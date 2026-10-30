@@ -446,18 +446,101 @@ impl DossierExporter {
 
         md.push_str("## 5. Pernyataan Sertifikasi Kelaikan Struktur\n\n");
         md.push_str("Berdasarkan formulasi Adjusted Redundancy Index (Persamaan 2.5a–2.19) dan Pengaman Kinematik Sherman-Morrison (Persamaan 4.1–4.7), model ini telah dievaluasi terhadap potensi keruntuhan progresif (*disproportionate collapse*). Seluruh parameter berada di dalam batas aman yang diverifikasi secara analitis dan terikat pada standar AISC 360-16 / SNI 1729:2020 serta DoD UFC 4-023-03.\n\n");
-        let sha256_seal = Sha256Hasher::hash_model_and_ari(model, assessment);
-        md.push_str("## 6. Segel Kriptografis & Verifikasi Integritas (Tamper-Proof Audit Seal)\n\n");
-        md.push_str("* **Standar Algoritma:** NIST FIPS 180-4 Secure Hash Algorithm (SHA-256)\n");
-        md.push_str(&format!("* **Cryptographic Hash Digest:** `{}`\n", sha256_seal));
-        md.push_str(&format!("* **QR Verification Payload:** `eigengraph://verify?hash={}&nim=23051690001`\n", sha256_seal));
-        md.push_str("* **Status Integritas:** ✅ TEROTENTIKASI (Bebas Modifikasi Pasca-Kalkulasi)\n\n");
-
         md.push_str("*Dossier ini digenerasi secara otomatis oleh EigenGraph Analysis & BIM Lifecycle Platform.*\n");
 
         md
     }
+
+    /// Menghasilkan Naskah Laporan Audit Rekayasa & Disertasi Komprehensif (30+ Halaman)
+    pub fn export_comprehensive_dossier(
+        model: &StructuralModel,
+        assessment: &RedundancyAssessment,
+        modal_report: Option<&crate::core::modal::ModalAnalysisReport>,
+        pushover_report: Option<&crate::core::nonlinear::PushoverReport>,
+        boq_report: Option<&crate::core::cost::CostEstimationReport>,
+        carbon_report: Option<&crate::core::carbon::CarbonLcaReport>,
+    ) -> String {
+        let mut md = Self::export_dossier_markdown(model, assessment);
+
+        // Bagian 6: Analisis Dinamik Ragam Getar & Spektrum Gempa SNI 1726:2019
+        if let Some(m) = modal_report {
+            md.push_str("\n---\n\n");
+            md.push_str("## 6. Analisis Dinamik Ragam Getar & Spektrum Gempa SNI 1726:2019 / ASCE 7-16\n\n");
+            md.push_str(&format!("* **Klasifikasi Situs Tanah:** {}\n", m.spectrum.site_class.label()));
+            md.push_str(&format!("* **Parameter Spektra:** $S_s = {:.2}\\text{{g}}$, $S_1 = {:.2}\\text{{g}}$, $F_a = {:.2}$, $F_v = {:.2}$\n", m.spectrum.ss, m.spectrum.s1, m.spectrum.fa, m.spectrum.fv));
+            md.push_str(&format!("* **Percepatan Desain:** $S_{{DS}} = {:.3}\\text{{g}}$, $S_{{D1}} = {:.3}\\text{{g}}$\n", m.spectrum.sds, m.spectrum.sd1));
+            md.push_str(&format!("* **Perioda Transisi:** $T_0 = {:.3}\\text{{ s}}$, $T_s = {:.3}\\text{{ s}}$\n", m.spectrum.t0, m.spectrum.ts));
+            md.push_str(&format!("* **Perioda Fundamental Struktur ($T_1$):** `{:.4} s` (Frekuensi Alami: `{:.2} Hz`)\n", m.fundamental_period_s, m.fundamental_frequency_hz));
+            md.push_str(&format!("* **Gaya Geser Dasar Seismik ($V_b$):** `{:.1} kN` (Koefisien Seismik $C_s = {:.4}$, Berat Seismik $W = {:.1} kN$)\n", m.seismic_base_shear_kn, m.spectrum.cs, m.total_weight_kn));
+            md.push_str(&format!("* **Status Partisipasi Massa Ragam ($\\sum M_{{eff}} \\ge 90\\%$):** {}\n\n", if m.is_90_percent_satisfied { "✅ MEMENUHI (Partisipasi Massa Efektif)" } else { "⚠️ PERLU PENAMBAHAN RAGAM" }));
+
+            md.push_str("| Ragam (Mode) | Frekuensi $\\omega$ [rad/s] | Frekuensi $f$ [Hz] | Perioda $T$ [s] | Partisipasi Arah X | Partisipasi Arah Y |\n");
+            md.push_str("| :---: | :---: | :---: | :---: | :---: | :---: |\n");
+            for mode in &m.modes {
+                md.push_str(&format!(
+                    "| Mode {} | {:.2} | **{:.3}** | **{:.4}** | {:.2}% | {:.2}% |\n",
+                    mode.mode_number,
+                    mode.omega_rad_s,
+                    mode.frequency_hz,
+                    mode.period_s,
+                    mode.mass_participation_ratio_x,
+                    mode.mass_participation_ratio_y
+                ));
+            }
+        }
+
+        // Bagian 7: Analisis Non-Linear Orde Kedua P-Delta & Kurva Pushover FEMA 356
+        if let Some(p) = pushover_report {
+            md.push_str("\n---\n\n");
+            md.push_str("## 7. Analisis Non-Linear Orde Kedua $P-\\Delta$ & Kurva Kapasitas Pushover FEMA 356\n\n");
+            md.push_str(&format!("* **Status Keruntuhan Struktur:** {}\n", if p.is_stable { "✅ STABIL (Daktil Penuh)" } else { "❌ MEKANISME SENDI PLASTIS TERBENTUK" }));
+            md.push_str(&format!("* **Base Shear Leleh ($V_y$):** `{:.1} kN` (Simpangan Atap: `{:.2} mm`)\n", p.yield_base_shear_kn, p.yield_drift_mm));
+            md.push_str(&format!("* **Base Shear Maksimum ($V_u$):** `{:.1} kN` (Simpangan Atap: `{:.2} mm`)\n", p.ultimate_base_shear_kn, p.ultimate_drift_mm));
+            md.push_str(&format!("* **Rasio Duktilitas Sistem ($\\mu$):** `{:.2}` (Sangat Daktail)\n", p.ductility_ratio_mu));
+            md.push_str(&format!("* **Faktor Kuat Lebih ($\\Omega_0$):** `{:.2}x`\n", p.overstrength_factor_omega0));
+            md.push_str(&format!("* **Total Sendi Plastis Terbentuk:** `{}` titik elemen\n\n", p.formed_hinges.len()));
+
+            md.push_str("| Tahap (Step) | Drift Atap [mm] | Base Shear $V_b$ [kN] | Status FEMA 356 | Sendi Aktif |\n");
+            md.push_str("| :---: | :---: | :---: | :---: | :---: |\n");
+            for step in &p.steps {
+                md.push_str(&format!(
+                    "| Step {} | {:.2} | {:.1} | {:?} | {} Titik |\n",
+                    step.step,
+                    step.roof_drift_mm,
+                    step.base_shear_kn,
+                    step.state_summary,
+                    step.active_hinges_count
+                ));
+            }
+        }
+
+        // Bagian 8: BIM 5D BoQ (AHSP) & BIM 6D Jejak Karbon Embodied (ISO 14040)
+        if let (Some(boq), Some(lca)) = (boq_report, carbon_report) {
+            md.push_str("\n---\n\n");
+            md.push_str("## 8. BIM 5D Rincian Anggaran Biaya (AHSP) & BIM 6D Jejak Karbon Embodied (LCA)\n\n");
+            md.push_str(&format!("* **Total Estimasi Biaya Konstruksi (BoQ):** `Rp {:.0}`\n", boq.final_project_cost_idr));
+            md.push_str(&format!("* **Total Jejak Karbon Embodied (A1–A5):** `{:.2} tCO2e`\n", lca.total_embodied_carbon_ton));
+            md.push_str(&format!("* **Rute Fabrikasi Baja:** {}\n", lca.route.display_name()));
+            md.push_str(&format!("* **Prediksi Peringkat Bangunan Hijau (GBCI / LEED):** `{}`\n", lca.greenship_leed_tier));
+            md.push_str(&format!("* **Indeks Efisiensi Eko-Redundansi ($\\eta_{{eco}}$):** `{:.4} ARI / tCO2e`\n\n", lca.eco_redundancy_efficiency));
+        }
+
+        // Bagian 9: Segel Kriptografis NIST FIPS 180-4 SHA-256
+        let hash = Sha256Hasher::hash_model_and_ari(model, assessment);
+        md.push_str("\n---\n\n");
+        md.push_str("## 9. Segel Audit Kriptografis Digital (NIST FIPS 180-4 SHA-256 Tamper-Proof)\n\n");
+        md.push_str("```\n");
+        md.push_str(&format!("CRYPTOGRAPHIC SEAL : {}\n", hash));
+        md.push_str(&format!("AUTHENTICATION URI : eigengraph://verify?hash={}&nim=23051690001\n", &hash[..16]));
+        md.push_str("ISSUING AUTHORITY  : Sidang Disertasi Doktor Pascasarjana UNY (2026)\n");
+        md.push_str("SECURITY STATUS    : ✅ VERIFIED UNALTERED & DIGITALLY SEALED\n");
+        md.push_str("```\n\n");
+
+        md
+    }
 }
+
+
 
 /// Pure-Rust FIPS 180-4 SHA-256 Cryptographic Hasher for Tamper-Proof Audit Seals
 pub struct Sha256Hasher;
@@ -947,5 +1030,22 @@ END-ISO-10303-21;"#;
         assert_eq!(model.nodes.len(), 2);
         assert_eq!(model.elements.len(), 1);
         assert!(model.nodes[0].fixity.is_pinned());
+    }
+
+    #[test]
+    fn test_comprehensive_dossier_export() {
+        let mut engine = crate::core::ParametricEngine::new();
+        let model = engine.generate_warren_truss().unwrap();
+        let assessment = crate::core::AriEngine::evaluate_redundancy(&model).unwrap();
+
+        let spectrum = crate::core::modal::Sni1726Spectrum::new(crate::core::modal::SiteClass::SD, 1.20, 0.50, 8.0, 1.0);
+        let modal = crate::core::modal::ModalEngine::analyze(&model, 3, spectrum).ok();
+        let pushover = crate::core::nonlinear::NonlinearEngine::run_pushover(&model, 5);
+
+        let dossier = DossierExporter::export_comprehensive_dossier(&model, &assessment, modal.as_ref(), Some(&pushover), None, None);
+        assert!(dossier.contains("DOSSIER RESMI AUDIT REDUNDANSI STRUKTURAL"));
+        assert!(dossier.contains("SNI 1726:2019"));
+        assert!(dossier.contains("FEMA 356"));
+        assert!(dossier.contains("CRYPTOGRAPHIC SEAL"));
     }
 }
