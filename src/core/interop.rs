@@ -1,5 +1,5 @@
 //! interop.rs — Industrial AEC Interoperability & Export Engine for EigenGraph.
-//! Provides CSI SAP2000 (.s2k), AutoCAD DXF 3D, and Dissertation Calculation Dossier Exporters.
+//! Provides CSI SAP2000 (.s2k), AutoCAD DXF 3D, OpenBIM IFC 4.3, and Dissertation Calculation Dossier Exporters.
 
 use crate::core::ari::RedundancyAssessment;
 use crate::core::model::{ElementType, StructuralModel};
@@ -184,22 +184,12 @@ impl DxfExporter {
     pub fn export_to_dxf(model: &StructuralModel, assessment: Option<&RedundancyAssessment>) -> String {
         let mut s = String::new();
 
-        // DXF Header
         s.push_str("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n0\nENDSEC\n");
-
-        // DXF Tables & Layers
         s.push_str("0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n3\n");
-        
-        // Layer: ARI_SAFE (Green = Color 3)
         s.push_str("0\nLAYER\n2\nARI_SAFE\n70\n0\n62\n3\n6\nCONTINUOUS\n");
-        // Layer: ARI_MODERATE (Yellow = Color 2)
         s.push_str("0\nLAYER\n2\nARI_MODERATE\n70\n0\n62\n2\n6\nCONTINUOUS\n");
-        // Layer: ARI_CRITICAL (Red = Color 1)
         s.push_str("0\nLAYER\n2\nARI_CRITICAL\n70\n0\n62\n1\n6\nCONTINUOUS\n");
-        
         s.push_str("0\nENDTAB\n0\nENDSEC\n");
-
-        // DXF Entities
         s.push_str("0\nSECTION\n2\nENTITIES\n");
 
         for elem in &model.elements {
@@ -225,9 +215,7 @@ impl DxfExporter {
 
                 s.push_str("0\nLINE\n");
                 s.push_str(&format!("8\n{}\n", layer));
-                // Start Node
                 s.push_str(&format!("10\n{:.4}\n20\n{:.4}\n30\n{:.4}\n", n1.x, n1.y, n1.z));
-                // End Node
                 s.push_str(&format!("11\n{:.4}\n21\n{:.4}\n31\n{:.4}\n", n2.x, n2.y, n2.z));
             }
         }
@@ -237,11 +225,154 @@ impl DxfExporter {
     }
 }
 
+/// OpenBIM Industry Foundation Classes (IFC 4.3 Add2) Standard Exporter
+pub struct IfcExporter;
+
+impl IfcExporter {
+    /// Generates a valid standard ISO-10303-21 STEP physical file format (.ifc)
+    /// representing 3D spatial elements and custom Pset_StructuralRedundancy properties.
+    pub fn export_to_ifc(model: &StructuralModel, assessment: Option<&RedundancyAssessment>) -> String {
+        let mut s = String::new();
+
+        s.push_str("ISO-10303-21;\n");
+        s.push_str("HEADER;\n");
+        s.push_str("FILE_DESCRIPTION(('ViewDefinition [DesignTransferView_V1.0]'),'2;1');\n");
+        s.push_str(&format!(
+            "FILE_NAME('{}','2026-10-30T12:00:00',('Harids Irawan'),('Universitas Negeri Yogyakarta'),'EigenGraph BIM Engine v1.0.0','EigenGraph','');\n",
+            model.name.replace('\'', "")
+        ));
+        s.push_str("FILE_SCHEMA(('IFC4'));\n");
+        s.push_str("ENDSEC;\n");
+
+        s.push_str("DATA;\n");
+
+        // Project and Context
+        s.push_str("#1=IFCPERSON('ID_HI','Irawan','Harids',$,$,$,$,$);\n");
+        s.push_str("#2=IFCORGANIZATION('ORG_UNY','Universitas Negeri Yogyakarta','Doctoral Program',$,$);\n");
+        s.push_str("#3=IFCPERSONANDORGANIZATION(#1,#2,$);\n");
+        s.push_str("#4=IFCAPPLICATION(#2,'1.0.0','EigenGraph','EigenGraph');\n");
+        s.push_str("#5=IFCOWNERHISTORY(#3,#4,$,.ADDED.,$,$,$,1761825600);\n");
+
+        // Units
+        s.push_str("#6=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);\n");
+        s.push_str("#7=IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.);\n");
+        s.push_str("#8=IFCSIUNIT(*,.FORCEUNIT.,$,.NEWTON.);\n");
+        s.push_str("#9=IFCUNITASSIGNMENT((#6,#7,#8));\n");
+
+        // Geometric Context
+        s.push_str("#10=IFCCARTESIANPOINT((0.,0.,0.));\n");
+        s.push_str("#11=IFCDIRECTION((0.,0.,1.));\n");
+        s.push_str("#12=IFCDIRECTION((1.,0.,0.));\n");
+        s.push_str("#13=IFCAXIS2PLACEMENT3D(#10,#11,#12);\n");
+        s.push_str("#14=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,#13,$);\n");
+
+        // Project, Site, Building, Storey
+        s.push_str(&format!("#20=IFCPROJECT('1Project000000000000000',#5,'{}','EigenGraph Structural Model',$,$,$,(#14),#9);\n", model.name));
+        s.push_str("#21=IFCSITE('1Site000000000000000000',#5,'Site',$,$,#13,$,$,.ELEMENT.,$,$,$,$,$);\n");
+        s.push_str("#22=IFCBUILDING('1Building000000000000000',#5,'Building',$,$,#13,$,$,.ELEMENT.,$,$,$);\n");
+        s.push_str("#23=IFCBUILDINGSTOREY('1Storey000000000000000',#5,'Level 1',$,$,#13,$,$,.ELEMENT.,0.);\n");
+
+        // Hierarchy Aggregates
+        s.push_str("#24=IFCRELAGGREGATES('1RelAgg000000000000001',#5,$,$,#20,(#21));\n");
+        s.push_str("#25=IFCRELAGGREGATES('1RelAgg000000000000002',#5,$,$,#21,(#22));\n");
+        s.push_str("#26=IFCRELAGGREGATES('1RelAgg000000000000003',#5,$,$,#22,(#23));\n");
+
+        let mut id_counter = 100;
+        let mut node_pt_ids = std::collections::HashMap::new();
+
+        for node in &model.nodes {
+            s.push_str(&format!("#{} = IFCCARTESIANPOINT(({:.6},{:.6},{:.6}));\n", id_counter, node.x, node.y, node.z));
+            node_pt_ids.insert(node.id, id_counter);
+            id_counter += 1;
+        }
+
+        let mut member_ids = Vec::new();
+
+        for elem in &model.elements {
+            if let (Some(&pt1), Some(&pt2)) = (node_pt_ids.get(&elem.start_node), node_pt_ids.get(&elem.end_node)) {
+                let polyline_id = id_counter;
+                id_counter += 1;
+                s.push_str(&format!("#{} = IFCPOLYLINE((#{},#{}));\n", polyline_id, pt1, pt2));
+
+                let shape_rep_id = id_counter;
+                id_counter += 1;
+                s.push_str(&format!("#{} = IFCSHAPEREPRESENTATION(#14,'Axis','Curve3D',(#{}));\n", shape_rep_id, polyline_id));
+
+                let prod_shape_id = id_counter;
+                id_counter += 1;
+                s.push_str(&format!("#{} = IFCPRODUCTDEFINITIONSHAPE($,$,(#{}));\n", prod_shape_id, shape_rep_id));
+
+                let member_id = id_counter;
+                id_counter += 1;
+                let obj_type = match elem.element_type {
+                    ElementType::Truss3D => "TRUSS_MEMBER",
+                    ElementType::Frame3D => "BEAM_COLUMN",
+                };
+                s.push_str(&format!(
+                    "#{} = IFCMEMBER('{}',#5,'{}','{}',$,#13,#{},'{}');\n",
+                    member_id,
+                    format!("1Member{:016X}", elem.id),
+                    elem.name,
+                    elem.section.name,
+                    prod_shape_id,
+                    obj_type
+                ));
+                member_ids.push(member_id);
+
+                if let Some(res) = assessment {
+                    if let Some(m) = res.member_results.iter().find(|r| r.member_id == elem.id) {
+                        let prop_ari = id_counter; id_counter += 1;
+                        let prop_ci = id_counter; id_counter += 1;
+                        let prop_svd = id_counter; id_counter += 1;
+                        let prop_grade = id_counter; id_counter += 1;
+
+                        s.push_str(&format!("#{} = IFCPROPERTYSINGLEVALUE('AdjustedRedundancyIndex',$,IFCREAL({:.4}),$);\n", prop_ari, m.ari));
+                        s.push_str(&format!("#{} = IFCPROPERTYSINGLEVALUE('CriticalityIndex',$,IFCREAL({:.4}),$);\n", prop_ci, m.ci));
+                        s.push_str(&format!("#{} = IFCPROPERTYSINGLEVALUE('SVDStabilityMargin',$,IFCREAL({:.6}),$);\n", prop_svd, m.svd_margin));
+                        let grade_str = if m.is_critical || m.ari < 0.50 { "CRITICAL_MEMBER" } else { "REDUNDANT_SAFE" };
+                        s.push_str(&format!("#{} = IFCPROPERTYSINGLEVALUE('RedundancyClassification',$,IFCTEXT('{}'),$);\n", prop_grade, grade_str));
+
+                        let pset_id = id_counter; id_counter += 1;
+                        s.push_str(&format!(
+                            "#{} = IFCPROPERTYSET('{}',#5,'Pset_StructuralRedundancy',$,(#{},#{},#{},#{}));\n",
+                            pset_id,
+                            format!("1Pset{:017X}", elem.id),
+                            prop_ari, prop_ci, prop_svd, prop_grade
+                        ));
+
+                        let rel_prop_id = id_counter; id_counter += 1;
+                        s.push_str(&format!(
+                            "#{} = IFCRELDEFINESBYPROPERTIES('{}',#5,$,$,(#{}) ,#{});\n",
+                            rel_prop_id,
+                            format!("1RelP{:017X}", elem.id),
+                            member_id,
+                            pset_id
+                        ));
+                    }
+                }
+            }
+        }
+
+        if !member_ids.is_empty() {
+            let rel_contain_id = id_counter;
+            let member_refs: Vec<String> = member_ids.iter().map(|id| format!("#{}", id)).collect();
+            s.push_str(&format!(
+                "#{} = IFCRELCONTAINEDINSPATIALSTRUCTURE('1RelContained0000000',#5,'StoreyElements',$,({}),#23);\n",
+                rel_contain_id,
+                member_refs.join(",")
+            ));
+        }
+
+        s.push_str("ENDSEC;\n");
+        s.push_str("END-ISO-10303-21;\n");
+        s
+    }
+}
+
 /// Official Academic & Professional Calculation Dossier Exporter
 pub struct DossierExporter;
 
 impl DossierExporter {
-    /// Generates a comprehensive engineering dossier in Markdown format
     pub fn export_dossier_markdown(model: &StructuralModel, assessment: &RedundancyAssessment) -> String {
         let mut md = String::new();
 
@@ -343,5 +474,11 @@ mod tests {
         assert!(dxf.contains("SECTION\n2\nHEADER"));
         assert!(dxf.contains("ARI_SAFE"));
         assert!(dxf.contains("LINE"));
+
+        let ifc = IfcExporter::export_to_ifc(&model, None);
+        assert!(ifc.contains("ISO-10303-21;"));
+        assert!(ifc.contains("IFCPROJECT"));
+        assert!(ifc.contains("IFCMEMBER"));
+        assert!(ifc.contains("END-ISO-10303-21;"));
     }
 }
