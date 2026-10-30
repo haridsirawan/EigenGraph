@@ -98,7 +98,21 @@ impl SustainabilityView {
     }
 
     fn render_embodied_carbon(&mut self, ui: &mut Ui, theme: &MacTheme, _members: &[StructuralMember]) {
-        let total_steel_tons = 48.5;
+        let mut engine = crate::core::ParametricEngine::new();
+        let lca = engine.generate_warren_truss().ok().map(|m| {
+            let route = match self.steel_production_route {
+                SteelProductionRoute::ElectricArcFurnace => crate::core::CarbonSteelRoute::EafRecycled,
+                SteelProductionRoute::BlastFurnaceBof => crate::core::CarbonSteelRoute::BfBofStandard,
+                SteelProductionRoute::HydrogenDri => crate::core::CarbonSteelRoute::GreenHydrogenDri,
+            };
+            crate::core::CarbonEngine::calculate_lca(&m, route, Some(65.0), Some(0.942))
+        });
+
+        let (total_co2, total_steel_tons, reduction_pct, _tier_str, eco_eff) = match lca.as_ref() {
+            Some(r) => (r.total_embodied_carbon_ton, r.steel_tonnage, r.carbon_reduction_pct, r.greenship_leed_tier.as_str(), r.eco_redundancy_efficiency),
+            None => (48.5 * 1.15, 48.5, 35.0, "LEED Silver", 0.017),
+        };
+
         let factor = match self.steel_production_route {
             SteelProductionRoute::ElectricArcFurnace => 1.15,
             SteelProductionRoute::BlastFurnaceBof => 2.35,
@@ -108,17 +122,16 @@ impl SustainabilityView {
         let concrete_co2 = 72.0 * 0.28; // 72 m3 @ 0.28 t CO2e/m3
         let coating_co2 = 340.0 * 0.008; // 340 m2 @ 8 kg CO2e/m2
         let transport_co2 = total_steel_tons * 0.045; // 45 kg CO2e / ton transport
-        let total_co2 = steel_co2 + concrete_co2 + coating_co2 + transport_co2;
 
         // Metric Cards Row
         ui.horizontal(|ui| {
-            self.render_stat_card(ui, theme, "TOTAL EMBODIED CARBON", &format!("{:.1} t CO₂e", total_co2), "Scope A1–A4 Lifecycle", theme.accent_green);
+            self.render_stat_card(ui, theme, "TOTAL EMBODIED CARBON", &format!("{:.1} t CO₂e", total_co2), &format!("Massa Baja: {:.1} Ton (A1–A5)", total_steel_tons), theme.accent_green);
             ui.add_space(8.0);
             self.render_stat_card(ui, theme, "CARBON INTENSITY", &format!("{:.1} kg/m²", (total_co2 * 1000.0) / 288.0), "Bentang 24m x 12m Floor", theme.accent_blue);
             ui.add_space(8.0);
-            self.render_stat_card(ui, theme, "RECYCLED CONTENT", "84.5%", "AISC High-Recycled EAF Scrap", theme.text_primary);
+            self.render_stat_card(ui, theme, "PENGHEMATAN EMISI", &format!("-{:.1}%", reduction_pct), "vs. Baseline BF-BOF", if reduction_pct > 30.0 { theme.accent_green } else { theme.accent_orange });
             ui.add_space(8.0);
-            self.render_stat_card(ui, theme, "NET ZERO READINESS", "Grade A-", "Net Zero Carbon 2050 Alignment", theme.accent_green);
+            self.render_stat_card(ui, theme, "EKO-REDUNDANSI (η)", &format!("{:.4}", eco_eff), "ARI / Total tCO₂e", theme.accent_blue);
         });
 
         ui.add_space(16.0);

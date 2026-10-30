@@ -530,46 +530,58 @@ impl PlanningView {
             ui.label(RichText::new("WBS 4D PENJADWALAN & SIMULASI TAHAPAN EREKSI (STAGED CONSTRUCTION)").size(13.0).strong().color(theme.text_primary));
             ui.add_space(10.0);
 
-            let stages = [
-                ("WBS 1.0", "Mobilisasi Peralatan & Site Clearing", "Hari 1 - 15", 10.0, "Selesai", theme.accent_green),
-                ("WBS 2.0", "Pekerjaan Pondasi Bored Pile & Abutment", "Hari 10 - 45", 25.0, "Selesai", theme.accent_green),
-                ("WBS 3.0", "Fabrikasi Workshop & Quality Control NDT", "Hari 20 - 75", 40.0, "Berjalan (70%)", theme.accent_blue),
-                ("WBS 4.0", "Sandblasting Sa 2.5 & Pengecatan Proteksi", "Hari 65 - 90", 15.0, "Menunggu", theme.text_muted),
-                ("WBS 5.0", "Ereksi Rangka Baja (Staged Cantilever Erection)", "Hari 85 - 120", 35.0, "Kritis (CPM)", theme.accent_red),
-                ("WBS 6.0", "Torsi Baut A325, Decking Lantai & Uji Beban", "Hari 115 - 140", 15.0, "Menunggu", theme.text_muted),
-            ];
+            let mut engine = crate::core::ParametricEngine::new();
+            let live_schedule = engine.generate_warren_truss().ok().map(|m| {
+                crate::core::ScheduleEngine::generate_standard_schedule(&m, t.grand_total_rab)
+            });
 
-            for (wbs, name, span, bobot, status, stat_color) in stages {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(wbs).size(12.0).strong().color(theme.accent_blue));
-                    ui.add_space(12.0);
-                    ui.label(RichText::new(name).size(12.0).strong().color(theme.text_primary));
-                    ui.add_space(16.0);
-                    ui.label(RichText::new(format!("⏱️ {}", span)).size(11.5).color(theme.text_secondary));
+            if let Some(ref sched) = live_schedule {
+                for act in &sched.activities {
+                    let stat_color = if act.is_critical {
+                        theme.accent_red
+                    } else if act.total_float < 7 {
+                        theme.accent_orange
+                    } else {
+                        theme.accent_green
+                    };
+                    let status_str = if act.is_critical {
+                        "Kritis (CPM - Float 0)"
+                    } else {
+                        "Float Aman"
+                    };
 
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        Frame::new()
-                            .fill(stat_color.gamma_multiply(0.2))
-                            .corner_radius(CornerRadius::same(4))
-                            .inner_margin(Margin::symmetric(6, 2))
-                            .show(ui, |ui| {
-                                ui.label(RichText::new(status).size(10.5).color(stat_color));
-                            });
-                        ui.add_space(16.0);
-                        ui.label(RichText::new(format!("Bobot: {:.1}%", bobot)).size(11.5).color(theme.text_secondary));
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("WBS {:02}", act.id)).size(12.0).strong().color(theme.accent_blue));
+                        ui.add_space(10.0);
+                        ui.label(RichText::new(&act.name).size(12.0).strong().color(theme.text_primary));
+                        ui.add_space(14.0);
+                        ui.label(RichText::new(format!("⏱️ Hari {}-{} (Dur: {}h)", act.early_start, act.early_finish, act.duration_days)).size(11.5).color(theme.text_secondary));
+
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            Frame::new()
+                                .fill(stat_color.gamma_multiply(0.2))
+                                .corner_radius(CornerRadius::same(4))
+                                .inner_margin(Margin::symmetric(6, 2))
+                                .show(ui, |ui| {
+                                    ui.label(RichText::new(status_str).size(10.5).color(stat_color));
+                                });
+                            ui.add_space(14.0);
+                            ui.label(RichText::new(format!("Float: {}h", act.total_float)).size(11.0).color(theme.text_muted));
+                            ui.add_space(10.0);
+                            ui.label(RichText::new(format!("Bobot: {:.1}%", act.weight_percentage)).size(11.5).color(theme.text_secondary));
+                        });
                     });
-                });
 
-                // Simple Visual Progress Bar for each WBS
-                ui.add_space(2.0);
-                let (rect, _resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 6.0), egui::Sense::hover());
-                let painter = ui.painter();
-                painter.rect_filled(rect, CornerRadius::same(3), theme.bg_canvas);
-                let filled_width = rect.width() * (bobot as f32 / 50.0).min(1.0);
-                let filled_rect = egui::Rect::from_min_size(rect.left_top(), Vec2::new(filled_width, rect.height()));
-                painter.rect_filled(filled_rect, CornerRadius::same(3), stat_color);
+                    ui.add_space(2.0);
+                    let (rect, _resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 6.0), egui::Sense::hover());
+                    let painter = ui.painter();
+                    painter.rect_filled(rect, CornerRadius::same(3), theme.bg_canvas);
+                    let filled_width = rect.width() * (act.weight_percentage as f32 / 30.0).min(1.0);
+                    let filled_rect = egui::Rect::from_min_size(rect.left_top(), Vec2::new(filled_width, rect.height()));
+                    painter.rect_filled(filled_rect, CornerRadius::same(3), stat_color);
 
-                ui.add_space(6.0);
+                    ui.add_space(6.0);
+                }
             }
         });
 
@@ -690,80 +702,51 @@ impl PlanningView {
             ui.label(RichText::new("Struktur baja sering kali belum memiliki kekakuan redundan sempurna selama masa ereksi di lapangan sebelum penutupan rangka (closure). Evaluasi tahapan ini mendeteksi titik rawan keruntuhan saat perakitan:").size(12.0).color(theme.text_secondary));
             ui.add_space(12.0);
 
-            let stages = [
-                (
-                    "Tahap 1: Pondasi Abutment & Pier Base (Minggu 1–3)",
-                    "Pengecoran beton K-350, angkur mutu tinggi A325, dan pemasangan bearing pad elastomeric.",
-                    1.000,
-                    "🟢 STABIL RIGID BASE",
-                    theme.accent_green,
-                    "Aman, pondasi siap menerima tumpuan rangka bawah.",
-                ),
-                (
-                    "Tahap 2: Kantilever Batang Bawah & Kolom Pier (Minggu 4–6)",
-                    "Perakitan bentang bawah pertama dari tumpuan sendi. Batang atas dan diagonal belum tersambung.",
-                    0.285,
-                    "🔴 KRITIS RUNTUH (MEKANISME GOYANG)",
-                    theme.accent_red,
-                    "⚠️ WAJIB SHORING: Pasang menara perancah sementara di Simpul 2 & 4 untuk mencegah goyangan akibat angin.",
-                ),
-                (
-                    "Tahap 3: Web Diagonals & Hanger Setengah Bentang (Minggu 7–10)",
-                    "Pemasangan profil web diagonal W8x24 menggunakan Mobile Crane 100T. Rangka berbentuk kantilever terbuka.",
-                    0.540,
-                    "🟡 PERINGATAN (REDUNDANSI PARSIAL)",
-                    theme.accent_orange,
-                    "Batasi beban kerja crane maksimal 25T. Lakukan pengujian torsi baut sambungan harian.",
-                ),
-                (
-                    "Tahap 4: Penutupan Puncak Rangka / Closure Joint (Minggu 11–13)",
-                    "Pemasangan segmen mahkota tengah bentang (top chord closure). Jalur transfer ganda tertutup sempurna.",
-                    0.885,
-                    "🟢 AMAN STABIL (DUAL-PATH)",
-                    theme.accent_green,
-                    "Kekakuan global tercapai. Menara perancah sementara (shoring) dapat dibongkar bertahap.",
-                ),
-                (
-                    "Tahap 5: Pemasangan Plat Lantai & Beban Layanan (Minggu 14–16)",
-                    "Pengecoran plat beton komposit, aspal, dan pengujian beban statis uji coba (proof loading).",
-                    0.942,
-                    "🟢 REDUNDAN SEMPURNA (GRADE A)",
-                    theme.accent_green,
-                    "Struktur selesai 100% dan kebal terhadap skenario keruntuhan progresif katastropik.",
-                ),
-            ];
+            let mut engine = crate::core::ParametricEngine::new();
+            let staged_results = engine.generate_warren_truss().ok().map(|m| {
+                crate::core::ScheduleEngine::verify_staged_erection(&m)
+            });
 
-            for (stage_title, desc, ari, status, col, reco) in stages {
-                Frame::new()
-                    .fill(theme.bg_card)
-                    .stroke(Stroke::new(1.0, col.gamma_multiply(0.4)))
-                    .corner_radius(CornerRadius::same(8))
-                    .inner_margin(Margin::symmetric(14, 10))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("●").size(14.0).color(col));
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new(stage_title).size(13.0).strong().color(theme.text_primary));
-                                ui.label(RichText::new(desc).size(11.5).color(theme.text_secondary));
-                                ui.add_space(4.0);
-                                ui.label(RichText::new(format!("Saran Keselamatan K3: {}", reco)).size(11.0).strong().color(col));
-                            });
+            if let Some(stages) = staged_results {
+                for stage in &stages {
+                    let col = if stage.is_stable { theme.accent_green } else { theme.accent_red };
+                    let status_str = if stage.is_stable { "🟢 STABIL BEBAS MEKANISME" } else { "🔴 KRITIS SHORING WAJIB" };
+                    let note = match stage.warning.as_deref() {
+                        Some(w) => w,
+                        None => "Kekakuan bertahap stabil rank penuh, deformasi terkendali.",
+                    };
 
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                Frame::new()
-                                    .fill(col.gamma_multiply(0.18))
-                                    .stroke(Stroke::new(1.0, col))
-                                    .corner_radius(CornerRadius::same(6))
-                                    .inner_margin(Margin::symmetric(8, 4))
-                                    .show(ui, |ui| {
-                                        ui.label(RichText::new(format!("ARI: {:.3}", ari)).size(12.5).strong().color(Color32::WHITE));
-                                    });
-                                ui.add_space(16.0);
-                                ui.label(RichText::new(status).size(11.5).strong().color(col));
+                    Frame::new()
+                        .fill(theme.bg_card)
+                        .stroke(Stroke::new(1.0, col.gamma_multiply(0.4)))
+                        .corner_radius(CornerRadius::same(8))
+                        .inner_margin(Margin::symmetric(14, 10))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("●").size(14.0).color(col));
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(&stage.stage_name).size(12.5).strong().color(theme.text_primary));
+                                    ui.label(RichText::new(format!("Elemen: {} batang • Rank SVD: {}/{} • Kondisi: {:.1e}", stage.erected_elements_count, stage.rank, stage.active_dofs, stage.condition_number)).size(11.0).color(theme.text_secondary));
+                                    ui.add_space(2.0);
+                                    ui.label(RichText::new(format!("💡 Evaluasi: {}", note)).size(11.0).color(theme.text_muted));
+                                });
+
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    Frame::new()
+                                        .fill(col.gamma_multiply(0.18))
+                                        .stroke(Stroke::new(1.0, col))
+                                        .corner_radius(CornerRadius::same(6))
+                                        .inner_margin(Margin::symmetric(8, 4))
+                                        .show(ui, |ui| {
+                                            ui.label(RichText::new(format!("Defl: {:.2} mm", stage.max_deflection_mm)).size(11.5).strong().color(Color32::WHITE));
+                                        });
+                                    ui.add_space(14.0);
+                                    ui.label(RichText::new(status_str).size(11.0).strong().color(col));
+                                });
                             });
                         });
-                    });
-                ui.add_space(8.0);
+                    ui.add_space(6.0);
+                }
             }
         });
     }
