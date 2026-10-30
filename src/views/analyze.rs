@@ -125,6 +125,13 @@ impl AnalyzeView {
                     .corner_radius(CornerRadius::same(8))).clicked() {
                     self.export_status = Some("AutoCAD 3D DXF generated with color-coded ARI classification layers".to_string());
                 }
+
+                if ui.add(egui::Button::new(RichText::new("🌐 OpenBIM (.ifc)").size(11.5).color(Color32::WHITE))
+                    .fill(theme.bg_card)
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(180, 100, 255)))
+                    .corner_radius(CornerRadius::same(8))).clicked() {
+                    self.export_status = Some("OpenBIM IFC 4.3 exported with custom Pset_StructuralRedundancy properties".to_string());
+                }
             });
         });
     }

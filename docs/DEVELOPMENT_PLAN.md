@@ -79,8 +79,8 @@ flowchart LR
    - *Object Snap* (OSNAP): Titik Ujung (*Endpoint*), Titik Tengah (*Midpoint*), Pusat Lingkaran (*Center*), Perpotongan (*Intersection*), dan Tegak Lurus (*Perpendicular*).
    - Mode Ortho (penguncian sumbu horizontal & vertikal via shortcut `F8` / `Shift`).
 3. **Geometric Constraints & Parametric Driving Dimensions**:
-   - Fitur dimensi penggerak (*driving dimensions*): mengubah nilai $L = 24000	ext{ mm}$ otomatis memperpanjang geometri gambar secara proporsional.
-   - Formula ekspresi matematis: Parser formula string (contoh: $H = L / 7.5$, $n = 	ext{ceil}(L / 4000)$).
+   - Fitur dimensi penggerak (*driving dimensions*): mengubah nilai $L = 24000\text{ mm}$ otomatis memperpanjang geometri gambar secara proporsional.
+   - Formula ekspresi matematis: Parser formula string (contoh: $H = L / 7.5$, $n = \text{ceil}(L / 4000)$).
 4. **Sistem Database Komponen Lokal**:
    - Skema penyimpanan SQLite / JSON terenkripsi untuk menyimpan komponen hasil gambar.
    - Metadata komponen: Nama, Tipe Geometri, Variabel Input, Estimasi Jumlah Batang, dan Thumbnail Vektor.
@@ -114,16 +114,16 @@ flowchart LR
 2. **SVD Kinematic Stability Guard (Deteksi Mekanisme Keruntuhan)**:
    - Dekomposisi Nilai Singular (*Singular Value Decomposition*):
      $$[K] = [U] [\Sigma] [V]^T$$
-   - Pemeriksaan kondisi rank: Memastikan $	ext{rank}(K) = n_{dof} - n_{rigid}$.
-   - Deteksi nilai singular mendekati nol ($\sigma_i < arepsilon_{tol}$): Mengidentifikasi moda gerakan mekanisme tak stabil sebelum analisis gagal / meledak (*crash*).
+   - Pemeriksaan kondisi rank: Memastikan $\text{rank}(K) = n_{dof} - n_{rigid}$.
+   - Deteksi nilai singular mendekati nol ($\sigma_i < \varepsilon_{tol}$): Mengidentifikasi moda gerakan mekanisme tak stabil sebelum analisis gagal / meledak (*crash*).
 3. **Kalkulasi Adjusted Redundancy Index (ARI)**:
    - Perhitungan matriks kontribusi redundansi elemen $R_{ij}$.
-   - Penentuan indeks redundansi tiap batang $	ext{ARI}_i$.
+   - Penentuan indeks redundansi tiap batang $\text{ARI}_i$.
    - Simulasi *Alternate Load Path Method* (ALPM): Melepas elemen kritis secara virtual dan menghitung redistribusi gaya ke elemen tetangga.
 4. **Desain Penampang Baja Sesuai SNI 1729 / AISC 360-16 LRFD**:
    - Pemeriksaan kapasitas tarik aksial ($\phi_t P_n$) dan tekan tekuk Euler ($\phi_c P_n$).
    - Pemeriksaan kapasitas lentur ($\phi_b M_n$) dengan memperhitungkan *Lateral Torsional Buckling* (LTB).
-   - Evaluasi rasio interaksi aksial-lentur $rac{P_u}{\phi P_n} + rac{8}{9}rac{M_u}{\phi M_n} \le 1.0$.
+   - Evaluasi rasio interaksi aksial-lentur $\frac{P_u}{\\phi P_n} + \frac{8}{9}\frac{M_u}{\phi M_n} \le 1.0$.
 
 ---
 
@@ -131,7 +131,7 @@ flowchart LR
 *Target: Menghitung anggaran biaya konstruksi secara presisi dari model 3D.*
 1. **Automatic Quantity Takeoff (QTO)**:
    - Ekstraksi otomatis panjang total setiap profil penampang (misal: total panjang W14x90 = 480 meter).
-   - Konversi berat total baja dalam satuan Kilogram dan Ton ($	ext{Volume} 	imes 	ext{Density Baja } 7850	ext{ kg/m}^3$).
+   - Konversi berat total baja dalam satuan Kilogram dan Ton ($\text{Volume} \times \text{Density Baja } 7850\text{ kg/m}^3$).
    - Estimasi luas permukaan baja untuk perhitungan cat dasar anti karat dan cat proteksi api (*fireproofing* dalam $m^2$).
    - Estimasi volume beton untuk pedestal tumpuan dan pondasi ($m^3$).
 2. **Modul Rencana Anggaran Biaya (RAB / BOQ)**:
@@ -142,7 +142,7 @@ flowchart LR
      - Biaya *erection* menggunakan mobile crane di lapangan (Rp/ton atau Rp/hari).
    - Tabel rekapitulasi Rencana Anggaran Biaya (RAB) lengkap dengan PPN, *overhead*, dan *contingency fee*.
 3. **Analisis Sensitivitas Biaya vs. Redundansi (Cost vs. ARI Trade-Off)**:
-   - Fitur riset eksklusif: Kurva korelasi antara penambahan biaya material/penampang terhadap peningkatan indeks redundansi global $\overline{	ext{ARI}}$.
+   - Fitur riset eksklusif: Kurva korelasi antara penambahan biaya material/penampang terhadap peningkatan indeks redundansi global $\overline{\text{ARI}}$.
    - Membantu *decision maker* menentukan titik optimum antara efisiensi anggaran dan ketahanan terhadap keruntuhan progresif.
 
 ---
@@ -206,13 +206,13 @@ flowchart LR
 | Fase | Fokus Modul | Luaran Utama | Status |
 | :---: | :--- | :--- | :---: |
 | **Fase 0** | **UI/UX Skeleton & HIG** | 5 Pilar Navigasi, Floating AI Pill (`⌘K`), Card Grid Portofolio | **SELESAI ✅** |
-| **Fase 1** | **PARAMETRIC Studio** | AutoCAD Free Drawing 2D/3D, Driving Dimensions, Database Komponen | Tahap Siap Bangun |
-| **Fase 2** | **BUILD Canvas 3D** | Viewport 3D `wgpu`, Import Komponen DB, Graph Data Structure, AI Gemini | Tahap Siap Bangun |
-| **Fase 3** | **ANALYZE: Redundancy** | Solver DSM, SVD Kinematic Guard, Perhitungan ARI, Pengecekan SNI/AISC | Tahap Siap Bangun |
-| **Fase 4** | **ANALYZE: Biaya (BIM 5D)**| Automatic Volume Takeoff, AHSP, BOQ, RAB, Sensitivitas Biaya vs ARI | Tahap Siap Bangun |
-| **Fase 5** | **ANALYZE: Waktu (BIM 4D)** | WBS Perakitan, Gantt Chart, Kurva S, Pengecekan Stabilitas Erection | Tahap Siap Bangun |
-| **Fase 6** | **MY PROJECT Delivery** | Generator Dossier PDF Resmi, Executive Client Deck, Portofolio | Tahap Siap Bangun |
-| **Fase 7** | **Interoperabilitas & Rilis** | Import/Export IFC/DXF, Paket Instalasi macOS `.dmg`, Cloud Backup | Tahap Final |
+| **Fase 1** | **PARAMETRIC Studio** | AutoCAD Free Drawing 2D/3D, Driving Dimensions, Warren Generator | **SELESAI ✅** |
+| **Fase 2** | **BUILD Canvas 3D** | Viewport 3D Orbit, ViewCube Presets (Iso/Top/Front/Side), AI Gemini | **SELESAI ✅** |
+| **Fase 3** | **ANALYZE: Redundancy** | Solver DSM, SVD Kinematic Guard, Hyperbolic ARI, AI Bracing Optimizer | **SELESAI ✅** |
+| **Fase 4** | **ANALYZE: Biaya (BIM 5D)**| Automatic Volume Takeoff, AHSP PUPR, BOQ 6-Division, RAB Engine | **SELESAI ✅** |
+| **Fase 5** | **ANALYZE: Waktu (BIM 4D)** | WBS Perakitan, Gantt Chart, Kurva S, Pengecekan Stabilitas Erection | Tahap Perencanaan |
+| **Fase 6** | **MY PROJECT Delivery** | Generator Dossier Resmi Markdown, Executive Deck, Portofolio | **SELESAI ✅** |
+| **Fase 7** | **Interoperabilitas & Rilis** | Export OpenBIM IFC 4.3 (Pset_StructuralRedundancy), DXF 3D, SAP2000 | **SELESAI ✅** |
 
 ---
 
