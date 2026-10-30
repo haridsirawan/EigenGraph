@@ -10,12 +10,16 @@ pub enum AnalyzeSubTab {
     MemberCriticality,
     DisplacementForces,
     Frame3dInteraction,
+    CascadingCollapse,
 }
 
 pub struct AnalyzeView {
     pub active_subtab: AnalyzeSubTab,
     pub published_to_dossier: bool,
     pub export_status: Option<String>,
+    pub initial_disrupt_input: String,
+    pub daf_val: f32,
+    pub last_cascade_report: Option<crate::core::CascadingCollapseReport>,
 }
 
 impl Default for AnalyzeView {
@@ -24,6 +28,9 @@ impl Default for AnalyzeView {
             active_subtab: AnalyzeSubTab::RedundancySvd,
             published_to_dossier: false,
             export_status: None,
+            initial_disrupt_input: "1, 2".to_string(),
+            daf_val: 1.20,
+            last_cascade_report: None,
         }
     }
 }
@@ -71,6 +78,7 @@ impl AnalyzeView {
                 AnalyzeSubTab::MemberCriticality => self.render_member_criticality(ui, theme, members),
                 AnalyzeSubTab::DisplacementForces => self.render_displacement_and_forces(ui, theme, members),
                 AnalyzeSubTab::Frame3dInteraction => self.render_frame_3d_interaction(ui, theme, members),
+                AnalyzeSubTab::CascadingCollapse => self.render_cascading_collapse(ui, theme),
             }
 
             ui.add_space(24.0);
@@ -83,7 +91,8 @@ impl AnalyzeView {
                 (AnalyzeSubTab::RedundancySvd, "⚡ SVD Guard & Redundansi"),
                 (AnalyzeSubTab::MemberCriticality, "🎯 Matriks Sensitivitas ARI"),
                 (AnalyzeSubTab::DisplacementForces, "📊 Gaya Dalam & Lendutan"),
-                (AnalyzeSubTab::Frame3dInteraction, "📐 Frame 3D P-M-V & Disrupsi Jamak (N-2)"),
+                (AnalyzeSubTab::Frame3dInteraction, "📐 Frame 3D P-M-V"),
+                (AnalyzeSubTab::CascadingCollapse, "💥 Kolaps Kaskade (DoD/ASCE)"),
             ];
 
             for (tab, label) in tabs {
@@ -553,5 +562,122 @@ impl AnalyzeView {
             ui.add_space(2.0);
             ui.label(RichText::new(sub).size(11.0).color(theme.text_muted));
         });
+    }
+
+    fn render_cascading_collapse(&mut self, ui: &mut Ui, theme: &MacTheme) {
+        // Controls card
+        theme.card_frame().show(ui, |ui| {
+            ui.label(RichText::new("💥 SIMULASI KERUNTUHAN BERANTAI & KASKADE (PROGRESSIVE COLLAPSE ENGINE)").size(14.0).strong().color(theme.text_primary));
+            ui.add_space(4.0);
+            ui.label(RichText::new("Pemodelan keruntuhan progresif dinamis sesuai standar DoD UFC 4-023-03 dan ASCE 7-22 Alternate Path Method. Masukkan elemen pemicu disrupsi mendadak untuk mengevaluasi amplifikasi dinamis (DAF) dan efek domino ke elemen penopang sekunder.").size(12.0).color(theme.text_secondary));
+            ui.add_space(12.0);
+
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("ID Batang Pemicu (pisahkan koma):").size(12.0).strong().color(theme.text_primary));
+                ui.add(egui::TextEdit::singleline(&mut self.initial_disrupt_input).desired_width(120.0));
+                ui.add_space(16.0);
+
+                ui.label(RichText::new(format!("Faktor DAF: {:.2}x", self.daf_val)).size(12.0).strong().color(theme.text_primary));
+                ui.add(egui::Slider::new(&mut self.daf_val, 1.0..=2.0).step_by(0.05));
+                ui.add_space(16.0);
+
+                if ui.add(egui::Button::new(RichText::new("💥 Jalankan Simulasi").size(12.0).strong().color(Color32::WHITE))
+                    .fill(theme.accent_red)
+                    .corner_radius(CornerRadius::same(6))).clicked() {
+                    let ids: Vec<usize> = self.initial_disrupt_input
+                        .split(',')
+                        .filter_map(|s| s.trim().parse::<usize>().ok())
+                        .collect();
+                    let target_ids = if ids.is_empty() { vec![1] } else { ids };
+
+                    let mut engine = crate::core::ParametricEngine::new();
+                    if let Ok(model) = engine.generate_warren_truss() {
+                        if let Ok(report) = crate::core::CascadingSimulator::simulate_disruption(&model, &target_ids, Some(self.daf_val as f64)) {
+                            self.last_cascade_report = Some(report);
+                        }
+                    }
+                }
+            });
+
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Skenario Cepat:").size(11.0).color(theme.text_muted));
+                if ui.button("⚡ Batang Tunggal Tengah (ID 1)").clicked() {
+                    self.initial_disrupt_input = "1".to_string();
+                }
+                if ui.button("💥 Disrupsi Ganda Kritis (ID 1, 2)").clicked() {
+                    self.initial_disrupt_input = "1, 2".to_string();
+                }
+                if ui.button("🛡️ Batang Web Diagonal (ID 18)").clicked() {
+                    self.initial_disrupt_input = "18".to_string();
+                }
+            });
+        });
+
+        ui.add_space(16.0);
+
+        // If simulation report is available
+        if let Some(ref report) = self.last_cascade_report {
+            let (status_text, status_color) = match report.status {
+                crate::core::CollapseStatus::ArrestedSafe => ("ARRESTED SAFE (REDUNDAN AMAN)", theme.accent_green),
+                crate::core::CollapseStatus::ArrestedPartialCollapse => ("ARRESTED PARTIAL COLLAPSE (STABILISASI PARSIAL)", theme.accent_orange),
+                crate::core::CollapseStatus::CatastrophicCollapse => ("CATASTROPHIC COLLAPSE (MEKANISME RUNTUH GLOBAL)", theme.accent_red),
+            };
+
+            ui.columns(4, |cols| {
+                self.metric_card(&mut cols[0], theme, "STATUS SIMULASI", status_text, &format!("DAF: {:.2}x • {} Tahap", report.daf, report.steps_count), status_color);
+                self.metric_card(&mut cols[1], theme, "TOTAL RUNTUH", &format!("{} Batang", report.total_collapsed_ids.len()), &format!("Awal: {:?}", report.initial_disrupted_ids), if report.total_collapsed_ids.len() > report.initial_disrupted_ids.len() { theme.accent_red } else { theme.accent_blue });
+                self.metric_card(&mut cols[2], theme, "ROBUSTNESS INDEX (R_sys)", &format!("{:.3}", report.robustness_index), &format!("PVI: {:.2}% Keruntuhan", report.pvi * 100.0), if report.robustness_index > 0.7 { theme.accent_green } else { theme.accent_red });
+                self.metric_card(&mut cols[3], theme, "MAX REDISTRIBUTED DCR", &format!("{:.1}%", report.max_redistributed_dcr * 100.0), &format!("Residual ARI: {:.3}", report.residual_ari), if report.max_redistributed_dcr > 1.0 { theme.accent_red } else { theme.accent_green });
+            });
+
+            ui.add_space(16.0);
+
+            // Chronology timeline table
+            theme.card_frame().show(ui, |ui| {
+                ui.label(RichText::new("KRONOLOGI PERAMBATAN KERUNTUHAN (DOMINO SEQUENCE CHRONOLOGY)").size(13.0).strong().color(theme.text_primary));
+                ui.add_space(10.0);
+
+                for step in &report.chronology {
+                    let step_color = if step.step_index == 1 {
+                        theme.accent_blue
+                    } else if step.max_dcr > 1.0 || step.description.contains("Domino") || step.description.contains("Failure") {
+                        theme.accent_red
+                    } else {
+                        theme.accent_green
+                    };
+
+                    Frame::new()
+                        .fill(theme.bg_card)
+                        .stroke(Stroke::new(1.0, step_color.gamma_multiply(0.4)))
+                        .corner_radius(CornerRadius::same(6))
+                        .inner_margin(Margin::symmetric(12, 8))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("Step {:02}", step.step_index)).size(12.0).strong().color(step_color));
+                                ui.add_space(12.0);
+                                ui.label(RichText::new(&step.description).size(12.0).color(theme.text_primary));
+
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if step.max_dcr.is_finite() && step.max_dcr > 0.0 {
+                                        ui.label(RichText::new(format!("DCR: {:.1}% | Defl: {:.2} mm", step.max_dcr * 100.0, step.max_displacement_mm)).size(11.0).color(theme.text_secondary));
+                                    }
+                                });
+                            });
+                        });
+                    ui.add_space(4.0);
+                }
+            });
+        } else {
+            theme.card_frame().show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(20.0);
+                    ui.label(RichText::new("Belum ada simulasi kolaps kaskade yang dijalankan.").size(13.0).color(theme.text_muted));
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Klik tombol '💥 Jalankan Simulasi' di atas untuk memulai kalkulasi domino nonlinier ASCE 7-22.").size(12.0).color(theme.text_secondary));
+                    ui.add_space(20.0);
+                });
+            });
+        }
     }
 }
