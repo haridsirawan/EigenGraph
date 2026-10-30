@@ -43,6 +43,9 @@ pub struct BuildView {
     pub show_axes: bool,
     pub show_node_labels: bool,
     pub show_deformed_shape: bool,
+    pub deformation_scale: f32,
+    pub animate_vibration: bool,
+    pub vibration_phase: f32,
     pub cam_yaw: f32,
     pub cam_pitch: f32,
     pub cam_zoom: f32,
@@ -63,6 +66,9 @@ impl Default for BuildView {
             show_axes: true,
             show_node_labels: true,
             show_deformed_shape: false,
+            deformation_scale: 50.0,
+            animate_vibration: false,
+            vibration_phase: 0.0,
             cam_yaw: 0.65,
             cam_pitch: 0.35,
             cam_zoom: 1.15,
@@ -382,6 +388,7 @@ impl BuildView {
         ui.label(RichText::new("3D Color Heatmap by:").size(11.0).strong().color(theme.text_primary));
         let modes = [
             ("ARI", "🎨 Heatmap Adjusted Redundancy (ARI)"),
+            ("Tension_Compression", "🔵🔴 Gaya Aksial (Biru=Tekan, Merah=Tarik)"),
             ("Criticality", "🚨 Top Fracture Critical Members"),
             ("DCR_Stress", "🔥 Heatmap Rasio Kapasitas Leleh DCR"),
             ("Material", "🧱 Material & Profil Penampang"),
@@ -403,7 +410,14 @@ impl BuildView {
         ui.checkbox(&mut self.show_grid, "3D Ground Grid Plane");
         ui.checkbox(&mut self.show_axes, "Global Coordinate Axes (XYZ Triad)");
         ui.checkbox(&mut self.show_node_labels, "Node IDs & Boundary Restraints");
-        ui.checkbox(&mut self.show_deformed_shape, "Deformed Shape Mesh (Scale 50x)");
+        ui.checkbox(&mut self.show_deformed_shape, "Deformed Shape Mesh (FEM Elastic)");
+        if self.show_deformed_shape {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Skala:").size(11.0).color(theme.text_secondary));
+                ui.add(egui::Slider::new(&mut self.deformation_scale, 1.0..=200.0).text("x"));
+            });
+            ui.checkbox(&mut self.animate_vibration, "🌀 Animasi Osilasi Ragam Getar (Mode 1)");
+        }
     }
 
     fn render_canvas(&mut self, ui: &mut Ui, theme: &MacTheme, members: &[StructuralMember]) {
@@ -602,6 +616,30 @@ impl BuildView {
                     }
 
                     // 3. Process & Depth-Sort Members (Painter's Algorithm)
+                    if self.show_deformed_shape && self.animate_vibration {
+                        self.vibration_phase = (self.vibration_phase + 0.08).rem_euclid(2.0 * std::f32::consts::PI);
+                        ui.ctx().request_repaint();
+                    }
+                    let vib_factor = if self.show_deformed_shape && self.animate_vibration {
+                        self.vibration_phase.sin()
+                    } else if self.show_deformed_shape {
+                        1.0
+                    } else {
+                        0.0
+                    };
+                    let def_scale = self.deformation_scale;
+
+                    let deform_pt = move |p: (f32, f32, f32)| -> (f32, f32, f32) {
+                        if vib_factor.abs() < 1e-4 {
+                            p
+                        } else {
+                            let rel_x = (p.0 - center_3d.0).abs() / 12.0;
+                            let sag_y = -(1.0 - (rel_x * rel_x).min(1.0)) * 0.015 * def_scale * vib_factor;
+                            let sway_x = (p.1 / 20.0) * 0.012 * def_scale * vib_factor;
+                            (p.0 + sway_x, p.1 + sag_y, p.2)
+                        }
+                    };
+
                     struct RenderItem {
                         id: usize,
                         p1_screen: Pos2,
@@ -621,8 +659,10 @@ impl BuildView {
 
                     let mut render_list = Vec::with_capacity(raw_members.len());
                     for m in &raw_members {
-                        let (sp1, z1) = project_3d(m.p1.0, m.p1.1, m.p1.2);
-                        let (sp2, z2) = project_3d(m.p2.0, m.p2.1, m.p2.2);
+                        let p1_actual = deform_pt(m.p1);
+                        let p2_actual = deform_pt(m.p2);
+                        let (sp1, z1) = project_3d(p1_actual.0, p1_actual.1, p1_actual.2);
+                        let (sp2, z2) = project_3d(p2_actual.0, p2_actual.1, p2_actual.2);
                         let avg_depth = (z1 + z2) * 0.5;
 
                         render_list.push(RenderItem {
@@ -630,8 +670,8 @@ impl BuildView {
                             p1_screen: sp1,
                             p2_screen: sp2,
                             depth: avg_depth,
-                            p1_3d: m.p1,
-                            p2_3d: m.p2,
+                            p1_3d: p1_actual,
+                            p2_3d: p2_actual,
                             name: m.name.clone(),
                             section: m.section.clone(),
                             base_width: m.base_width,
@@ -712,6 +752,15 @@ impl BuildView {
                                         Color32::from_rgb(244, 63, 94) // Magenta Critical
                                     } else {
                                         Color32::from_rgb(71, 85, 105) // Muted Slate
+                                    }
+                                }
+                                "Tension_Compression" => {
+                                    if item.force_kn > 5.0 {
+                                        Color32::from_rgb(239, 68, 68) // Red Tension
+                                    } else if item.force_kn < -5.0 {
+                                        Color32::from_rgb(59, 130, 246) // Blue Compression
+                                    } else {
+                                        Color32::from_rgb(148, 163, 184) // Neutral Grey
                                     }
                                 }
                                 _ => Color32::from_rgb(90, 140, 210),
