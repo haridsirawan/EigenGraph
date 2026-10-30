@@ -1,0 +1,41 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Test Suite
+        run: cargo test
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Package App Bundle & DMG
+        run: |
+          mkdir -p "EigenGraph.app/Contents/MacOS"
+          mkdir -p "EigenGraph.app/Contents/Resources"
+          cp target/release/eigengraph "EigenGraph.app/Contents/MacOS/"
+          if [ -f "assets/icon.png" ]; then
+            cp assets/icon.png "EigenGraph.app/Contents/Resources/"
+          fi
+          hdiutil create -volname "EigenGraph" -srcfolder "EigenGraph.app" -ov -format UDZO "EigenGraph-v1.0.0.dmg"
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EigenGraph-v1.0.0.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
