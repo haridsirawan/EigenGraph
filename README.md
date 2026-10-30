@@ -9,13 +9,8 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon%20%26%20Intel)-black.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-7%20passed%20(100%25)-30D158.svg)](#)
-[![Dissertation](https://img.shields.io/badge/dissertation-UNY%20Doctoral%20Research-FF9500.svg)](#)
 
 *Implementasi resmi mesin analitis berkecepatan tinggi dalam bahasa Rust yang diporting langsung dari basis kode penelitian [Adjusted-Redundancy-Index](https://github.com/haridsirawan/Adjusted-Redundancy-Index).*  
-*Berdasarkan Naskah Disertasi Doktor:*  
-**"PENGEMBANGAN DAN VALIDASI ADJUSTED REDUNDANCY INDEX UNTUK PENAPISAN PRA-ANALISIS SKENARIO GANGGUAN ELEMEN PADA STRUKTUR LINEAR-ELASTIK"**  
-**Harids Irawan, S.T., M.T.** (NIM: 23051690001)  
-*Program Studi Doktor Ilmu Teknik, Fakultas Teknik, Universitas Negeri Yogyakarta (2026)*
 
 </div>
 
