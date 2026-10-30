@@ -247,115 +247,6 @@ Exact rational arithmetic comparison (Benchmark Closed-Form Solution vs. Rust En
 
 ---
 
-## 🏛️ The 10D BIM Lifecycle Framework
-
-EigenGraph features an ordered, locked 11-pillar macOS sidebar navigation integrating the full building lifecycle:
-
-```
-┌────────────────────────────────────────────────────────┐
-│  ⚛️ EigenGraph                                         │
-│                                                        │
-│  📁   My Library                                       │
-│  💡   Research & Concept               (1D BIM)        │
-│  📐   Drafting & Drawings              (2D CAD Studio) │
-│  🏗️   Modeling & Geometry              (3D CAD/BIM)    │
-│  ⏱️   Time & Scheduling                (4D Staging)    │
-│  💰   Cost & Budgeting                 (5D QTO / RAB)  │
-│  🌱   Sustainability & Energy          (6D Carbon)     │
-│  🏢   Facility Management              (7D Digital Twin)│
-│  🛡️   Safety/Health & Safety           (8D Reliability)│
-│  ♻️   Lean Construction                (9D LPS / Waste)│
-│  🤖   Industrialized & Automation      (10D DfMA / IoT)│
-│                                                        │
-│  ────────────────────────────────────────────────────  │
-│  ACTIVE PROJECT: Arch Truss Bridge (Family S5)        │
-│  ARI: 0.940 (Safe) • DB Parts: 2 ready                │
-│                                                        │
-│  👤  Harids Irawan                                    │
-│  v1.0.0 • Metal GPU 60 FPS • 🚀 Update                │
-└────────────────────────────────────────────────────────┘
-```
-
-1. **📁 My Library**: Multi-project portfolio catalog, instant project switching, and parametric components database.
-2. **💡 [1D] Research & Concept**: Project guidelines, regulatory code verification (AISC 360-16, SNI 1729, Eurocode 3, ASCE 7-22), and feasibility notes.
-3. **📐 [2D] Drafting & Drawings**: AutoCAD-style vector studio featuring 9 CAD tools (`Line`, `Polyline`, `Arc`, `Circle`, `Rectangle`, `Trim`, `Offset`, `Dimension`), Object Snapping, Ortho (F8), Command Prompt, and parametric equation binding.
-4. **🏗️ [3D] Modeling & Geometry**: Apple Metal GPU 3D viewport canvas paired with the unified CAD/BIM Triad Dock.
-5. **⏱️ [4D] Time & Scheduling**: 4D construction staging sequence simulation and Staged Erection SVD Stability Verification to prevent mechanism formation during incomplete cantilever erection.
-6. **💰 [5D] Cost & Budgeting**: Dynamic Quantity Takeoff (QTO), detailed construction cost budgeting (RAB), and the Cost vs. ARI Pareto Frontier trade-off.
-7. **🌱 [6D] Sustainability & Energy**: Embodied carbon footprint calculation ($t\text{ CO}_2e$) comparing electric arc furnace (EAF) vs. blast furnace (BF-BOF) steel production routes, circularity index, and green rating point predictions (LEED / GREENSHIP).
-8. **🏢 [7D] Facility Management**: Digital Twin asset health monitoring, real-time IoT sensor telemetry simulation (strain, vibration, tilt), and time-dependent degradation tracking $ARI(t)$.
-9. **🛡️ [8D] Safety/Health & Safety**: Fracture-Critical Member (FCM) screening, Cornell reliability index $\beta$, probability of failure $P_f$, and $N-2 / N-k$ multi-disruption simulation.
-10. **♻️ [9D] Lean Construction**: 1D/2D cutting stock optimization reducing 12m steel beam waste from 12.8% to 2.4%, Last Planner System (LPS) Percent Plan Complete (PPC), and Muda/Mura/Muri waste elimination.
-11. **🤖 [10D] Industrialized & Automation**: Design for Manufacture and Assembly (DfMA) with 82.5% off-site prefabrication ratio, 6-axis robotic welding standardization, and OpenBIM IFC 4.3 export.
-
----
-
-## 📐 CAD/BIM Triad Dock & Native Vector Canvas Viewport
-
-The 3D Modeling workspace provides an unencumbered CAD/BIM interface:
-
-```
-┌──────────────────────────────────┬────────────────────────────────────────────────────────┐
-│ CAD/BIM TRIAD DOCK (320px)       │ INTERACTIVE VECTOR CAD VIEWPORT (Apple Metal 60 FPS)   │
-│ ┌───┬───┬───┬───┐                │                                                        │
-│ │📋 │🗂️ │🛠️ │👁️ │                │      Y ▲                                               │
-│ └───┴───┴───┴───┘                │        │        Top Chords (T1 - T5)                   │
-│                                  │        │     ┌─────o─────o─────o─────o─────┐            │
-│ 📋 PROPERTIES INSPECTOR          │        │     │    / \   / \   / \   / \    │            │
-│  • Level 1 (Deselected):         │        │    ▲│   /   \ /   \ /   \ /   \   │▲ P = -30kN │
-│    - Minimum System ARI: 0.940   │        │    ││  /     o     o     o     \  ││           │
-│    - SVD Kinematics: STABLE      │        │    o──o─────o─────o─────o─────o──o             │
-│    - Total Steel: 48.5 Ton       │        │   ▲ Pinned Support       Roller Support ▲      │
-│    - Active Elements: 432        │        └───┼──────────────────────────────────────────► │
-│    - Parametric Variables        │            │◄────────────── L = 24.0 m ──────────────►│   X │
-│                                  │                                                        │
-│  • Level 2 (Element Clicked):    │ ┌────────────────────────────────────────────────────┐ │
-│    - Member Tag: E1 (W14x90)     │ │ [● E1: 0.58] [● E2: 0.65] [● E3: 0.82] [● E4: 0.91]│ │
-│    - Internal Forces: N, My, Mz  │ └────────────────────────────────────────────────────┘ │
-│    - AISC 360 LRFD P-M-V DCR     │                                                        │
-│    - Disruption Testing: N-k     │ 💡 Click member to inspect • Click canvas to clear     │
-└──────────────────────────────────┴────────────────────────────────────────────────────────┘
-```
-
-* **Two-Level Contextual Properties Inspector**:
-  * **Level 1 (Global System KPI)**: When no element is selected, displays holistic structural metrics (System ARI, SVD Mechanism Guard, steel tonnage, total elements, deflection, and parametric variables).
-  * **Level 2 (Element Inspector)**: When an element is clicked, reveals cross-section profile, Frame 3D axial forces, bending moments, shear forces, AISC 360 LRFD DCR utilization with color coding, redundancy metrics ($RR, ARI, CI, m_e$), and $N-2 / N-k$ multi-element disruption testing.
-* **Project Browser**: Hierarchical navigation tree of structural frames, boundary supports, load combinations, and parametric database parts with one-click `+ Insert`.
-* **Display Layers & Heatmap Toggles**: Selectable overlays for Ground Grid, Global Axes, Node IDs, and analytical heatmaps (Adjusted Redundancy Index, Criticality, SVD Mode, and Yield Capacity DCR).
-* **Native Vector Viewport**: Rendered directly via `egui::Painter` with sub-pixel anti-aliasing, pinned and roller support symbols, span dimension lines, and point-to-segment hit testing (clicking a member selects it; clicking empty canvas space deselects and returns to Level 1 KPIs).
-
----
-
-## 🤖 Global Floating Dynamic Island AI Copilot (`⌘K`)
-
-The **EigenAI Copilot** floats at the bottom-center of the screen across all workspaces:
-* **In `Research & Concept` (1D)**: `[📑 Summarize Portfolio]`, `[📜 Verify Regulatory Criteria]`, `[📊 Sort by ARI]`
-* **In `Drafting & Drawings` (2D)**: `[🪄 Suggest Redundant Bracing]`, `[📐 Insert Warren Truss 24m]`, `[🔗 Bind Formula H = L / 7.5]`
-* **In `Modeling & Geometry` (3D)**: `[💥 Test Multi-Disruption (N-2)]`, `[⚡ Verify SVD Mechanism Guard]`, `[🎯 Screen Critical FCM]`
-* **In `Time & Scheduling` (4D)**: `[🏗️ Verify Staged 4D SVD]`, `[📊 Export S-Curve]`, `[⏱️ Cantilever Risk Assessment]`
-* **In `Cost & Budgeting` (5D)**: `[💰 Auto-Calculate 5D Budget]`, `[📈 Cost vs ARI Sensitivity]`, `[📑 Steel QTO Breakdown]`
-* **In `Sustainability & Energy` (6D)**: `[🌱 Calculate CO₂e Footprint]`, `[📈 Carbon vs ARI Trade-Off]`, `[🏅 Predict LEED Rating]`
-* **In `Facility Management` (7D)**: `[📡 Read Real-Time SHM Telemetry]`, `[📉 Evaluate Degradation ARI(t)]`, `[🛠️ Issue Work Order]`
-* **In `Safety/Health & Safety` (8D)**: `[📐 Evaluate P-M-V Interaction]`, `[💥 Progressive Collapse Simulation]`, `[🚨 Top 5 Critical Elements]`
-* **In `Lean Construction` (9D)**: `[✂️ Optimize 12m Beam Cutting]`, `[📋 Last Planner System PPC]`, `[🌊 Eliminate 7 Wastes]`
-* **In `Industrialized & Automation` (10D)**: `[🏭 Verify DfMA Modular Ratio]`, `[🦾 Robotic Welding Toolpath]`, `[🌐 Export OpenBIM IFC 4.3]`
-
----
-
-## 🚀 In-App GitHub Releases Auto-Updater
-
-EigenGraph includes a built-in background updater connected to the official GitHub Releases API:
-
-1. Click the **`🚀 Update`** button in the top toolbar or bottom sidebar footer.
-2. The application asynchronously queries `https://api.github.com/repos/haridsirawan/EigenGraph/releases/latest`.
-3. An Apple-style modal dialog displays:
-   - Latest release version and release date.
-   - Comprehensive changelog and release notes.
-   - Download file size.
-4. Clicking **`[🚀 Unduh & Pasang Sekarang]`** automatically downloads the new Universal DMG to `~/Downloads/` with a live progress bar and automatically executes `open` to mount the disk image for drag-and-drop installation.
-
----
-
 ## 📦 Installation & Compilation Guide
 
 ### Option 1: Universal 2 macOS Disk Image (`.dmg`)
@@ -392,6 +283,6 @@ cargo run --release
 
 ## 🛡️ License & Acknowledgments
 
-Copyright © 2026 **Harids Irawan, S.T., M.T.**  
+Copyright © 2026 **Harids Irawan**  
 Distributed under the dual **MIT License** and **Apache License 2.0**.  
 See the [LICENSE](LICENSE) file for complete details.
