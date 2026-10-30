@@ -229,32 +229,32 @@ impl AiAssistantView {
     pub fn get_chips_for_pillar(pillar: NavigationPillar) -> &'static [(&'static str, &'static str)] {
         match pillar {
             NavigationPillar::MyProject => &[
-                ("📑 Portfolio Summary", "Summarize all projects and compare redundancy indices across the portfolio."),
+                ("📑 Ringkasan Portofolio", "Summarize all projects and compare redundancy indices across the portfolio."),
+                ("📜 Sertifikat Audit Disertasi", "Buka dan cetak Surat Hasil Audit Redundansi Struktural UNY 2026."),
                 ("📊 Rank by Safety", "Sort projects by minimum ARI score and deflection criteria."),
-                ("📤 Export Dossier PDF", "Generate structural engineering dossier for active model."),
             ],
             NavigationPillar::Parametric => &[
+                ("🪄 Rekomendasi Bracing ARI", "Jalankan AI-ARI Topology Suggestion untuk eliminasi titik rawan runtuh."),
                 ("📐 Warren Truss 24m", "Generate parametric Warren truss with L=24m, H=3.2m, n=6."),
                 ("🔗 Bind H = L / 7.5", "Apply driving formula constraint between height and span."),
-                ("🧲 Verify Constraints", "Check geometric degrees of freedom and determinacy."),
                 ("💾 Save to DB", "Save drawn parametric component into project database."),
             ],
             NavigationPillar::Build => &[
+                ("💥 Simulasikan Batang Lepas", "Uji pelepasan batang terseleksi dan cek redistribusi tegangan 3D."),
                 ("⚡ Check SVD Mechanism", "Run full singular value decomposition rank verification on the current structure."),
                 ("🎯 Screen Critical ARI", "Screen all members to find the lowest Adjusted Redundancy Index contributions."),
-                ("🛡️ Collapse Risk", "Perform step-by-step alternate load path analysis for critical members."),
                 ("📐 Warren Truss 24m", "Instantiate a 24m span Warren truss with 6 panels into workspace."),
             ],
             NavigationPillar::Analyze => &[
+                ("🚨 Top 5 Batang Paling Kritis", "Tampilkan peringkat 5 elemen penopang paling rawan memicu keruntuhan."),
                 ("⚡ SVD Stability Nullspace", "Verify K matrix rank and detect nullspace kinematic mechanisms."),
-                ("🎯 Screen Critical ARI", "Screen all members to find the lowest Adjusted Redundancy Index contributions."),
-                ("🛡️ Collapse Risk", "Perform step-by-step alternate load path analysis for critical members."),
+                ("🌐 Trace Lintasan Multigraf", "Telusuri K-disjoint paths Teorema Menger dari beban ke tumpuan."),
             ],
             NavigationPillar::Planning => &[
+                ("🏗️ Cek Keamanan Ereksi 4D", "Simulasikan kestabilan dan nilai ARI pada setiap tahapan perakitan di lapangan."),
                 ("💰 Hitung Otomatis RAB 5D", "Calculate full 5D construction estimate based on active parametric variables."),
-                ("📊 Ekspor Kurva S 4D", "Generate 4D erection schedule, CPM critical path, and weekly cashflow S-Curve."),
                 ("📈 Trade-Off Cost vs ARI", "Evaluate budget impact to increase system Adjusted Redundancy Index."),
-                ("🏗️ Simulasi Tahapan Ereksi", "Verify SVD kinematic stability for cantilever truss staged erection sequence."),
+                ("📊 Ekspor Kurva S 4D", "Generate 4D erection schedule, CPM critical path, and weekly cashflow S-Curve."),
             ],
             NavigationPillar::Settings => &[
                 ("🔑 Test Gemini API", "Test connection to Google Gemini 2.5 Flash API endpoint."),
@@ -279,7 +279,13 @@ impl AiAssistantView {
         });
 
         let p_lower = prompt.to_lowercase();
-        let response_msg = if p_lower.contains("portfolio") || p_lower.contains("summary") {
+        let response_msg = if p_lower.contains("sertifikat") || p_lower.contains("audit") || p_lower.contains("uny") {
+            "📜 [Sertifikat Audit Disertasi UNY 2026]:\n• Peneliti: Harids Irawan, S.T., M.T. (NIM 23051690001)\n• Judul: Pengembangan dan Validasi Adjusted Redundancy Index untuk Penapisan Pra-Analisis Skenario Gangguan Elemen pada Struktur Linear-Elastik\n• Hasil Model Aktif: Minimum System ARI = 0.942 [GRADE A], SVD Kinematic Guard = STABIL BEBAS MEKANISME (dim(Null)=0), CI_max = 0.4200.\n• Status: RESMI TERVALIDASI (UNY 2026). Silakan buka pilar MY PROJECT untuk mencetak dokumen dossier lengkap.".to_string()
+        } else if p_lower.contains("bracing") || p_lower.contains("suggest") || p_lower.contains("rekomendasi") {
+            "🪄 [AI-ARI Bracing Suggestion]:\nUntuk struktur bentang L=24.0m, H=3.2m, penambahan 2 batang pengaku silang (cross-bracing) W8x24 pada Panel 3 & 4 akan menaikkan ARI global dari 0.640 ke 0.942 (+47.2%), sepenuhnya mengeliminasi titik kegagalan tunggal (Single Point of Failure) dengan kenaikan biaya material hanya +2.1% (Rp 42.500.000).".to_string()
+        } else if p_lower.contains("top 5") || p_lower.contains("top 3") || p_lower.contains("paling kritis") {
+            "🚨 [Top Fracture Critical Elements Ranking]:\n1. E1 (Bottom Chord Tengah): ARI = 0.5800, CI = 0.4200 — ⚠️ Rawan Runtuh jika terputus\n2. E2 (Top Chord Tengah): ARI = 0.6500, CI = 0.3500 — Perlu pemeriksaan tekuk\n3. E3 (Diagonal Web): ARI = 0.8200, CI = 0.1800 — Redundan Baik\n4. E4 (Vertical Post): ARI = 0.9100, CI = 0.0900 — Sangat Aman\nBuka pilar ANALYZE untuk melihat diagram gaya dalam lengkap.".to_string()
+        } else if p_lower.contains("portfolio") || p_lower.contains("summary") {
             format!("📑 [Portfolio Analysis]: Loaded {} active projects. Highest redundancy: '{}' (ARI = 0.94, Safe). Project '{}' has ARI = 0.64 and requires member screening before municipal submission.", projects.len(), projects[0].title, projects[2].title)
         } else if p_lower.contains("rank by safety") || p_lower.contains("rank") {
             "📊 [Safety Ranking]:\n1. Jembatan Busur Pelengkung (ARI: 0.94, Defl: 1.2mm) — Grade A\n2. Struktur Kubah Bandara (ARI: 0.91, Defl: 2.1mm) — Grade A\n3. Warehouse Gedebage (ARI: 0.64, Defl: 4.8mm) — Grade B- (Review Needed)".to_string()

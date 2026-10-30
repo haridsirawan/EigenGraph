@@ -32,6 +32,7 @@ pub enum PlanningSubTab {
     DynamicRab,
     Schedule4d,
     CostAriTradeoff,
+    StagedErectionSvd,
 }
 
 pub struct PlanningView {
@@ -249,6 +250,7 @@ impl PlanningView {
                 PlanningSubTab::DynamicRab => self.render_dynamic_rab(ui, theme, &takeoff),
                 PlanningSubTab::Schedule4d => self.render_schedule_4d(ui, theme, &takeoff),
                 PlanningSubTab::CostAriTradeoff => self.render_cost_ari_tradeoff(ui, theme, &takeoff),
+                PlanningSubTab::StagedErectionSvd => self.render_staged_erection_svd(ui, theme, &takeoff),
             }
 
             ui.add_space(24.0);
@@ -258,10 +260,11 @@ impl PlanningView {
     fn render_header_bar(&mut self, ui: &mut Ui, theme: &MacTheme, takeoff: &Parametric5DTakeoff) {
         ui.horizontal(|ui| {
             let tabs = [
-                (PlanningSubTab::DynamicRab, "💰 Rencana Anggaran Biaya (RAB 5D)"),
-                (PlanningSubTab::TakeoffQto, "📊 Quantity Takeoff (QTO)"),
-                (PlanningSubTab::Schedule4d, "⏱️ Penjadwalan & Kurva S (4D)"),
-                (PlanningSubTab::CostAriTradeoff, "📈 Optimasi Cost vs ARI"),
+                (PlanningSubTab::DynamicRab, "💰 RAB 5D"),
+                (PlanningSubTab::TakeoffQto, "📊 QTO"),
+                (PlanningSubTab::Schedule4d, "⏱️ Kurva S 4D"),
+                (PlanningSubTab::CostAriTradeoff, "📈 Cost vs ARI"),
+                (PlanningSubTab::StagedErectionSvd, "🏗️ Staged Erection Guard"),
             ];
 
             for (tab, label) in tabs {
@@ -665,6 +668,103 @@ impl PlanningView {
                 ui.label(RichText::new("💡 KESIMPULAN REKAYASA NILAI (VALUE ENGINEERING):").size(12.0).strong().color(theme.accent_green));
                 ui.label(RichText::new("Hanya dengan kenaikan biaya +3.8% dari baseline standar, indeks redundansi ARI meningkat drastis +16.9%, mencegah mekanisme keruntuhan katastropik saat terjadi gempa atau benturan kendaraan.").size(12.0).color(theme.text_secondary));
             });
+        });
+    }
+
+    // -------------------------------------------------------------
+    // SUB-TAB 5: Staged Erection SVD & ARI Guard
+    // -------------------------------------------------------------
+    fn render_staged_erection_svd(&self, ui: &mut Ui, theme: &MacTheme, _takeoff: &Parametric5DTakeoff) {
+        ui.columns(4, |cols| {
+            self.metric_card(&mut cols[0], theme, "TAHAPAN EREKSI", "5 Tahap", "WBS Erection Sequence", theme.accent_blue);
+            self.metric_card(&mut cols[1], theme, "TAHAP PALING KRITIS", "Tahap 2 (WBS 2.2)", "ARI: 0.285 (Shoring Wajib)", theme.accent_red);
+            self.metric_card(&mut cols[2], theme, "STABILITAS CLOSURE", "Minggu Ke-12", "SVD Gate 1 Full Rank", theme.accent_green);
+            self.metric_card(&mut cols[3], theme, "FINAL OPERATIONAL ARI", "0.942", "Safe Multi-Path System", theme.accent_green);
+        });
+
+        ui.add_space(16.0);
+
+        theme.card_frame().show(ui, |ui| {
+            ui.label(RichText::new("SIMULASI KESELAMATAN EREKSI BERTAHAP (STAGED ERECTION SVD GUARD)").size(14.0).strong().color(theme.text_primary));
+            ui.add_space(4.0);
+            ui.label(RichText::new("Struktur baja sering kali belum memiliki kekakuan redundan sempurna selama masa ereksi di lapangan sebelum penutupan rangka (closure). Evaluasi tahapan ini mendeteksi titik rawan keruntuhan saat perakitan:").size(12.0).color(theme.text_secondary));
+            ui.add_space(12.0);
+
+            let stages = [
+                (
+                    "Tahap 1: Pondasi Abutment & Pier Base (Minggu 1–3)",
+                    "Pengecoran beton K-350, angkur mutu tinggi A325, dan pemasangan bearing pad elastomeric.",
+                    1.000,
+                    "🟢 STABIL RIGID BASE",
+                    theme.accent_green,
+                    "Aman, pondasi siap menerima tumpuan rangka bawah.",
+                ),
+                (
+                    "Tahap 2: Kantilever Batang Bawah & Kolom Pier (Minggu 4–6)",
+                    "Perakitan bentang bawah pertama dari tumpuan sendi. Batang atas dan diagonal belum tersambung.",
+                    0.285,
+                    "🔴 KRITIS RUNTUH (MEKANISME GOYANG)",
+                    theme.accent_red,
+                    "⚠️ WAJIB SHORING: Pasang menara perancah sementara di Simpul 2 & 4 untuk mencegah goyangan akibat angin.",
+                ),
+                (
+                    "Tahap 3: Web Diagonals & Hanger Setengah Bentang (Minggu 7–10)",
+                    "Pemasangan profil web diagonal W8x24 menggunakan Mobile Crane 100T. Rangka berbentuk kantilever terbuka.",
+                    0.540,
+                    "🟡 PERINGATAN (REDUNDANSI PARSIAL)",
+                    theme.accent_orange,
+                    "Batasi beban kerja crane maksimal 25T. Lakukan pengujian torsi baut sambungan harian.",
+                ),
+                (
+                    "Tahap 4: Penutupan Puncak Rangka / Closure Joint (Minggu 11–13)",
+                    "Pemasangan segmen mahkota tengah bentang (top chord closure). Jalur transfer ganda tertutup sempurna.",
+                    0.885,
+                    "🟢 AMAN STABIL (DUAL-PATH)",
+                    theme.accent_green,
+                    "Kekakuan global tercapai. Menara perancah sementara (shoring) dapat dibongkar bertahap.",
+                ),
+                (
+                    "Tahap 5: Pemasangan Plat Lantai & Beban Layanan (Minggu 14–16)",
+                    "Pengecoran plat beton komposit, aspal, dan pengujian beban statis uji coba (proof loading).",
+                    0.942,
+                    "🟢 REDUNDAN SEMPURNA (GRADE A)",
+                    theme.accent_green,
+                    "Struktur selesai 100% dan kebal terhadap skenario keruntuhan progresif katastropik.",
+                ),
+            ];
+
+            for (stage_title, desc, ari, status, col, reco) in stages {
+                Frame::new()
+                    .fill(theme.bg_card)
+                    .stroke(Stroke::new(1.0, col.gamma_multiply(0.4)))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::symmetric(14, 10))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("●").size(14.0).color(col));
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(stage_title).size(13.0).strong().color(theme.text_primary));
+                                ui.label(RichText::new(desc).size(11.5).color(theme.text_secondary));
+                                ui.add_space(4.0);
+                                ui.label(RichText::new(format!("Saran Keselamatan K3: {}", reco)).size(11.0).strong().color(col));
+                            });
+
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                Frame::new()
+                                    .fill(col.gamma_multiply(0.18))
+                                    .stroke(Stroke::new(1.0, col))
+                                    .corner_radius(CornerRadius::same(6))
+                                    .inner_margin(Margin::symmetric(8, 4))
+                                    .show(ui, |ui| {
+                                        ui.label(RichText::new(format!("ARI: {:.3}", ari)).size(12.5).strong().color(Color32::WHITE));
+                                    });
+                                ui.add_space(16.0);
+                                ui.label(RichText::new(status).size(11.5).strong().color(col));
+                            });
+                        });
+                    });
+                ui.add_space(8.0);
+            }
         });
     }
 
