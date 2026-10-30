@@ -3,7 +3,7 @@
 <img src="assets/icon.png" width="140" height="140" alt="EigenGraph Logo" style="border-radius: 28px; box-shadow: 0 12px 36px rgba(0,0,0,0.4);" />
 
 # EigenGraph
-### Computational Framework & Testbed for Adjusted Redundancy Index (ARI), SVD Kinematic Mechanism Guards, and 5D BIM Construction Optimization
+### Computational Framework & Testbed for Adjusted Redundancy Index (ARI), SVD Kinematic Mechanism Guards, and 10D BIM Construction Optimization
 
 [![Release](https://img.shields.io/badge/release-v1.0.0-0A84FF.svg)](https://github.com/haridsirawan/EigenGraph/releases/tag/v1.0.0)
 [![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon%20%26%20Intel)-black.svg)](#)
@@ -30,7 +30,6 @@
 3. [Hasil Verifikasi Kanonik & Benchmark Numerik](#-hasil-verifikasi-kanonik--benchmark-numerik)
    - [Verifikasi Analitis Model M1 (Parallel Bars - Tabel 25)](#verifikasi-analitis-model-m1-parallel-bars---tabel-25)
    - [Evaluasi Skala Penuh: Model M1–M4 & 300 Model Induk S1–S5](#evaluasi-skala-penuh-model-m1m4--300-model-induk-s1s5)
-4. [Arsitektur Navigasi Apple-Style (10 Dimensi BIM & Lifecycle)](#-arsitektur-navigasi-apple-style-10-dimensi-bim--lifecycle)
 5. [Global Floating Dynamic Island AI Copilot](#-global-floating-dynamic-island-ai-copilot)
 6. [Instalasi & Panduan Kompilasi](#-instalasi--panduan-kompilasi)
 7. [Sitasi Riset Akademis](#-sitasi-riset-akademis)
