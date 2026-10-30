@@ -7,7 +7,7 @@ use crate::models::{DatabaseComponent, NavigationPillar, ParametricVariable, Pro
 use crate::theme::MacTheme;
 use crate::views::{
     AiAssistantView, AnalyzeView, BuildView, FacilityView, IndustrializedView, LeanView,
-    MyProjectView, ParametricView, PlanningView, SettingsView, SustainabilityView,
+    MyProjectView, ParametricView, PlanningView, ResearchConceptView, SettingsView, SustainabilityView,
 };
 
 pub struct EigenGraphApp {
@@ -15,8 +15,9 @@ pub struct EigenGraphApp {
     pub active_pillar: NavigationPillar,
     pub search_query: String,
 
-    // 10D BIM & Lifecycle Views
-    pub my_project_view: MyProjectView,         // 1D: Research & Concept
+    // Library & 10D BIM Lifecycle Views
+    pub my_project_view: MyProjectView,         // 📁 My Library (Project Catalog & Components)
+    pub research_view: ResearchConceptView,     // 1D: Research & Concept
     pub parametric_view: ParametricView,         // 2D: Drafting & Drawings
     pub build_view: BuildView,                   // 3D: Modeling & Geometry
     pub planning_view: PlanningView,             // 4D (Time & Scheduling) & 5D (Cost & Budgeting)
@@ -38,10 +39,11 @@ impl Default for EigenGraphApp {
     fn default() -> Self {
         Self {
             theme: MacTheme::default(),
-            active_pillar: NavigationPillar::ResearchConcept,
+            active_pillar: NavigationPillar::MyLibrary,
             search_query: String::new(),
 
             my_project_view: MyProjectView::default(),
+            research_view: ResearchConceptView::default(),
             parametric_view: ParametricView::default(),
             build_view: BuildView::default(),
             planning_view: PlanningView::default(),
@@ -231,11 +233,70 @@ impl App for EigenGraphApp {
                     });
                     ui.label(RichText::new("10D BIM & Adjusted Redundancy Index").size(10.0).color(self.theme.accent_blue));
 
-                    ui.add_space(16.0);
+                    ui.add_space(14.0);
 
-                    // Workspaces Section Header
-                    ui.label(RichText::new("LIFECYCLE WORKSPACES (1D–10D)").size(9.5).strong().color(self.theme.text_muted));
-                    ui.add_space(5.0);
+                    // 1. LIBRARY SECTION HEADER
+                    ui.label(RichText::new("LIBRARY").size(9.5).strong().color(self.theme.text_muted));
+                    ui.add_space(4.0);
+
+                    // MY LIBRARY BUTTON
+                    {
+                        let is_active = self.active_pillar == NavigationPillar::MyLibrary;
+                        let bg = if is_active {
+                            self.theme.accent_blue
+                        } else {
+                            Color32::TRANSPARENT
+                        };
+                        let fg = if is_active {
+                            Color32::WHITE
+                        } else {
+                            self.theme.text_secondary
+                        };
+
+                        let badge_bg = if is_active {
+                            Color32::from_white_alpha(45)
+                        } else {
+                            self.theme.bg_card
+                        };
+                        let badge_fg = if is_active {
+                            Color32::WHITE
+                        } else {
+                            self.theme.accent_blue
+                        };
+
+                        let response = Frame::new()
+                            .fill(bg)
+                            .corner_radius(CornerRadius::same(7))
+                            .inner_margin(Margin::symmetric(7, 5))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.horizontal(|ui| {
+                                    Frame::new()
+                                        .fill(badge_bg)
+                                        .corner_radius(CornerRadius::same(4))
+                                        .inner_margin(Margin::symmetric(4, 1))
+                                        .show(ui, |ui| {
+                                            ui.label(RichText::new("LIB").size(9.0).strong().color(badge_fg));
+                                        });
+
+                                    ui.add_space(2.0);
+                                    ui.label(RichText::new("📁").size(12.0));
+                                    ui.add_space(2.0);
+                                    ui.label(RichText::new("My Library").size(11.5).strong().color(fg));
+                                });
+                            });
+
+                        let interact = ui.interact(response.response.rect, response.response.id, egui::Sense::click());
+                        if interact.clicked() {
+                            self.active_pillar = NavigationPillar::MyLibrary;
+                        }
+                    }
+
+                    ui.add_space(10.0);
+
+                    // 2. BIM LIFECYCLE (1D–10D) SECTION HEADER
+                    ui.label(RichText::new("BIM LIFECYCLE (1D–10D)").size(9.5).strong().color(self.theme.text_muted));
+                    ui.add_space(4.0);
 
                     // 10 Navigation Pillars (Apple Sidebar Capsule Buttons with Dimension Badges)
                     let pillars = [
@@ -398,11 +459,14 @@ impl App for EigenGraphApp {
             });
         });
 
-        // 4. CENTRAL PANEL (Views Router for 10D BIM Dimensions)
+        // 4. CENTRAL PANEL (Views Router for Library & 10D BIM Dimensions)
         CentralPanel::default().frame(Frame::new().fill(self.theme.bg_canvas)).show(ui, |ui| {
             match self.active_pillar {
-                NavigationPillar::ResearchConcept => {
+                NavigationPillar::MyLibrary => {
                     self.my_project_view.show(ui, &self.theme, &self.projects, &mut self.active_pillar);
+                }
+                NavigationPillar::ResearchConcept => {
+                    self.research_view.show(ui, &self.theme, &mut self.active_pillar);
                 }
                 NavigationPillar::DraftingDrawings => {
                     self.parametric_view.show(ui, &self.theme, &mut self.db_components, &mut self.active_pillar);

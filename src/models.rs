@@ -2,9 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The 10-Dimensional BIM & Lifecycle Navigation Pillars of EigenGraph
+/// The Navigation Pillars of EigenGraph: My Library & 10-Dimensional BIM Lifecycles
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NavigationPillar {
+    MyLibrary,               // 📁 My Library (Project Portfolio & Components Catalog)
     ResearchConcept,         // 1D: Research & Concept
     DraftingDrawings,        // 2D: Drafting & Drawings
     ModelingGeometry,        // 3D: Modeling & Geometry
@@ -20,6 +21,7 @@ pub enum NavigationPillar {
 impl NavigationPillar {
     pub fn title(&self) -> &'static str {
         match self {
+            Self::MyLibrary => "MY LIBRARY",
             Self::ResearchConcept => "RESEARCH & CONCEPT",
             Self::DraftingDrawings => "DRAFTING & DRAWINGS",
             Self::ModelingGeometry => "MODELING & GEOMETRY",
@@ -35,6 +37,7 @@ impl NavigationPillar {
 
     pub fn clean_name(&self) -> &'static str {
         match self {
+            Self::MyLibrary => "My Library",
             Self::ResearchConcept => "Research & Concept",
             Self::DraftingDrawings => "Drafting & Drawings",
             Self::ModelingGeometry => "Modeling & Geometry",
@@ -50,6 +53,7 @@ impl NavigationPillar {
 
     pub fn dimension_tag(&self) -> &'static str {
         match self {
+            Self::MyLibrary => "LIB",
             Self::ResearchConcept => "1D",
             Self::DraftingDrawings => "2D",
             Self::ModelingGeometry => "3D",
@@ -65,6 +69,7 @@ impl NavigationPillar {
 
     pub fn icon(&self) -> &'static str {
         match self {
+            Self::MyLibrary => "📁",
             Self::ResearchConcept => "💡",
             Self::DraftingDrawings => "📐",
             Self::ModelingGeometry => "🏗️",
@@ -80,6 +85,7 @@ impl NavigationPillar {
 
     pub fn subtitle(&self) -> &'static str {
         match self {
+            Self::MyLibrary => "Project Catalog, Parametric Component Database & UNY Dissertation Audit Dossier.",
             Self::ResearchConcept => "The foundational stage involving initial ideas, feasibility studies, regulatory checks, surveying data, and project guidelines.",
             Self::DraftingDrawings => "Traditional two-dimensional technical documentation showing X and Y axes, such as floor plans, elevations, sections, and blueprints.",
             Self::ModelingGeometry => "The creation of a digital three-dimensional model (length, width, height) allowing for spatial visualization and clash detection.",

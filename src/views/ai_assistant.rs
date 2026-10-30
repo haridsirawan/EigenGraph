@@ -228,10 +228,16 @@ impl AiAssistantView {
 
     pub fn get_chips_for_pillar(pillar: NavigationPillar) -> &'static [(&'static str, &'static str)] {
         match pillar {
-            NavigationPillar::ResearchConcept => &[
+            NavigationPillar::MyLibrary => &[
                 ("📑 Ringkasan Portofolio", "Summarize all projects and compare redundancy indices across the portfolio."),
                 ("📜 Sertifikat Audit Disertasi", "Buka dan cetak Surat Hasil Audit Redundansi Struktural UNY 2026."),
                 ("📊 Rank by Safety", "Sort projects by minimum ARI score and deflection criteria."),
+                ("📦 Pustaka Komponen DB", "Tampilkan seluruh modul rangka parametrik yang tersimpan di database proyek."),
+            ],
+            NavigationPillar::ResearchConcept => &[
+                ("💡 Evaluasi Feasibility Proyek", "Cek studi kelayakan teknis dan batasan bentang bebas jembatan."),
+                ("📜 Standar SNI 1729 / AISC", "Periksa kepatuhan terhadap faktor ketahanan LRFD dan batas DCR leleh."),
+                ("🔬 Tampilkan Formulasi ARI", "Tinjau persamaan resmi naskah disertasi UNY (Michaelis-Menten dan SVD Guard)."),
             ],
             NavigationPillar::DraftingDrawings => &[
                 ("🪄 Rekomendasi Bracing ARI", "Jalankan AI-ARI Topology Suggestion untuk eliminasi titik rawan runtuh."),

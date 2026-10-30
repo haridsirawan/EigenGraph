@@ -1,6 +1,7 @@
 //! views/mod.rs — UI View Modules for EigenGraph (1D to 10D BIM Dimensions).
 
 pub mod my_project;
+pub mod research;
 pub mod parametric;
 pub mod build;
 pub mod analyze;
@@ -13,6 +14,7 @@ pub mod lean;
 pub mod industrialized;
 
 pub use my_project::MyProjectView;
+pub use research::ResearchConceptView;
 pub use parametric::ParametricView;
 pub use build::BuildView;
 pub use analyze::AnalyzeView;

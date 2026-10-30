@@ -256,37 +256,47 @@ Mesin analitis ARI telah divalidasi terhadap dataset masif disertasi:
 
 ---
 
-## 🏛️ Arsitektur Navigasi Apple-Style (10 Dimensi BIM & Lifecycle)
+## 🏛️ Arsitektur Navigasi Apple-Style (My Library & 10 Dimensi BIM)
 
-Aplikasi desktop native macOS EigenGraph dikemas dalam antarmuka minimalis elegan berbasis panduan *Apple Human Interface Guidelines (HIG)* dengan bilah samping vertikal penuh (*full-height sidebar*) yang memetakan siklus hidup bangunan ke dalam 10 Dimensi BIM (1D–10D):
+Aplikasi desktop native macOS EigenGraph dikemas dalam antarmuka minimalis elegan berbasis panduan *Apple Human Interface Guidelines (HIG)* dengan bilah samping vertikal penuh (*full-height sidebar*):
 
 ```
 ┌──────────────────┬──────────────────────────────────────────────────────────────┐
-│  ⚛️ EigenGraph    │  [Top Toolbar] 💰 Cost & Budgeting — Dynamic RAB  [🤖 Ask AI]│
+│  ⚛️ EigenGraph    │  [Top Toolbar] 📁 My Library — Project Catalog    [🤖 Ask AI]│
 │  10D BIM & ARI   │  ─────────────────────────────────────────────────────────── │
-├──────────────────┤  [Sub-Tabs: 💰 Dynamic RAB  |  📊 QTO  |  📈 Cost vs ARI]   │
-│  LIFECYCLE (1-10)│  ─────────────────────────────────────────────────────────── │
-│  [1D]  💡 Concept│  🔗 TERIKAT KE PARAMETRIC: L=24.0m, H=3.2m, Baja Rp 24.500/kg│
-│  [2D]  📐 Draft  │  ─────────────────────────────────────────────────────────── │
-│  [3D]  🏗️ Model  │  TOTAL RAB (5D)       MATERIAL BAJA       VOLUME BETON       │
-│  [4D]  ⏱️ Time   │  Rp 3.842.500.000     48.5 Ton            65.0 m³            │
-│  [5D]  💰 Cost   │  ─────────────────────────────────────────────────────────── │
-│  [6D]  🌱 Sustain│  Rincian AHSP Pekerjaan (WBS 1.0 - 6.0)                      │
-│  [7D]  🏢 Facility│ 1.0 Mobilisasi Crane 100T       : Rp 180.000.000            │
-│  [8D]  🛡️ Safety │  2.0 Pondasi Abutment K-350      : Rp 126.750.000            │
-│  [9D]  ♻️ Lean   │  3.0 Pengadaan Baja BJ41         : Rp 1.188.250.000          │
-│  [10D] 🤖 Industry│ 4.0 Fabrikasi Workshop & NDT    : Rp   412.250.000          │
-│  ──────────────  │  5.0 Proteksi Cat Sa 2.5 3-Coat  : Rp    89.900.000          │
-│  ACTIVE PROJECT  │                                                              │
-│  ARI: 0.94 Safe  │       [ ⚛️ EigenAI  •  💰 5D Cost   |  Ask or type ⌘K... ]   │
-│  DB: 3 Parts     │                      (Floating Dynamic Island)                │
+├──────────────────┤  [Categories: All Projects | Bridges | Industrial | Towers]  │
+│  LIBRARY         │  ─────────────────────────────────────────────────────────── │
+│  📁 My Library   │  [FEATURED MASTER PROJECT] 🟢 ARI Safe                       │
+│                  │  Jembatan Busur Pelengkung Baja Merah (Bentang 24.0m)        │
+│  BIM (1D–10D)    │  ─────────────────────────────────────────────────────────── │
+│  [1D]  💡 Concept│  Min System ARI : 0.940 (Grade A)   Elements : 432           │
+│  [2D]  📐 Draft  │  Max Deflection : 1.20 mm           SVD Guard: Full Rank     │
+│  [3D]  🏗️ Model  │  ─────────────────────────────────────────────────────────── │
+│  [4D]  ⏱️ Time   │  [📜 Cetak Sertifikat Audit Redundansi Disertasi UNY 2026]  │
+│  [5D]  💰 Cost   │                                                              │
+│  [6D]  🌱 Sustain│                                                              │
+│  [7D]  🏢 Facility│                                                             │
+│  [8D]  🛡️ Safety │                                                              │
+│  [9D]  ♻️ Lean   │                                                              │
+│  [10D] 🤖 Industry│                                                             │
+│  ──────────────  │                                                              │
+│  ACTIVE PROJECT  │       [ ⚛️ EigenAI  •  📁 My Library  |  Ask or type ⌘K... ] │
+│  ARI: 0.94 Safe  │                      (Floating Dynamic Island)                │
+│  DB: 3 Parts     │                                                              │
 └──────────────────┴──────────────────────────────────────────────────────────────┘
 ```
 
+0. **📁 MY LIBRARY (Pustaka Proyek, Komponen & Dokumen Disertasi)**  
+   *Pusat etalase kurasi portofolio proyek bergaya Mac App Store, basis data komponen parametrik tersimpan, serta penerbitan Sertifikat Hasil Audit Redundansi Disertasi UNY 2026.*
+   - Portofolio visual dengan kartu kurasi interaktif, filter kategori, dan pencarian instan.
+   - Status penapisan instan (`🟢 ARI Safe`, `🟡 Review Needed`, `🔴 Mechanism Warning`).
+   - Modal dokumen resmi Audit Redundansi Struktural UNY 2026 lengkap dengan data penguji dan validasi.
+
 1. **💡 [1D] Research & Concept**  
    *Tahap konseptual awal yang memuat gagasan mula, studi kelayakan (feasibility), tinjauan regulasi SNI/AISC, data survei tapak, dan panduan teknis proyek.*
-   - Portofolio proyek visual, status penapisan instan (`🟢 ARI Safe`, `🟡 Review Needed`, `🔴 Mechanism Warning`).
-   - Akses langsung ke Dokumen Sertifikat Hasil Audit Redundansi Struktural Disertasi UNY 2026.
+   - Matriks evaluasi kelayakan teknis dan finansial multi-alternatif.
+   - Kepatuhan regulasi: SNI 1729:2020, SNI 2833:2016, AISC 360-16 LRFD, DoD UFC 4-023-03.
+   - Tampilan interaktif seluruh persamaan matematis resmi ARI dan SVD Kinematic Guard.
 
 2. **📐 [2D] Drafting & Drawings**  
    *Dokumentasi teknis tradisional dua dimensi yang menampilkan sumbu X dan Y, seperti denah lantai, tampak (elevasi), potongan (sections), dan cetak biru (blueprints).*
