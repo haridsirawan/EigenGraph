@@ -10,6 +10,7 @@ pub struct SettingsView {
     pub enable_svd_guard: bool,
     pub enable_anti_leakage: bool,
     pub gemini_api_key: String,
+    pub github_token: String,
 }
 
 impl Default for SettingsView {
@@ -21,6 +22,7 @@ impl Default for SettingsView {
             enable_svd_guard: true,
             enable_anti_leakage: true,
             gemini_api_key: String::new(),
+            github_token: String::new(),
         }
     }
 }
@@ -73,15 +75,20 @@ impl SettingsView {
 
             ui.add_space(16.0);
 
-            // Group 3: AI Copilot & Cloud
+            // Group 3: AI Copilot & Cloud / Auto-Updater
             theme.card_frame().show(ui, |ui| {
-                ui.label(RichText::new("AI COPILOT & CLOUD SYNCHRONIZATION").strong().size(12.0).color(theme.accent_blue));
+                ui.label(RichText::new("AI COPILOT & CLOUD / AUTO-UPDATER SYNCHRONIZATION").strong().size(12.0).color(theme.accent_blue));
                 ui.separator();
                 ui.add_space(8.0);
 
                 ui.label(RichText::new("Google Gemini API Key:").size(13.0).color(theme.text_primary));
-                ui.text_edit_singleline(&mut self.gemini_api_key);
+                ui.add(egui::TextEdit::singleline(&mut self.gemini_api_key).password(true));
                 ui.label(RichText::new("Used for autonomous BIM modeling, load path diagnostics, and structural reports.").size(11.0).color(theme.text_muted));
+
+                ui.add_space(12.0);
+                ui.label(RichText::new("GitHub Personal Access Token (PAT) [Opsional]:").size(13.0).color(theme.text_primary));
+                ui.add(egui::TextEdit::singleline(&mut self.github_token).password(true));
+                ui.label(RichText::new("Digunakan untuk otentikasi update otomatis dari aplikasi jika repositori GitHub berstatus privat.").size(11.0).color(theme.text_muted));
             });
 
             ui.add_space(24.0);

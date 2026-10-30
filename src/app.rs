@@ -1,7 +1,7 @@
 //! app.rs — Core application struct implementing eframe::App.
 
 use eframe::App;
-use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, Panel, CentralPanel, RichText, Stroke, Vec2};
+use egui::{Align, Align2, Color32, CornerRadius, Frame, Layout, Margin, Panel, CentralPanel, RichText, Stroke, Vec2};
 
 use crate::models::{DatabaseComponent, NavigationPillar, ParametricVariable, ProjectItem, ProjectStatus, StructuralMember};
 use crate::theme::MacTheme;
@@ -14,6 +14,7 @@ pub struct EigenGraphApp {
     pub theme: MacTheme,
     pub active_pillar: NavigationPillar,
     pub search_query: String,
+    pub show_settings: bool,
 
     // Library & 10D BIM Lifecycle Views
     pub my_project_view: MyProjectView,         // 📁 My Library (Project Catalog & Components)
@@ -42,6 +43,7 @@ impl Default for EigenGraphApp {
             theme: MacTheme::default(),
             active_pillar: NavigationPillar::MyLibrary,
             search_query: String::new(),
+            show_settings: false,
 
             my_project_view: MyProjectView::default(),
             research_view: ResearchConceptView::default(),
@@ -208,8 +210,12 @@ impl Default for EigenGraphApp {
 
 impl App for EigenGraphApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // macOS Global Shortcut: Cmd+, opens System Preferences
+        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Comma)) {
+            self.show_settings = !self.show_settings;
+        }
+
         // 1. APPLE-STYLE FULL-HEIGHT LEFT NAVIGATION SIDEBAR
-        // Calling Panel::left FIRST ensures it extends all the way from the top (y=0) to the bottom of the window.
         Panel::left("mac_navigation_sidebar")
             .exact_size(248.0)
             .resizable(false)
@@ -325,6 +331,7 @@ impl App for EigenGraphApp {
                             if ui.add(egui::Button::new(RichText::new("🚀 Update").size(9.5).color(self.theme.accent_blue))
                                 .fill(self.theme.bg_card)
                                 .corner_radius(CornerRadius::same(4))).on_hover_text("Periksa rilis pembaruan di GitHub").clicked() {
+                                self.updater.github_token = self.settings_view.github_token.clone();
                                 self.updater.check_for_updates();
                             }
                         });
@@ -370,7 +377,7 @@ impl App for EigenGraphApp {
                 ui.label(RichText::new("—").size(12.0).color(self.theme.text_muted));
                 ui.label(RichText::new(self.active_pillar.subtitle()).size(12.0).color(self.theme.text_secondary));
 
-                // Global Search Box, Update Button & Copilot Toggle in Toolbar
+                // Global Search Box, Update Button, Settings Button & Copilot Toggle in Toolbar
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.add(egui::Button::new(RichText::new("🤖 Ask AI (⌘K)").size(11.5).strong().color(self.theme.accent_blue))
                         .fill(self.theme.bg_card)
@@ -383,7 +390,16 @@ impl App for EigenGraphApp {
                     if ui.add(egui::Button::new(RichText::new("🚀 Update").size(11.5).color(self.theme.text_secondary))
                         .fill(self.theme.bg_card)
                         .corner_radius(CornerRadius::same(6))).on_hover_text("Periksa rilis pembaruan di GitHub").clicked() {
+                        self.updater.github_token = self.settings_view.github_token.clone();
                         self.updater.check_for_updates();
+                    }
+
+                    ui.add_space(6.0);
+
+                    if ui.add(egui::Button::new(RichText::new("⚙️").size(12.0).color(self.theme.text_secondary))
+                        .fill(self.theme.bg_card)
+                        .corner_radius(CornerRadius::same(6))).on_hover_text("System Preferences (⌘,)").clicked() {
+                        self.show_settings = !self.show_settings;
                     }
 
                     ui.add_space(8.0);
@@ -458,5 +474,25 @@ impl App for EigenGraphApp {
 
         // 6. MACOS SOFTWARE UPDATE MODAL (If Triggered)
         self.updater.render_modal(ui.ctx(), &self.theme);
+
+        // 7. MACOS SYSTEM PREFERENCES MODAL (Cmd+,)
+        if self.show_settings {
+            let mut open = self.show_settings;
+            egui::Window::new("⚙️ System Preferences")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 0.0))
+                .fixed_size(Vec2::new(480.0, 440.0))
+                .frame(Frame::new()
+                    .fill(self.theme.bg_card)
+                    .stroke(Stroke::new(1.0, self.theme.border_subtle))
+                    .corner_radius(CornerRadius::same(12))
+                    .inner_margin(Margin::same(20)))
+                .show(ui.ctx(), |ui| {
+                    self.settings_view.show(ui, &self.theme);
+                });
+            self.show_settings = open;
+        }
     }
 }
