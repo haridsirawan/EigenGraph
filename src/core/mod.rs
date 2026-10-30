@@ -11,6 +11,7 @@ pub mod parametric;
 pub mod interop;
 pub mod optimizer;
 pub mod cost;
+pub mod cascade;
 
 pub use linalg::Matrix;
 pub use model::{
@@ -23,3 +24,4 @@ pub use parametric::{ParametricEngine, ParametricFormula};
 pub use interop::{DossierExporter, DxfExporter, IfcExporter, Sap2000Exporter};
 pub use optimizer::{AriTopologyOptimizer, BracingCandidate, BracingOptimizationReport};
 pub use cost::{AhspUnitRates, BoqLineItem, CostEngine, CostEstimationReport, ProfileQuantity};
+pub use cascade::{CascadingCollapseReport, CascadingSimulator, CollapseStatus, CollapseStep};
