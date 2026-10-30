@@ -238,7 +238,7 @@ impl IfcExporter {
         s.push_str("HEADER;\n");
         s.push_str("FILE_DESCRIPTION(('ViewDefinition [DesignTransferView_V1.0]'),'2;1');\n");
         s.push_str(&format!(
-            "FILE_NAME('{}','2026-10-30T12:00:00',('Harids Irawan'),('Universitas Negeri Yogyakarta'),'EigenGraph BIM Engine v1.0.0','EigenGraph','');\n",
+            "FILE_NAME('{}','2026-10-30T12:00:00',('Harids Irawan'),('EigenGraph Platform'),'EigenGraph BIM Engine v1.0.0','EigenGraph','');\n",
             model.name.replace('\'', "")
         ));
         s.push_str("FILE_SCHEMA(('IFC4'));\n");
@@ -248,7 +248,7 @@ impl IfcExporter {
 
         // Project and Context
         s.push_str("#1=IFCPERSON('ID_HI','Irawan','Harids',$,$,$,$,$);\n");
-        s.push_str("#2=IFCORGANIZATION('ORG_UNY','Universitas Negeri Yogyakarta','Doctoral Program',$,$);\n");
+        s.push_str("#2=IFCORGANIZATION('ORG_EIGENGRAPH','EigenGraph Structural Platform','Engineering & Research',$,$);\n");
         s.push_str("#3=IFCPERSONANDORGANIZATION(#1,#2,$);\n");
         s.push_str("#4=IFCAPPLICATION(#2,'1.0.0','EigenGraph','EigenGraph');\n");
         s.push_str("#5=IFCOWNERHISTORY(#3,#4,$,.ADDED.,$,$,$,1761825600);\n");
@@ -378,9 +378,9 @@ impl DossierExporter {
 
         md.push_str("# 📜 DOSSIER RESMI AUDIT REDUNDANSI STRUKTURAL & PENCEGAHAN KERUNTUHAN PROGRESIF\n\n");
         md.push_str("> **Platform Analitis:** EigenGraph Desktop Engine (Rust 1.80+ / Metal GPU)\n");
-        md.push_str("> **Dasar Teoretis:** Disertasi Doktor Universitas Negeri Yogyakarta (UNY), 2026\n");
-        md.push_str("> **Peneliti:** Harids Irawan, S.T., M.T. (NIM: 23051690001)\n");
-        md.push_str("> **Judul Disertasi:** *Pengembangan dan Validasi Adjusted Redundancy Index untuk Penapisan Pra-Analisis Skenario Gangguan Elemen pada Struktur Linear-Elastik*\n\n");
+        md.push_str("> **Dasar Teoretis:** EigenGraph Structural Redundancy Framework (2026)\n");
+        md.push_str("> **Lead Engineer:** Harids Irawan, S.T., M.T. (EigenGraph Systems)\n");
+        md.push_str("> **Dokumen Teknis:** *Formulasi & Validasi Adjusted Redundancy Index untuk Penapisan Kelaikan Skenario Gangguan Struktur Linear-Elastik*\n\n");
 
         md.push_str("---\n\n");
 
@@ -406,11 +406,11 @@ impl DossierExporter {
         md.push_str("---\n\n");
 
         md.push_str("## 3. Rekapitulasi Metrik Redundansi Global (ARI System Metrics)\n\n");
-        md.push_str("| Indikator Metrik | Nilai Numerik | Standar Kelaikan Disertasi / ASCE 7 |\n");
+        md.push_str("| Indikator Metrik | Nilai Numerik | Standar Kelaikan EigenGraph / ASCE 7 |\n");
         md.push_str("| :--- | :---: | :--- |\n");
         md.push_str(&format!("| **Indeks Redundansi Global Rata-Rata ($\\overline{{\\text{{ARI}}}}$)** | `{:.4}` | $\\ge 0.70$ (Direkomendasikan Multi-Path) |\n", assessment.average_ari));
         md.push_str(&format!("| **Indeks Redundansi Minimum Elemen ($\\text{{ARI}}_{{\\min}}$)** | `{:.4}` | Ambang Batas FCM $\\tau = 0.50$ |\n", assessment.min_system_ari));
-        md.push_str(&format!("| **Jumlah Elemen Kritis (FCM, ARI < 0.70)** | `{}` | Target Disertasi: Zero Miss pada Ambang $\\tau$ |\n\n", assessment.critical_members_count));
+        md.push_str(&format!("| **Jumlah Elemen Kritis (FCM, ARI < 0.70)** | `{}` | Target EigenGraph: Zero Miss pada Ambang $\\tau$ |\n\n", assessment.critical_members_count));
 
         md.push_str("---\n\n");
 
@@ -451,7 +451,7 @@ impl DossierExporter {
         md
     }
 
-    /// Menghasilkan Naskah Laporan Audit Rekayasa & Disertasi Komprehensif (30+ Halaman)
+    /// Menghasilkan Naskah Laporan Audit Rekayasa Komprehensif (30+ Halaman)
     pub fn export_comprehensive_dossier(
         model: &StructuralModel,
         assessment: &RedundancyAssessment,
@@ -531,8 +531,8 @@ impl DossierExporter {
         md.push_str("## 9. Segel Audit Kriptografis Digital (NIST FIPS 180-4 SHA-256 Tamper-Proof)\n\n");
         md.push_str("```\n");
         md.push_str(&format!("CRYPTOGRAPHIC SEAL : {}\n", hash));
-        md.push_str(&format!("AUTHENTICATION URI : eigengraph://verify?hash={}&nim=23051690001\n", &hash[..16]));
-        md.push_str("ISSUING AUTHORITY  : Sidang Disertasi Doktor Pascasarjana UNY (2026)\n");
+        md.push_str(&format!("AUTHENTICATION URI : eigengraph://verify?hash={}&org=eigengraph\n", &hash[..16]));
+        md.push_str("ISSUING AUTHORITY  : EigenGraph Structural Authority & Cryptographic Registry (2026)\n");
         md.push_str("SECURITY STATUS    : ✅ VERIFIED UNALTERED & DIGITALLY SEALED\n");
         md.push_str("```\n\n");
 
@@ -632,7 +632,7 @@ impl Sha256Hasher {
 
     pub fn hash_model_and_ari(model: &StructuralModel, assessment: &RedundancyAssessment) -> String {
         let payload = format!(
-            "EIGENGRAPH_UNY_DOSSIER:name={}:nodes={}:elems={}:avg_ari={:.6}:min_ari={:.6}:cond={:.6}:rank={}",
+            "EIGENGRAPH_DOSSIER:name={}:nodes={}:elems={}:avg_ari={:.6}:min_ari={:.6}:cond={:.6}:rank={}",
             model.name,
             model.nodes.len(),
             model.elements.len(),
@@ -990,9 +990,9 @@ mod tests {
 
     #[test]
     fn test_sha256_cryptographic_seal() {
-        let text = b"EigenGraph Structural Redundancy Dossier UNY 2026";
+        let text = b"EigenGraph Structural Redundancy Dossier 2026";
         let hash = Sha256Hasher::digest_hex(text);
-        assert_eq!(hash, "b2e609583b06d78c6fe7e40dabedb3deeef3ada75d4ef8b88dcab3d8b5bd677c");
+        assert_eq!(hash, "30eb64237ce6ff2841534ccb7250b0b6fa1f18d58dd795d58591af2a58c51652");
     }
 
     #[test]
