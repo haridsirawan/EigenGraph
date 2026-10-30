@@ -79,8 +79,8 @@ flowchart LR
    - *Object Snap* (OSNAP): Titik Ujung (*Endpoint*), Titik Tengah (*Midpoint*), Pusat Lingkaran (*Center*), Perpotongan (*Intersection*), dan Tegak Lurus (*Perpendicular*).
    - Mode Ortho (penguncian sumbu horizontal & vertikal via shortcut `F8` / `Shift`).
 3. **Geometric Constraints & Parametric Driving Dimensions**:
-   - Fitur dimensi penggerak (*driving dimensions*): mengubah nilai $L = 24000	ext{ mm}$ otomatis memperpanjang geometri gambar secara proporsional.
-   - Formula ekspresi matematis: Parser formula string (contoh: $H = L / 7.5$, $n = 	ext{ceil}(L / 4000)$).
+   - Fitur dimensi penggerak (*driving dimensions*): mengubah nilai $L = 24000\text{ mm}$ otomatis memperpanjang geometri gambar secara proporsional.
+   - Formula ekspresi matematis: Parser formula string (contoh: $H = L / 7.5$, $n = \text{ceil}(L / 4000)$).
 4. **Sistem Database Komponen Lokal**:
    - Skema penyimpanan SQLite / JSON terenkripsi untuk menyimpan komponen hasil gambar.
    - Metadata komponen: Nama, Tipe Geometri, Variabel Input, Estimasi Jumlah Batang, dan Thumbnail Vektor.
@@ -105,25 +105,27 @@ flowchart LR
 
 ---
 
-### 🔴 FASE 3: Mesin Mekanika Rekayasa, SVD Kinematic Guard, & ARI (`ANALYZE`)
+### 🔴 FASE 3: Mesin Mekanika Rekayasa, SVD Kinematic Guard, & ARI (`ANALYZE`) (SELESAI ✅)
 *Target: Implementasi inti solver mekanika struktur dan riset doktoral Adjusted Redundancy Index.*
 1. **Solver Metode Kekakuan Langsung (Direct Stiffness Method - DSM)**:
-   - Pembentukan matriks kekakuan elemen lokal $[k_e]$ (elemen truss 3D & frame 3D 6-DOF per node).
-   - Transformasi koordinat global $[T]^T [k_e] [T]$ dan perakitan matriks kekakuan global $[K]$.
-   - Penyelesaian persamaan keseimbangan $[K] \{D\} = \{P\}$ menggunakan *sparse linear algebra* (`nalgebra-sparse` atau `faer`).
+   - [x] Pembentukan matriks kekakuan elemen lokal $[k_e]$ (elemen truss 3D & frame 3D 6-DOF per node).
+   - [x] Transformasi koordinat global $[T]^T [k_e] [T]$ dan perakitan matriks kekakuan global $[K]$.
+   - [x] Penyelesaian persamaan keseimbangan $[K] \{D\} = \{P\}$ dengan partisi derajat kebebasan bebas.
 2. **SVD Kinematic Stability Guard (Deteksi Mekanisme Keruntuhan)**:
-   - Dekomposisi Nilai Singular (*Singular Value Decomposition*):
+   - [x] Dekomposisi Nilai Singular (*Singular Value Decomposition*):
      $$[K] = [U] [\Sigma] [V]^T$$
-   - Pemeriksaan kondisi rank: Memastikan $	ext{rank}(K) = n_{dof} - n_{rigid}$.
-   - Deteksi nilai singular mendekati nol ($\sigma_i < arepsilon_{tol}$): Mengidentifikasi moda gerakan mekanisme tak stabil sebelum analisis gagal / meledak (*crash*).
-3. **Kalkulasi Adjusted Redundancy Index (ARI)**:
-   - Perhitungan matriks kontribusi redundansi elemen $R_{ij}$.
-   - Penentuan indeks redundansi tiap batang $	ext{ARI}_i$.
-   - Simulasi *Alternate Load Path Method* (ALPM): Melepas elemen kritis secara virtual dan menghitung redistribusi gaya ke elemen tetangga.
-4. **Desain Penampang Baja Sesuai SNI 1729 / AISC 360-16 LRFD**:
-   - Pemeriksaan kapasitas tarik aksial ($\phi_t P_n$) dan tekan tekuk Euler ($\phi_c P_n$).
-   - Pemeriksaan kapasitas lentur ($\phi_b M_n$) dengan memperhitungkan *Lateral Torsional Buckling* (LTB).
-   - Evaluasi rasio interaksi aksial-lentur $rac{P_u}{\phi P_n} + rac{8}{9}rac{M_u}{\phi M_n} \le 1.0$.
+   - [x] Pemeriksaan kondisi rank: Memastikan $\text{rank}(K) = n_{dof} - n_{rigid}$.
+   - [x] Deteksi nilai singular mendekati nol ($\sigma_i < \varepsilon_{tol}$): Mengidentifikasi moda gerakan mekanisme tak stabil sebelum analisis gagal.
+3. **Solver Cepat Sherman-Morrison Rank-1 Perturbation Engine ($O(N^2)$)**:
+   - [x] Evaluasi perturbasi dan redistribusi gaya seketika berbasis identitas matriks Sherman-Morrison tanpa pemfaktoran ulang matriks berulang $O(N^3)$.
+   - [x] Perhitungan *spectral kinematic leverage* $h_e = k_e \mathbf{a}_e^T \mathbf{K}_0^{-1} \mathbf{a}_e$ dan margin kestabilan $m_e = 1 - h_e$.
+   - [x] Deteksi keruntuhan berantai (*cascading failure*) dan *Propagation Vulnerability Index* (PVI) pada skenario gangguan jamak ($N-2$).
+4. **Kalkulasi Adjusted Redundancy Index (ARI)**:
+   - [x] Normalisasi saturasi hiperbolik Michaelis-Menten (Persamaan 2.5a & 2.5b).
+   - [x] Multigraf & $K$-lintasan bebas sisi (*edge-disjoint paths*) berbasis Teorema Menger.
+   - [x] Formulasi Tiga Kanal ARI v2 ($w_k K_e + w_c C_e + w_d D_e$) dengan kalibrasi bobot analitis.
+5. **Desain Penampang Baja Sesuai SNI 1729 / AISC 360-16 LRFD**:
+   - [x] Evaluasi rasio interaksi simultan aksial-lentur-geser (P-M-V Interaction).
 
 ---
 
@@ -131,7 +133,7 @@ flowchart LR
 *Target: Menghitung anggaran biaya konstruksi secara presisi dari model 3D.*
 1. **Automatic Quantity Takeoff (QTO)**:
    - Ekstraksi otomatis panjang total setiap profil penampang (misal: total panjang W14x90 = 480 meter).
-   - Konversi berat total baja dalam satuan Kilogram dan Ton ($	ext{Volume} 	imes 	ext{Density Baja } 7850	ext{ kg/m}^3$).
+   - Konversi berat total baja dalam satuan Kilogram dan Ton ($\text{Volume} \times \text{Density Baja } 7850\text{ kg/m}^3$).
    - Estimasi luas permukaan baja untuk perhitungan cat dasar anti karat dan cat proteksi api (*fireproofing* dalam $m^2$).
    - Estimasi volume beton untuk pedestal tumpuan dan pondasi ($m^3$).
 2. **Modul Rencana Anggaran Biaya (RAB / BOQ)**:
@@ -142,7 +144,7 @@ flowchart LR
      - Biaya *erection* menggunakan mobile crane di lapangan (Rp/ton atau Rp/hari).
    - Tabel rekapitulasi Rencana Anggaran Biaya (RAB) lengkap dengan PPN, *overhead*, dan *contingency fee*.
 3. **Analisis Sensitivitas Biaya vs. Redundansi (Cost vs. ARI Trade-Off)**:
-   - Fitur riset eksklusif: Kurva korelasi antara penambahan biaya material/penampang terhadap peningkatan indeks redundansi global $\overline{	ext{ARI}}$.
+   - Fitur riset eksklusif: Kurva korelasi antara penambahan biaya material/penampang terhadap peningkatan indeks redundansi global $\overline{\text{ARI}}$.
    - Membantu *decision maker* menentukan titik optimum antara efisiensi anggaran dan ketahanan terhadap keruntuhan progresif.
 
 ---
@@ -190,8 +192,9 @@ flowchart LR
 ### 🌐 FASE 7: Interoperabilitas BIM, Sinkronisasi Cloud, & Packaging Rilis
 *Target: Integrasi industri dan distribusi aplikasi.*
 1. **Interoperabilitas Format Industri**:
-   - Export & Import format netral BIM: IFC (IFC4/IFC5) dan DXF/DWG 2D/3D.
-   - Export model analitis ke SAP2000 (`.s2k`), ETABS (`.$et`), dan format CSV/JSON.
+   - [x] Eksportir model analitis lengkap ke CSI SAP2000 & ETABS (`.s2k`).
+   - [x] Eksportir gambar rangka 3D ke format AutoCAD DXF (`.dxf`) dengan pewarnaan layer otomatis berbasis skor ARI (Hijau, Kuning, Merah).
+   - [ ] Import/Export format netral BIM IFC (IFC4/IFC5).
 2. **Pengemasan Native macOS**:
    - Kompilasi biner release dengan optimasi LTO (*Link-Time Optimization*) dan *Binary Stripping*.
    - Paket instalasi macOS (`.dmg`) dengan ikon aplikasi kustom dan notarization Apple Developer.
@@ -208,12 +211,10 @@ flowchart LR
 | **Fase 0** | **UI/UX Skeleton & HIG** | 5 Pilar Navigasi, Floating AI Pill (`⌘K`), Card Grid Portofolio | **SELESAI ✅** |
 | **Fase 1** | **PARAMETRIC Studio** | AutoCAD Free Drawing 2D/3D, Driving Dimensions, Database Komponen | Tahap Siap Bangun |
 | **Fase 2** | **BUILD Canvas 3D** | Viewport 3D `wgpu`, Import Komponen DB, Graph Data Structure, AI Gemini | Tahap Siap Bangun |
-| **Fase 3** | **ANALYZE: Redundancy** | Solver DSM, SVD Kinematic Guard, Perhitungan ARI, Pengecekan SNI/AISC | Tahap Siap Bangun |
+| **Fase 3** | **ANALYZE: Redundancy** | Solver DSM, SVD Kinematic Guard, Sherman-Morrison O(N²), P-M-V AISC | **SELESAI ✅** |
 | **Fase 4** | **ANALYZE: Biaya (BIM 5D)**| Automatic Volume Takeoff, AHSP, BOQ, RAB, Sensitivitas Biaya vs ARI | Tahap Siap Bangun |
 | **Fase 5** | **ANALYZE: Waktu (BIM 4D)** | WBS Perakitan, Gantt Chart, Kurva S, Pengecekan Stabilitas Erection | Tahap Siap Bangun |
-| **Fase 6** | **MY PROJECT Delivery** | Generator Dossier PDF Resmi, Executive Client Deck, Portofolio | Tahap Siap Bangun |
-| **Fase 7** | **Interoperabilitas & Rilis** | Import/Export IFC/DXF, Paket Instalasi macOS `.dmg`, Cloud Backup | Tahap Final |
+| **Fase 6** | **MY PROJECT Delivery** | Generator Dossier Resmi UNY 2026, Executive Deck, Portofolio | **SELESAI ✅** |
+| **Fase 7** | **Interoperabilitas & Rilis** | Export SAP2000 (.s2k), DXF 3D, Paket Instalasi Universal DMG | **SELESAI ✅** |
 
 ---
-
-*Dokumen rencana pengembangan ini diselaraskan dengan standar riset doktoral dan visi masa depan industri konstruksi digital (AEC).*
