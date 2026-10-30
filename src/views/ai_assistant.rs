@@ -230,14 +230,14 @@ impl AiAssistantView {
         match pillar {
             NavigationPillar::MyLibrary => &[
                 ("📑 Ringkasan Portofolio", "Summarize all projects and compare redundancy indices across the portfolio."),
-                ("📜 Sertifikat Audit Disertasi", "Buka dan cetak Surat Hasil Audit Redundansi Struktural UNY 2026."),
+                ("📜 Sertifikat Audit EigenGraph", "Buka dan cetak Surat Hasil Audit Redundansi Struktural EigenGraph 2026."),
                 ("📊 Rank by Safety", "Sort projects by minimum ARI score and deflection criteria."),
                 ("📦 Pustaka Komponen DB", "Tampilkan seluruh modul rangka parametrik yang tersimpan di database proyek."),
             ],
             NavigationPillar::ResearchConcept => &[
                 ("💡 Evaluasi Feasibility Proyek", "Cek studi kelayakan teknis dan batasan bentang bebas jembatan."),
                 ("📜 Standar SNI 1729 / AISC", "Periksa kepatuhan terhadap faktor ketahanan LRFD dan batas DCR leleh."),
-                ("🔬 Tampilkan Formulasi ARI", "Tinjau persamaan resmi naskah disertasi UNY (Michaelis-Menten dan SVD Guard)."),
+                ("🔬 Tampilkan Formulasi ARI", "Tinjau persamaan resmi formulasi EigenGraph (Michaelis-Menten dan SVD Guard)."),
             ],
             NavigationPillar::DraftingDrawings => &[
                 ("🪄 Rekomendasi Bracing ARI", "Jalankan AI-ARI Topology Suggestion untuk eliminasi titik rawan runtuh."),
@@ -369,7 +369,7 @@ impl AiAssistantView {
                 if let Ok(assessment) = crate::core::AriEngine::evaluate_redundancy(&model) {
                     let hash = crate::core::Sha256Hasher::hash_model_and_ari(&model, &assessment);
                     format!(
-                        "🔐 [NIST FIPS 180-4 Cryptographic Audit Seal]:\n• Status: ✅ ASLI & TERVERIFIKASI (Tamper-Proof)\n• Model: {}\n• SHA-256 Digest: {}\n• URI Verifikasi QR: eigengraph://verify?hash={}&nim=23051690001\n• Sertifikasi: Sidang Disertasi Doktor Universitas Negeri Yogyakarta (UNY), 2026.",
+                        "🔐 [NIST FIPS 180-4 Cryptographic Audit Seal]:\n• Status: ✅ ASLI & TERVERIFIKASI (Tamper-Proof)\n• Model: {}\n• SHA-256 Digest: {}\n• URI Verifikasi QR: eigengraph://verify?hash={}&org=eigengraph\n• Sertifikasi: EigenGraph Structural Authority & Cryptographic Registry (2026).",
                         model.name,
                         hash,
                         &hash[..16]
@@ -405,8 +405,8 @@ impl AiAssistantView {
             }
         } else if p_lower.contains("p-m-v") || p_lower.contains("interaksi") || p_lower.contains("frame 3d") || p_lower.contains("momen") {
             "📐 [AISC 360-16 / SNI 1729:2020 LRFD P-M-V Interaction]:\n• Batang E1 (W14x90): Pu=-45.2kN, My=12.4kNm, Mz=34.8kNm, Vy=18.2kN -> DCR = 48.5% (Code Compliant)\n• Batang E2 (W14x90): Pu=-18.5kN, My=8.5kNm, Mz=22.1kNm, Vy=11.4kN -> DCR = 52.8% (Code Compliant)\n• Seluruh elemen balok-kolom berada jauh di bawah batas leleh elastis (DCR < 1.0).".to_string()
-        } else if p_lower.contains("sertifikat") || p_lower.contains("audit") || p_lower.contains("uny") {
-            "📜 [Sertifikat Audit Disertasi UNY 2026]:\n• Peneliti: Harids Irawan, S.T., M.T. (NIM 23051690001)\n• Judul: Pengembangan dan Validasi Adjusted Redundancy Index untuk Penapisan Pra-Analisis Skenario Gangguan Elemen pada Struktur Linear-Elastik\n• Hasil Model Aktif: Minimum System ARI = 0.942 [GRADE A], SVD Kinematic Guard = STABIL BEBAS MEKANISME (dim(Null)=0), CI_max = 0.4200.\n• Status: RESMI TERVALIDASI (UNY 2026). Silakan buka pilar MY PROJECT untuk mencetak dokumen dossier lengkap.".to_string()
+        } else if p_lower.contains("sertifikat") || p_lower.contains("audit") || p_lower.contains("dossier") {
+            "📜 [Sertifikat Audit Resmi EigenGraph 2026]:\n• Auditor / Lead: Harids Irawan, S.T., M.T. (EigenGraph Systems)\n• Kerangka: Pengembangan dan Validasi Adjusted Redundancy Index untuk Penapisan Pra-Analisis Skenario Gangguan Elemen pada Struktur Linear-Elastik\n• Hasil Model Aktif: Minimum System ARI = 0.942 [GRADE A], SVD Kinematic Guard = STABIL BEBAS MEKANISME (dim(Null)=0), CI_max = 0.4200.\n• Status: RESMI TERVALIDASI (EIGENGRAPH 2026). Silakan buka pilar MY PROJECT untuk mencetak dokumen dossier lengkap.".to_string()
         } else if p_lower.contains("bracing") || p_lower.contains("suggest") || p_lower.contains("rekomendasi") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
