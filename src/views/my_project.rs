@@ -189,7 +189,7 @@ impl MyProjectView {
             .resizable(true)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::new(0.0, 0.0))
             .show(ui.ctx(), |ui| {
-                ui.set_width(580.0);
+                ui.set_width(620.0);
                 Frame::new()
                     .fill(Color32::from_rgb(18, 22, 30))
                     .stroke(Stroke::new(1.0, theme.border_card))
@@ -243,6 +243,12 @@ impl MyProjectView {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if ui.add(egui::Button::new(RichText::new("✕ Tutup").size(12.0).color(theme.text_secondary))
                                     .fill(theme.bg_card)
+                                    .corner_radius(CornerRadius::same(6))).clicked() {
+                                    self.show_dossier_modal = false;
+                                }
+
+                                if ui.add(egui::Button::new(RichText::new("📄 Unduh Naskah Dossier (.md)").size(12.0).strong().color(Color32::WHITE))
+                                    .fill(theme.accent_green)
                                     .corner_radius(CornerRadius::same(6))).clicked() {
                                     self.show_dossier_modal = false;
                                 }
