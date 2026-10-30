@@ -227,79 +227,16 @@ impl App for EigenGraphApp {
 
                     ui.add_space(14.0);
 
-                    // App Identity / Branding
+                    // App Identity / Branding (Clean title only, subtitle removed per user request)
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("⚛️ EigenGraph").size(15.5).strong().color(Color32::WHITE));
+                        ui.label(RichText::new("⚛️ EigenGraph").size(16.0).strong().color(Color32::WHITE));
                     });
-                    ui.label(RichText::new("10D BIM & Adjusted Redundancy Index").size(10.0).color(self.theme.accent_blue));
 
-                    ui.add_space(14.0);
+                    ui.add_space(18.0);
 
-                    // 1. LIBRARY SECTION HEADER
-                    ui.label(RichText::new("LIBRARY").size(9.5).strong().color(self.theme.text_muted));
-                    ui.add_space(4.0);
-
-                    // MY LIBRARY BUTTON
-                    {
-                        let is_active = self.active_pillar == NavigationPillar::MyLibrary;
-                        let bg = if is_active {
-                            self.theme.accent_blue
-                        } else {
-                            Color32::TRANSPARENT
-                        };
-                        let fg = if is_active {
-                            Color32::WHITE
-                        } else {
-                            self.theme.text_secondary
-                        };
-
-                        let badge_bg = if is_active {
-                            Color32::from_white_alpha(45)
-                        } else {
-                            self.theme.bg_card
-                        };
-                        let badge_fg = if is_active {
-                            Color32::WHITE
-                        } else {
-                            self.theme.accent_blue
-                        };
-
-                        let response = Frame::new()
-                            .fill(bg)
-                            .corner_radius(CornerRadius::same(7))
-                            .inner_margin(Margin::symmetric(7, 5))
-                            .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                ui.horizontal(|ui| {
-                                    Frame::new()
-                                        .fill(badge_bg)
-                                        .corner_radius(CornerRadius::same(4))
-                                        .inner_margin(Margin::symmetric(4, 1))
-                                        .show(ui, |ui| {
-                                            ui.label(RichText::new("LIB").size(9.0).strong().color(badge_fg));
-                                        });
-
-                                    ui.add_space(2.0);
-                                    ui.label(RichText::new("📁").size(12.0));
-                                    ui.add_space(2.0);
-                                    ui.label(RichText::new("My Library").size(11.5).strong().color(fg));
-                                });
-                            });
-
-                        let interact = ui.interact(response.response.rect, response.response.id, egui::Sense::click());
-                        if interact.clicked() {
-                            self.active_pillar = NavigationPillar::MyLibrary;
-                        }
-                    }
-
-                    ui.add_space(10.0);
-
-                    // 2. BIM LIFECYCLE (1D–10D) SECTION HEADER
-                    ui.label(RichText::new("BIM LIFECYCLE (1D–10D)").size(9.5).strong().color(self.theme.text_muted));
-                    ui.add_space(4.0);
-
-                    // 10 Navigation Pillars (Apple Sidebar Capsule Buttons with Dimension Badges)
+                    // Unified Navigation Pillars (Direct list: My Library, Research & Concept, etc. without tags/section headers)
                     let pillars = [
+                        NavigationPillar::MyLibrary,
                         NavigationPillar::ResearchConcept,
                         NavigationPillar::DraftingDrawings,
                         NavigationPillar::ModelingGeometry,
@@ -325,45 +262,21 @@ impl App for EigenGraphApp {
                             self.theme.text_secondary
                         };
 
-                        let badge_bg = if is_active {
-                            Color32::from_white_alpha(45)
-                        } else {
-                            self.theme.bg_card
-                        };
-                        let badge_fg = if is_active {
-                            Color32::WHITE
-                        } else {
-                            self.theme.accent_blue
-                        };
+                        let btn_text = format!("{}   {}", p.icon(), p.clean_name());
+                        let btn = egui::Button::new(
+                            RichText::new(btn_text)
+                                .size(12.5)
+                                .strong()
+                                .color(fg),
+                        )
+                        .fill(bg)
+                        .corner_radius(CornerRadius::same(8))
+                        .min_size(Vec2::new(ui.available_width(), 32.0));
 
-                        let response = Frame::new()
-                            .fill(bg)
-                            .corner_radius(CornerRadius::same(7))
-                            .inner_margin(Margin::symmetric(7, 5))
-                            .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                ui.horizontal(|ui| {
-                                    // Dimension tag pill
-                                    Frame::new()
-                                        .fill(badge_bg)
-                                        .corner_radius(CornerRadius::same(4))
-                                        .inner_margin(Margin::symmetric(4, 1))
-                                        .show(ui, |ui| {
-                                            ui.label(RichText::new(p.dimension_tag()).size(9.0).strong().color(badge_fg));
-                                        });
-
-                                    ui.add_space(2.0);
-                                    ui.label(RichText::new(p.icon()).size(12.0));
-                                    ui.add_space(2.0);
-                                    ui.label(RichText::new(p.clean_name()).size(11.5).strong().color(fg));
-                                });
-                            });
-
-                        let interact = ui.interact(response.response.rect, response.response.id, egui::Sense::click());
-                        if interact.clicked() {
+                        if ui.add(btn).clicked() {
                             self.active_pillar = p;
                         }
-                        ui.add_space(1.5);
+                        ui.add_space(2.0);
                     }
 
                     ui.add_space(16.0);
