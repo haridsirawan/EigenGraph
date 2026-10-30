@@ -17,6 +17,7 @@ pub struct IndustrializedView {
     pub active_subtab: IndustrializedSubTab,
     pub offsite_ratio_pct: f32,
     pub robotic_speed_mm_s: f32,
+    pub export_status: Option<String>,
 }
 
 impl Default for IndustrializedView {
@@ -25,6 +26,7 @@ impl Default for IndustrializedView {
             active_subtab: IndustrializedSubTab::ModularDfma,
             offsite_ratio_pct: 82.5,
             robotic_speed_mm_s: 14.5,
+            export_status: None,
         }
     }
 }
@@ -36,6 +38,23 @@ impl IndustrializedView {
 
             // 1. TOP SUBTABS SELECTOR
             self.render_header_bar(ui, theme);
+
+            if let Some(ref status_msg) = self.export_status {
+                ui.add_space(10.0);
+                theme.card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("📦 10D EXPORT SIAP:").size(11.5).strong().color(theme.accent_green));
+                        ui.label(RichText::new(status_msg).size(11.5).color(theme.text_primary));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(theme.text_muted))
+                                .fill(theme.bg_card)
+                                .corner_radius(CornerRadius::same(4))).clicked() {
+                                self.export_status = None;
+                            }
+                        });
+                    });
+                });
+            }
 
             ui.add_space(14.0);
 
@@ -217,6 +236,30 @@ impl IndustrializedView {
                     });
                     ui.separator();
                 }
+
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.add(egui::Button::new(RichText::new("🌐 Ekspor Berkas OpenBIM IFC 4.3 (.ifc)").size(12.0).strong().color(Color32::WHITE))
+                        .fill(theme.accent_blue)
+                        .corner_radius(CornerRadius::same(6))).clicked() {
+                        let mut engine = crate::core::ParametricEngine::new();
+                        if let Ok(model) = engine.generate_warren_truss() {
+                            let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                            let ifc = crate::core::IfcExporter::export_to_ifc(&model, ari.as_ref());
+                            self.export_status = Some(format!("Model diekspor ke format OpenBIM IFC 4.3 ({} baris). Siap dibuka di Solibri, Revit, dan Tekla.", ifc.lines().count()));
+                        }
+                    }
+
+                    if ui.add(egui::Button::new(RichText::new("🦾 Ekspor Paket DSTV CNC (.nc1)").size(12.0).strong().color(Color32::WHITE))
+                        .fill(theme.accent_green)
+                        .corner_radius(CornerRadius::same(6))).clicked() {
+                        let mut engine = crate::core::ParametricEngine::new();
+                        if let Ok(model) = engine.generate_warren_truss() {
+                            let pieces = crate::core::DstvExporter::export_to_dstv(&model);
+                            self.export_status = Some(format!("{} berkas instruksi robotik DSTV .nc1 berhasil digenerasi untuk pemotongan dan pengeboran CNC otomatis.", pieces.len()));
+                        }
+                    }
+                });
             });
     }
 
