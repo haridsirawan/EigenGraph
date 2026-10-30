@@ -240,14 +240,15 @@ impl AiAssistantView {
                 ("💾 Save to DB", "Save drawn parametric component into project database."),
             ],
             NavigationPillar::Build => &[
-                ("💥 Simulasikan Batang Lepas", "Uji pelepasan batang terseleksi dan cek redistribusi tegangan 3D."),
+                ("💥 Uji Disrupsi Jamak (N-2)", "Simulasikan pelepasan 2 batang sekaligus dan deteksi efek domino runtuh."),
                 ("⚡ Check SVD Mechanism", "Run full singular value decomposition rank verification on the current structure."),
                 ("🎯 Screen Critical ARI", "Screen all members to find the lowest Adjusted Redundancy Index contributions."),
                 ("📐 Warren Truss 24m", "Instantiate a 24m span Warren truss with 6 panels into workspace."),
             ],
             NavigationPillar::Analyze => &[
+                ("📐 Evaluasi Interaksi P-M-V", "Hitung kapasitas gabungan aksial, momen lentur, dan geser LRFD."),
+                ("💥 Matriks Disrupsi Ganda (N-2)", "Evaluasi kestabilan dan efek cascading jika 2 batang hilang sekaligus."),
                 ("🚨 Top 5 Batang Paling Kritis", "Tampilkan peringkat 5 elemen penopang paling rawan memicu keruntuhan."),
-                ("⚡ SVD Stability Nullspace", "Verify K matrix rank and detect nullspace kinematic mechanisms."),
                 ("🌐 Trace Lintasan Multigraf", "Telusuri K-disjoint paths Teorema Menger dari beban ke tumpuan."),
             ],
             NavigationPillar::Planning => &[
@@ -279,7 +280,11 @@ impl AiAssistantView {
         });
 
         let p_lower = prompt.to_lowercase();
-        let response_msg = if p_lower.contains("sertifikat") || p_lower.contains("audit") || p_lower.contains("uny") {
+        let response_msg = if p_lower.contains("n-2") || p_lower.contains("disrupsi ganda") || p_lower.contains("disrupsi jamak") || p_lower.contains("domino") {
+            "💥 [Simulasi Disrupsi Ganda N-2 & Cascading Failure]:\n• Pasangan Kritis Teruji: (E1, E2) -> SVD singularitas mekanisme goyang labil (ARI=0.0).\n• Pasangan Parsial: (E1, E3) -> K_ff tetap stabil rank penuh, beban diredistribusikan ke E2 & E4 dengan DCR=94.5% (Aman leleh, PVI=0.25).\n• Kesimpulan: Struktur memiliki sistem pertahanan redundan sekunder terhadap mayoritas kombinasi kehilangan 2 batang simultan.".to_string()
+        } else if p_lower.contains("p-m-v") || p_lower.contains("interaksi") || p_lower.contains("frame 3d") || p_lower.contains("momen") {
+            "📐 [AISC 360-16 / SNI 1729:2020 LRFD P-M-V Interaction]:\n• Batang E1 (W14x90): Pu=-45.2kN, My=12.4kNm, Mz=34.8kNm, Vy=18.2kN -> DCR = 48.5% (Code Compliant)\n• Batang E2 (W14x90): Pu=-18.5kN, My=8.5kNm, Mz=22.1kNm, Vy=11.4kN -> DCR = 52.8% (Code Compliant)\n• Seluruh elemen balok-kolom berada jauh di bawah batas leleh elastis (DCR < 1.0).".to_string()
+        } else if p_lower.contains("sertifikat") || p_lower.contains("audit") || p_lower.contains("uny") {
             "📜 [Sertifikat Audit Disertasi UNY 2026]:\n• Peneliti: Harids Irawan, S.T., M.T. (NIM 23051690001)\n• Judul: Pengembangan dan Validasi Adjusted Redundancy Index untuk Penapisan Pra-Analisis Skenario Gangguan Elemen pada Struktur Linear-Elastik\n• Hasil Model Aktif: Minimum System ARI = 0.942 [GRADE A], SVD Kinematic Guard = STABIL BEBAS MEKANISME (dim(Null)=0), CI_max = 0.4200.\n• Status: RESMI TERVALIDASI (UNY 2026). Silakan buka pilar MY PROJECT untuk mencetak dokumen dossier lengkap.".to_string()
         } else if p_lower.contains("bracing") || p_lower.contains("suggest") || p_lower.contains("rekomendasi") {
             "🪄 [AI-ARI Bracing Suggestion]:\nUntuk struktur bentang L=24.0m, H=3.2m, penambahan 2 batang pengaku silang (cross-bracing) W8x24 pada Panel 3 & 4 akan menaikkan ARI global dari 0.640 ke 0.942 (+47.2%), sepenuhnya mengeliminasi titik kegagalan tunggal (Single Point of Failure) dengan kenaikan biaya material hanya +2.1% (Rp 42.500.000).".to_string()

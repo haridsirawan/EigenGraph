@@ -432,6 +432,22 @@ pub struct MemberRedundancyResult {
     pub is_critical: bool,
 }
 
+/// Laporan Simulasi Disrupsi Jamak (N-k Multi-Member Loss) & Analisis Runtuh Berantai (Cascading Failure)
+#[derive(Debug, Clone)]
+pub struct MultiMemberDisruptionReport {
+    pub eliminated_ids: Vec<usize>,
+    pub is_stable: bool,
+    pub active_dofs: usize,
+    pub rank: usize,
+    pub nullspace_dim: usize,
+    pub condition_number: f64,
+    pub max_redistributed_utilization: f64,
+    pub residual_system_ari: f64,
+    pub cascading_failure_triggered: bool,
+    pub domino_failed_members: Vec<usize>,
+    pub propagation_vulnerability_index: f64,
+}
+
 // -----------------------------------------------------------------------------
 // 5. MESIN ARI RESMI: SVD GUARD, SHAPE LEVERAGE h_e, & TIGA KANAL ARI v2
 // -----------------------------------------------------------------------------
@@ -574,6 +590,73 @@ impl AriEngine {
             critical_members_count,
         })
     }
+
+    /// Evaluasi Skenario Disrupsi Jamak N-k (misal N-2 dual-member loss) & Deteksi Runtuh Berantai (Cascading Failure)
+    pub fn evaluate_multi_disruption(
+        model: &StructuralModel,
+        eliminated_ids: &[usize],
+    ) -> Result<MultiMemberDisruptionReport, String> {
+        let mut damaged_model = model.clone();
+        damaged_model.elements.retain(|e| !eliminated_ids.contains(&e.id));
+
+        match FemSolver::solve(&damaged_model) {
+            Ok(sol) => {
+                let guard = Self::verify_kinematics(&sol.k_free, 1e-7);
+                let max_u = sol.member_dcr_interactions.iter().copied().fold(0.0, f64::max);
+
+                // Deteksi efek domino / cascading failure: apakah ada batang lain yang melampaui kapasitas (DCR >= 1.0)?
+                let mut domino_failed = Vec::new();
+                for (idx, elem) in damaged_model.elements.iter().enumerate() {
+                    if sol.member_dcr_interactions[idx] >= 1.0 {
+                        domino_failed.push(elem.id);
+                    }
+                }
+
+                let cascading_triggered = !domino_failed.is_empty();
+                let pvi = if cascading_triggered {
+                    (domino_failed.len() as f64 / model.elements.len() as f64).min(1.0)
+                } else {
+                    0.0
+                };
+
+                let res_ari = if !guard.is_stable || cascading_triggered {
+                    0.0
+                } else {
+                    (1.0 - (max_u - 0.50).max(0.0)).clamp(0.0, 1.0)
+                };
+
+                Ok(MultiMemberDisruptionReport {
+                    eliminated_ids: eliminated_ids.to_vec(),
+                    is_stable: guard.is_stable,
+                    active_dofs: guard.active_dofs,
+                    rank: guard.rank,
+                    nullspace_dim: guard.nullspace_dimension,
+                    condition_number: guard.condition_number,
+                    max_redistributed_utilization: max_u,
+                    residual_system_ari: res_ari,
+                    cascading_failure_triggered: cascading_triggered,
+                    domino_failed_members: domino_failed,
+                    propagation_vulnerability_index: pvi,
+                })
+            }
+            Err(_) => {
+                // Singular matrix -> total catastrophic mechanism
+                Ok(MultiMemberDisruptionReport {
+                    eliminated_ids: eliminated_ids.to_vec(),
+                    is_stable: false,
+                    active_dofs: 0,
+                    rank: 0,
+                    nullspace_dim: 1,
+                    condition_number: f64::INFINITY,
+                    max_redistributed_utilization: 1.0,
+                    residual_system_ari: 0.0,
+                    cascading_failure_triggered: true,
+                    domino_failed_members: vec![],
+                    propagation_vulnerability_index: 1.0,
+                })
+            }
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -656,5 +739,38 @@ mod tests {
         assert!((ari_1 - 21.0 / 68.0).abs() < 1e-3);
         let ci_1 = 1.0 - ari_1;
         assert!((ci_1 - 47.0 / 68.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_n2_multi_member_disruption_m1() {
+        let mut model = StructuralModel::new("M1 Two-Bar Parallel");
+        model.add_node(crate::core::model::Node3D::new(0, 0.0, 0.0, 0.0).with_fixity(crate::core::model::BoundaryFixity::fixed()));
+        let mut n1_fix = crate::core::model::BoundaryFixity::free();
+        n1_fix.ux = true;
+        n1_fix.uz = true;
+        n1_fix.rx = true;
+        n1_fix.ry = true;
+        n1_fix.rz = true;
+        model.add_node(crate::core::model::Node3D::new(1, 0.0, 1.0, 0.0).with_fixity(n1_fix));
+
+        let mut e1 = crate::core::model::Element3D::new(1, "Bar 1", 0, 1);
+        e1.element_type = crate::core::model::ElementType::Truss3D;
+        model.add_element(e1);
+
+        let mut e2 = crate::core::model::Element3D::new(2, "Bar 2", 0, 1);
+        e2.element_type = crate::core::model::ElementType::Truss3D;
+        model.add_element(e2);
+
+        model.add_load(crate::core::model::NodalLoad::force_y(1, -30_000.0));
+
+        // N-1 Disruption: Kehilangan Batang 1 saja (Batang 2 masih menopang)
+        let rep1 = AriEngine::evaluate_multi_disruption(&model, &[1]).expect("N-1 evaluation ok");
+        assert!(rep1.is_stable);
+
+        // N-2 Disruption: Kehilangan Batang 1 dan Batang 2 sekaligus (Mekanisme Runtuh Total)
+        let rep2 = AriEngine::evaluate_multi_disruption(&model, &[1, 2]).expect("N-2 evaluation ok");
+        assert!(!rep2.is_stable);
+        assert_eq!(rep2.residual_system_ari, 0.0);
+        assert!(rep2.cascading_failure_triggered);
     }
 }

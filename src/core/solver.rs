@@ -10,10 +10,16 @@ pub struct AnalysisResult {
     pub nodal_displacements: Vec<[f64; 6]>,
     /// Member internal axial forces in Newtons (Positive = Tension, Negative = Compression)
     pub member_axial_forces: Vec<f64>,
+    /// Member internal shear forces in Newtons: V_max = max(|Vy|, |Vz|)
+    pub member_shear_forces: Vec<f64>,
+    /// Member internal bending moments in N.m: (max |My|, max |Mz|)
+    pub member_bending_moments: Vec<(f64, f64)>,
     /// Member capacity in Newtons
     pub member_capacities: Vec<f64>,
-    /// Member utilization ratio U = |N| / (phi * Pn)
+    /// Member axial utilization ratio U = |N| / (phi * Pn)
     pub member_utilizations: Vec<f64>,
+    /// AISC 360-16 / SNI 1729:2020 Combined P-M-V Interaction Ratio
+    pub member_dcr_interactions: Vec<f64>,
     /// Global stiffness matrix (assembled)
     pub global_k: Matrix,
     /// Partitioned Free-DOF Stiffness Matrix K_ff
@@ -161,10 +167,13 @@ impl FemSolver {
             nodal_displacements.push(disp);
         }
 
-        // 6. Post-Process Member Internal Axial Forces & Utilizations
+        // 6. Post-Process Member Internal Forces, Moments & AISC P-M-V Interactions
         let mut member_axial_forces = Vec::new();
         let mut member_capacities = Vec::new();
         let mut member_utilizations = Vec::new();
+        let mut member_shear_forces = Vec::new();
+        let mut member_bending_moments = Vec::new();
+        let mut member_dcr_interactions = Vec::new();
 
         for elem in &model.elements {
             let n1_idx = model.nodes.iter().position(|n| n.id == elem.start_node).unwrap();
@@ -184,20 +193,75 @@ impl FemSolver {
             let delta = (u2[0] - u1[0]) * cx + (u2[1] - u1[1]) * cy + (u2[2] - u1[2]) * cz;
             let axial_force = (elem.material.elastic_modulus * elem.section.area / l) * delta;
 
-            // Capacity = phi * A * Fy (phi = 0.90 for steel LRFD)
-            let capacity = 0.90 * elem.section.area * elem.material.yield_strength;
-            let util = (axial_force.abs() / (capacity + 1e-12)).min(2.0);
+            // Axial Capacity = phi * A * Fy (phi = 0.90 for steel LRFD)
+            let axial_capacity = 0.90 * elem.section.area * elem.material.yield_strength;
+            let p_ratio = (axial_force.abs() / (axial_capacity + 1e-12)).min(2.0);
+
+            // Bending Moments & Shear Forces for Frame Elements
+            let (max_my, max_mz, max_v, dcr) = match elem.element_type {
+                ElementType::Truss3D => (0.0, 0.0, 0.0, p_ratio),
+                ElementType::Frame3D => {
+                    let e = elem.material.elastic_modulus;
+                    let fy = elem.material.yield_strength;
+                    let iy = elem.section.iy;
+                    let iz = elem.section.iz;
+
+                    // Rotations at joints
+                    let theta1y = u1[4];
+                    let theta2y = u2[4];
+                    let theta1z = u1[5];
+                    let theta2z = u2[5];
+
+                    // Transverse relative displacements
+                    let delta_vy = u2[1] - u1[1];
+                    let delta_vz = u2[2] - u1[2];
+
+                    // Slope-deflection bending moments (N.m)
+                    let mz1 = (2.0 * e * iz / l) * (2.0 * theta1z + theta2z - (3.0 * delta_vy / l));
+                    let mz2 = (2.0 * e * iz / l) * (theta1z + 2.0 * theta2z - (3.0 * delta_vy / l));
+                    let my1 = (2.0 * e * iy / l) * (2.0 * theta1y + theta2y - (3.0 * delta_vz / l));
+                    let my2 = (2.0 * e * iy / l) * (theta1y + 2.0 * theta2y - (3.0 * delta_vz / l));
+
+                    let max_mz = mz1.abs().max(mz2.abs());
+                    let max_my = my1.abs().max(my2.abs());
+                    let max_v = ((mz1 + mz2).abs() / l).max((my1 + my2).abs() / l);
+
+                    // Plastic Moment Capacity: Mpx, Mpy (phi_b = 0.90)
+                    let c_depth = (elem.section.depth / 2.0).max(0.01);
+                    let c_width = (elem.section.width / 2.0).max(0.01);
+                    let mpz = 0.90 * (1.15 * iz / c_depth) * fy;
+                    let mpy = 0.90 * (1.15 * iy / c_width) * fy;
+
+                    let mz_ratio = max_mz / (mpz + 1e-12);
+                    let my_ratio = max_my / (mpy + 1e-12);
+
+                    // AISC 360-16 / SNI 1729:2020 Combined P-M Interaction
+                    let dcr_comb = if p_ratio >= 0.20 {
+                        p_ratio + (8.0 / 9.0) * (mz_ratio + my_ratio)
+                    } else {
+                        (p_ratio / 2.0) + (mz_ratio + my_ratio)
+                    };
+
+                    (max_my, max_mz, max_v, dcr_comb.min(2.0))
+                }
+            };
 
             member_axial_forces.push(axial_force);
-            member_capacities.push(capacity);
-            member_utilizations.push(util);
+            member_capacities.push(axial_capacity);
+            member_utilizations.push(p_ratio);
+            member_shear_forces.push(max_v);
+            member_bending_moments.push((max_my, max_mz));
+            member_dcr_interactions.push(dcr);
         }
 
         Ok(AnalysisResult {
             nodal_displacements,
             member_axial_forces,
+            member_shear_forces,
+            member_bending_moments,
             member_capacities,
             member_utilizations,
+            member_dcr_interactions,
             global_k: k_global,
             k_free: k_ff,
             max_displacement_mm: max_disp * 1000.0,
