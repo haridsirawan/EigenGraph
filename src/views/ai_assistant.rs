@@ -436,7 +436,48 @@ impl AiAssistantView {
                 "💰 [BIM 5D Cost Intelligence]: Gagal menghitung RAB parametrik.".to_string()
             }
         } else if p_lower.contains("erection") || p_lower.contains("staged") || p_lower.contains("4d") || p_lower.contains("schedule") {
-            "📅 [BIM 4D Schedule Guard]: 140 days total duration across 6 erection stages. SVD rank check confirms zero mechanism during cantilever erection Stage 3.".to_string()
+            let mut engine = crate::core::ParametricEngine::new();
+            if let Ok(model) = engine.generate_warren_truss() {
+                let report = crate::core::ScheduleEngine::generate_standard_schedule(&model, 3_840_000_000.0);
+                format!(
+                    "📅 [BIM 4D Erection Scheduling & Staged SVD Guard - Live Engine]:\n• Total Durasi Proyek: {} Hari Kerja ({} Minggu Kalender)\n• Lintasan Kritis (Critical Path): WBS Aktivitas {:?}\n• Progres Mingguan: S-Curve {} milestone terdistribusi (100% pada Minggu {})\n• Evaluasi Stabilitas Erection Bertahap (SVD Guard):\n  - {}\n  - {}\n  - {}\n  - {}\n• Status Keamanan Erection: {}",
+                    report.total_duration_days,
+                    (report.total_duration_days + 6) / 7,
+                    report.critical_path_activity_ids,
+                    report.scurve.len(),
+                    report.scurve.len(),
+                    report.staged_stability.get(0).map(|s| format!("{}: {} (Rank {}/{})", s.stage_name, if s.is_stable { "STABIL" } else { "MEKANISME" }, s.rank, s.active_dofs)).unwrap_or_default(),
+                    report.staged_stability.get(1).map(|s| format!("{}: {} (Rank {}/{})", s.stage_name, if s.is_stable { "STABIL" } else { "MEKANISME" }, s.rank, s.active_dofs)).unwrap_or_default(),
+                    report.staged_stability.get(2).map(|s| format!("{}: {} (Rank {}/{})", s.stage_name, if s.is_stable { "STABIL" } else { "MEKANISME" }, s.rank, s.active_dofs)).unwrap_or_default(),
+                    report.staged_stability.get(3).map(|s| format!("{}: {} (Rank {}/{})", s.stage_name, if s.is_stable { "STABIL" } else { "MEKANISME" }, s.rank, s.active_dofs)).unwrap_or_default(),
+                    if report.is_erection_sequence_safe { "Lolos Verifikasi Bebas Mekanisme Goyang (Zero SVD Instability)" } else { "Kritis — Diperlukan perancah sementara (shoring towers)" }
+                )
+            } else {
+                "📅 [BIM 4D Schedule Guard]: Gagal menghitung jadwal ereksi parametrik.".to_string()
+            }
+        } else if p_lower.contains("karbon") || p_lower.contains("carbon") || p_lower.contains("co2") || p_lower.contains("gbci") || p_lower.contains("leed") || p_lower.contains("lca") || p_lower.contains("sustain") {
+            let mut engine = crate::core::ParametricEngine::new();
+            if let Ok(model) = engine.generate_warren_truss() {
+                let report = crate::core::CarbonEngine::calculate_lca(&model, crate::core::CarbonSteelRoute::EafRecycled, Some(65.0), Some(0.942));
+                format!(
+                    "🌱 [Embodied Carbon & Sustainability LCA - ISO 14040/EN 15978]:\n• Total Massa Baja: {:.2} Ton ({})\n• Total Jejak Karbon Embodied (A1–A5): {:.2} tCO2e\n• Rincian Siklus Hidup:\n  - A1–A3 (Material & Fabrikasi): {:.2} tCO2e ({:.1}%)\n  - A4 (Transportasi {:.0} km): {:.3} tCO2e ({:.1}%)\n  - A5 (Ereksi & Alat Berat): {:.2} tCO2e ({:.1}%)\n• Penurunan Emisi vs Konvensional (BF-BOF): -{:.1}%\n• Prediksi Sertifikasi: {}\n• Efisiensi Eko-Redundansi (η_eco): {:.4} ARI / tCO2e",
+                    report.steel_tonnage,
+                    report.route.display_name(),
+                    report.total_embodied_carbon_ton,
+                    report.a1_a3_emissions_ton,
+                    report.stages.get(0).map(|s| s.percentage).unwrap_or(0.0),
+                    report.transport_distance_km,
+                    report.a4_transport_emissions_ton,
+                    report.stages.get(1).map(|s| s.percentage).unwrap_or(0.0),
+                    report.a5_erection_emissions_ton,
+                    report.stages.get(2).map(|s| s.percentage).unwrap_or(0.0),
+                    report.carbon_reduction_pct,
+                    report.greenship_leed_tier,
+                    report.eco_redundancy_efficiency
+                )
+            } else {
+                "🌱 [Sustainability LCA]: Gagal mengevaluasi jejak karbon parametrik.".to_string()
+            }
         } else if p_lower.contains("gemini") || p_lower.contains("api") {
             "🔑 [Gemini API Gateway]: Connection to Google Gemini 2.5 Flash API active. Latency: 38ms • Model: gemini-2.5-flash-preview • Autonomous agent tools enabled.".to_string()
         } else if p_lower.contains("sni") || p_lower.contains("aisc") {
