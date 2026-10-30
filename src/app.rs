@@ -227,7 +227,14 @@ impl App for EigenGraphApp {
 
                     ui.add_space(14.0);
 
-                    // App Identity / Branding (Clean title only, subtitle removed per user request)
+                    // =========================================================================
+                    // 🔒 LOCK: CRITICAL USER INTERFACE LAYOUT (DO NOT TAMPER OR MODIFY)
+                    // This clean, minimalist macOS sidebar layout is strictly locked by user rule.
+                    // - Header: ONLY "⚛️ EigenGraph" (no sub-branding strings)
+                    // - NO section headers (no LIBRARY, no WORKSPACES, no BIM headers)
+                    // - NO badge tags (no LIB, no 1D..10D)
+                    // - Direct 11 items in exact sequence: My Library -> Industrialized
+                    // =========================================================================
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("⚛️ EigenGraph").size(16.0).strong().color(Color32::WHITE));
                     });
