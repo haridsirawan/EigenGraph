@@ -14,6 +14,7 @@ pub mod cost;
 pub mod cascade;
 pub mod schedule;
 pub mod carbon;
+pub mod nonlinear;
 
 pub use linalg::Matrix;
 pub use model::{
@@ -23,7 +24,7 @@ pub use model::{
 pub use solver::{AnalysisResult, FemSolver};
 pub use ari::{AriEngine, KinematicGuardReport, MemberRedundancyResult, RedundancyAssessment};
 pub use parametric::{ParametricEngine, ParametricFormula};
-pub use interop::{DossierExporter, DxfExporter, IfcExporter, Sap2000Exporter};
+pub use interop::{DossierExporter, DstvExporter, DstvPiece, DxfExporter, IfcExporter, IfcImporter, Sap2000Exporter, Sha256Hasher};
 pub use optimizer::{AriTopologyOptimizer, BracingCandidate, BracingOptimizationReport};
 pub use cost::{AhspUnitRates, BoqLineItem, CostEngine, CostEstimationReport, ProfileQuantity};
 pub use cascade::{CascadingCollapseReport, CascadingSimulator, CollapseStatus, CollapseStep};
@@ -31,3 +32,6 @@ pub use schedule::{
     ConstructionActivity, SCurvePoint, Schedule4DReport, ScheduleEngine, StageStabilityResult,
 };
 pub use carbon::{CarbonEngine, CarbonLcaReport, CarbonLcaStage, CarbonSteelRoute};
+pub use nonlinear::{
+    NonlinearEngine, PlasticHinge, PlasticHingeState, PushoverReport, PushoverStep,
+};
