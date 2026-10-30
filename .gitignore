@@ -1,3 +1,22 @@
+# Rust build artifacts
 /target/
 **/*.rs.bk
+
+# macOS system & Finder files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Disk images & temporary staging
 *.dmg
+dmg_staging/
+/tmp/
+
+# IDE & Editor caches
+.idea/
+.vscode/
+*.swp
+*~
+.gemini/
