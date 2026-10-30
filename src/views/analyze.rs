@@ -12,6 +12,7 @@ pub enum AnalyzeSubTab {
     Frame3dInteraction,
     CascadingCollapse,
     NonlinearPushover,
+    ModalDynamics,
 }
 
 pub struct AnalyzeView {
@@ -21,6 +22,11 @@ pub struct AnalyzeView {
     pub initial_disrupt_input: String,
     pub daf_val: f32,
     pub last_cascade_report: Option<crate::core::CascadingCollapseReport>,
+    pub site_class: crate::core::SiteClass,
+    pub ss_val: f32,
+    pub s1_val: f32,
+    pub r_val: f32,
+    pub modal_report: Option<crate::core::ModalAnalysisReport>,
 }
 
 impl Default for AnalyzeView {
@@ -32,6 +38,11 @@ impl Default for AnalyzeView {
             initial_disrupt_input: "1, 2".to_string(),
             daf_val: 1.20,
             last_cascade_report: None,
+            site_class: crate::core::SiteClass::SD,
+            ss_val: 1.20,
+            s1_val: 0.50,
+            r_val: 8.0,
+            modal_report: None,
         }
     }
 }
@@ -81,6 +92,7 @@ impl AnalyzeView {
                 AnalyzeSubTab::Frame3dInteraction => self.render_frame_3d_interaction(ui, theme, members),
                 AnalyzeSubTab::CascadingCollapse => self.render_cascading_collapse(ui, theme),
                 AnalyzeSubTab::NonlinearPushover => self.render_nonlinear_pushover(ui, theme),
+                AnalyzeSubTab::ModalDynamics => self.render_modal_dynamics(ui, theme),
             }
 
             ui.add_space(24.0);
@@ -94,8 +106,9 @@ impl AnalyzeView {
                 (AnalyzeSubTab::MemberCriticality, "🎯 Matriks Sensitivitas ARI"),
                 (AnalyzeSubTab::DisplacementForces, "📊 Gaya Dalam & Lendutan"),
                 (AnalyzeSubTab::Frame3dInteraction, "📐 Frame 3D P-M-V"),
-                (AnalyzeSubTab::CascadingCollapse, "💥 Kolaps Kaskade (DoD/ASCE)"),
-                (AnalyzeSubTab::NonlinearPushover, "📉 Pushover Non-Linear P-Δ"),
+                (AnalyzeSubTab::CascadingCollapse, "💥 Kolaps Kaskade"),
+                (AnalyzeSubTab::NonlinearPushover, "📉 Pushover P-Δ"),
+                (AnalyzeSubTab::ModalDynamics, "🌊 Ragam SNI 1726"),
             ];
 
             for (tab, label) in tabs {
@@ -567,6 +580,16 @@ impl AnalyzeView {
         });
     }
 
+    fn render_stat_card(&self, ui: &mut Ui, theme: &MacTheme, title: &str, val: &str, subtitle: &str, val_color: Color32) {
+        theme.card_frame().show(ui, |ui| {
+            ui.label(RichText::new(title).size(11.0).strong().color(theme.text_secondary));
+            ui.add_space(4.0);
+            ui.label(RichText::new(val).size(18.0).strong().color(val_color));
+            ui.add_space(2.0);
+            ui.label(RichText::new(subtitle).size(10.5).color(theme.text_muted));
+        });
+    }
+
     fn render_cascading_collapse(&mut self, ui: &mut Ui, theme: &MacTheme) {
         // Controls card
         theme.card_frame().show(ui, |ui| {
@@ -765,4 +788,126 @@ impl AnalyzeView {
             });
     }
 
+    fn render_modal_dynamics(&mut self, ui: &mut Ui, theme: &MacTheme) {
+        Frame::new()
+            .fill(theme.bg_card)
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::same(16))
+            .stroke(Stroke::new(1.0, theme.border_subtle))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("🌊 Analisis Ragam Dinamik & Spektrum Gempa SNI 1726:2019 / ASCE 7-16").size(14.0).strong().color(theme.text_primary));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(RichText::new("Solusi Persamaan Eigen K*phi = omega^2*M*phi").size(11.0).color(theme.accent_blue));
+                    });
+                });
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Parameter Input Row (Site Class, Ss, S1, R, Ie)
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Situs Tanah:").size(11.5).strong().color(theme.text_secondary));
+                    let classes = [
+                        (crate::core::SiteClass::SB, "SB (Batuan)"),
+                        (crate::core::SiteClass::SC, "SC (Padat)"),
+                        (crate::core::SiteClass::SD, "SD (Sedang/Standar)"),
+                        (crate::core::SiteClass::SE, "SE (Lunak)"),
+                    ];
+                    for (sc, sc_lbl) in classes {
+                        let is_sel = self.site_class == sc;
+                        if ui.selectable_label(is_sel, sc_lbl).clicked() {
+                            self.site_class = sc;
+                        }
+                    }
+
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("Ss:").size(11.5).color(theme.text_secondary));
+                    ui.add(egui::DragValue::new(&mut self.ss_val).speed(0.01).range(0.1..=2.5).suffix(" g"));
+
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("S1:").size(11.5).color(theme.text_secondary));
+                    ui.add(egui::DragValue::new(&mut self.s1_val).speed(0.01).range(0.05..=1.5).suffix(" g"));
+
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("R:").size(11.5).color(theme.text_secondary));
+                    ui.add(egui::DragValue::new(&mut self.r_val).speed(0.5).range(1.0..=10.0));
+
+                    ui.add_space(12.0);
+                    if ui.add(egui::Button::new(RichText::new("⚡ Hitung Ragam & Gempa").size(11.5).strong().color(Color32::WHITE))
+                        .fill(theme.accent_blue)
+                        .corner_radius(CornerRadius::same(6))).clicked() {
+                        let mut engine = crate::core::ParametricEngine::new();
+                        if let Ok(model) = engine.generate_warren_truss() {
+                            let spec = crate::core::modal::Sni1726Spectrum::new(self.site_class, self.ss_val as f64, self.s1_val as f64, self.r_val as f64, 1.0);
+                            self.modal_report = crate::core::modal::ModalEngine::analyze(&model, 4, spec).ok();
+                        }
+                    }
+                });
+
+                ui.add_space(12.0);
+
+                // Auto-run if not yet computed
+                if self.modal_report.is_none() {
+                    let mut engine = crate::core::ParametricEngine::new();
+                    if let Ok(model) = engine.generate_warren_truss() {
+                        let spec = crate::core::modal::Sni1726Spectrum::new(self.site_class, self.ss_val as f64, self.s1_val as f64, self.r_val as f64, 1.0);
+                        self.modal_report = crate::core::modal::ModalEngine::analyze(&model, 4, spec).ok();
+                    }
+                }
+
+                if let Some(ref report) = self.modal_report {
+                    // Summary Stat Cards Row
+                    ui.horizontal(|ui| {
+                        self.render_stat_card(ui, theme, "PERIODA FUNDAMENTAL (T1)", &format!("{:.4} s", report.fundamental_period_s), &format!("Frekuensi: {:.2} Hz", report.fundamental_frequency_hz), theme.accent_blue);
+                        ui.add_space(8.0);
+                        self.render_stat_card(ui, theme, "GAYA GESER SEISMIK (V_b)", &format!("{:.1} kN", report.seismic_base_shear_kn), &format!("Cs = {:.4} • W = {:.1} kN", report.spectrum.cs, report.total_weight_kn), theme.accent_green);
+                        ui.add_space(8.0);
+                        self.render_stat_card(ui, theme, "PERCEPATAN DESAIN (SDS)", &format!("{:.3} g", report.spectrum.sds), &format!("SD1: {:.3} g • Ts: {:.2} s", report.spectrum.sd1, report.spectrum.ts), theme.text_primary);
+                        ui.add_space(8.0);
+                        let badge_col = if report.is_90_percent_satisfied { theme.accent_green } else { theme.accent_orange };
+                        self.render_stat_card(ui, theme, "PARTISIPASI MASSA RAGAM", &format!("{:.1}%", report.cumulative_mass_ratio_x.max(report.cumulative_mass_ratio_y)), "Standar SNI: Min. 90%", badge_col);
+                    });
+
+                    ui.add_space(16.0);
+
+                    // Mode Shapes Table
+                    ui.label(RichText::new("📋 Tabel Karakteristik Ragam Getar Alami (Natural Vibration Modes):").size(12.5).strong().color(theme.text_primary));
+                    ui.add_space(6.0);
+
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Ragam").size(11.0).strong().color(theme.text_secondary));
+                        ui.add_space(30.0);
+                        ui.label(RichText::new("Frekuensi Sudut (ω)").size(11.0).strong().color(theme.text_secondary));
+                        ui.add_space(40.0);
+                        ui.label(RichText::new("Frekuensi (f)").size(11.0).strong().color(theme.text_secondary));
+                        ui.add_space(40.0);
+                        ui.label(RichText::new("Perioda (T)").size(11.0).strong().color(theme.text_secondary));
+                        ui.add_space(40.0);
+                        ui.label(RichText::new("Partisipasi X (%)").size(11.0).strong().color(theme.text_secondary));
+                        ui.add_space(40.0);
+                        ui.label(RichText::new("Partisipasi Y (%)").size(11.0).strong().color(theme.text_secondary));
+                    });
+                    ui.separator();
+
+                    for mode in &report.modes {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("Mode {}", mode.mode_number)).size(11.5).strong().color(theme.accent_blue));
+                            ui.add_space(45.0);
+                            ui.label(RichText::new(format!("{:.2} rad/s", mode.omega_rad_s)).size(11.5).color(theme.text_primary));
+                            ui.add_space(60.0);
+                            ui.label(RichText::new(format!("{:.3} Hz", mode.frequency_hz)).size(11.5).strong().color(theme.text_primary));
+                            ui.add_space(65.0);
+                            ui.label(RichText::new(format!("{:.4} s", mode.period_s)).size(11.5).strong().color(theme.accent_green));
+                            ui.add_space(65.0);
+                            ui.label(RichText::new(format!("{:.2}%", mode.mass_participation_ratio_x)).size(11.5).color(theme.text_secondary));
+                            ui.add_space(65.0);
+                            ui.label(RichText::new(format!("{:.2}%", mode.mass_participation_ratio_y)).size(11.5).color(theme.text_secondary));
+                        });
+                        ui.separator();
+                    }
+                }
+            });
+    }
 }
