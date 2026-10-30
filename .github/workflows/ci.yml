@@ -6,6 +6,10 @@ on:
     tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -49,13 +53,17 @@ jobs:
         run: cargo test --verbose
 
   release-macos:
-    name: Build macOS DMG Bundle
+    name: Build & Publish macOS Release (.dmg)
     needs: test
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -63,12 +71,14 @@ jobs:
       - name: Build Optimized Release Binary
         run: cargo build --release
 
-      - name: Package macOS App Bundle
+      - name: Package macOS App Bundle & DMG
         run: |
+          VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d '"' -f 2)
+          echo "Building EigenGraph macOS bundle version ${VERSION}..."
           mkdir -p target/release/bundle/osx/EigenGraph.app/Contents/MacOS
           mkdir -p target/release/bundle/osx/EigenGraph.app/Contents/Resources
           cp target/release/eigengraph target/release/bundle/osx/EigenGraph.app/Contents/MacOS/
-          cat << 'EOF' > target/release/bundle/osx/EigenGraph.app/Contents/Info.plist
+          cat << PLIST > target/release/bundle/osx/EigenGraph.app/Contents/Info.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -82,14 +92,14 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>1.0.0</string>
+              <string>${VERSION}</string>
               <key>LSMinimumSystemVersion</key>
               <string>12.0</string>
               <key>NSHighResolutionCapable</key>
               <true/>
           </dict>
           </plist>
-          EOF
+          PLIST
           hdiutil create -volname "EigenGraph" -srcfolder target/release/bundle/osx -ov -format UDZO target/release/EigenGraph-macOS.dmg
 
       - name: Upload macOS DMG Artifact
@@ -97,3 +107,37 @@ jobs:
         with:
           name: EigenGraph-macOS-DMG
           path: target/release/EigenGraph-macOS.dmg
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d '"' -f 2)
+          TAG_NAME="v${VERSION}"
+          echo "Target Release Tag: ${TAG_NAME}"
+
+          cat << 'RELNOTES' > /tmp/release_notes.md
+          ### 🚀 EigenGraph Official Release
+
+          #### 🌟 Highlight Fitur Baru:
+          - **💥 Dynamic Cascading Collapse Engine**: Simulasi keruntuhan berantai nonlinier Alternate Path Method sesuai standar DoD UFC 4-023-03 dan ASCE 7-22 dengan Dynamic Amplification Factor (DAF).
+          - **⏱️ BIM 4D CPM Erection Scheduling**: Perhitungan otomatis lintasan kritis WBS, float, kurva S mingguan, dan pengamanan stabilitas bertahap Staged Erection SVD Guard.
+          - **🌱 BIM 6D Embodied Carbon LCA**: Akuntansi jejak karbon cradle-to-site (A1–A5) terintegrasi ISO 14040 / EN 15978 dengan evaluasi rute fabrikasi (EAF, BF-BOF, H2-DRI) dan predikat LEED/GBCI Greenship Platinum.
+          - **🛡️ SVD Kinematic Guard & Sherman-Morrison O(N²)**: Evaluasi perturbasi cepat rank-1 instan tanpa inversi matriks berulang.
+          - **🌐 OpenBIM IFC 4.3 & CAD Triad**: Ekspor penuh ke CSI SAP2000 (.s2k), AutoCAD 3D DXF, dan IFC 4.3 dengan custom Property Set `Pset_StructuralRedundancy`.
+          - **🏝️ Dynamic Island Floating AI Copilot**: Asisten cerdas floating (Cmd+K) yang tertaut langsung ke seluruh engine komputasi struktural.
+
+          #### 📦 Download macOS Installer:
+          Unduh dan buka file **EigenGraph-macOS.dmg** di bawah ini untuk menginstal di macOS (Apple Silicon M1/M2/M3/M4 & Intel x86_64).
+          RELNOTES
+
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            echo "Release ${TAG_NAME} already exists. Updating DMG asset and notes..."
+            gh release upload "${TAG_NAME}" target/release/EigenGraph-macOS.dmg --clobber
+            gh release edit "${TAG_NAME}" --notes-file /tmp/release_notes.md
+          else
+            echo "Creating new GitHub Release ${TAG_NAME}..."
+            gh release create "${TAG_NAME}" target/release/EigenGraph-macOS.dmg \
+              --title "EigenGraph ${TAG_NAME} — Progressive Collapse, BIM 4D CPM & 6D LCA" \
+              --notes-file /tmp/release_notes.md
+          fi

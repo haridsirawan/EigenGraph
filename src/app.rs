@@ -320,7 +320,7 @@ impl App for EigenGraphApp {
 
                         // Version & Tech stack with Update checker button
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("v1.0.0 • Metal GPU 60 FPS").size(10.0).color(self.theme.text_muted));
+                            ui.label(RichText::new("v1.1.0 • Metal GPU 60 FPS").size(10.0).color(self.theme.text_muted));
                             ui.add_space(4.0);
                             if ui.add(egui::Button::new(RichText::new("🚀 Update").size(9.5).color(self.theme.accent_blue))
                                 .fill(self.theme.bg_card)
