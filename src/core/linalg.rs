@@ -86,6 +86,32 @@ impl Matrix {
         self.data.iter().map(|&x| x * x).sum::<f64>().sqrt()
     }
 
+    /// Element access helper: mat.get(r, c)
+    #[inline]
+    pub fn get(&self, r: usize, c: usize) -> f64 {
+        self[(r, c)]
+    }
+
+    /// Computes matrix inverse A^(-1) using column-by-column Gaussian elimination.
+    /// Returns None if matrix is singular or non-square.
+    pub fn inverse(&self) -> Option<Matrix> {
+        if self.rows != self.cols {
+            return None;
+        }
+        let n = self.rows;
+        let mut inv = Matrix::zeros(n, n);
+        let mut e = vec![0.0; n];
+        for j in 0..n {
+            e[j] = 1.0;
+            let col_sol = self.solve_gaussian(&e)?;
+            for i in 0..n {
+                inv[(i, j)] = col_sol[i];
+            }
+            e[j] = 0.0;
+        }
+        Some(inv)
+    }
+
     /// Solves linear system A * x = b using Gaussian elimination with partial pivoting.
     /// Returns None if matrix is singular.
     pub fn solve_gaussian(&self, b: &[f64]) -> Option<Vec<f64>> {

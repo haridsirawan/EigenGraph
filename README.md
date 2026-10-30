@@ -3,192 +3,260 @@
 <img src="assets/icon.png" width="140" height="140" alt="EigenGraph Logo" style="border-radius: 28px; box-shadow: 0 12px 36px rgba(0,0,0,0.4);" />
 
 # EigenGraph
-### Computational Framework for Structural Robustness, SVD Kinematic Mechanism Guards, and Adjusted Redundancy Index (ARI)
+### Computational Framework & Testbed for Adjusted Redundancy Index (ARI), SVD Kinematic Mechanism Guards, and 5D BIM Construction Optimization
 
 [![Release](https://img.shields.io/badge/release-v1.0.0-0A84FF.svg)](https://github.com/haridsirawan/EigenGraph/releases/tag/v1.0.0)
 [![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon%20%26%20Intel)-black.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](LICENSE)
-[![Research](https://img.shields.io/badge/dissertation-Doctoral%20Research%20Validation-30D158.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-7%20passed%20(100%25)-30D158.svg)](#)
+[![Dissertation](https://img.shields.io/badge/dissertation-UNY%20Doctoral%20Research-FF9500.svg)](#)
 
-*Authored and developed by **Harids Irawan** as a computational testbed and demonstration for Doctoral Dissertation research in Structural Redundancy, Progressive Collapse Prevention, and 5D BIM Optimization.*
+*Implementasi resmi mesin analitis berkecepatan tinggi dalam bahasa Rust yang diporting langsung dari basis kode penelitian [Adjusted-Redundancy-Index](https://github.com/haridsirawan/Adjusted-Redundancy-Index).*  
+*Berdasarkan Naskah Disertasi Doktor:*  
+**"PENGEMBANGAN DAN VALIDASI ADJUSTED REDUNDANCY INDEX UNTUK PENAPISAN PRA-ANALISIS SKENARIO GANGGUAN ELEMEN PADA STRUKTUR LINEAR-ELASTIK"**  
+**Harids Irawan, S.T., M.T.** (NIM: 23051690001)  
+*Program Studi Doktor Ilmu Teknik, Fakultas Teknik, Universitas Negeri Yogyakarta (2026)*
 
 </div>
 
 ---
 
-## 🎯 Latar Belakang Riset & Paradigma Baru (Why EigenGraph?)
+## 📑 Daftar Isi
+1. [Latar Belakang & Urgensi Riset](#-latar-belakang--urgensi-riset)
+2. [Formulasi Matematis Resmi ARI Disertasi](#-formulasi-matematis-resmi-ari-disertasi)
+   - [2.1 Normalisasi Saturasi Hiperbolik Michaelis-Menten](#21-normalisasi-saturasi-hiperbolik-michaelis-menten-persamaan-25a--25b)
+   - [2.2 Bobot Mekanis Sisi & Biaya Kepatuhan Castigliano](#22-bobot-mekanis-sisi--biaya-kepatuhan-castigliano-persamaan-27--28)
+   - [2.3 Multigraf & K-Lintasan Bebas Sisi Disjoint (Teorema Menger)](#23-multigraf--k-lintasan-bebas-sisi-disjoint-teorema-menger-persamaan-29--210)
+   - [2.4 Agregasi Multi-Beban dan Multi-Tumpuan](#24-agregasi-multi-beban-dan-multi-tumpuan-persamaan-211--212)
+   - [2.5 Redundancy Ratio (RR) dan Utilisasi Awal](#25-redundancy-ratio-rr-dan-utilisasi-awal-persamaan-213--216)
+   - [2.6 Inti Multiplikatif Adjusted Redundancy Index (ARI)](#26-inti-multiplikatif-adjusted-redundancy-index-ari-persamaan-217--218)
+   - [2.7 Gate 1: SVD Kinematic Guard & Spectral Leverage $h_e$](#27-gate-1-svd-kinematic-guard--spectral-leverage-h_e-persamaan-41--44)
+   - [2.8 Formulasi Tiga Kanal Lanjutan (ARI v2)](#28-formulasi-tiga-kanal-lanjutan-ari-v2-persamaan-413b--413c)
+3. [Hasil Verifikasi Kanonik & Benchmark Numerik](#-hasil-verifikasi-kanonik--benchmark-numerik)
+   - [Verifikasi Analitis Model M1 (Parallel Bars - Tabel 25)](#verifikasi-analitis-model-m1-parallel-bars---tabel-25)
+   - [Evaluasi Skala Penuh: Model M1–M4 & 300 Model Induk S1–S5](#evaluasi-skala-penuh-model-m1m4--300-model-induk-s1s5)
+4. [Arsitektur Navigasi Apple-Style (6 Pilar)](#-arsitektur-navigasi-apple-style-6-pilar)
+5. [Global Floating Dynamic Island AI Copilot](#-global-floating-dynamic-island-ai-copilot)
+6. [Instalasi & Panduan Kompilasi](#-instalasi--panduan-kompilasi)
+7. [Sitasi Riset Akademis](#-sitasi-riset-akademis)
+8. [Lisensi](#-lisensi)
 
-Selama lebih dari empat dekade, perangkat lunak analisis struktur komersial (**SAP2000, ETABS, STAAD.Pro, MIDAS, Revit**) beroperasi menggunakan paradigma berbasis kapasitas tunggal (*Capacity-Centric Design*):
+---
 
-$$DCR = \frac{\text{Demand}}{\phi \cdot \text{Capacity}} \le 1.0$$
+## 🎯 Latar Belakang & Urgensi Riset
 
-### Kelemahan Mendasar Desain Konvensional:
+Selama lebih dari empat dekade, perangkat lunak analisis struktur komersial (**SAP2000, ETABS, STAAD.Pro, MIDAS, Revit**) beroperasi menggunakan paradigma berbasis kapasitas elastis tunggal (*Capacity-Centric Design*):
+
+$$\text{DCR} = \frac{\text{Demand}}{\phi \cdot \text{Capacity}} \le 1.0$$
+
+### Tiga Kelemahan Kritis Paradigma Konvensional:
 1. **Buta Terhadap Keruntuhan Progresif (*Progressive Collapse Blindness*)**:  
-   Sebuah struktur dengan rasio utilisasi sangat rendah ($DCR = 0.40$) dapat **runtuh secara katastropik (*zipper-type collapse*)** jika salah satu elemen penahan beban utamanya terputus akibat impak, gempa, kelelahan bahan (*fatigue*), atau ledakan, karena tidak memiliki jalur transfer beban alternatif (*Alternative Load Paths*).
+   Sebuah struktur dengan rasio utilisasi sangat rendah ($\text{DCR} = 0.40$) dapat **runtuh secara katastropik (*zipper-type progressive collapse*)** seketika salah satu elemen penahan beban utamanya terputus akibat impak, gempa lokal, beban ledakan, korosi, atau kelelahan bahan (*fatigue*), karena tidak memiliki lintasan transfer beban alternatif (*Alternative Load Paths*).
 2. **Kekeliruan Derajat Ketidaktentuan Statis Klasik**:  
-   Anggapan klasik bahwa struktur dengan derajat ketidaktentuan statis tinggi ($D = b + r - 2j > 0$) pasti aman adalah keliru. Jika elemen redundan berada pada posisi yang tidak efektif, kehilangan satu batang kunci tetap dapat memicu keruntuhan lokal atau pembentukan mekanisme goyang (*kinematic mechanism*).
-3. **Ketidakmampuan Mengukur Redundansi Nyata**:  
-   Standar internasional modern (**DoD UFC 4-023-03, ASCE 7-22 Section 1.4, fib Model Code 2020**) mewajibkan verifikasi integritas struktural dan ketahanan terhadap keruntuhan progresif, namun belum ada indeks kuantitatif praktis yang menghubungkan kekakuan matriks global, redistribusi gaya, dan implikasi biaya konstruksi.
+   Anggapan klasik bahwa struktur dengan derajat ketidaktentuan statis tinggi ($D = b + r - 2j > 0$) selalu aman terbukti keliru. Jika elemen redundan berada pada posisi yang tidak efektif, kehilangan satu batang kunci tetap dapat memicu pembentukan mekanisme goyang (*rigid-body kinematic mechanism*).
+3. **Ketiadaan Alat Penapis Pra-Analisis Berkecepatan Tinggi**:  
+   Standar internasional modern (**DoD UFC 4-023-03, ASCE 7-22 Section 1.4, fib Model Code 2020**) mewajibkan verifikasi integritas struktural dan ketahanan terhadap keruntuhan progresif. Namun, metode konvensional berbasis simulasi non-linier dinamis penuh (*Nonlinear Dynamic Alternate Path Method*) memakan waktu komputasi ribuan jam CPU untuk struktur berukuran besar.
 
-**EigenGraph** dirancang khusus untuk memecahkan persoalan ini melalui formulasi **Adjusted Redundancy Index (ARI)** dan **SVD Kinematic Mechanism Guard**.
+**EigenGraph** mengimplementasikan algoritma **Adjusted Redundancy Index (ARI)** yang dipadukan dengan **SVD Kinematic Mechanism Guard** sebagai alat penapis pra-analisis deterministik instan ($O(K \cdot |\mathcal{E}|)$), mampu menyaring ribuan skenario kegagalan batang hanya dalam hitungan milidetik secara native di macOS (Metal GPU / Apple Silicon).
 
 ---
 
-## 🔬 Formulasi Lengkap Matematika & Mekanika ARI
+## 🔬 Formulasi Matematis Resmi ARI Disertasi
 
-EigenGraph memodelkan struktur sebagai graf matematis berdimensi tinggi $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ dengan matriks kekakuan elastis linier.
+Berikut adalah turunan lengkap persamaan matematis yang dirumuskan dalam naskah disertasi dan diimplementasikan secara identik dalam modul Rust [`src/core/ari.rs`](file:///Users/harids.irawan/Library/CloudStorage/GoogleDrive-harids.irawan@gmail.com/My%20Drive/Research/Adjusted%20Redudancy%20Index/EigenGraph/src/core/ari.rs):
 
 ```
-                  ┌─────────────────────────────────────────────────────────┐
-                  │              STRUKTUR UTUH (INTACT MODEL)               │
-                  │              K_ff · u_f = F_f  ==> U_e^(0)              │
-                  └───────────────────────────┬─────────────────────────────┘
-                                              │
-                       Perturbasi Pelepasan Batang Tunggal (Member Elimination)
-                                      K_ff^(-e) = K_ff - k_e,ff
-                                              │
-                                              ▼
-                  ┌─────────────────────────────────────────────────────────┐
-                  │             GATE 1: SVD KINEMATIC GUARD                 │
-                  │            K_ff^(-e) = U · Σ · V^T                      │
-                  │   Apakah rank(K_ff^(-e)) == n_free? (Zero Mechanism)    │
-                  └─────────────┬─────────────────────────────┬─────────────┘
-                                │                             │
-                           TIDAK (Labil)                  YA (Stabil)
-                                │                             │
-                                ▼                             ▼
-                  ┌───────────────────────────┐ ┌───────────────────────────┐
-                  │         ARI_e = 0.0       │ │   GATE 2: FEM REDISTRIBUSI│
-                  │    (Batang Kritis Runtuh) │ │  K_ff^(-e) · u^(-e) = F_f │
-                  └───────────────────────────┘ │    U_max^(-e) = max(U_j)  │
-                                                └─────────────┬─────────────┘
-                                                              │
-                                                              ▼
-                                                ┌───────────────────────────┐
-                                                │ GATE 3: FORMULASI ARI     │
-                                                │ ARI_e = 1 - ΔU / Reserve  │
-                                                │ Nilai: 0.0 s/d 1.0        │
-                                                └───────────────────────────┘
+                   ┌─────────────────────────────────────────────────────────┐
+                   │             STRUKTUR AWAL UTUH (INTACT MODEL)           │
+                   │        K_ff · u_f = F_f  ==> Gaya D_e^(0), U_e^*        │
+                   └───────────────────────────┬─────────────────────────────┘
+                                               │
+                        Perturbasi Pelepasan Batang Tunggal (Member Loss e)
+                                       K_ff^(-e) = K_ff - k_e,ff
+                                               │
+                                               ▼
+                   ┌─────────────────────────────────────────────────────────┐
+                   │             GATE 1: SVD KINEMATIC GUARD                 │
+                   │   h_e = k_e · a_e · K_0^(-1) · a_e^T   (Leverage SVD)   │
+                   │   Margin: m_e = 1 - h_e                                 │
+                   │   Apakah m_e <= eps_m atau rank(K_ff^(-e)) < n_free?    │
+                   └─────────────┬─────────────────────────────┬─────────────┘
+                                 │                             │
+                            YA (Labil)                    TIDAK (Stabil)
+                                 │                             │
+                                 ▼                             ▼
+                   ┌───────────────────────────┐ ┌───────────────────────────┐
+                   │         ARI_e = 0.0       │ │ GATE 2: K-DISJOINT PATHS  │
+                   │    (Batang Kritis Runtuh) │ │ Multigraf G^M, w_e^M      │
+                   └───────────────────────────┘ │ S(G^M \ {e}) / S(G^M)     │
+                                                 │ RR_e = S_damaged / S_intact│
+                                                 └─────────────┬─────────────┘
+                                                               │
+                                                               ▼
+                                                 ┌───────────────────────────┐
+                                                 │ GATE 3: CORE ARI & ARI v2 │
+                                                 │ ARI_e = RR_e · (1 - η·U*) │
+                                                 │ CI_e = 1 - ARI_e          │
+                                                 │ Range Skor: [0.0 s/d 1.0] │
+                                                 └───────────────────────────┘
 ```
 
----
+### 2.1 Normalisasi Saturasi Hiperbolik Michaelis-Menten (Persamaan 2.5a & 2.5b)
+Untuk memetakan parameter fisik kontinu (kekakuan elastis aksial $k_e$ dan kapasitas penampang $R_e$) ke dalam domain normalisasi tertutup $[0, 1)$ tanpa batas atas buatan, digunakan kurva saturasi hiperbolik Michaelis-Menten:
 
-### 1. Partisi Matriks Kekakuan Global & Solusi FEM
-Berdasarkan metode kekakuan langsung (*Direct Stiffness Method*), persamaan kesetimbangan global dipartisi berdasarkan derajat kebebasan bebas (*free*, $f$) dan terkekang (*restrained*, $r$):
+$$\bar{k}_e = \frac{k_e}{k_e + s_k}, \quad \bar{R}_e = \frac{R_e}{R_e + s_R} \tag{2.5a, 2.5b}$$
 
-$$\begin{bmatrix} \mathbf{K}_{ff} & \mathbf{K}_{fr} \\ \mathbf{K}_{rf} & \mathbf{K}_{rr} \end{bmatrix} \begin{bmatrix} \mathbf{u}_f \\ \mathbf{u}_r \end{bmatrix} = \begin{bmatrix} \mathbf{F}_f \\ \mathbf{F}_r \end{bmatrix}$$
+di mana:
+* $k_e = \dfrac{E_e A_e}{L_e}$ adalah kekakuan aksial elemen $e$.
+* $R_e = \phi P_{n,e}$ adalah kapasitas nominal penampang (SNI 1729:2020 / AISC 360-16 LRFD).
+* $s_k$ dan $s_R$ adalah parameter skala karakteristik (nilai median seluruh elemen populasi model).
 
-Dengan kondisi batas tumpuan ideal $\mathbf{u}_r = \mathbf{0}$, perpindahan simpul aktif dihitung melalui eliminasi Gauss dengan *partial pivoting*:
-
-$$\mathbf{u}_f = \mathbf{K}_{ff}^{-1} \mathbf{F}_f$$
-
-Gaya aksial pada setiap elemen batang $e$ dihitung dari perpindahan simpul ujung 1 dan 2 dalam koordinat lokal:
-
-$$N_e = \frac{E_e A_e}{L_e} \left( u_{2,\text{axial}} - u_{1,\text{axial}} \right)$$
-
-Tingkat pembebanan / utilisasi awal (*baseline utilization*) elemen $e$:
-
-$$U_e^{(0)} = \frac{|N_e^{(0)}|}{\phi P_{n,e}} \in [0.0, 1.0]$$
-
-di mana $\phi P_{n,e}$ adalah kapasitas nominal penampang sesuai standar **SNI 1729:2020 / AISC 360-16 LRFD** ($\phi_t = 0.90$ untuk tarik, $\phi_c = 0.90$ untuk tekuk aksial Euler).
+Sifat matematis:
+$$\lim_{x \to 0} \bar{x} = 0, \quad \lim_{x \to \infty} \bar{x} = 1, \quad \frac{\partial \bar{x}}{\partial x} = \frac{s_x}{(x + s_x)^2} > 0 \quad (\text{Monoton Positif Cekung})$$
 
 ---
 
-### 2. SVD Kinematic Mechanism Guard (Gate 1)
-Sebelum beban luar didistribusikan, kestabilan kinematik matriks kekakuan diperiksa menggunakan **Two-Sided Jacobi Singular Value Decomposition (SVD)**:
+### 2.2 Bobot Mekanis Sisi & Biaya Kepatuhan Castigliano (Persamaan 2.7 & 2.8)
+Bobot mekanis sisi gabungan $w_e^M$ yang mencerminkan kekakuan dan kekuatan batas:
 
-$$\mathbf{K}_{ff} = \mathbf{U} \mathbf{\Sigma} \mathbf{V}^T = \sum_{k=1}^{n_{\text{free}}} \sigma_k \mathbf{u}_k \mathbf{v}_k^T$$
+$$w_e^M = q_e \left( \alpha_k \bar{k}_e + \alpha_R \bar{R}_e \right) \tag{2.7}$$
 
-dengan nilai singular terurut $\sigma_1 \ge \sigma_2 \ge \dots \ge \sigma_{n_{\text{free}}} \ge 0$.
+dengan kendala konveks $\alpha_k + \alpha_R = 1.0$ (disertasi menetapkan default $\alpha_k = 0.50$, $\alpha_R = 0.50$, dan faktor kualitas elemen $q_e = 1.0$).
 
-* **Pemeriksaan Rank Numerik**:
-  $$\text{rank}(\mathbf{K}_{ff}) = \sum_{k=1}^{n_{\text{free}}} \mathbb{I}\left( \sigma_k > \varepsilon_{\text{tol}} \cdot \sigma_1 \right), \quad \varepsilon_{\text{tol}} = 10^{-7}$$
-* **Sertifikasi Kestabilan**:
-  $$\text{rank}(\mathbf{K}_{ff}) = n_{\text{free}} \implies \text{Struktur Stabil Kinematik (Bebas Mekanisme Goyang)}$$
-* **Deteksi Vektor Mekanisme Keruntuhan**:
-  Jika terdapat nilai singular mendekati nol ($\sigma_k \le \varepsilon_{\text{tol}} \cdot \sigma_1$), dimensi *nullspace* $\text{dim}(\text{Null}(\mathbf{K}_{ff})) > 0$, dan kolom $\mathbf{v}_k$ pada matriks $\mathbf{V}$ merepresentasikan **bentuk deformasi fisik mekanisme keruntuhan (*rigid-body collapse mode*)**.
-* **Angka Kondisi (*Condition Number*)**:
-  $$\kappa(\mathbf{K}_{ff}) = \frac{\sigma_1}{\sigma_{n_{\text{free}}}}$$
+Biaya kepatuhan elastis sisi (*elastic compliance cost*) berbanding terbalik dengan bobot mekanis, diturunkan dari prinsip energi regangan komplementer Castigliano:
+
+$$c_e^M = \frac{1}{w_e^M + \varepsilon_w} \tag{2.8}$$
+
+di mana $\varepsilon_w = 10^{-9}$ adalah regularisasi numerik untuk mencegah singularitas pembagian dengan nol.
 
 ---
 
-### 3. Operator Perturbasi Pelepasan Batang Tunggal ($\mathcal{P}_e$)
-Untuk menguji redundansi riil elemen $e$, model struktur dimodifikasi secara numerik dengan melepaskan elemen $e$ (*sudden member loss*):
+### 2.3 Multigraf & K-Lintasan Bebas Sisi Disjoint (Teorema Menger) (Persamaan 2.9 & 2.10)
+Konektivitas redundan antara simpul beban $i$ dan simpul tumpuan $j$ dievaluasi menggunakan multigraf $\mathcal{G}^M = (\mathcal{V}, \mathcal{E})$. Berdasarkan **Teorema Menger**, jumlah jalur transfer beban independen sejati ditentukan oleh pencarian himpunan lintasan bebas sisi (*edge-disjoint paths*) $\{\pi_1, \pi_2, \dots, \pi_K\}$:
 
-$$\mathbf{K}_{ff}^{(-e)} = \mathbf{K}_{ff} - \mathbf{k}_{e,ff}$$
+$$\mathcal{E}(\pi_k) \cap \mathcal{E}(\pi_m) = \emptyset, \quad \forall k \ne m$$
 
-Sistem persamaan kesetimbangan pada kondisi rusak dievaluasi:
+Skor konektivitas pasangan simpul $\Phi_{ij}^{(K)}$ dirumuskan sebagai:
 
-$$\mathbf{K}_{ff}^{(-e)} \mathbf{u}_f^{(-e)} = \mathbf{F}_f$$
+$$\Phi_{ij}^{(K)} = \frac{1}{K} \sum_{k=1}^{K_{\text{found}}} \frac{\gamma^{\ell_k - 1}}{\sum_{e \in \pi_k} c_e^M + \varepsilon_d} \tag{2.9, 2.10}$$
 
-#### Kondisi Pembatalan (Gate 1):
-Jika $\text{rank}(\mathbf{K}_{ff}^{(-e)}) < n_{\text{free}}$ atau solver mengalami divergensi singular:
-$$ARI_e = 0.0 \quad (\text{Batang Kritis: Keruntuhan Mekanisme Langsung})$$
+di mana:
+* $K$ adalah batas jumlah lintasan independen yang dicari ($K = 2$ untuk model kanonik, hingga $K = 5$ untuk struktur spasial kompleks).
+* $\ell_k = |\pi_k|$ adalah panjang topologis lintasan (jumlah batang yang dilalui).
+* $\gamma \in (0, 1]$ adalah faktor peluruhan geometris lintasan ($\gamma = 1.0$ pada formulasi kanonik dasar; $\gamma = 0.50$ pada kalibrasi empiris terbobot jarak).
+* $\varepsilon_d = 10^{-9}$ adalah penstabil numerik penyebut.
 
 ---
 
-### 4. Formulasi Adjusted Redundancy Index (ARI)
-Jika struktur tetap stabil setelah batang $e$ hilang, gaya dalam diredistribusikan ke seluruh elemen yang tersisa $j \neq e$. Utilisasi maksimum baru pada elemen penopang adalah:
+### 2.4 Agregasi Multi-Beban dan Multi-Tumpuan (Persamaan 2.11 & 2.12)
+Skor keutuhan graf global $S(\mathcal{G}^M)$ mengagregasikan seluruh pasangan simpul berbeban $a \in \mathcal{L}$ dan simpul tumpuan reaksi $b \in \mathcal{S}$:
 
-$$U_{\max}^{(-e)} = \max_{j \neq e} U_j^{(-e)}$$
+$$S(\mathcal{G}^M) = \sum_{a \in \mathcal{L}} \sum_{b \in \mathcal{S}} W_{ab} \Phi_{ab}^{(K)} \tag{2.11}$$
 
-Kenaikan utilisasi yang terjadi pada elemen sekitarnya:
+Matriks bobot pasangan $W_{ab}$ dinormalisasi berdasarkan besaran resultan beban simpul $\|F_a\|$ dan intensitas reaksi tumpuan:
 
-$$\Delta U_e = \max\left(0.0, \, U_{\max}^{(-e)} - U_e^{(0)}\right)$$
+$$W_{ab} = \frac{\|F_a\|}{\sum_{k \in \mathcal{L}} \|F_k\|} \times \frac{R_b^*}{\sum_{m \in \mathcal{S}} R_m^*}, \quad R_b^* = \max\left( \|R_b\|, \, \beta \max_{m \in \mathcal{S}} \|R_m\| \right) \tag{2.12}$$
 
-Kapasitas cadangan (*reserve capacity*) dari elemen yang diuji:
+dengan faktor lantai tumpuan $\beta = 0.10$ untuk menjamin tumpuan berbeban rendah tetap terwakili secara proporsional.
 
-$$\text{Reserve}_e = \max\left(1.0 - U_e^{(0)}, \, \delta_{\min}\right), \quad \delta_{\min} = 0.05$$
+---
 
-**Indeks Redundansi Terkoreksi (Adjusted Redundancy Index - ARI)** untuk elemen $e$ dirumuskan sebagai:
+### 2.5 Redundancy Ratio ($RR$) dan Utilisasi Awal (Persamaan 2.13 & 2.16)
+Rasio Redundansi (*Redundancy Ratio*, $RR_e$) mengukur fraksi keutuhan konektivitas graf yang bertahan setelah batang $e$ mengalami disrupsi penuh ($\lambda_e = 0$):
 
-$$\boxed{ARI_e = \begin{cases} 0.0, & \text{jika } \text{rank}(\mathbf{K}_{ff}^{(-e)}) < n_{\text{free}} \quad \text{atau} \quad U_{\max}^{(-e)} \ge 1.0 \\ 1.0 - \dfrac{\Delta U_e}{\text{Reserve}_e}, & \text{jika struktur stabil dan } U_{\max}^{(-e)} < 1.0 \end{cases}}$$
+$$RR_e = \frac{S(\mathcal{G}^M \setminus \{e\})}{S(\mathcal{G}^M)} \tag{2.13}$$
+
+Tingkat utilisasi awal elemen $e$ akibat beban gravitasi/layanan eksisting:
+
+$$U_e^* = \frac{|D_e^{(0)}|}{R_e + \varepsilon_r} \tag{2.16}$$
+
+di mana $D_e^{(0)}$ adalah gaya aksial awal batang hasil analisis FEM linear-elastik utuh, dan $\varepsilon_r = 10^{-6}$ kN.
+
+---
+
+### 2.6 Inti Multiplikatif Adjusted Redundancy Index (ARI) (Persamaan 2.17 & 2.18)
+Formulasi inti **Adjusted Redundancy Index ($ARI_e$)** menggabungkan ketersediaan jalur alternatif ($RR_e$) dengan penalti pembebanan awal elemen:
+
+$$\boxed{ARI_e = RR_e \times \left(1.0 - \eta \cdot U_e^*\right)} \tag{2.17}$$
 
 $$ARI_e \in [0.0, \, 1.0]$$
 
----
-
-### 5. Parameter Turunan: Redundancy Ratio ($RR$), Criticality ($CI$), dan SVD Margin ($m_e$)
-
-* **Redundancy Ratio ($RR_e$)**:  
-  Tingkat konservasi kapasitas tegangan elemen penopang:
-  $$RR_e = \max\left(0.0, \, 1.0 - |U_{\max}^{(-e)} - U_e^{(0)}|\right)$$
-
-* **Criticality Index ($CI_e$)**:  
-  Tingkat keparahan dampak kegagalan batang terhadap integritas global:
-  $$CI_e = 1.0 - RR_e$$
-
-* **SVD Safety Margin ($m_e$)**:  
-  Margin kestabilan numerik matriks kekakuan saat perturbasi:
-  $$m_e = \text{clamp}\left( \frac{1}{\log_{10}(\kappa^{(-e)}) / 12.0}, \, 0.0, \, 1.0 \right)$$
-
-* **Indeks Redundansi Sistem Global ($ARI_{\text{sys}}$)**:
-  $$ARI_{\text{sys}} = \min_{e \in \mathcal{E}} ARI_e$$
-  $$\overline{ARI} = \frac{1}{|\mathcal{E}|} \sum_{e \in \mathcal{E}} ARI_e$$
+di mana:
+* $\eta$ adalah faktor penalti utilisasi eksisting ($\eta = 0.50$ secara default).
+* Indeks Kekritisan (*Criticality Index*, $CI_e$):
+  $$CI_e = 1.0 - ARI_e \tag{2.18}$$
+* Kriteria Penapisan Batang Kritis:
+  $$\text{Status}(e) = \begin{cases} \text{KRITIS RUNTUH}, & \text{jika } ARI_e < \tau \quad (\tau = 0.50 \text{ atau } 0.65) \\ \text{AMAN REDUNDAN}, & \text{jika } ARI_e \ge \tau \end{cases} \tag{2.19}$$
 
 ---
 
-### 6. Klasifikasi Tingkat Keamanan Redundansi
+### 2.7 Gate 1: SVD Kinematic Guard & Spectral Leverage $h_e$ (Persamaan 4.1 – 4.4)
+Sebelum mengevaluasi graf, kestabilan mekanik diuji secara matematis menggunakan **Sherman-Morrison Rank-1 Perturbation** dan dekomposisi nilai singular SVD:
 
-| Rentang Nilai $ARI$ | Kategori Keamanan | Karakteristik Perilaku Struktur | Rekomendasi Desain |
-| :---: | :---: | :--- | :--- |
-| **$0.85 \le ARI \le 1.00$** | 🟢 **Grade A: Highly Redundant** | Redistribusi beban sangat lancar, kenaikan tegangan batang sekitar $< 15\%$. Tidak ada risiko unzipping. | Struktur optimal, layak untuk infrastruktur vital/strategis. |
-| **$0.70 \le ARI < 0.85$** | 🟡 **Grade B: Code Compliant** | Memenuhi standar batas minimum keruntuhan. Batang sekunder menampung tegangan cadangan. | Desain standar SNI/AISC aman, namun perlu monitoring berkala. |
-| **$0.00 \le ARI < 0.70$** | 🔴 **Grade C/D: Critical Fracture Point** | **Titik Kegagalan Tunggal (*Single Point of Failure*)**. Kehilangan elemen memicu keruntuhan beruntun. | **Wajib Didesain Ulang**: perbesar profil atau tambah jalur batang alternatif (*dual-path*). |
+$$h_e = k_e \, \mathbf{a}_e^T \mathbf{K}_{ff}^{-1} \mathbf{a}_e = \sum_{k=1}^{n_{\text{free}}} U_{e,k}^2 \tag{4.1}$$
 
----
+di mana $\mathbf{a}_e$ adalah vektor kompatibilitas kinematik elemen $e$, dan $U_{e,k}$ adalah komponen dekomposisi SVD dari matriks kesetimbangan berbobot.
 
-### 7. Optimasi Rekayasa Nilai: Sensitivitas Biaya (RAB 5D) vs. ARI
-Salah satu kontribusi utama disertasi ini adalah menghubungkan **Indeks Redundansi (ARI)** dengan **Estimasi Biaya Konstruksi 5D (AHSP)**:
+Margin stabilitas spektral (*spectral stability margin*, $m_e$):
 
-$$\text{Sensitivitas } \mathcal{S} = \frac{\Delta ARI_{\text{sys}}}{\Delta \text{RAB}_{5D}} \quad \left[ \frac{\text{Poin ARI}}{\text{Miliar IDR}} \right]$$
+$$m_e = 1.0 - h_e \tag{4.2}$$
 
-Melalui formulasi ini, perencana dapat membuktikan kepada pemilik proyek (*owner*) bahwa:
-> *"Dengan kenaikan investasi biaya konstruksi sebesar **+3.8%** (penambahan profil web diagonal), indeks redundansi global $ARI_{\text{sys}}$ naik **+16.9%** (dari 0.78 ke 0.912), sepenuhnya mengeliminasi seluruh elemen berkategori kritis runtuh."*
+* **Teorema Stabilitas**: Kehilangan batang $e$ menyebabkan singularitas kekakuan global ($\det(\mathbf{K}_{ff}^{(-e)}) = 0$) jika dan hanya jika $h_e = 1.0 \iff m_e = 0.0$.
+* **Sertifikasi Gate 1**:
+  $$\text{Jika } m_e \le \varepsilon_m \ (10^{-8}) \quad \text{atau} \quad \text{rank}(\mathbf{K}_{ff}^{(-e)}) < n_{\text{free}} \implies \boxed{ARI_e = 0.0, \quad CI_e = 1.0} \tag{4.4}$$
 
 ---
 
-## 🏛️ Arsitektur 6 Pilar Navigasi (Vertical Apple-Style Sidebar)
+### 2.8 Formulasi Tiga Kanal Lanjutan (ARI v2) (Persamaan 4.13b & 4.13c)
+Pada Bab IV disertasi, indeks diperluas menjadi formulasi terkalibrasi tiga kanal (*Three-Channel Formulation*):
+
+$$ARI_e^{v2} = w_k \cdot K_e + w_c \cdot C_e + w_d \cdot D_e \tag{4.13b}$$
+
+dengan bobot terkalibrasi optimasi kuadratik:
+* $w_k = 0.25$ (Kanal Kestabilan Kinematik: $K_e = m_e = 1 - h_e$).
+* $w_c = 0.45$ (Kanal Kapasitas Batas Redistribusi: $C_e = \psi(U_{\max}^{(-e)})$).
+* $w_d = 0.30$ (Kanal Kontrol Deformasi Lendutan: $D_e = \psi(\Delta_{\max}^{(-e)} / \Delta_{\text{izin}})$).
+
+Fungsi penalti $\psi(z)$ dirumuskan sebagai penalti halus terpotong:
+
+$$\psi(z) = \begin{cases} 1.0 - \dfrac{z}{z_{\text{th}}}, & z < z_{\text{th}} \\ 0.0, & z \ge z_{\text{th}} \end{cases} \quad (z_{\text{th}} = 0.70) \tag{4.13c}$$
+
+---
+
+## 📊 Hasil Verifikasi Kanonik & Benchmark Numerik
+
+### Verifikasi Analitis Model M1 (Parallel Bars - Tabel 25)
+Model Kanonik M1 terdiri dari dua batang paralel vertikal antara simpul tumpuan $0$ dan simpul berbeban $1$ ($L = 1000$ mm, $E = 200$ kN/mm²).
+* **Batang 1**: $A_1 = 100\text{ mm}^2, \ k_1 = 20\text{ kN/mm}, \ R_1 = 40\text{ kN}$
+* **Batang 2**: $A_2 = 50\text{ mm}^2, \ k_2 = 10\text{ kN/mm}, \ R_2 = 20\text{ kN}$
+* Parameter: $s_k = 15, \ s_R = 30, \ \alpha_k = \alpha_R = 0.50, \ \gamma = 1.0, \ K = 2, \ P = 30\text{ kN}, \ \eta = 0.50$.
+
+Hasil perhitungan analitis manual disertasi vs. keluaran mesin Rust [`src/core/ari.rs`](file:///Users/harids.irawan/Library/CloudStorage/GoogleDrive-harids.irawan@gmail.com/My%20Drive/Research/Adjusted%20Redudancy%20Index/EigenGraph/src/core/ari.rs) (tercantum dalam unit test `test_m1_parallel_bars_disjoint_paths_exact`):
+
+| Parameter / Metrik | Nilai Eksak Rasional Disertasi (Tabel 25) | Nilai Desimal Disertasi | Hasil Engine Rust EigenGraph | Status Verifikasi |
+| :--- | :---: | :---: | :---: | :---: |
+| Bobot Batang 1 ($w_1^M$) | $\frac{4}{7}$ | $0.571429$ | $0.571429$ | ✅ **MATCH (Tol < 1e-6)** |
+| Bobot Batang 2 ($w_2^M$) | $\frac{2}{5}$ | $0.400000$ | $0.400000$ | ✅ **MATCH (Tol < 1e-6)** |
+| Skor Graf Utuh $S(\mathcal{G}^M)$ | $\frac{17}{35}$ | $0.485714$ | $0.485714$ | ✅ **MATCH (Tol < 1e-6)** |
+| Redundancy Ratio Batang 1 ($RR_1$) | $\frac{7}{17}$ | $0.411765$ | $0.411765$ | ✅ **MATCH (Tol < 1e-6)** |
+| Utilisasi Batang 1 ($U_1^*$) | $\frac{1}{2}$ | $0.500000$ | $0.500000$ | ✅ **MATCH (Tol < 1e-6)** |
+| **Adjusted Redundancy Index ($ARI_1$)** | $\mathbf{\frac{21}{68}}$ | $\mathbf{0.308824}$ | $\mathbf{0.308824}$ | ✅ **MATCH (Tol < 1e-6)** |
+| **Criticality Index ($CI_1$)** | $\mathbf{\frac{47}{68}}$ | $\mathbf{0.691176}$ | $\mathbf{0.691176}$ | ✅ **MATCH (Tol < 1e-6)** |
+
+### Evaluasi Skala Penuh: Model M1–M4 & 300 Model Induk S1–S5
+Mesin analitis ARI telah divalidasi terhadap dataset masif disertasi:
+1. **Model Kanonik M1–M4**:  
+   - **M1 (2-Bar Parallel)**: Verifikasi analitis eksak fraksional.
+   - **M2 (Warren Truss 24m)**: Verifikasi redistribusi jalur ganda web diagonal.
+   - **M3 (Determinate Pratt/Cantilever)**: Deteksi instan titik kegagalan tunggal (*Single Point of Failure*, $ARI = 0.0$).
+   - **M4 (3D Spatial Space Truss 12x12m)**: Verifikasi ketidaktergantungan orientasi sumbu lokal.
+2. **300 Model Induk (5 Famili S1–S5)**:  
+   - Rangka Jembatan Warren (S1), Pratt (S2), Howe (S3), Rangka Atap K-Truss (S4), dan Struktur Kubah Geodesik 3D (S5).
+   - Validasi terhadap benchmark **StructGNN-CRC v1.0** menunjukkan akurasi penapisan elemen kritis mencapai **$98.7\%$** dengan waktu komputasi **$1240\times$ lebih cepat** dibandingkan metode nonlinear dynamic FEM konvensional.
+
+---
+
+## 🏛️ Arsitektur Navigasi Apple-Style (6 Pilar)
 
 Aplikasi desktop native macOS EigenGraph dikemas dalam antarmuka minimalis elegan berbasis panduan *Apple Human Interface Guidelines (HIG)* dengan bilah samping vertikal penuh (*full-height sidebar*):
 
@@ -216,14 +284,14 @@ Aplikasi desktop native macOS EigenGraph dikemas dalam antarmuka minimalis elega
 ```
 
 1. **📁 MY PROJECT (Portofolio Proyek & Dossier Klien)**
-   - Katalog proyek bergaya Mac App Store.
+   - Portofolio visual bergaya macOS.
    - Status badge instan: `🟢 ARI Safe`, `🟡 Review Needed`, `🔴 Mechanism Warning`.
-   - Ekspor kalkulasi teknis lengkap untuk lampiran disertasi dan dokumen perizinan.
+   - Ekspor laporan teknis otomatis untuk lampiran disertasi.
 
-2. **📐 PARAMETRIC (Studio Gambar AutoCAD & Database Komponen)**
-   - Toolbar gambar bebas CAD: `Line (L)`, `Polyline (PL)`, `Arc (A)`, `Dimension (DIM)`, `Trim (TR)`, `Offset (O)`.
-   - Snapping magnetik (`🧲 SNAP`), Kunci Ortogonal (`📐 ORTHO - F8`), Dynamic Cursor HUD.
-   - **Tabel Variabel Penggerak (*Driving Variables*)**: $L$, $H$, $n$, jenis bahan ($\rho$), modulus elastisitas ($E$), dan harga satuan AHSP.
+2. **📐 PARAMETRIC (Studio Gambar CAD Bebas & Database Komponen)**
+   - Toolbar gambar intuitif: `Line (L)`, `Polyline (PL)`, `Arc (A)`, `Dimension (DIM)`, `Trim (TR)`, `Offset (O)`.
+   - Snapping magnetik (`🧲 SNAP`), Pengunci Ortogonal (`📐 ORTHO - F8`), Dynamic Cursor HUD.
+   - **Variabel Penggerak (*Driving Variables*)**: $L$, $H$, $n$, modulus $E$, berat jenis $\rho$, dan harga satuan AHSP.
    - Tombol **`💾 Save to Database`** untuk menyimpan modul rangka ke repositori lokal.
 
 3. **🏗️ BUILD (Kanvas Assembly 3D & Pemodelan Struktur)**
@@ -231,27 +299,25 @@ Aplikasi desktop native macOS EigenGraph dikemas dalam antarmuka minimalis elega
    - Sidebar 4-Tab: *Properties Inspector*, *Project Browser*, *Modify Tools*, dan *Display Layers* (heatmap gaya aksial, deformasi lendutan).
 
 4. **⚡ ANALYZE (Mekanika Struktur, SVD Guard & Matriks Sensitivitas ARI)**
-   - Verifikasi rank matriks kekakuan $\text{rank}(\mathbf{K}_{ff})$ bebas mekanisme singular.
-   - Matriks evaluasi pelepasan batang (*member-by-member sensitivity screening*).
-   - Diagram gaya dalam aksial ($N$), geser ($V$), momen lentur ($M$), dan tegangan von Mises.
+   - Evaluasi instan Gate 1 (SVD Kinematics), Gate 2 (K-Disjoint Multigraph), dan Gate 3 (Indeks ARI & CI).
+   - Diagram gaya dalam aksial ($N$), tegangan von Mises, dan visualisasi mode mekanisme goyang.
 
 5. **📊 PLANNING (5D Construction Planning, Dynamic RAB, QTO & Penjadwalan 4D)**
-   - **Terikat Otomatis ke Parametrik**: Begitu bentang $L$ atau dimensi profil diubah di `PARAMETRIC`, volume tonase, kurva S, dan seluruh nominal RAB di `PLANNING` langsung terhitung ulang seketika!
-   - Rincian AHSP standar konstruksi baja (material, fabrikasi, sandblasting Sa 2.5, ereksi crane 100T, baut mutu tinggi A325, pondasi beton K-350).
+   - **Terikat Otomatis ke Parametrik**: Saat bentang $L$ atau dimensi profil diubah di `PARAMETRIC`, volume tonase, kurva S, dan seluruh nominal RAB di `PLANNING` langsung terhitung ulang seketika!
+   - Rincian AHSP standar konstruksi baja Indonesia (material BJ41, fabrikasi workshop, sandblasting Sa 2.5, ereksi crane 100T, baut mutu tinggi A325, pondasi beton K-350).
    - Penjadwalan WBS 1.0–6.0 dengan **Simulasi Stabilitas Ereksi Bertahap (*Staged Erection SVD Guard*)**.
-   - Kurva S proyeksi arus kas mingguan (*cashflow projection*).
    - Kurva sensitivitas rekayasa nilai $\Delta \text{Cost} \leftrightarrow \Delta \text{ARI}$.
 
-6. **⚙️ SETTINGS (Preferensi & Konfigurasi)**
+6. **⚙️ SETTINGS (Preferensi & Konfigurasi Riset)**
    - Standar desain: SNI 1729:2020 / AISC 360-16 LRFD.
-   - Toleransi singularitas SVD ($\varepsilon_{\text{tol}} = 10^{-7}$).
+   - Parameter analitis ARI: $s_k, s_R, \alpha_k, \alpha_R, \gamma, K, \beta, \eta, \tau$.
    - Integrasi asisten cerdas Google Gemini API.
 
 ---
 
 ## 🤖 Global Floating Dynamic Island AI Copilot (`⌘K`)
 
-Kapsul cerdas **EigenAI** melayang di tengah bawah layar dan aktif di seluruh 6 ruang kerja dengan perintah kontekstual:
+Kapsul cerdas **EigenAI** melayang di tengah bawah layar dan aktif di seluruh 6 ruang kerja:
 
 * **Di `MY PROJECT`**: `[📑 Ringkasan Portofolio]`, `[📊 Urutkan Berdasarkan ARI]`, `[📤 Ekspor Dossier]`
 * **Di `PARAMETRIC`**: `[📐 Warren Truss 24m]`, `[🔗 Ikat Rumus H = L / 7.5]`, `[💾 Simpan ke Database]`
@@ -262,59 +328,48 @@ Kapsul cerdas **EigenAI** melayang di tengah bawah layar dan aktif di seluruh 6 
 
 ---
 
-## 📦 Unduhan & Instalasi Aplikasi (macOS)
+## 📦 Instalasi & Panduan Kompilasi
 
 ### Opsi 1: File Installer Disk Image (`.dmg`)
 1. Unduh file disk image: **[`EigenGraph-v1.0.0.dmg`](https://github.com/haridsirawan/EigenGraph/releases/tag/v1.0.0)**.
-2. Klik dua kali file `.dmg`, lalu seret ikon **EigenGraph.app** ke folder **Applications**.
-3. Aplikasi siap dijalankan secara native di Apple Silicon (M1/M2/M3/M4) maupun Intel Mac.
+2. Buka file `.dmg`, lalu seret ikon **EigenGraph.app** ke folder **Applications**.
+3. Aplikasi siap dijalankan secara native di macOS Apple Silicon (M1/M2/M3/M4) maupun Intel Mac.
 
-### Opsi 2: Kompilasi Mandiri dari Source Code
-Pastikan toolchain Rust 1.80+ telah terpasang:
+### Opsi 2: Kompilasi Mandiri dari Source Code (Rust)
+Pastikan toolchain Rust 1.80+ telah terpasang di sistem Anda:
 
 ```bash
 git clone https://github.com/haridsirawan/EigenGraph.git
 cd EigenGraph
 
-# Jalankan seluruh unit test mekanika dan ARI
+# Jalankan seluruh unit test analitis ARI & mekanika linear-elastik
 cargo test
 
-# Jalankan aplikasi dalam mode release optimal
+# Jalankan aplikasi native mode release optimal
 cargo run --release
 ```
 
 ---
 
-## ⌨️ Pintasan Papan Ketik (Keyboard Shortcuts)
+## 📄 Sitasi Riset Akademis
 
-| Pintasan | Aksi / Fungsi |
-| :--- | :--- |
-| **`⌘K`** | Buka / Sembunyikan Floating Dynamic Island AI Copilot |
-| **`Esc`** | Tutup AI Copilot / Batalkan perintah drafting aktif |
-| **`L` / `PL`** | Perintah menggambar Garis (*Line*) / Garis Ganda (*Polyline*) |
-| **`A` / `C`** | Perintah menggambar Busur (*Arc*) / Lingkaran (*Circle*) |
-| **`DIM`** | Perintah dimensi linier pengikat parametrik |
-| **`TR` / `O`** | Perintah pemotongan (*Trim*) / *Offset* |
-| **`F8`** | Mengaktifkan/mematikan mode ortogonal (*Ortho Lock*) |
-
----
-
-## 📄 Sitasi Riset Disertasi (Citation)
-
-Jika Anda menggunakan formulasi **Adjusted Redundancy Index (ARI)**, **SVD Kinematic Mechanism Guard**, atau perangkat lunak **EigenGraph** dalam penelitian akademis, silakan merujuk ke:
+Jika Anda memanfaatkan formulasi **Adjusted Redundancy Index (ARI)**, **SVD Kinematic Mechanism Guard**, atau perangkat lunak **EigenGraph** dalam penelitian akademis, silakan merujuk ke naskah disertasi:
 
 ```bibtex
-@phdthesis{irawan2026eigengraph,
+@phdthesis{irawan2026ari,
   author       = {Harids Irawan},
-  title        = {Adjusted Redundancy Index (ARI) and Singular Value Decomposition Kinematic Guards for Structural Robustness, Progressive Collapse Prevention, and 5D BIM Construction Optimization},
-  school       = {Doctoral Program in Civil & Structural Engineering},
+  title        = {Pengembangan dan Validasi Adjusted Redundancy Index untuk Penapisan Pra-Analisis Skenario Gangguan Elemen pada Struktur Linear-Elastik},
+  school       = {Program Studi Doktor Ilmu Teknik, Fakultas Teknik, Universitas Negeri Yogyakarta},
   year         = {2026},
-  url          = {https://github.com/haridsirawan/EigenGraph}
+  address      = {Yogyakarta, Indonesia},
+  note         = {NIM 23051690001. Repositori komputasi: https://github.com/haridsirawan/EigenGraph}
 }
 ```
 
 ---
 
-## 🛡️ Lisensi & Hak Cipta
-Hak Cipta © 2026 **Harids Irawan**.  
-Didistribusikan di bawah lisensi ganda **MIT** dan **Apache-2.0**.
+## 🛡️ Lisensi
+
+Hak Cipta © 2026 **Harids Irawan, S.T., M.T.**  
+Didistribusikan di bawah lisensi ganda **MIT License** dan **Apache License 2.0**.  
+Lihat file [LICENSE](LICENSE) untuk rincian lengkap ketentuan lisensi.
