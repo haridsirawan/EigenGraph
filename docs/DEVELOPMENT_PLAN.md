@@ -212,6 +212,29 @@ flowchart LR
    - *Propagation Vulnerability Index* ($PVI$): Rasio keruntuhan sekunder terhadap elemen tersisa.
    - *System Robustness Index* ($R_{\text{sys}} = 1.0 - PVI$): Indeks ketahanan global terhadap bencana progresif.
 
+---
+
+### 🟢 FASE 9: Analisis Jejak Karbon Embodied & Keberlanjutan (BIM 6D di `ANALYZE`) (SELESAI ✅)
+*Target: Pemodelan dampak lingkungan dan efisiensi eko-redundansi berbasis standar ISO 14040/14044 dan EN 15978.*
+1. **Cradle-to-Site Life Cycle Assessment (LCA)**:
+   - Tahap A1–A3: Ekstraksi bahan baku dan fabrikasi baja (rute BF-BOF vs. EAF daur ulang tinggi vs. Green Hydrogen DRI).
+   - Tahap A4: Emisi transportasi material ke lokasi proyek (kg CO₂e / ton-km).
+   - Tahap A5: Emisi peralatan ereksi alat berat (crane & genset).
+2. **Indikator Efisiensi Eko-Redundansi ($\eta_{\text{eco}}$)**:
+   - Keseimbangan antara ketahanan struktur (ARI) terhadap jejak karbon embodied:
+     $$\eta_{\text{eco}} = \frac{\text{System ARI}}{\text{Total } t\text{CO}_2\text{e}}$$
+3. **Penyelarasan Sertifikasi Bangunan Hijau (GBCI & LEED v4.1)**:
+   - Klasifikasi otomatis tingkatan sertifikasi: Certified, Silver, Gold, hingga Platinum.
+
+---
+
+### 🌐 FASE 10: Otomasi CI/CD & Pengemasan Rilis Multi-Platform (SELESAI ✅)
+*Target: Pipeline integrasi berkelanjutan GitHub Actions untuk verifikasi mekanika dan kompilasi installer macOS.*
+1. **GitHub Actions Matrix Workflow (`.github/workflows/ci.yml`)**:
+   - Kompilasi dan eksekusi seluruh unit test solver mekanika dan SVD Guard secara otomatis pada macOS, Ubuntu, dan Windows.
+2. **Otomasi Pembuatan macOS DMG Installer**:
+   - Pengemasan biner release ke dalam bundel aplikasi `EigenGraph.app` dan pembentukan disk image `.dmg` terkompresi.
+
 ## 📊 Matriks Ringkasan Roadmap & Milestone
 
 | Fase | Fokus Modul | Luaran Utama | Status |
@@ -221,10 +244,12 @@ flowchart LR
 | **Fase 2** | **BUILD Canvas 3D** | Viewport 3D Orbit, ViewCube Presets (Iso/Top/Front/Side), AI Gemini | **SELESAI ✅** |
 | **Fase 3** | **ANALYZE: Redundancy** | Solver DSM, SVD Kinematic Guard, Hyperbolic ARI, AI Bracing Optimizer | **SELESAI ✅** |
 | **Fase 4** | **ANALYZE: Biaya (BIM 5D)**| Automatic Volume Takeoff, AHSP PUPR, BOQ 6-Division, RAB Engine | **SELESAI ✅** |
-| **Fase 5** | **ANALYZE: Waktu (BIM 4D)** | WBS Perakitan, Gantt Chart, Kurva S, Pengecekan Stabilitas Erection | Tahap Perencanaan |
+| **Fase 5** | **ANALYZE: Waktu (BIM 4D)** | WBS Perakitan, Gantt Chart, Kurva S, Pengecekan Stabilitas Erection | **SELESAI ✅** |
 | **Fase 6** | **MY PROJECT Delivery** | Generator Dossier Resmi Markdown, Executive Deck, Portofolio | **SELESAI ✅** |
 | **Fase 7** | **Interoperabilitas & Rilis** | Export OpenBIM IFC 4.3 (Pset_StructuralRedundancy), DXF 3D, SAP2000 | **SELESAI ✅** |
 | **Fase 8** | **Kolaps Kaskade & Progresif** | DoD UFC 4-023-03 Alternate Path, DAF 1.25x, PVI, Robustness $R_{\text{sys}}$ | **SELESAI ✅** |
+| **Fase 9** | **Embodied Carbon & LCA (6D)** | ISO 14040/EN 15978 A1-A5 Footprint, Eko-Redundansi $\eta_{\text{eco}}$, LEED/GBCI | **SELESAI ✅** |
+| **Fase 10**| **CI/CD & macOS DMG Release** | GitHub Actions Multi-OS Matrix (macOS/Linux/Win), DMG App Bundle | **SELESAI ✅** |
 
 ---
 
