@@ -5,7 +5,7 @@ use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, Panel, CentralPa
 
 use crate::models::{DatabaseComponent, NavigationPillar, ParametricVariable, ProjectItem, ProjectStatus, StructuralMember};
 use crate::theme::MacTheme;
-use crate::views::{AnalyzeView, BuildView, MyProjectView, ParametricView, SettingsView};
+use crate::views::{AiAssistantView, AnalyzeView, BuildView, MyProjectView, ParametricView, SettingsView};
 
 pub struct EigenGraphApp {
     pub theme: MacTheme,
@@ -18,6 +18,7 @@ pub struct EigenGraphApp {
     pub build_view: BuildView,
     pub analyze_view: AnalyzeView,
     pub settings_view: SettingsView,
+    pub ai_assistant_view: AiAssistantView,
 
     // Domain Data & Parametric Component Database
     pub projects: Vec<ProjectItem>,
@@ -37,6 +38,7 @@ impl Default for EigenGraphApp {
             build_view: BuildView::default(),
             analyze_view: AnalyzeView::default(),
             settings_view: SettingsView::default(),
+            ai_assistant_view: AiAssistantView::default(),
 
             projects: vec![
                 ProjectItem {
@@ -321,11 +323,19 @@ impl App for EigenGraphApp {
                 ui.label(RichText::new("—").size(12.0).color(self.theme.text_muted));
                 ui.label(RichText::new(self.active_pillar.subtitle()).size(12.0).color(self.theme.text_secondary));
 
-                // Global Search Box
+                // Global Search Box & Copilot Toggle in Toolbar
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.add(egui::Button::new(RichText::new("🤖 Ask AI (⌘K)").size(11.5).strong().color(self.theme.accent_blue))
+                        .fill(self.theme.bg_card)
+                        .corner_radius(CornerRadius::same(6))).clicked() {
+                        self.ai_assistant_view.expanded = !self.ai_assistant_view.expanded;
+                    }
+
+                    ui.add_space(8.0);
+
                     ui.add(egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text("🔍 Search (⌘K)...")
-                        .desired_width(180.0));
+                        .hint_text("🔍 Filter workspace...")
+                        .desired_width(160.0));
                 });
             });
         });
@@ -350,5 +360,16 @@ impl App for EigenGraphApp {
                 }
             }
         });
+
+        // 5. GLOBAL FLOATING DYNAMIC ISLAND AI COPILOT (Available Across All 5 Features)
+        let ctx = ui.ctx().clone();
+        self.ai_assistant_view.show(
+            &ctx,
+            &self.theme,
+            self.active_pillar,
+            &self.members,
+            &self.projects,
+            &mut self.db_components,
+        );
     }
 }
