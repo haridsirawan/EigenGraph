@@ -13,6 +13,10 @@ pub struct BuildView {
     pub show_axes: bool,
     pub show_node_labels: bool,
     pub show_deformed_shape: bool,
+    pub cam_yaw: f32,
+    pub cam_pitch: f32,
+    pub cam_zoom: f32,
+    pub cam_pan: Vec2,
 }
 
 impl Default for BuildView {
@@ -26,6 +30,10 @@ impl Default for BuildView {
             show_axes: true,
             show_node_labels: true,
             show_deformed_shape: false,
+            cam_yaw: 0.0,
+            cam_pitch: 0.0,
+            cam_zoom: 1.0,
+            cam_pan: Vec2::ZERO,
         }
     }
 }
@@ -209,7 +217,7 @@ impl BuildView {
                 ui.separator();
                 ui.add_space(6.0);
 
-                let kpis = [
+                let kpis = [\
                     ("Minimum System ARI", "0.940 (Grade A Safe)", theme.accent_green),
                     ("SVD Kinematic Guard", "STABIL BEBAS MEKANISME", theme.accent_green),
                     ("Total Tonase Baja", "48.5 Ton (ASTM A992)", theme.text_primary),
@@ -394,7 +402,41 @@ impl BuildView {
                         for t in tools {
                             if ui.add(egui::Button::new(RichText::new(t).size(12.0).color(theme.text_primary))
                                 .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(6))).clicked() {}
+                                .corner_radius(CornerRadius::same(6))).clicked() {
+                                if *t == "🔍 Fit All" {
+                                    self.cam_yaw = 0.0;
+                                    self.cam_pitch = 0.0;
+                                    self.cam_zoom = 1.0;
+                                    self.cam_pan = Vec2::ZERO;
+                                }
+                            }
+                        }
+
+                        // ViewCube Camera Presets
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        ui.label(RichText::new("🎥 3D Orbit:").size(11.0).color(theme.text_muted));
+                        if ui.add(egui::Button::new(RichText::new("📐 Iso").size(11.0).color(theme.text_secondary))
+                            .fill(theme.bg_card).corner_radius(CornerRadius::same(4))).clicked() {
+                            self.cam_yaw = 0.55;
+                            self.cam_pitch = 0.35;
+                        }
+                        if ui.add(egui::Button::new(RichText::new("Front").size(11.0).color(theme.text_secondary))
+                            .fill(theme.bg_card).corner_radius(CornerRadius::same(4))).clicked() {
+                            self.cam_yaw = 0.0;
+                            self.cam_pitch = 0.0;
+                        }
+                        if ui.add(egui::Button::new(RichText::new("🔝 Top").size(11.0).color(theme.text_secondary))
+                            .fill(theme.bg_card).corner_radius(CornerRadius::same(4))).clicked() {
+                            self.cam_yaw = 0.0;
+                            self.cam_pitch = 1.57;
+                        }
+                        if ui.add(egui::Button::new(RichText::new("Side").size(11.0).color(theme.text_secondary))
+                            .fill(theme.bg_card).corner_radius(CornerRadius::same(4))).clicked() {
+                            self.cam_yaw = 1.57;
+                            self.cam_pitch = 0.0;
                         }
 
                         // Right-aligned Heatmap mode indicator & What-If Status
@@ -462,12 +504,54 @@ impl BuildView {
                         // Canvas Vector Drawing Viewport
                         let canvas_width = 720.0;
                         let canvas_height = 240.0;
-                        let (response, painter) = ui.allocate_painter(Vec2::new(canvas_width, canvas_height), Sense::click());
+                        let (response, painter) = ui.allocate_painter(Vec2::new(canvas_width, canvas_height), Sense::click_and_drag());
                         let rect = response.rect;
+
+                        // 3D Mouse Orbit, Pan, and Scroll Zoom Controls
+                        if response.dragged_by(egui::PointerButton::Secondary) || (response.dragged() && ui.input(|i| i.modifiers.shift)) {
+                            self.cam_pan += response.drag_delta();
+                        } else if response.dragged_by(egui::PointerButton::Primary) {
+                            self.cam_yaw += response.drag_delta().x * 0.01;
+                            self.cam_pitch = (self.cam_pitch - response.drag_delta().y * 0.01).clamp(-1.55, 1.55);
+                        }
+
+                        if response.hovered() {
+                            let scroll_y = ui.input(|i| i.raw_scroll_delta.y);
+                            if scroll_y.abs() > 0.0 {
+                                self.cam_zoom = (self.cam_zoom * (1.0 + scroll_y * 0.002)).clamp(0.2, 5.0);
+                            }
+                        }
 
                         // 1. Background Fill
                         painter.rect_filled(rect, CornerRadius::same(8), Color32::from_rgb(18, 20, 28));
                         painter.rect_stroke(rect, CornerRadius::same(8), Stroke::new(1.0, theme.border_subtle), egui::StrokeKind::Outside);
+
+                        // 3D Projection Engine
+                        let center_x = 12.0;
+                        let center_y = 1.6;
+                        let center_z = 0.0;
+
+                        let project_3d = |x: f32, y: f32, z: f32| -> Pos2 {
+                            let dx = x - center_x;
+                            let dy = y - center_y;
+                            let dz = z - center_z;
+
+                            let cos_y = self.cam_yaw.cos();
+                            let sin_y = self.cam_yaw.sin();
+                            let x1 = dx * cos_y + dz * sin_y;
+                            let z1 = -dx * sin_y + dz * cos_y;
+
+                            let cos_p = self.cam_pitch.cos();
+                            let sin_p = self.cam_pitch.sin();
+                            let y2 = dy * cos_p - z1 * sin_p;
+
+                            let base_scale = (canvas_width - 110.0) / 24.0;
+                            let scale = base_scale * self.cam_zoom;
+                            let screen_cx = rect.center().x + self.cam_pan.x;
+                            let screen_cy = rect.center().y + self.cam_pan.y;
+
+                            Pos2::new(screen_cx + x1 * scale, screen_cy - y2 * scale)
+                        };
 
                         // 2. CAD Grid
                         if self.show_grid {
@@ -484,7 +568,7 @@ impl BuildView {
                             }
                         }
 
-                        // 3. Origin Coordinate Axes
+                        // 3. Origin Coordinate Axes & Camera Status HUD
                         if self.show_axes {
                             let origin = Pos2::new(rect.left() + 25.0, rect.bottom() - 25.0);
                             painter.line_segment([origin, origin + Vec2::new(26.0, 0.0)], Stroke::new(2.0, Color32::from_rgb(255, 75, 75))); // X (Red)
@@ -493,21 +577,25 @@ impl BuildView {
                             painter.text(origin - Vec2::new(2.0, 32.0), Align2::CENTER_BOTTOM, "Y", egui::FontId::monospace(10.0), Color32::from_rgb(100, 230, 100));
                         }
 
-                        // 4. Truss Nodes Coordinates Calculation (6 Panels Warren Truss)
-                        let pad_x = 55.0;
-                        let span_draw = canvas_width - pad_x * 2.0;
-                        let panel_w = span_draw / 6.0;
-                        let bot_y = rect.bottom() - 55.0;
-                        let top_y = bot_y - 105.0;
+                        painter.text(
+                            Pos2::new(rect.left() + 10.0, rect.top() + 10.0),
+                            Align2::LEFT_TOP,
+                            format!("🎥 3D Viewport: Yaw {:.0}° | Pitch {:.0}° | Zoom {:.1}x", self.cam_yaw.to_degrees(), self.cam_pitch.to_degrees(), self.cam_zoom),
+                            egui::FontId::monospace(9.5),
+                            Color32::from_rgb(130, 150, 180),
+                        );
 
+                        // 4. Truss Nodes Coordinates Calculation (6 Panels Warren Truss in 3D Space)
                         let mut bot_nodes = Vec::new();
                         for i in 0..=6 {
-                            bot_nodes.push(Pos2::new(rect.left() + pad_x + (i as f32) * panel_w, bot_y));
+                            let x = (i as f32) * 4.0;
+                            bot_nodes.push(project_3d(x, 0.0, 0.0));
                         }
 
                         let mut top_nodes = Vec::new();
                         for i in 1..=5 {
-                            top_nodes.push(Pos2::new(rect.left() + pad_x + (i as f32) * panel_w, top_y));
+                            let x = (i as f32) * 4.0;
+                            top_nodes.push(project_3d(x, 3.2, 0.0));
                         }
 
                         // 5. Member Definitions (id, p1, p2, name)
@@ -630,7 +718,7 @@ impl BuildView {
                         }
 
                         // Dimension Line at the bottom
-                        let dim_y = bot_y + 32.0;
+                        let dim_y = bot_nodes[0].y + 32.0;
                         painter.line_segment([Pos2::new(bot_nodes[0].x, dim_y), Pos2::new(bot_nodes[6].x, dim_y)], Stroke::new(1.0, Color32::from_rgb(100, 150, 220)));
                         painter.line_segment([Pos2::new(bot_nodes[0].x, dim_y - 4.0), Pos2::new(bot_nodes[0].x, dim_y + 4.0)], Stroke::new(1.0, Color32::from_rgb(100, 150, 220)));
                         painter.line_segment([Pos2::new(bot_nodes[6].x, dim_y - 4.0), Pos2::new(bot_nodes[6].x, dim_y + 4.0)], Stroke::new(1.0, Color32::from_rgb(100, 150, 220)));
