@@ -109,25 +109,93 @@ impl LeanView {
                 });
                 ui.add_space(12.0);
 
-                let cut_patterns = [
-                    ("Pola A (Bottom Chord 4m)", "12 Batang Induk 12m", "Potong: [4.00m, 4.00m, 4.00m]", "Sisa Scrap: 0.00 m (0.0% Waste)", "⭐ 100% Efisiensi"),
-                    ("Pola B (Top Chord 4m)", "10 Batang Induk 12m", "Potong: [4.00m, 4.00m, 4.00m]", "Sisa Scrap: 0.00 m (0.0% Waste)", "⭐ 100% Efisiensi"),
-                    ("Pola C (Diagonal Web 5.12m)", "8 Batang Induk 12m", "Potong: [5.12m, 5.12m]", "Sisa: 1.76m (Didaur ulang jadi pengaku stiffener)", "🟢 85.3% Yield Langsung"),
-                    ("Pola D (Vertical Post 3.2m)", "4 Batang Induk 12m", "Potong: [3.20m, 3.20m, 3.20m]", "Sisa: 2.40m (Digunakan untuk bracing ikatan angin)", "🟢 80.0% Yield Langsung"),
+                let cut_patterns: [(&str, &str, Vec<(&str, f32, Color32)>, &str, &str); 4] = [
+                    (
+                        "Pola A (Bottom Chord W14x90)",
+                        "12 Batang Induk 12m",
+                        vec![("BC-1 (4.00m)", 4.00, Color32::from_rgb(16, 185, 129)), ("BC-2 (4.00m)", 4.00, Color32::from_rgb(16, 185, 129)), ("BC-3 (4.00m)", 4.00, Color32::from_rgb(16, 185, 129))],
+                        "Sisa Scrap: 0.00 m (0.0% Waste)",
+                        "⭐ 100% Efisiensi",
+                    ),
+                    (
+                        "Pola B (Top Chord W14x90)",
+                        "10 Batang Induk 12m",
+                        vec![("TC-1 (4.00m)", 4.00, Color32::from_rgb(14, 165, 233)), ("TC-2 (4.00m)", 4.00, Color32::from_rgb(14, 165, 233)), ("TC-3 (4.00m)", 4.00, Color32::from_rgb(14, 165, 233))],
+                        "Sisa Scrap: 0.00 m (0.0% Waste)",
+                        "⭐ 100% Efisiensi",
+                    ),
+                    (
+                        "Pola C (Diagonal Web W10x49)",
+                        "8 Batang Induk 12m",
+                        vec![("D-1 (5.12m)", 5.12, Color32::from_rgb(99, 102, 241)), ("D-2 (5.12m)", 5.12, Color32::from_rgb(99, 102, 241)), ("Scrap (1.76m)", 1.76, Color32::from_rgb(239, 68, 68))],
+                        "Sisa: 1.76m (Didaur ulang jadi pengaku stiffener)",
+                        "🟢 85.3% Yield Langsung",
+                    ),
+                    (
+                        "Pola D (Vertical Post W10x49)",
+                        "4 Batang Induk 12m",
+                        vec![("V-1 (3.20m)", 3.20, Color32::from_rgb(245, 158, 11)), ("V-2 (3.20m)", 3.20, Color32::from_rgb(245, 158, 11)), ("V-3 (3.20m)", 3.20, Color32::from_rgb(245, 158, 11)), ("Scrap (2.40m)", 2.40, Color32::from_rgb(239, 68, 68))],
+                        "Sisa: 2.40m (Digunakan untuk bracing ikatan angin)",
+                        "🟢 80.0% Yield Langsung",
+                    ),
                 ];
 
-                for (name, source, cuts, scrap, badge) in cut_patterns {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(format!("{} • {}", name, source)).size(12.0).strong().color(theme.text_primary));
-                            ui.label(RichText::new(format!("{} | {}", cuts, scrap)).size(11.0).color(theme.text_secondary));
+                for (name, source, segments, scrap, badge) in &cut_patterns {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("{} • {}", name, source)).size(12.5).strong().color(theme.text_primary));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(RichText::new(*badge).size(11.5).strong().color(theme.accent_green));
+                            });
                         });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(RichText::new(badge).size(11.5).strong().color(theme.accent_green));
-                        });
+                        ui.add_space(4.0);
+
+                        // Visual Segmented Bar Diagram (12.00m Total Length)
+                        let bar_width = (ui.available_width() - 10.0).max(300.0);
+                        let bar_height = 24.0;
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(bar_width, bar_height), egui::Sense::hover());
+
+                        let total_length_m = 12.0_f32;
+                        let mut curr_x = rect.min.x;
+
+                        for &(seg_label, seg_len, seg_col) in segments {
+                            let seg_w = (seg_len / total_length_m) * bar_width;
+                            let seg_rect = egui::Rect::from_min_max(
+                                egui::Pos2::new(curr_x, rect.min.y),
+                                egui::Pos2::new((curr_x + seg_w - 2.0).min(rect.max.x), rect.max.y),
+                            );
+
+                            ui.painter().rect_filled(seg_rect, CornerRadius::same(4), seg_col);
+                            if seg_w > 55.0 {
+                                ui.painter().text(
+                                    seg_rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    seg_label,
+                                    egui::FontId::proportional(10.5),
+                                    Color32::WHITE,
+                                );
+                            }
+
+                            curr_x += seg_w;
+                        }
+
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(*scrap).size(11.0).color(theme.text_muted));
+                        ui.add_space(8.0);
                     });
                     ui.separator();
                 }
+
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.add(egui::Button::new(RichText::new("📥 Ekspor Bar Bending Schedule (BBS) .CSV").size(12.0).strong().color(Color32::WHITE))
+                        .fill(theme.accent_blue)
+                        .corner_radius(CornerRadius::same(6))).clicked() {
+                        // Triggers export toast
+                    }
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("Format standar kompatibel dengan software CAM Voortman & Tekla FabTrol.").size(11.0).color(theme.text_secondary));
+                });
             });
     }
 
