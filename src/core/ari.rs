@@ -1,8 +1,8 @@
 //! ari.rs — Mesin Adjusted Redundancy Index (ARI) & Pengaman Kinematik Spektral.
 //! Diporting langsung dari repositori resmi: https://github.com/haridsirawan/Adjusted-Redundancy-Index
-//! Berdasarkan Naskah Disertasi Doktor:
+//! Berdasarkan Formulasi Resmi EigenGraph:
 //! "Pengembangan dan Validasi Adjusted Redundancy Index untuk Penapisan Pra-Analisis Skenario Gangguan Elemen pada Struktur Linear-Elastik"
-//! Oleh: Harids Irawan, S.T., M.T. (NIM 23051690001), Universitas Negeri Yogyakarta, 2026.
+//! Oleh: Harids Irawan, S.T., M.T., EigenGraph Platform, 2026.
 
 use std::collections::{HashMap, HashSet};
 use crate::core::linalg::Matrix;
@@ -10,7 +10,7 @@ use crate::core::model::StructuralModel;
 use crate::core::solver::FemSolver;
 
 // -----------------------------------------------------------------------------
-// KONSTANTA & PARAMETER KALIBRASI RESMI DISERTASI (Persamaan 2.6 - 2.19, 4.13b)
+// KONSTANTA & PARAMETER KALIBRASI RESMI EIGENGRAPH (Persamaan 2.6 - 2.19, 4.13b)
 // -----------------------------------------------------------------------------
 pub const EPS_W: f64 = 1e-9;          // Regularisasi biaya sisi elastis (Eq 2.8)
 pub const EPS_D: f64 = 1e-9;          // Regularisasi pembagi skor lintasan (Eq 2.9)
@@ -19,7 +19,7 @@ pub const BASELINE_TOL: f64 = 1e-12;  // Toleransi singularitas skor acuan
 pub const MARGIN_TOL: f64 = 1e-8;     // Toleransi batas pengaman stabilitas Sherman-Morrison m_e (Eq 4.2)
 pub const RANK_TOL: f64 = 1e-10;      // Toleransi rank relatif solver Gate 1
 
-/// Konfigurasi Parameter Analitis ARI (Naskah Disertasi Bab II & Bab IV)
+/// Konfigurasi Parameter Analitis ARI (Formulasi EigenGraph Bab II & Bab IV)
 #[derive(Debug, Clone)]
 pub struct AriConfig {
     pub alpha_k: f64,       // Koefisien bobot kekakuan elastis (Eq 2.7, default 0.50)
@@ -670,7 +670,7 @@ impl AriEngine {
 }
 
 // -----------------------------------------------------------------------------
-// 6. SUITE PENGUJIAN OTOMATIS DISERTASI
+// 6. SUITE PENGUJIAN OTOMATIS EIGENGRAPH
 // -----------------------------------------------------------------------------
 
 #[cfg(test)]

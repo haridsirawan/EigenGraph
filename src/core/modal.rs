@@ -12,7 +12,7 @@ pub enum SiteClass {
     SA, // Batuan Keras (Hard Rock)
     SB, // Batuan (Rock)
     SC, // Tanah Sangat Padat dan Batuan Lunak (Dense Soil)
-    SD, // Tanah Sedang (Stiff Soil) - Default Yogyakarta / Jawa
+    SD, // Tanah Sedang (Stiff Soil) - Default SNI 1726 / Jawa
     SE, // Tanah Lunak (Soft Clay)
 }
 

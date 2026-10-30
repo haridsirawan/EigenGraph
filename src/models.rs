@@ -1,59 +1,59 @@
-//! models.rs — Domain models and state definitions for EigenGraph.
+//! models.rs — Central Data Structures for EigenGraph.
+//! Contains model entities, navigation pillars, project catalogs, and UI state models.
 
 use serde::{Deserialize, Serialize};
 
-/// The Navigation Pillars of EigenGraph: My Library & 10-Dimensional BIM Lifecycles
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavigationPillar {
-    MyLibrary,               // 📁 My Library (Project Portfolio & Components Catalog)
-    ResearchConcept,         // 1D: Research & Concept
-    DraftingDrawings,        // 2D: Drafting & Drawings
-    ModelingGeometry,        // 3D: Modeling & Geometry
-    TimeScheduling,          // 4D: Time & Scheduling
-    CostBudgeting,           // 5D: Cost & Budgeting
-    SustainabilityEnergy,    // 6D: Sustainability & Energy
-    FacilityManagement,      // 7D: Facility Management
-    SafetyHealth,            // 8D: Safety/Health & Safety
-    LeanConstruction,        // 9D: Lean Construction
-    IndustrializedAutomation,// 10D: Industrialized Construction & Automation
+    MyLibrary,
+    ResearchConcept,
+    DraftingDrawings,
+    ModelingGeometry,
+    TimeScheduling,
+    CostBudgeting,
+    SustainabilityEnergy,
+    FacilityManagement,
+    SafetyHealth,
+    LeanConstruction,
+    IndustrializedAutomation,
 }
 
 impl NavigationPillar {
+    pub fn all() -> &'static [NavigationPillar] {
+        &[
+            NavigationPillar::MyLibrary,
+            NavigationPillar::ResearchConcept,
+            NavigationPillar::DraftingDrawings,
+            NavigationPillar::ModelingGeometry,
+            NavigationPillar::TimeScheduling,
+            NavigationPillar::CostBudgeting,
+            NavigationPillar::SustainabilityEnergy,
+            NavigationPillar::FacilityManagement,
+            NavigationPillar::SafetyHealth,
+            NavigationPillar::LeanConstruction,
+            NavigationPillar::IndustrializedAutomation,
+        ]
+    }
+
     pub fn title(&self) -> &'static str {
         match self {
-            Self::MyLibrary => "MY LIBRARY",
-            Self::ResearchConcept => "RESEARCH & CONCEPT",
-            Self::DraftingDrawings => "DRAFTING & DRAWINGS",
-            Self::ModelingGeometry => "MODELING & GEOMETRY",
-            Self::TimeScheduling => "TIME & SCHEDULING",
-            Self::CostBudgeting => "COST & BUDGETING",
-            Self::SustainabilityEnergy => "SUSTAINABILITY & ENERGY",
-            Self::FacilityManagement => "FACILITY MANAGEMENT",
-            Self::SafetyHealth => "SAFETY / HEALTH & SAFETY",
-            Self::LeanConstruction => "LEAN CONSTRUCTION",
-            Self::IndustrializedAutomation => "INDUSTRIALIZED & AUTOMATION",
+            Self::MyLibrary => "MY LIBRARY & CATALOG",
+            Self::ResearchConcept => "1. RESEARCH & CONCEPT",
+            Self::DraftingDrawings => "2. DRAFTING & 2D BLUEPRINTS",
+            Self::ModelingGeometry => "3. 3D MODELING & GEOMETRY",
+            Self::TimeScheduling => "4. TIME & 4D SCHEDULING",
+            Self::CostBudgeting => "5. COST & 5D BUDGETING",
+            Self::SustainabilityEnergy => "6. SUSTAINABILITY & 6D LCA",
+            Self::FacilityManagement => "7. FACILITY & 7D MANAGEMENT",
+            Self::SafetyHealth => "8. SAFETY & 8D RISK",
+            Self::LeanConstruction => "9. LEAN & 9D WASTE-OPTIMIZATION",
+            Self::IndustrializedAutomation => "10. AUTOMATION & 10D DfMA",
         }
     }
 
-    pub fn clean_name(&self) -> &'static str {
+    pub fn badge(&self) -> &'static str {
         match self {
-            Self::MyLibrary => "My Library",
-            Self::ResearchConcept => "Research & Concept",
-            Self::DraftingDrawings => "Drafting & Drawings",
-            Self::ModelingGeometry => "Modeling & Geometry",
-            Self::TimeScheduling => "Time & Scheduling",
-            Self::CostBudgeting => "Cost & Budgeting",
-            Self::SustainabilityEnergy => "Sustainability & Energy",
-            Self::FacilityManagement => "Facility Management",
-            Self::SafetyHealth => "Safety/Health & Safety",
-            Self::LeanConstruction => "Lean Construction",
-            Self::IndustrializedAutomation => "Industrialized & Automation",
-        }
-    }
-
-    pub fn dimension_tag(&self) -> &'static str {
-        match self {
-            Self::MyLibrary => "LIB",
+            Self::MyLibrary => "CATALOG",
             Self::ResearchConcept => "1D",
             Self::DraftingDrawings => "2D",
             Self::ModelingGeometry => "3D",
@@ -85,7 +85,7 @@ impl NavigationPillar {
 
     pub fn subtitle(&self) -> &'static str {
         match self {
-            Self::MyLibrary => "Project Catalog, Parametric Component Database & UNY Dissertation Audit Dossier.",
+            Self::MyLibrary => "Project Catalog, Parametric Component Database & EigenGraph Audit Dossier.",
             Self::ResearchConcept => "The foundational stage involving initial ideas, feasibility studies, regulatory checks, surveying data, and project guidelines.",
             Self::DraftingDrawings => "Traditional two-dimensional technical documentation showing X and Y axes, such as floor plans, elevations, sections, and blueprints.",
             Self::ModelingGeometry => "The creation of a digital three-dimensional model (length, width, height) allowing for spatial visualization and clash detection.",
@@ -100,136 +100,143 @@ impl NavigationPillar {
     }
 }
 
-/// CAD Drawing Tools in PARAMETRIC Free Drawing Studio
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CadTool {
-    Select,
-    Line,
-    Polyline,
-    Arc,
-    Circle,
-    Rectangle,
-    Dimension,
-    Trim,
-    Offset,
-}
-
-impl CadTool {
-    pub fn label_and_shortcut(&self) -> (&'static str, &'static str) {
-        match self {
-            Self::Select => ("👆 Select", "ESC"),
-            Self::Line => ("📏 Line", "L"),
-            Self::Polyline => ("〰️ Polyline", "PL"),
-            Self::Arc => ("⭕ Arc", "A"),
-            Self::Circle => ("⚪ Circle", "C"),
-            Self::Rectangle => ("▭ Rectangle", "REC"),
-            Self::Dimension => ("📐 Dimension", "DIM"),
-            Self::Trim => ("✂️ Trim", "TR"),
-            Self::Offset => ("↔️ Offset", "O"),
-        }
-    }
-}
-
-/// Parametric Driving Variable (e.g. L = 24.0m, H = L / 7.5, n = 6)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParametricVariable {
-    pub name: String,
-    pub expression: String,
-    pub evaluated_value: f32,
-    pub unit: String,
-}
-
-/// A Drawn Parametric Component saved into the Database
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseComponent {
-    pub id: String,
-    pub name: String,
-    pub category: String,
-    pub description: String,
-    pub variables: Vec<ParametricVariable>,
-    pub elements_count: usize,
-    pub created_at: String,
-}
-
-/// Unified Left Sidebar (Activity Bar) Tabs in BUILD Workspace (CAD/BIM Modeling & Inspection)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SidebarTab {
-    Properties,
-    ProjectBrowser,
-    Modify,
-    Layers,
-}
-
-impl SidebarTab {
-    pub fn icon_and_name(&self) -> (&'static str, &'static str) {
-        match self {
-            Self::Properties => ("⚙️", "Properties Inspector"),
-            Self::ProjectBrowser => ("📁", "Project Browser"),
-            Self::Modify => ("🛠️", "Modify Tools"),
-            Self::Layers => ("📑", "Display Layers"),
-        }
-    }
-}
-
-/// Project Item in Mac App Store style Catalog
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectItem {
-    pub id: String,
-    pub title: String,
-    pub category: String,
-    pub description: String,
-    pub elements_count: usize,
-    pub nodes_count: usize,
-    pub min_ari: f32,
-    pub max_deflection_mm: f32,
-    pub status: ProjectStatus,
-    pub last_modified: String,
-    pub is_favorite: bool,
-    pub is_featured: bool,
-    pub tag: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectStatus {
-    Safe,
-    ReviewNeeded,
-    CriticalMechanism,
+    Designed,
+    UnderReview,
+    Approved,
+    Archived,
 }
 
 impl ProjectStatus {
     pub fn badge_label(&self) -> &'static str {
         match self {
-            Self::Safe => "🟢 ARI Safe",
-            Self::ReviewNeeded => "🟡 Review Needed",
-            Self::CriticalMechanism => "🔴 Mechanism Warning",
+            Self::Designed => "DESIGNED",
+            Self::UnderReview => "UNDER REVIEW",
+            Self::Approved => "APPROVED",
+            Self::Archived => "ARCHIVED",
         }
     }
 }
 
-/// Structural Element for the Build and Analyze views
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+pub struct ProjectItem {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub last_modified: String,
+    pub status: ProjectStatus,
+    pub elements_count: usize,
+    pub nodes_count: usize,
+    pub max_deflection_mm: f64,
+    pub min_ari: f64,
+}
+
+#[derive(Debug, Clone)]
 pub struct StructuralMember {
     pub id: usize,
     pub name: String,
     pub section: String,
-    pub force_kn: f32,
-    pub capacity_kn: f32,
-    pub utilization: f32,
-    pub moment_my_knm: f32,
-    pub moment_mz_knm: f32,
-    pub shear_vy_kn: f32,
-    pub dcr_interaction: f32,
-    pub rr: f32,
-    pub ari: f32,
-    pub ci: f32,
-    pub svd_margin: f32,
+    pub material: String,
+    pub length: f64,
+    pub axial_force_kn: f64,
+    pub capacity_kn: f64,
+    pub utilization: f64,
+    pub ari_score: f64,
+    pub criticality_index: f64,
     pub is_critical: bool,
 }
 
-/// Chat message with EigenAI
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ChatMessage {
     pub is_user: bool,
     pub message: String,
     pub time: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SidebarTab {
+    Geometry,
+    Sections,
+    Materials,
+    Loads,
+    Settings,
+}
+
+/// A stored parametric structural component in the local database library
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseComponent {
+    pub id: String,
+    pub name: String,
+    pub category: String, // e.g. "Truss", "Portal Frame", "Space Frame"
+    pub description: String,
+    pub span_m: f64,
+    pub height_m: f64,
+    pub divisions: usize,
+    pub default_section: String,
+    pub driving_formula: String, // e.g. "H = L / 7.5"
+    pub elements_count: usize,
+    pub nodes_count: usize,
+    pub est_weight_ton: f64,
+    pub min_system_ari: f64,
+    pub created_at: String,
+}
+
+impl DatabaseComponent {
+    pub fn warren_truss_default() -> Self {
+        Self {
+            id: "comp_warren_24m".to_string(),
+            name: "Standard Warren Girder (24m)".to_string(),
+            category: "Steel Truss".to_string(),
+            description: "24m modular Warren steel bridge truss with diagonal braces and top chord loads.".to_string(),
+            span_m: 24.0,
+            height_m: 3.2,
+            divisions: 6,
+            default_section: "W14x90".to_string(),
+            driving_formula: "H = L / 7.5".to_string(),
+            elements_count: 25,
+            nodes_count: 14,
+            est_weight_ton: 12.8,
+            min_system_ari: 0.942,
+            created_at: "2026-10-30".to_string(),
+        }
+    }
+
+    pub fn pratt_truss_default() -> Self {
+        Self {
+            id: "comp_pratt_30m".to_string(),
+            name: "Industrial Pratt Roof Truss (30m)".to_string(),
+            category: "Roof Structure".to_string(),
+            description: "30m heavy industrial pitched roof truss with vertical tension and diagonal compression ties.".to_string(),
+            span_m: 30.0,
+            height_m: 4.5,
+            divisions: 8,
+            default_section: "W12x65".to_string(),
+            driving_formula: "H = L / 6.67".to_string(),
+            elements_count: 33,
+            nodes_count: 18,
+            est_weight_ton: 18.4,
+            min_system_ari: 0.915,
+            created_at: "2026-10-30".to_string(),
+        }
+    }
+
+    pub fn diagrid_module_default() -> Self {
+        Self {
+            id: "comp_diagrid_48m".to_string(),
+            name: "High-Rise Diagrid Perimeter Module".to_string(),
+            category: "Space Frame".to_string(),
+            description: "Modular triangular interlocking diagrid system for tall building wind/seismic shear resistance.".to_string(),
+            span_m: 18.0,
+            height_m: 12.0,
+            divisions: 4,
+            default_section: "HSS16x16x0.5".to_string(),
+            driving_formula: "θ = 65° (Optimum Diagrid Angle)".to_string(),
+            elements_count: 42,
+            nodes_count: 20,
+            est_weight_ton: 26.5,
+            min_system_ari: 0.968,
+            created_at: "2026-10-30".to_string(),
+        }
+    }
 }
