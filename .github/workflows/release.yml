@@ -4,9 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 jobs:
   build-macos:
+    name: Build & Publish macOS DMG
     runs-on: macos-14
     permissions:
       contents: write
@@ -23,7 +25,7 @@ jobs:
       - name: Build Release Binary
         run: cargo build --release
 
-      - name: Package App Bundle & DMG
+      - name: Package macOS App Bundle & DMG
         run: |
           mkdir -p "EigenGraph.app/Contents/MacOS"
           mkdir -p "EigenGraph.app/Contents/Resources"
@@ -31,11 +33,25 @@ jobs:
           if [ -f "assets/icon.png" ]; then
             cp assets/icon.png "EigenGraph.app/Contents/Resources/"
           fi
-          hdiutil create -volname "EigenGraph" -srcfolder "EigenGraph.app" -ov -format UDZO "EigenGraph-v1.0.0.dmg"
+          
+          # Create professional staging folder with /Applications symlink
+          mkdir -p dmg_staging
+          cp -R "EigenGraph.app" dmg_staging/
+          ln -s /Applications dmg_staging/Applications
+          
+          TAG_NAME="${{ github.ref_name }}"
+          if [ -z "$TAG_NAME" ]; then
+            TAG_NAME="v1.0.0"
+          fi
+          
+          hdiutil create -volname "EigenGraph" -srcfolder "dmg_staging" -ov -format UDZO "EigenGraph-${TAG_NAME}.dmg"
+          rm -rf dmg_staging
 
-      - name: Upload Release Asset
+      - name: Create GitHub Release & Upload Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: EigenGraph-v1.0.0.dmg
+          name: "EigenGraph ${{ github.ref_name }}"
+          generate_release_notes: true
+          files: EigenGraph-*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -28,6 +28,7 @@ pub struct EigenGraphApp {
     pub industrialized_view: IndustrializedView, // 10D: Industrialized Construction & Automation
     pub settings_view: SettingsView,
     pub ai_assistant_view: AiAssistantView,
+    pub updater: crate::updater::AppUpdater,
 
     // Domain Data & Parametric Component Database
     pub projects: Vec<ProjectItem>,
@@ -54,6 +55,7 @@ impl Default for EigenGraphApp {
             industrialized_view: IndustrializedView::default(),
             settings_view: SettingsView::default(),
             ai_assistant_view: AiAssistantView::default(),
+            updater: crate::updater::AppUpdater::default(),
 
             projects: vec![
                 ProjectItem {
@@ -316,9 +318,15 @@ impl App for EigenGraphApp {
                     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
                         ui.add_space(10.0);
 
-                        // Version & Tech stack
+                        // Version & Tech stack with Update checker button
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("v1.0.0 • Metal GPU 60 FPS").size(10.0).color(self.theme.text_muted));
+                            ui.add_space(4.0);
+                            if ui.add(egui::Button::new(RichText::new("🚀 Update").size(9.5).color(self.theme.accent_blue))
+                                .fill(self.theme.bg_card)
+                                .corner_radius(CornerRadius::same(4))).on_hover_text("Periksa rilis pembaruan di GitHub").clicked() {
+                                self.updater.check_for_updates();
+                            }
                         });
 
                         ui.add_space(6.0);
@@ -362,7 +370,7 @@ impl App for EigenGraphApp {
                 ui.label(RichText::new("—").size(12.0).color(self.theme.text_muted));
                 ui.label(RichText::new(self.active_pillar.subtitle()).size(12.0).color(self.theme.text_secondary));
 
-                // Global Search Box & Copilot Toggle in Toolbar
+                // Global Search Box, Update Button & Copilot Toggle in Toolbar
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.add(egui::Button::new(RichText::new("🤖 Ask AI (⌘K)").size(11.5).strong().color(self.theme.accent_blue))
                         .fill(self.theme.bg_card)
@@ -370,11 +378,19 @@ impl App for EigenGraphApp {
                         self.ai_assistant_view.expanded = !self.ai_assistant_view.expanded;
                     }
 
+                    ui.add_space(6.0);
+
+                    if ui.add(egui::Button::new(RichText::new("🚀 Update").size(11.5).color(self.theme.text_secondary))
+                        .fill(self.theme.bg_card)
+                        .corner_radius(CornerRadius::same(6))).on_hover_text("Periksa rilis pembaruan di GitHub").clicked() {
+                        self.updater.check_for_updates();
+                    }
+
                     ui.add_space(8.0);
 
                     ui.add(egui::TextEdit::singleline(&mut self.search_query)
                         .hint_text("🔍 Filter workspace...")
-                        .desired_width(160.0));
+                        .desired_width(150.0));
                 });
             });
         });
@@ -439,5 +455,8 @@ impl App for EigenGraphApp {
             &self.projects,
             &mut self.db_components,
         );
+
+        // 6. MACOS SOFTWARE UPDATE MODAL (If Triggered)
+        self.updater.render_modal(ui.ctx(), &self.theme);
     }
 }
