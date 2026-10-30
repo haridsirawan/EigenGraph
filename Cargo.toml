@@ -1,0 +1,32 @@
+[package]
+name = "eigengraph"
+version = "1.0.0"
+edition = "2021"
+authors = ["Harids Irawan <harids.irawan@gmail.com>"]
+description = "EigenGraph - Desktop BIM & Structural Graph Analytics with Mac App Store UI"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/haridsirawan/EigenGraph"
+
+[dependencies]
+eframe = { version = "0.36", default-features = false, features = [
+    "default_fonts",
+    "glow",
+] }
+egui = "0.36"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[lib]
+name = "eigengraph"
+path = "src/lib.rs"
+
+[[bin]]
+name = "eigengraph"
+path = "src/main.rs"
