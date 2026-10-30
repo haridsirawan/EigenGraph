@@ -200,7 +200,7 @@ impl App for EigenGraphApp {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("⚛️ EigenGraph").size(16.0).strong().color(Color32::WHITE));
                     });
-                    ui.label(RichText::new("BIM & Structural Analytics").size(10.0).color(self.theme.text_muted));
+                    ui.label(RichText::new("BIM & Adjusted Redundancy Index").size(10.0).color(self.theme.accent_blue));
 
                     ui.add_space(20.0);
 
