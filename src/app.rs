@@ -5,19 +5,26 @@ use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, Panel, CentralPa
 
 use crate::models::{DatabaseComponent, NavigationPillar, ParametricVariable, ProjectItem, ProjectStatus, StructuralMember};
 use crate::theme::MacTheme;
-use crate::views::{AiAssistantView, AnalyzeView, BuildView, MyProjectView, ParametricView, PlanningView, SettingsView};
+use crate::views::{
+    AiAssistantView, AnalyzeView, BuildView, FacilityView, IndustrializedView, LeanView,
+    MyProjectView, ParametricView, PlanningView, SettingsView, SustainabilityView,
+};
 
 pub struct EigenGraphApp {
     pub theme: MacTheme,
     pub active_pillar: NavigationPillar,
     pub search_query: String,
 
-    // Views
-    pub my_project_view: MyProjectView,
-    pub parametric_view: ParametricView,
-    pub build_view: BuildView,
-    pub analyze_view: AnalyzeView,
-    pub planning_view: PlanningView,
+    // 10D BIM & Lifecycle Views
+    pub my_project_view: MyProjectView,         // 1D: Research & Concept
+    pub parametric_view: ParametricView,         // 2D: Drafting & Drawings
+    pub build_view: BuildView,                   // 3D: Modeling & Geometry
+    pub planning_view: PlanningView,             // 4D (Time & Scheduling) & 5D (Cost & Budgeting)
+    pub sustainability_view: SustainabilityView, // 6D: Sustainability & Energy
+    pub facility_view: FacilityView,             // 7D: Facility Management
+    pub analyze_view: AnalyzeView,               // 8D: Safety/Health & Safety
+    pub lean_view: LeanView,                     // 9D: Lean Construction
+    pub industrialized_view: IndustrializedView, // 10D: Industrialized Construction & Automation
     pub settings_view: SettingsView,
     pub ai_assistant_view: AiAssistantView,
 
@@ -31,14 +38,18 @@ impl Default for EigenGraphApp {
     fn default() -> Self {
         Self {
             theme: MacTheme::default(),
-            active_pillar: NavigationPillar::MyProject,
+            active_pillar: NavigationPillar::ResearchConcept,
             search_query: String::new(),
 
             my_project_view: MyProjectView::default(),
             parametric_view: ParametricView::default(),
             build_view: BuildView::default(),
-            analyze_view: AnalyzeView::default(),
             planning_view: PlanningView::default(),
+            sustainability_view: SustainabilityView::default(),
+            facility_view: FacilityView::default(),
+            analyze_view: AnalyzeView::default(),
+            lean_view: LeanView::default(),
+            industrialized_view: IndustrializedView::default(),
             settings_view: SettingsView::default(),
             ai_assistant_view: AiAssistantView::default(),
 
@@ -196,7 +207,7 @@ impl App for EigenGraphApp {
         // 1. APPLE-STYLE FULL-HEIGHT LEFT NAVIGATION SIDEBAR
         // Calling Panel::left FIRST ensures it extends all the way from the top (y=0) to the bottom of the window.
         Panel::left("mac_navigation_sidebar")
-            .exact_size(210.0)
+            .exact_size(248.0)
             .resizable(false)
             .frame(self.theme.mac_sidebar_frame())
             .show(ui, |ui| {
@@ -212,28 +223,32 @@ impl App for EigenGraphApp {
                         painter.circle_filled(rect.left_top() + Vec2::new(38.0, 7.0), 5.5, Color32::from_rgb(40, 200, 64));
                     });
 
-                    ui.add_space(16.0);
+                    ui.add_space(14.0);
 
                     // App Identity / Branding
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("⚛️ EigenGraph").size(16.0).strong().color(Color32::WHITE));
+                        ui.label(RichText::new("⚛️ EigenGraph").size(15.5).strong().color(Color32::WHITE));
                     });
-                    ui.label(RichText::new("BIM & Adjusted Redundancy Index").size(10.0).color(self.theme.accent_blue));
+                    ui.label(RichText::new("10D BIM & Adjusted Redundancy Index").size(10.0).color(self.theme.accent_blue));
 
-                    ui.add_space(20.0);
+                    ui.add_space(16.0);
 
                     // Workspaces Section Header
-                    ui.label(RichText::new("WORKSPACES").size(10.0).strong().color(self.theme.text_muted));
-                    ui.add_space(6.0);
+                    ui.label(RichText::new("LIFECYCLE WORKSPACES (1D–10D)").size(9.5).strong().color(self.theme.text_muted));
+                    ui.add_space(5.0);
 
-                    // 6 Navigation Pillars (Apple Sidebar Capsule Buttons)
+                    // 10 Navigation Pillars (Apple Sidebar Capsule Buttons with Dimension Badges)
                     let pillars = [
-                        NavigationPillar::MyProject,
-                        NavigationPillar::Parametric,
-                        NavigationPillar::Build,
-                        NavigationPillar::Analyze,
-                        NavigationPillar::Planning,
-                        NavigationPillar::Settings,
+                        NavigationPillar::ResearchConcept,
+                        NavigationPillar::DraftingDrawings,
+                        NavigationPillar::ModelingGeometry,
+                        NavigationPillar::TimeScheduling,
+                        NavigationPillar::CostBudgeting,
+                        NavigationPillar::SustainabilityEnergy,
+                        NavigationPillar::FacilityManagement,
+                        NavigationPillar::SafetyHealth,
+                        NavigationPillar::LeanConstruction,
+                        NavigationPillar::IndustrializedAutomation,
                     ];
 
                     for p in pillars {
@@ -249,21 +264,45 @@ impl App for EigenGraphApp {
                             self.theme.text_secondary
                         };
 
-                        let btn_text = format!("{}   {}", p.icon(), p.clean_name());
-                        let btn = egui::Button::new(
-                            RichText::new(btn_text)
-                                .size(13.0)
-                                .strong()
-                                .color(fg),
-                        )
-                        .fill(bg)
-                        .corner_radius(CornerRadius::same(8))
-                        .min_size(Vec2::new(ui.available_width(), 34.0));
+                        let badge_bg = if is_active {
+                            Color32::from_white_alpha(45)
+                        } else {
+                            self.theme.bg_card
+                        };
+                        let badge_fg = if is_active {
+                            Color32::WHITE
+                        } else {
+                            self.theme.accent_blue
+                        };
 
-                        if ui.add(btn).clicked() {
+                        let response = Frame::new()
+                            .fill(bg)
+                            .corner_radius(CornerRadius::same(7))
+                            .inner_margin(Margin::symmetric(7, 5))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.horizontal(|ui| {
+                                    // Dimension tag pill
+                                    Frame::new()
+                                        .fill(badge_bg)
+                                        .corner_radius(CornerRadius::same(4))
+                                        .inner_margin(Margin::symmetric(4, 1))
+                                        .show(ui, |ui| {
+                                            ui.label(RichText::new(p.dimension_tag()).size(9.0).strong().color(badge_fg));
+                                        });
+
+                                    ui.add_space(2.0);
+                                    ui.label(RichText::new(p.icon()).size(12.0));
+                                    ui.add_space(2.0);
+                                    ui.label(RichText::new(p.clean_name()).size(11.5).strong().color(fg));
+                                });
+                            });
+
+                        let interact = ui.interact(response.response.rect, response.response.id, egui::Sense::click());
+                        if interact.clicked() {
                             self.active_pillar = p;
                         }
-                        ui.add_space(3.0);
+                        ui.add_space(1.5);
                     }
 
                     ui.add_space(16.0);
@@ -359,26 +398,49 @@ impl App for EigenGraphApp {
             });
         });
 
-        // 4. CENTRAL PANEL (Views Router)
+        // 4. CENTRAL PANEL (Views Router for 10D BIM Dimensions)
         CentralPanel::default().frame(Frame::new().fill(self.theme.bg_canvas)).show(ui, |ui| {
             match self.active_pillar {
-                NavigationPillar::MyProject => {
+                NavigationPillar::ResearchConcept => {
                     self.my_project_view.show(ui, &self.theme, &self.projects, &mut self.active_pillar);
                 }
-                NavigationPillar::Parametric => {
+                NavigationPillar::DraftingDrawings => {
                     self.parametric_view.show(ui, &self.theme, &mut self.db_components, &mut self.active_pillar);
                 }
-                NavigationPillar::Build => {
+                NavigationPillar::ModelingGeometry => {
                     self.build_view.show(ui, &self.theme, &self.members, &self.db_components);
                 }
-                NavigationPillar::Analyze => {
-                    self.analyze_view.show(ui, &self.theme, &self.members);
-                }
-                NavigationPillar::Planning => {
+                NavigationPillar::TimeScheduling => {
+                    if self.planning_view.active_subtab != crate::views::planning::PlanningSubTab::Schedule4d
+                        && self.planning_view.active_subtab != crate::views::planning::PlanningSubTab::StagedErectionSvd
+                    {
+                        self.planning_view.active_subtab = crate::views::planning::PlanningSubTab::Schedule4d;
+                    }
                     self.planning_view.show(ui, &self.theme, &self.parametric_view.variables, &self.members);
                 }
-                NavigationPillar::Settings => {
-                    self.settings_view.show(ui, &self.theme);
+                NavigationPillar::CostBudgeting => {
+                    if self.planning_view.active_subtab != crate::views::planning::PlanningSubTab::DynamicRab
+                        && self.planning_view.active_subtab != crate::views::planning::PlanningSubTab::TakeoffQto
+                        && self.planning_view.active_subtab != crate::views::planning::PlanningSubTab::CostAriTradeoff
+                    {
+                        self.planning_view.active_subtab = crate::views::planning::PlanningSubTab::DynamicRab;
+                    }
+                    self.planning_view.show(ui, &self.theme, &self.parametric_view.variables, &self.members);
+                }
+                NavigationPillar::SustainabilityEnergy => {
+                    self.sustainability_view.show(ui, &self.theme, &self.members);
+                }
+                NavigationPillar::FacilityManagement => {
+                    self.facility_view.show(ui, &self.theme, &self.members);
+                }
+                NavigationPillar::SafetyHealth => {
+                    self.analyze_view.show(ui, &self.theme, &self.members);
+                }
+                NavigationPillar::LeanConstruction => {
+                    self.lean_view.show(ui, &self.theme, &self.members);
+                }
+                NavigationPillar::IndustrializedAutomation => {
+                    self.industrialized_view.show(ui, &self.theme, &self.members);
                 }
             }
         });

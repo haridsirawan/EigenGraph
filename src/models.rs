@@ -2,59 +2,94 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The Top-Level Navigation Pillars of EigenGraph
+/// The 10-Dimensional BIM & Lifecycle Navigation Pillars of EigenGraph
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NavigationPillar {
-    MyProject,
-    Parametric,
-    Build,
-    Analyze,
-    Planning,
-    Settings,
+    ResearchConcept,         // 1D: Research & Concept
+    DraftingDrawings,        // 2D: Drafting & Drawings
+    ModelingGeometry,        // 3D: Modeling & Geometry
+    TimeScheduling,          // 4D: Time & Scheduling
+    CostBudgeting,           // 5D: Cost & Budgeting
+    SustainabilityEnergy,    // 6D: Sustainability & Energy
+    FacilityManagement,      // 7D: Facility Management
+    SafetyHealth,            // 8D: Safety/Health & Safety
+    LeanConstruction,        // 9D: Lean Construction
+    IndustrializedAutomation,// 10D: Industrialized Construction & Automation
 }
 
 impl NavigationPillar {
     pub fn title(&self) -> &'static str {
         match self {
-            Self::MyProject => "MY PROJECT",
-            Self::Parametric => "PARAMETRIC",
-            Self::Build => "BUILD",
-            Self::Analyze => "ANALYZE",
-            Self::Planning => "PLANNING",
-            Self::Settings => "SETTINGS",
+            Self::ResearchConcept => "RESEARCH & CONCEPT",
+            Self::DraftingDrawings => "DRAFTING & DRAWINGS",
+            Self::ModelingGeometry => "MODELING & GEOMETRY",
+            Self::TimeScheduling => "TIME & SCHEDULING",
+            Self::CostBudgeting => "COST & BUDGETING",
+            Self::SustainabilityEnergy => "SUSTAINABILITY & ENERGY",
+            Self::FacilityManagement => "FACILITY MANAGEMENT",
+            Self::SafetyHealth => "SAFETY / HEALTH & SAFETY",
+            Self::LeanConstruction => "LEAN CONSTRUCTION",
+            Self::IndustrializedAutomation => "INDUSTRIALIZED & AUTOMATION",
         }
     }
 
     pub fn clean_name(&self) -> &'static str {
         match self {
-            Self::MyProject => "My Project",
-            Self::Parametric => "Parametric",
-            Self::Build => "Build",
-            Self::Analyze => "Analyze",
-            Self::Planning => "Planning",
-            Self::Settings => "Settings",
+            Self::ResearchConcept => "Research & Concept",
+            Self::DraftingDrawings => "Drafting & Drawings",
+            Self::ModelingGeometry => "Modeling & Geometry",
+            Self::TimeScheduling => "Time & Scheduling",
+            Self::CostBudgeting => "Cost & Budgeting",
+            Self::SustainabilityEnergy => "Sustainability & Energy",
+            Self::FacilityManagement => "Facility Management",
+            Self::SafetyHealth => "Safety/Health & Safety",
+            Self::LeanConstruction => "Lean Construction",
+            Self::IndustrializedAutomation => "Industrialized & Automation",
+        }
+    }
+
+    pub fn dimension_tag(&self) -> &'static str {
+        match self {
+            Self::ResearchConcept => "1D",
+            Self::DraftingDrawings => "2D",
+            Self::ModelingGeometry => "3D",
+            Self::TimeScheduling => "4D",
+            Self::CostBudgeting => "5D",
+            Self::SustainabilityEnergy => "6D",
+            Self::FacilityManagement => "7D",
+            Self::SafetyHealth => "8D",
+            Self::LeanConstruction => "9D",
+            Self::IndustrializedAutomation => "10D",
         }
     }
 
     pub fn icon(&self) -> &'static str {
         match self {
-            Self::MyProject => "📁",
-            Self::Parametric => "📐",
-            Self::Build => "🏗️",
-            Self::Analyze => "⚡",
-            Self::Planning => "📊",
-            Self::Settings => "⚙️",
+            Self::ResearchConcept => "💡",
+            Self::DraftingDrawings => "📐",
+            Self::ModelingGeometry => "🏗️",
+            Self::TimeScheduling => "⏱️",
+            Self::CostBudgeting => "💰",
+            Self::SustainabilityEnergy => "🌱",
+            Self::FacilityManagement => "🏢",
+            Self::SafetyHealth => "🛡️",
+            Self::LeanConstruction => "♻️",
+            Self::IndustrializedAutomation => "🤖",
         }
     }
 
     pub fn subtitle(&self) -> &'static str {
         match self {
-            Self::MyProject => "Portfolio & Client Presentation",
-            Self::Parametric => "AutoCAD Free Drawing & Parametric Database",
-            Self::Build => "3D Assembly Canvas & Modeling Workspace",
-            Self::Analyze => "Structural Health & SVD Guard",
-            Self::Planning => "5D BIM Construction Planning, RAB & Erection Schedule",
-            Self::Settings => "Preferences & Integrations",
+            Self::ResearchConcept => "The foundational stage involving initial ideas, feasibility studies, regulatory checks, surveying data, and project guidelines.",
+            Self::DraftingDrawings => "Traditional two-dimensional technical documentation showing X and Y axes, such as floor plans, elevations, sections, and blueprints.",
+            Self::ModelingGeometry => "The creation of a digital three-dimensional model (length, width, height) allowing for spatial visualization and clash detection.",
+            Self::TimeScheduling => "The integration of project timelines and construction sequences into the 3D model to simulate the building process over time.",
+            Self::CostBudgeting => "The tracking of cost, dynamic quantity take-offs (QTO), and financial estimates directly linked to the digital model.",
+            Self::SustainabilityEnergy => "The analysis of energy efficiency, carbon footprint, environmental impact, and green building certification requirements.",
+            Self::FacilityManagement => "The lifecycle operation and maintenance data used by building owners to manage assets, repairs, and components after construction is complete.",
+            Self::SafetyHealth => "The integration of accident prevention strategies, site risk assessments, and emergency planning into the construction design.",
+            Self::LeanConstruction => "The optimization of the construction process to minimize material waste, streamline workflow, and maximize production efficiency.",
+            Self::IndustrializedAutomation => "The integration of Industry 4.0 technologies, including prefabrication, robotics, 3D printing, and automated site processes.",
         }
     }
 }

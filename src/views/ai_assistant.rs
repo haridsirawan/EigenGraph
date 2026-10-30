@@ -228,39 +228,58 @@ impl AiAssistantView {
 
     pub fn get_chips_for_pillar(pillar: NavigationPillar) -> &'static [(&'static str, &'static str)] {
         match pillar {
-            NavigationPillar::MyProject => &[
+            NavigationPillar::ResearchConcept => &[
                 ("📑 Ringkasan Portofolio", "Summarize all projects and compare redundancy indices across the portfolio."),
                 ("📜 Sertifikat Audit Disertasi", "Buka dan cetak Surat Hasil Audit Redundansi Struktural UNY 2026."),
                 ("📊 Rank by Safety", "Sort projects by minimum ARI score and deflection criteria."),
             ],
-            NavigationPillar::Parametric => &[
+            NavigationPillar::DraftingDrawings => &[
                 ("🪄 Rekomendasi Bracing ARI", "Jalankan AI-ARI Topology Suggestion untuk eliminasi titik rawan runtuh."),
                 ("📐 Warren Truss 24m", "Generate parametric Warren truss with L=24m, H=3.2m, n=6."),
                 ("🔗 Bind H = L / 7.5", "Apply driving formula constraint between height and span."),
                 ("💾 Save to DB", "Save drawn parametric component into project database."),
             ],
-            NavigationPillar::Build => &[
+            NavigationPillar::ModelingGeometry => &[
                 ("💥 Uji Disrupsi Jamak (N-2)", "Simulasikan pelepasan 2 batang sekaligus dan deteksi efek domino runtuh."),
                 ("⚡ Check SVD Mechanism", "Run full singular value decomposition rank verification on the current structure."),
                 ("🎯 Screen Critical ARI", "Screen all members to find the lowest Adjusted Redundancy Index contributions."),
                 ("📐 Warren Truss 24m", "Instantiate a 24m span Warren truss with 6 panels into workspace."),
             ],
-            NavigationPillar::Analyze => &[
+            NavigationPillar::TimeScheduling => &[
+                ("🏗️ Cek Keamanan Ereksi 4D", "Simulasikan kestabilan dan nilai ARI pada setiap tahapan perakitan di lapangan."),
+                ("📊 Ekspor Kurva S 4D", "Generate 4D erection schedule, CPM critical path, and weekly cashflow S-Curve."),
+                ("⏱️ Tahap Kritis Cantilever", "Verifikasi ketiadaan singularitas SVD pada tahap ereksi kantilever."),
+            ],
+            NavigationPillar::CostBudgeting => &[
+                ("💰 Hitung Otomatis RAB 5D", "Calculate full 5D construction estimate based on active parametric variables."),
+                ("📈 Trade-Off Cost vs ARI", "Evaluate budget impact to increase system Adjusted Redundancy Index."),
+                ("📑 Rincian AHSP Baja", "Tampilkan analisa harga satuan pekerjaan fabrikasi dan ereksi baja."),
+            ],
+            NavigationPillar::SustainabilityEnergy => &[
+                ("🌱 Hitung Jejak Karbon CO₂e", "Hitung total emisi karbon embodied material baja dan beton bertulang."),
+                ("📈 Trade-Off Karbon vs ARI", "Tampilkan kurva optimasi keseimbangan redundansi terhadap jejak emisi."),
+                ("🏅 Prediksi Skor GBCI/LEED", "Simulasikan perolehan sertifikasi bangunan hijau untuk proyek ini."),
+            ],
+            NavigationPillar::FacilityManagement => &[
+                ("📡 Baca Sensor SHM Realtime", "Tampilkan telemetri strain gauge dan frekuensi alami jembatan."),
+                ("📉 Evaluasi Degradasi ARI(t)", "Monitor laju degradasi redundansi akibat penuaan dan kelelahan siklik."),
+                ("🛠️ Terbitkan SPK Pemeliharaan", "Terbitkan perintah kerja inspeksi jika ARI turun di bawah ambang aman."),
+            ],
+            NavigationPillar::SafetyHealth => &[
                 ("📐 Evaluasi Interaksi P-M-V", "Hitung kapasitas gabungan aksial, momen lentur, dan geser LRFD."),
                 ("💥 Matriks Disrupsi Ganda (N-2)", "Evaluasi kestabilan dan efek cascading jika 2 batang hilang sekaligus."),
                 ("🚨 Top 5 Batang Paling Kritis", "Tampilkan peringkat 5 elemen penopang paling rawan memicu keruntuhan."),
-                ("🌐 Trace Lintasan Multigraf", "Telusuri K-disjoint paths Teorema Menger dari beban ke tumpuan."),
+                ("🛡️ Rencana Mitigasi Keruntuhan", "Tampilkan protokol keselamatan pencegahan keruntuhan progresif."),
             ],
-            NavigationPillar::Planning => &[
-                ("🏗️ Cek Keamanan Ereksi 4D", "Simulasikan kestabilan dan nilai ARI pada setiap tahapan perakitan di lapangan."),
-                ("💰 Hitung Otomatis RAB 5D", "Calculate full 5D construction estimate based on active parametric variables."),
-                ("📈 Trade-Off Cost vs ARI", "Evaluate budget impact to increase system Adjusted Redundancy Index."),
-                ("📊 Ekspor Kurva S 4D", "Generate 4D erection schedule, CPM critical path, and weekly cashflow S-Curve."),
+            NavigationPillar::LeanConstruction => &[
+                ("✂️ Optimasi Potong Baja 12m", "Jalankan 1D Cutting Stock Optimizer untuk menekan sisa limbah scrap."),
+                ("📋 Last Planner System PPC", "Cek persentase kepatuhan komitmen mingguan dan sound lookahead."),
+                ("🌊 Eliminasi 7 Pemborosan", "Identifikasi aktivitas non-value-added pada rantai pasok ereksi."),
             ],
-            NavigationPillar::Settings => &[
-                ("🔑 Test Gemini API", "Test connection to Google Gemini 2.5 Flash API endpoint."),
-                ("📐 SNI 1729 / AISC LRFD", "Switch active standard to SNI 1729:2020 / AISC 360-16 LRFD."),
-                ("⚙️ SVD Tol (1e-7)", "Set singular value cutoff tolerance to 1e-7."),
+            NavigationPillar::IndustrializedAutomation => &[
+                ("🏭 Verifikasi Modul DfMA", "Periksa batas dimensi transportasi jalan raya trailer untuk modul 12m."),
+                ("🦾 Toolpath Pengelasan Robotik", "Simulasikan jalur las otomatis robot 6-axis pada pelat buhul."),
+                ("🌐 Ekspor OpenBIM IFC 4.3", "Ekspor topologi struktur dan metadata ARI ke standar IFC buildingSMART."),
             ],
         }
     }

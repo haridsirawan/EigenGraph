@@ -83,7 +83,7 @@ impl MyProjectView {
                             .fill(theme.accent_blue)
                             .corner_radius(CornerRadius::same(8))
                             ).clicked() {
-                            *active_pillar = NavigationPillar::Build;
+                            *active_pillar = NavigationPillar::ModelingGeometry;
                         }
 
                         if ui.add(egui::Button::new(RichText::new("📜 Cetak Sertifikat Audit Disertasi").strong().color(Color32::WHITE))
@@ -173,7 +173,7 @@ impl MyProjectView {
                             if ui.add(egui::Button::new(RichText::new("Open").size(12.0).color(Color32::WHITE))
                                 .fill(theme.accent_blue)
                                 .corner_radius(CornerRadius::same(6))).clicked() {
-                                *active_pillar = NavigationPillar::Build;
+                                *active_pillar = NavigationPillar::ModelingGeometry;
                             }
                         });
                     });

@@ -220,7 +220,7 @@ impl ParametricView {
                         if ui.add(egui::Button::new(RichText::new("Open in BUILD →").size(12.0).strong().color(Color32::WHITE))
                             .fill(theme.accent_blue.gamma_multiply(0.8))
                             .corner_radius(CornerRadius::same(6))).clicked() {
-                            *active_pillar = NavigationPillar::Build;
+                            *active_pillar = NavigationPillar::ModelingGeometry;
                         }
 
                         // Save to Database Button
@@ -305,7 +305,7 @@ impl ParametricView {
                     .fill(theme.accent_blue)
                     .corner_radius(CornerRadius::same(6))
                     .min_size(Vec2::new(ui.available_width(), 30.0))).clicked() {
-                    *active_pillar = NavigationPillar::Planning;
+                    *active_pillar = NavigationPillar::CostBudgeting;
                 }
 
                 ui.add_space(10.0);

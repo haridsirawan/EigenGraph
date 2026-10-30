@@ -35,7 +35,7 @@
 3. [Hasil Verifikasi Kanonik & Benchmark Numerik](#-hasil-verifikasi-kanonik--benchmark-numerik)
    - [Verifikasi Analitis Model M1 (Parallel Bars - Tabel 25)](#verifikasi-analitis-model-m1-parallel-bars---tabel-25)
    - [Evaluasi Skala Penuh: Model M1–M4 & 300 Model Induk S1–S5](#evaluasi-skala-penuh-model-m1m4--300-model-induk-s1s5)
-4. [Arsitektur Navigasi Apple-Style (6 Pilar)](#-arsitektur-navigasi-apple-style-6-pilar)
+4. [Arsitektur Navigasi Apple-Style (10 Dimensi BIM & Lifecycle)](#-arsitektur-navigasi-apple-style-10-dimensi-bim--lifecycle)
 5. [Global Floating Dynamic Island AI Copilot](#-global-floating-dynamic-island-ai-copilot)
 6. [Instalasi & Panduan Kompilasi](#-instalasi--panduan-kompilasi)
 7. [Sitasi Riset Akademis](#-sitasi-riset-akademis)
@@ -256,75 +256,107 @@ Mesin analitis ARI telah divalidasi terhadap dataset masif disertasi:
 
 ---
 
-## 🏛️ Arsitektur Navigasi Apple-Style (6 Pilar)
+## 🏛️ Arsitektur Navigasi Apple-Style (10 Dimensi BIM & Lifecycle)
 
-Aplikasi desktop native macOS EigenGraph dikemas dalam antarmuka minimalis elegan berbasis panduan *Apple Human Interface Guidelines (HIG)* dengan bilah samping vertikal penuh (*full-height sidebar*):
+Aplikasi desktop native macOS EigenGraph dikemas dalam antarmuka minimalis elegan berbasis panduan *Apple Human Interface Guidelines (HIG)* dengan bilah samping vertikal penuh (*full-height sidebar*) yang memetakan siklus hidup bangunan ke dalam 10 Dimensi BIM (1D–10D):
 
 ```
 ┌──────────────────┬──────────────────────────────────────────────────────────────┐
-│  ⚛️ EigenGraph    │  [Top Toolbar] 📊 Planning — 5D Construction      [🤖 Ask AI]│
-│  BIM & ARI Engine│  ─────────────────────────────────────────────────────────── │
-├──────────────────┤  [Sub-Tabs: 💰 RAB 5D  |  📊 QTO  |  ⏱️ 4D WBS  |  📈 Value Eng]│
-│  WORKSPACES      │  ─────────────────────────────────────────────────────────── │
-│  📁 My Project   │  🔗 TERIKAT KE PARAMETRIC: L=24.0m, H=3.2m, Baja Rp 24.500/kg│
-│  📐 Parametric   │  ─────────────────────────────────────────────────────────── │
-│  🏗️ Build        │  TOTAL RAB (5D)       MATERIAL BAJA       VOLUME BETON       │
-│  ⚡ Analyze      │  Rp 3.842.500.000     48.5 Ton            65.0 m³            │
-│  📊 Planning     │  ─────────────────────────────────────────────────────────── │
-│  ⚙️ Settings     │  Rincian AHSP Pekerjaan (WBS 1.0 - 6.0)                      │
-│                  │  1.0 Mobilisasi Crane 100T       : Rp 180.000.000            │
-│  ──────────────  │  2.0 Pondasi Abutment K-350      : Rp 126.750.000            │
-│  ACTIVE PROJECT  │  3.0 Pengadaan Baja BJ41         : Rp 1.188.250.000          │
-│  ARI: 0.94 Safe  │  4.0 Fabrikasi Workshop & NDT    : Rp   412.250.000          │
-│  DB: 3 Parts     │  5.0 Proteksi Cat Sa 2.5 3-Coat  : Rp    89.900.000          │
-│                  │                                                              │
-│  👤 Disertasi S3 │       [ ⚛️ EigenAI  •  📊 Planning  |  Ask or type ⌘K... ]   │
-│     Harids Irawan│                      (Floating Dynamic Island)                │
+│  ⚛️ EigenGraph    │  [Top Toolbar] 💰 Cost & Budgeting — Dynamic RAB  [🤖 Ask AI]│
+│  10D BIM & ARI   │  ─────────────────────────────────────────────────────────── │
+├──────────────────┤  [Sub-Tabs: 💰 Dynamic RAB  |  📊 QTO  |  📈 Cost vs ARI]   │
+│  LIFECYCLE (1-10)│  ─────────────────────────────────────────────────────────── │
+│  [1D]  💡 Concept│  🔗 TERIKAT KE PARAMETRIC: L=24.0m, H=3.2m, Baja Rp 24.500/kg│
+│  [2D]  📐 Draft  │  ─────────────────────────────────────────────────────────── │
+│  [3D]  🏗️ Model  │  TOTAL RAB (5D)       MATERIAL BAJA       VOLUME BETON       │
+│  [4D]  ⏱️ Time   │  Rp 3.842.500.000     48.5 Ton            65.0 m³            │
+│  [5D]  💰 Cost   │  ─────────────────────────────────────────────────────────── │
+│  [6D]  🌱 Sustain│  Rincian AHSP Pekerjaan (WBS 1.0 - 6.0)                      │
+│  [7D]  🏢 Facility│ 1.0 Mobilisasi Crane 100T       : Rp 180.000.000            │
+│  [8D]  🛡️ Safety │  2.0 Pondasi Abutment K-350      : Rp 126.750.000            │
+│  [9D]  ♻️ Lean   │  3.0 Pengadaan Baja BJ41         : Rp 1.188.250.000          │
+│  [10D] 🤖 Industry│ 4.0 Fabrikasi Workshop & NDT    : Rp   412.250.000          │
+│  ──────────────  │  5.0 Proteksi Cat Sa 2.5 3-Coat  : Rp    89.900.000          │
+│  ACTIVE PROJECT  │                                                              │
+│  ARI: 0.94 Safe  │       [ ⚛️ EigenAI  •  💰 5D Cost   |  Ask or type ⌘K... ]   │
+│  DB: 3 Parts     │                      (Floating Dynamic Island)                │
 └──────────────────┴──────────────────────────────────────────────────────────────┘
 ```
 
-1. **📁 MY PROJECT (Portofolio Proyek & Dossier Klien)**
-   - Portofolio visual bergaya macOS.
-   - Status badge instan: `🟢 ARI Safe`, `🟡 Review Needed`, `🔴 Mechanism Warning`.
-   - Ekspor laporan teknis otomatis untuk lampiran disertasi.
+1. **💡 [1D] Research & Concept**  
+   *Tahap konseptual awal yang memuat gagasan mula, studi kelayakan (feasibility), tinjauan regulasi SNI/AISC, data survei tapak, dan panduan teknis proyek.*
+   - Portofolio proyek visual, status penapisan instan (`🟢 ARI Safe`, `🟡 Review Needed`, `🔴 Mechanism Warning`).
+   - Akses langsung ke Dokumen Sertifikat Hasil Audit Redundansi Struktural Disertasi UNY 2026.
 
-2. **📐 PARAMETRIC (Studio Gambar CAD Bebas & Database Komponen)**
-   - Toolbar gambar intuitif: `Line (L)`, `Polyline (PL)`, `Arc (A)`, `Dimension (DIM)`, `Trim (TR)`, `Offset (O)`.
+2. **📐 [2D] Drafting & Drawings**  
+   *Dokumentasi teknis tradisional dua dimensi yang menampilkan sumbu X dan Y, seperti denah lantai, tampak (elevasi), potongan (sections), dan cetak biru (blueprints).*
+   - Studio gambar CAD bebas: `Line (L)`, `Polyline (PL)`, `Arc (A)`, `Dimension (DIM)`, `Trim (TR)`, `Offset (O)`.
    - Snapping magnetik (`🧲 SNAP`), Pengunci Ortogonal (`📐 ORTHO - F8`), Dynamic Cursor HUD.
-   - **Variabel Penggerak (*Driving Variables*)**: $L$, $H$, $n$, modulus $E$, berat jenis $\rho$, dan harga satuan AHSP.
-   - Tombol **`💾 Save to Database`** untuk menyimpan modul rangka ke repositori lokal.
+   - Variabel penggerak parametrik (*Driving Variables*): $L$, $H$, $n$, modulus $E$, berat jenis $\rho$, dan AHSP.
 
-3. **🏗️ BUILD (Kanvas Assembly 3D & Pemodelan Struktur)**
-   - Ruang perakitan 3D hardware-accelerated (Metal GPU 60 FPS).
+3. **🏗️ [3D] Modeling & Geometry**  
+   *Pembuatan model digital tiga dimensi (panjang, lebar, tinggi) untuk visualisasi spasial dan deteksi tabrakan (clash detection).*
+   - Assembly canvas 3D akselerasi perangkat keras (Metal GPU 60 FPS).
    - Sidebar 4-Tab: *Properties Inspector*, *Project Browser*, *Modify Tools*, dan *Display Layers* (heatmap gaya aksial, deformasi lendutan).
 
-4. **⚡ ANALYZE (Mekanika Struktur, SVD Guard & Matriks Sensitivitas ARI)**
-   - Evaluasi instan Gate 1 (SVD Kinematics), Gate 2 (K-Disjoint Multigraph), dan Gate 3 (Indeks ARI & CI).
-   - Diagram gaya dalam aksial ($N$), tegangan von Mises, dan visualisasi mode mekanisme goyang.
+4. **⏱️ [4D] Time & Scheduling**  
+   *Integrasi linimasa proyek dan tahapan urutan konstruksi ke dalam model 3D untuk mensimulasikan proses pembangunan seiring waktu.*
+   - Penjadwalan WBS 1.0–6.0, diagram batang Gantt, dan lintasan kritis CPM (*Critical Path Method*).
+   - **Simulasi Kestabilan Ereksi Bertahap (*Staged Erection SVD Guard*)**: Memastikan struktur tidak mengalami mekanisme labil pada setiap tahap perakitan di lapangan.
 
-5. **📊 PLANNING (5D Construction Planning, Dynamic RAB, QTO & Penjadwalan 4D)**
-   - **Terikat Otomatis ke Parametrik**: Saat bentang $L$ atau dimensi profil diubah di `PARAMETRIC`, volume tonase, kurva S, dan seluruh nominal RAB di `PLANNING` langsung terhitung ulang seketika!
-   - Rincian AHSP standar konstruksi baja Indonesia (material BJ41, fabrikasi workshop, sandblasting Sa 2.5, ereksi crane 100T, baut mutu tinggi A325, pondasi beton K-350).
-   - Penjadwalan WBS 1.0–6.0 dengan **Simulasi Stabilitas Ereksi Bertahap (*Staged Erection SVD Guard*)**.
-   - Kurva sensitivitas rekayasa nilai $\Delta \text{Cost} \leftrightarrow \Delta \text{ARI}$.
+5. **💰 [5D] Cost & Budgeting**  
+   *Pelacakan biaya, perhitungan kuantitas dinamis (QTO), dan estimasi keuangan yang terhubung langsung dengan model digital.*
+   - **Sinkronisasi Dinamis**: Perubahan bentang atau profil di CAD langsung memperbarui tonase dan anggaran RAB.
+   - Rincian AHSP standar Indonesia (material baja, fabrikasi workshop, sandblasting Sa 2.5, ereksi crane, baut HTB, beton K-350).
+   - Analisis trade-off kurva Pareto $\Delta \text{Cost} \leftrightarrow \Delta \text{ARI}$.
 
-6. **⚙️ SETTINGS (Preferensi & Konfigurasi Riset)**
-   - Standar desain: SNI 1729:2020 / AISC 360-16 LRFD.
-   - Parameter analitis ARI: $s_k, s_R, \alpha_k, \alpha_R, \gamma, K, \beta, \eta, \tau$.
-   - Integrasi asisten cerdas Google Gemini API.
+6. **🌱 [6D] Sustainability & Energy**  
+   *Analisis efisiensi energi, jejak karbon (embodied carbon), dampak lingkungan, dan persyaratan sertifikasi bangunan hijau.*
+   - Perhitungan jejak karbon embodied ($t \text{ CO}_2\text{e}$) mencakup baja daur ulang EAF, beton, coating, dan transportasi.
+   - Kurva trade-off Karbon vs Redundansi ARI: Menentukan titik keseimbangan optimal penambahan massa pengaku terhadap reduksi risiko keruntuhan katastropik.
+   - Simulator sertifikasi Greenship GBCI & LEED v4.1 (predikat Gold / Platinum).
+
+7. **🏢 [7D] Facility Management**  
+   *Data operasi dan pemeliharaan siklus hidup yang digunakan pemilik bangunan untuk mengelola aset, perbaikan, dan komponen setelah konstruksi selesai.*
+   - Registri aset komponen berstandar COBie & IFC 4.3 (pelat buhul, chord, bearing tumpuan, expansion joint).
+   - **Digital Twin & Telemetri Sensor SHM**: Pembacaan langsung regangan serat optik ($\mu\epsilon$), akselerometer getaran ($Hz$), dan inklinometer.
+   - **Pemantauan Degradasi Redundansi Real-Time $ARI(t)$**: Penerbitan otomatis Surat Perintah Kerja (SPK) saat indikator korosi atau fatigue mendekati ambang batas.
+
+8. **🛡️ [8D] Safety/Health & Safety**  
+   *Integrasi strategi pencegahan kecelakaan, asesmen risiko tapak, dan perencanaan darurat ke dalam desain konstruksi.*
+   - **Singular Value Decomposition (SVD) Kinematic Guard**: Deteksi dini mode keruntuhan goyang ($\sigma_{\min} > 0$).
+   - **Penapisan Keruntuhan Progresif & Disrupsi Jamak ($N-2$ / $N-k$)**: Mencegah kegagalan kaskade domino.
+   - Evaluasi kapasitas interaksi aksial, momen lentur, dan geser P-M-V LRFD (AISC 360-16 / SNI 1729:2020).
+
+9. **♻️ [9D] Lean Construction**  
+   *Optimalisasi proses konstruksi untuk meminimalkan limbah material, memperlancar alur kerja (workflow), dan memaksimalkan efisiensi produksi.*
+   - **1D/2D Cutting Stock Optimizer**: Mengoptimalkan pola potong profil baja standar pabrikan 12.0 meter sehingga limbah scrap berkurang drastis dari 12.8% menjadi hanya 2.4% (penghematan material Rp 88.200.000).
+   - **Last Planner System (LPS)**: Pelacakan komitmen mingguan *Percent Plan Complete* (PPC 88.5%) dan asesmen 6-week sound lookahead.
+   - Eliminasi 7 Pemborosan Konstruksi (*Seven Wastes*) dan buffer pengiriman *Just-In-Time* (JIT).
+
+10. **🤖 [10D] Industrialized Construction & Automation**  
+    *Integrasi teknologi Industri 4.0, termasuk prefabrikasi modular, robotika, pencetakan 3D, dan proses tapak otomatis.*
+    - **DfMA (Design for Manufacture and Assembly)**: Prefabrikasi modular modul Warren truss 12 meter di pabrik dengan rasio off-site 82.5%.
+    - **Pengelasan Robotik 6-Axis & CNC Laser Cutting**: Standarisasi sambungan buhul presisi tinggi dengan tingkat kelulusan NDT 99.4%.
+    - Trajektori crane otonom bebas tabrakan dan verifikasi drone LiDAR *as-built vs as-designed* ($\pm 2.1$ mm).
+    - Jembatan interoperabilitas OpenBIM IFC 4.3 Structural Analysis MVD, BCF 3.0, dan IoT MQTT bridge.
 
 ---
 
 ## 🤖 Global Floating Dynamic Island AI Copilot (`⌘K`)
 
-Kapsul cerdas **EigenAI** melayang di tengah bawah layar dan aktif di seluruh 6 ruang kerja:
+Kapsul cerdas **EigenAI** melayang di tengah bawah layar dan aktif di seluruh 10 ruang kerja:
 
-* **Di `MY PROJECT`**: `[📑 Ringkasan Portofolio]`, `[📊 Urutkan Berdasarkan ARI]`, `[📤 Ekspor Dossier]`
-* **Di `PARAMETRIC`**: `[📐 Warren Truss 24m]`, `[🔗 Ikat Rumus H = L / 7.5]`, `[💾 Simpan ke Database]`
-* **Di `BUILD`**: `[⚡ Cek Mekanisme SVD]`, `[🎯 Skrining Batang Kritis]`, `[🛡️ Evaluasi Risiko Runtuh]`
-* **Di `ANALYZE`**: `[⚡ Verifikasi Nullspace SVD]`, `[🎯 Tampilkan Matriks ARI]`, `[📊 Heatmap Lendutan]`
-* **Di `PLANNING`**: `[💰 Hitung Otomatis RAB 5D]`, `[📊 Ekspor Kurva S 4D]`, `[📈 Trade-Off Cost vs ARI]`, `[🏗️ Simulasi Stabilitas Ereksi]`
-* **Di `SETTINGS`**: `[🔑 Tes Gemini API]`, `[📐 Kunci SNI 1729 / AISC LRFD]`, `[⚙️ Set Toleransi SVD]`
+* **Di `Research & Concept` (1D)**: `[📑 Ringkasan Portofolio]`, `[📜 Sertifikat Audit Disertasi]`, `[📊 Urutkan Berdasarkan ARI]`
+* **Di `Drafting & Drawings` (2D)**: `[🪄 Rekomendasi Bracing ARI]`, `[📐 Warren Truss 24m]`, `[🔗 Ikat Rumus H = L / 7.5]`, `[💾 Simpan ke DB]`
+* **Di `Modeling & Geometry` (3D)**: `[💥 Uji Disrupsi Jamak (N-2)]`, `[⚡ Cek Mekanisme SVD]`, `[🎯 Skrining Batang Kritis]`
+* **Di `Time & Scheduling` (4D)**: `[🏗️ Cek Keamanan Ereksi 4D]`, `[📊 Ekspor Kurva S 4D]`, `[⏱️ Tahap Kritis Cantilever]`
+* **Di `Cost & Budgeting` (5D)**: `[💰 Hitung Otomatis RAB 5D]`, `[📈 Trade-Off Cost vs ARI]`, `[📑 Rincian AHSP Baja]`
+* **Di `Sustainability & Energy` (6D)**: `[🌱 Hitung Jejak Karbon CO₂e]`, `[📈 Trade-Off Karbon vs ARI]`, `[🏅 Prediksi Skor GBCI/LEED]`
+* **Di `Facility Management` (7D)**: `[📡 Baca Sensor SHM Realtime]`, `[📉 Evaluasi Degradasi ARI(t)]`, `[🛠️ Terbitkan SPK Pemeliharaan]`
+* **Di `Safety/Health & Safety` (8D)**: `[📐 Evaluasi Interaksi P-M-V]`, `[💥 Matriks Disrupsi Ganda (N-2)]`, `[🚨 Top 5 Batang Paling Kritis]`
+* **Di `Lean Construction` (9D)**: `[✂️ Optimasi Potong Baja 12m]`, `[📋 Last Planner System PPC]`, `[🌊 Eliminasi 7 Pemborosan]`
+* **Di `Industrialized & Automation` (10D)**: `[🏭 Verifikasi Modul DfMA]`, `[🦾 Toolpath Pengelasan Robotik]`, `[🌐 Ekspor OpenBIM IFC 4.3]`
 
 ---
 
