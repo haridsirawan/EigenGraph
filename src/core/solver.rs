@@ -116,7 +116,7 @@ impl FemSolver {
             ];
 
             for (dof, is_fixed) in restraints {
-                if !is_fixed {
+                if !is_fixed && k_global[(dof, dof)].abs() > 1e-12 {
                     free_dofs.push(dof);
                 }
             }
@@ -210,7 +210,7 @@ impl FemSolver {
                     let mz1 = (2.0 * e * iz / l) * (2.0 * theta1z + theta2z - (3.0 * delta_vy / l));
                     let mz2 = (2.0 * e * iz / l) * (theta1z + 2.0 * theta2z - (3.0 * delta_vy / l));
                     let my1 = (2.0 * e * iy / l) * (2.0 * theta1y + theta2y - (3.0 * delta_vz / l));
-                    let my2 = (2.0 * e * iy / l) * (theta1y + 2.0 * theta2y - (3.0 * delta_vz / l));
+                    let my2 = (2.0 * e * iy / l) * (theta1y + 2.0 * theta2z - (3.0 * delta_vz / l));
 
                     let max_mz = mz1.abs().max(mz2.abs());
                     let max_my = my1.abs().max(my2.abs());
