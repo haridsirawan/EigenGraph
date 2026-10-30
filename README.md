@@ -1,6 +1,6 @@
 # ⚛️ EigenGraph
 
-> **Desktop BIM & Structural Graph Analytics** with Mac App Store-inspired Human Interface Design.
+> **Desktop BIM & Structural Graph Analytics**
 > Developed by **Harids Irawan** (Doctoral Research in Structural Redundancy & Progressive Collapse).
 
 ---
