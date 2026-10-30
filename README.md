@@ -273,25 +273,8 @@ cargo run --release
 
 ---
 
-## 📄 Sitasi Riset Akademis
-
-Jika Anda memanfaatkan formulasi **Adjusted Redundancy Index (ARI)**, **SVD Kinematic Mechanism Guard**, atau perangkat lunak **EigenGraph** dalam penelitian akademis, silakan merujuk ke naskah disertasi:
-
-```bibtex
-@phdthesis{irawan2026ari,
-  author       = {Harids Irawan},
-  title        = {Pengembangan dan Validasi Adjusted Redundancy Index untuk Penapisan Pra-Analisis Skenario Gangguan Elemen pada Struktur Linear-Elastik},
-  school       = {Program Studi Doktor Ilmu Teknik, Fakultas Teknik, Universitas Negeri Yogyakarta},
-  year         = {2026},
-  address      = {Yogyakarta, Indonesia},
-  note         = {NIM 23051690001. Repositori komputasi: https://github.com/haridsirawan/EigenGraph}
-}
-```
-
----
-
 ## 🛡️ Lisensi
 
-Hak Cipta © 2026 **Harids Irawan, S.T., M.T.**  
+Hak Cipta © 2026 **Harids Irawan**  
 Didistribusikan di bawah lisensi ganda **MIT License** dan **Apache License 2.0**.  
 Lihat file [LICENSE](LICENSE) untuk rincian lengkap ketentuan lisensi.
