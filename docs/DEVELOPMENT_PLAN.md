@@ -123,7 +123,7 @@ flowchart LR
 4. **Desain Penampang Baja Sesuai SNI 1729 / AISC 360-16 LRFD**:
    - Pemeriksaan kapasitas tarik aksial ($\phi_t P_n$) dan tekan tekuk Euler ($\phi_c P_n$).
    - Pemeriksaan kapasitas lentur ($\phi_b M_n$) dengan memperhitungkan *Lateral Torsional Buckling* (LTB).
-   - Evaluasi rasio interaksi aksial-lentur $\frac{P_u}{\\phi P_n} + \frac{8}{9}\frac{M_u}{\phi M_n} \le 1.0$.
+   - Evaluasi rasio interaksi aksial-lentur $\frac{P_u}{\phi P_n} + \frac{8}{9}\frac{M_u}{\phi M_n} \le 1.0$.
 
 ---
 
@@ -201,6 +201,17 @@ flowchart LR
 
 ---
 
+### 🟣 FASE 8: Simulasi Kolaps Dinamis & Runtuh Kaskade (Progressive Collapse Engine) (SELESAI ✅)
+*Target: Pemodelan keruntuhan berantai (domino effect) pasca disrupsi mendadak sesuai standar DoD UFC 4-023-03 dan ASCE 7-22 Alternate Path Method.*
+1. **Dynamic Amplification Factor ($DAF$)**:
+   - Pembebanan gravitasi dinamis yang diamplifikasi seketika ($DAF = 1.05 \sim 2.00\times$) pada nodal-nodal terdampak langsung *member loss*.
+2. **Iterative Domino Equilibrium Solver**:
+   - Simulasi langkah-demi-langkah perambatan leleh/putus batang dengan kriteria rasio permintaan terhadap kapasitas ($DCR > 1.0$).
+   - Pendeteksian mekanisme kinematis runtuh total ($\text{dim}(\text{Null}(K)) > 0$) versus penghentian runtuh parsial (*arrested equilibrium*).
+3. **Indikator Ketahanan Sistem (PVI & $R_{\text{sys}}$)**:
+   - *Propagation Vulnerability Index* ($PVI$): Rasio keruntuhan sekunder terhadap elemen tersisa.
+   - *System Robustness Index* ($R_{\text{sys}} = 1.0 - PVI$): Indeks ketahanan global terhadap bencana progresif.
+
 ## 📊 Matriks Ringkasan Roadmap & Milestone
 
 | Fase | Fokus Modul | Luaran Utama | Status |
@@ -213,6 +224,7 @@ flowchart LR
 | **Fase 5** | **ANALYZE: Waktu (BIM 4D)** | WBS Perakitan, Gantt Chart, Kurva S, Pengecekan Stabilitas Erection | Tahap Perencanaan |
 | **Fase 6** | **MY PROJECT Delivery** | Generator Dossier Resmi Markdown, Executive Deck, Portofolio | **SELESAI ✅** |
 | **Fase 7** | **Interoperabilitas & Rilis** | Export OpenBIM IFC 4.3 (Pset_StructuralRedundancy), DXF 3D, SAP2000 | **SELESAI ✅** |
+| **Fase 8** | **Kolaps Kaskade & Progresif** | DoD UFC 4-023-03 Alternate Path, DAF 1.25x, PVI, Robustness $R_{\text{sys}}$ | **SELESAI ✅** |
 
 ---
 
