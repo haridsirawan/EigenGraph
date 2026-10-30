@@ -45,7 +45,7 @@ impl MyProjectView {
             ui.add_space(32.0);
         });
 
-        // 4. UNY ARI DISSERTATION AUDIT DOSSIER MODAL
+        // 4. EIGENGRAPH ARI AUDIT DOSSIER MODAL
         if self.show_dossier_modal {
             self.render_dossier_modal(ui, theme);
         }
@@ -88,7 +88,7 @@ impl MyProjectView {
                             *active_pillar = NavigationPillar::ModelingGeometry;
                         }
 
-                        if ui.add(egui::Button::new(RichText::new("📜 Cetak Sertifikat Audit Disertasi").strong().color(Color32::WHITE))
+                        if ui.add(egui::Button::new(RichText::new("📜 Cetak Sertifikat Audit EigenGraph").strong().color(Color32::WHITE))
                             .fill(theme.accent_green)
                             .corner_radius(CornerRadius::same(8))
                             ).clicked() {
@@ -186,7 +186,7 @@ impl MyProjectView {
     }
 
     fn render_dossier_modal(&mut self, ui: &mut Ui, theme: &MacTheme) {
-        egui::Window::new("📜 SERTIFIKAT AUDIT REDUNDANSI STRUKTURAL (ARI DISERTASI UNY)")
+        egui::Window::new("📜 SERTIFIKAT AUDIT REDUNDANSI STRUKTURAL (EIGENGRAPH OFFICIAL)")
             .collapsible(false)
             .resizable(true)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::new(0.0, 0.0))
@@ -199,8 +199,8 @@ impl MyProjectView {
                     .inner_margin(Margin::symmetric(20, 16))
                     .show(ui, |ui| {
                         ui.vertical_centered(|ui| {
-                            ui.label(RichText::new("UNIVERSITAS NEGERI YOGYAKARTA").size(12.0).strong().color(theme.accent_blue));
-                            ui.label(RichText::new("FAKULTAS TEKNIK — PROGRAM DOKTOR ILMU TEKNIK (S3)").size(11.0).color(theme.text_secondary));
+                            ui.label(RichText::new("EIGENGRAPH STRUCTURAL PLATFORM").size(12.0).strong().color(theme.accent_blue));
+                            ui.label(RichText::new("ADVANCED STRUCTURAL INTEGRITY & RESILIENCE ENGINE").size(11.0).color(theme.text_secondary));
                             ui.add_space(4.0);
                             ui.heading(RichText::new("SURAT HASIL AUDIT REDUNDANSI STRUKTURAL & KETAHANAN RUNTUH PROGRESIF").size(14.0).strong().color(Color32::WHITE));
                             ui.label(RichText::new("Verifikasi Berbasis Adjusted Redundancy Index (ARI) & SVD Kinematic Mechanism Guard").size(11.0).color(theme.accent_green));
@@ -209,10 +209,10 @@ impl MyProjectView {
                             ui.add_space(10.0);
                         });
 
-                        ui.label(RichText::new("INFORMASI RISET & PENELITI:").size(11.5).strong().color(theme.text_secondary));
-                        ui.label(RichText::new("• Nama Peneliti: Harids Irawan, S.T., M.T. (NIM: 23051690001)").size(11.5).color(theme.text_primary));
-                        ui.label(RichText::new("• Judul Disertasi: Pengembangan dan Validasi Adjusted Redundancy Index untuk Penapisan Pra-Analisis Skenario Gangguan Elemen pada Struktur Linear-Elastik").size(11.0).color(theme.text_secondary));
-                        ui.label(RichText::new("• Tahun Publikasi / Sidang: 2026").size(11.0).color(theme.text_muted));
+                        ui.label(RichText::new("INFORMASI OTORITAS & AUDITOR:").size(11.5).strong().color(theme.text_secondary));
+                        ui.label(RichText::new("• Lead Engineer / Auditor: Harids Irawan, S.T., M.T. (EigenGraph Systems)").size(11.5).color(theme.text_primary));
+                        ui.label(RichText::new("• Kerangka Analisis: Pengembangan dan Validasi Adjusted Redundancy Index untuk Penapisan Pra-Analisis Skenario Gangguan Elemen").size(11.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Tahun Terbit / Verifikasi: 2026").size(11.0).color(theme.text_muted));
 
                         ui.add_space(8.0);
                         ui.separator();
@@ -241,7 +241,7 @@ impl MyProjectView {
                         ui.add_space(8.0);
 
                         // SHA-256 Cryptographic Audit Seal (FIPS 180-4)
-                        let mock_hash = crate::core::Sha256Hasher::digest_hex(b"EIGENGRAPH_UNY_DOSSIER:name=Warren_Truss_24m:nodes=14:elems=25:avg_ari=0.9420:min_ari=0.8840:cond=1.42e3:rank=36");
+                        let mock_hash = crate::core::Sha256Hasher::digest_hex(b"EIGENGRAPH_DOSSIER:name=Warren_Truss_24m:nodes=14:elems=25:avg_ari=0.9420:min_ari=0.8840:cond=1.42e3:rank=36");
                         Frame::new()
                             .fill(Color32::from_rgb(12, 16, 22))
                             .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.5)))
@@ -255,7 +255,7 @@ impl MyProjectView {
                                     });
                                 });
                                 ui.label(RichText::new(format!("Hash: {}", mock_hash)).size(10.0).color(theme.text_secondary));
-                                ui.label(RichText::new(format!("QR Payload: eigengraph://verify?hash={}&nim=23051690001", &mock_hash[..16])).size(10.0).color(theme.text_muted));
+                                ui.label(RichText::new(format!("QR Payload: eigengraph://verify?hash={}&org=eigengraph", &mock_hash[..16])).size(10.0).color(theme.text_muted));
                             });
 
                         ui.add_space(12.0);
@@ -263,7 +263,7 @@ impl MyProjectView {
                         ui.add_space(10.0);
 
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("Status Sertifikasi: RESMI TERVALIDASI (UNY 2026)").size(11.5).strong().color(theme.accent_green));
+                            ui.label(RichText::new("Status Sertifikasi: RESMI TERVALIDASI (EIGENGRAPH 2026)").size(11.5).strong().color(theme.accent_green));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if ui.add(egui::Button::new(RichText::new("✕ Tutup").size(12.0).color(theme.text_secondary))
                                     .fill(theme.bg_card)
@@ -289,8 +289,8 @@ impl MyProjectView {
                                             let lca = crate::core::carbon::CarbonEngine::calculate_lca(&model, crate::core::carbon::CarbonSteelRoute::EafRecycled, Some(65.0), Some(assessment.min_system_ari));
 
                                             let full_md = crate::core::DossierExporter::export_comprehensive_dossier(&model, &assessment, modal.as_ref(), Some(&pushover), Some(&boq), Some(&lca));
-                                            let _ = std::fs::write("/tmp/EigenGraph_Comprehensive_Dossier_UNY_2026.md", &full_md);
-                                            self.export_success_msg = Some("Dossier lengkap 30+ halaman tersimpan di /tmp/EigenGraph_Comprehensive_Dossier_UNY_2026.md".to_string());
+                                            let _ = std::fs::write("/tmp/EigenGraph_Comprehensive_Dossier_2026.md", &full_md);
+                                            self.export_success_msg = Some("Dossier lengkap 30+ halaman tersimpan di /tmp/EigenGraph_Comprehensive_Dossier_2026.md".to_string());
                                         }
                                     }
                                 }

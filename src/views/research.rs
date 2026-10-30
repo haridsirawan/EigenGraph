@@ -63,7 +63,7 @@ impl ResearchConceptView {
                         (ResearchSubTab::ConceptFeasibility, "💡 Studi Kelayakan & Gagasan Awal"),
                         (ResearchSubTab::RegulatoryCodes, "📜 Regulasi & Standar Desain SNI/AISC"),
                         (ResearchSubTab::SurveyingSite, "🗺️ Data Survei Tapak & Geoteknik"),
-                        (ResearchSubTab::AriFormulations, "🔬 Formulasi Resmi ARI Disertasi UNY"),
+                        (ResearchSubTab::AriFormulations, "🔬 Formulasi Resmi ARI EigenGraph"),
                     ];
 
                     for (tab, label) in tabs {
@@ -238,9 +238,9 @@ impl ResearchConceptView {
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("🔬 Landasan Teori Resmi: Adjusted Redundancy Index (Disertasi UNY 2026)").size(13.5).strong().color(theme.text_primary));
+                    ui.label(RichText::new("🔬 Landasan Teori Resmi: Adjusted Redundancy Index (EigenGraph 2026)").size(13.5).strong().color(theme.text_primary));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(RichText::new("Peneliti: Harids Irawan, S.T., M.T. (NIM 23051690001)").size(11.0).color(theme.accent_blue));
+                        ui.label(RichText::new("Lead Engineer: Harids Irawan, S.T., M.T. (EigenGraph Systems)").size(11.0).color(theme.accent_blue));
                     });
                 });
                 ui.add_space(10.0);
