@@ -15,11 +15,31 @@ pub enum NavigationPillar {
 impl NavigationPillar {
     pub fn title(&self) -> &'static str {
         match self {
-            Self::MyProject => "📑 MY PROJECT",
-            Self::Parametric => "📐 PARAMETRIC",
-            Self::Build => "🏗️ BUILD",
-            Self::Analyze => "⚡ ANALYZE",
-            Self::Settings => "⚙️ SETTINGS",
+            Self::MyProject => "MY PROJECT",
+            Self::Parametric => "PARAMETRIC",
+            Self::Build => "BUILD",
+            Self::Analyze => "ANALYZE",
+            Self::Settings => "SETTINGS",
+        }
+    }
+
+    pub fn clean_name(&self) -> &'static str {
+        match self {
+            Self::MyProject => "My Project",
+            Self::Parametric => "Parametric",
+            Self::Build => "Build",
+            Self::Analyze => "Analyze",
+            Self::Settings => "Settings",
+        }
+    }
+
+    pub fn icon(&self) -> &'static str {
+        match self {
+            Self::MyProject => "📁",
+            Self::Parametric => "📐",
+            Self::Build => "🏗️",
+            Self::Analyze => "⚡",
+            Self::Settings => "⚙️",
         }
     }
 

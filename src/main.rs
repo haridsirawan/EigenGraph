@@ -11,6 +11,9 @@ fn main() -> eframe::Result {
         .with_inner_size(Vec2::new(1440.0, 900.0))
         .with_min_inner_size(Vec2::new(1024.0, 700.0))
         .with_transparent(false)
+        .with_fullsize_content_view(true)
+        .with_titlebar_shown(false)
+        .with_title_shown(false)
         .with_active(true);
 
     eframe::run_native(

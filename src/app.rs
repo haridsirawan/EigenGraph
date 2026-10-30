@@ -1,7 +1,7 @@
 //! app.rs — Core application struct implementing eframe::App.
 
 use eframe::App;
-use egui::{Align, Color32, CornerRadius, Frame, Layout, Panel, CentralPanel, RichText, Vec2};
+use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, Panel, CentralPanel, RichText, Stroke, Vec2};
 
 use crate::models::{DatabaseComponent, NavigationPillar, ParametricVariable, ProjectItem, ProjectStatus, StructuralMember};
 use crate::theme::MacTheme;
@@ -173,50 +173,131 @@ impl Default for EigenGraphApp {
 
 impl App for EigenGraphApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // 1. TOP NAVIGATION BAR (Mac App Store Style)
-        Panel::top("top_navigation_bar").frame(self.theme.top_bar_frame()).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                // Brand Logo
-                ui.label(RichText::new("⚛️ EigenGraph").size(16.0).strong().color(self.theme.accent_blue));
-                ui.add_space(20.0);
+        // 1. APPLE-STYLE FULL-HEIGHT LEFT NAVIGATION SIDEBAR
+        // Calling Panel::left FIRST ensures it extends all the way from the top (y=0) to the bottom of the window.
+        Panel::left("mac_navigation_sidebar")
+            .exact_size(210.0)
+            .resizable(false)
+            .frame(self.theme.mac_sidebar_frame())
+            .show(ui, |ui| {
+                ui.vertical(|ui| {
+                    // Window Traffic Light dots space (macOS HIG fullsize content view)
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(2.0);
+                        let (rect, _response) = ui.allocate_exact_size(Vec2::new(54.0, 14.0), egui::Sense::hover());
+                        let painter = ui.painter();
+                        painter.circle_filled(rect.left_top() + Vec2::new(6.0, 7.0), 5.5, Color32::from_rgb(255, 95, 87));
+                        painter.circle_filled(rect.left_top() + Vec2::new(22.0, 7.0), 5.5, Color32::from_rgb(254, 188, 46));
+                        painter.circle_filled(rect.left_top() + Vec2::new(38.0, 7.0), 5.5, Color32::from_rgb(40, 200, 64));
+                    });
 
-                // 5 PILLARS NAVIGATION CONTROLLER
-                let pillars = [
-                    NavigationPillar::MyProject,
-                    NavigationPillar::Parametric,
-                    NavigationPillar::Build,
-                    NavigationPillar::Analyze,
-                    NavigationPillar::Settings,
-                ];
+                    ui.add_space(16.0);
 
-                for p in pillars {
-                    let is_active = self.active_pillar == p;
-                    let bg = if is_active { self.theme.accent_blue } else { Color32::TRANSPARENT };
-                    let fg = if is_active { Color32::WHITE } else { self.theme.text_secondary };
+                    // App Identity / Branding
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("⚛️ EigenGraph").size(16.0).strong().color(Color32::WHITE));
+                    });
+                    ui.label(RichText::new("BIM & Structural Analytics").size(10.0).color(self.theme.text_muted));
 
-                    let btn = egui::Button::new(RichText::new(p.title()).size(12.0).strong().color(fg))
+                    ui.add_space(20.0);
+
+                    // Workspaces Section Header
+                    ui.label(RichText::new("WORKSPACES").size(10.0).strong().color(self.theme.text_muted));
+                    ui.add_space(6.0);
+
+                    // 5 Navigation Pillars (Apple Sidebar Capsule Buttons)
+                    let pillars = [
+                        NavigationPillar::MyProject,
+                        NavigationPillar::Parametric,
+                        NavigationPillar::Build,
+                        NavigationPillar::Analyze,
+                        NavigationPillar::Settings,
+                    ];
+
+                    for p in pillars {
+                        let is_active = self.active_pillar == p;
+                        let bg = if is_active {
+                            self.theme.accent_blue
+                        } else {
+                            Color32::TRANSPARENT
+                        };
+                        let fg = if is_active {
+                            Color32::WHITE
+                        } else {
+                            self.theme.text_secondary
+                        };
+
+                        let btn_text = format!("{}   {}", p.icon(), p.clean_name());
+                        let btn = egui::Button::new(
+                            RichText::new(btn_text)
+                                .size(13.0)
+                                .strong()
+                                .color(fg),
+                        )
                         .fill(bg)
                         .corner_radius(CornerRadius::same(8))
-                        .min_size(Vec2::new(110.0, 28.0));
+                        .min_size(Vec2::new(ui.available_width(), 34.0));
 
-                    if ui.add(btn).clicked() {
-                        self.active_pillar = p;
+                        if ui.add(btn).clicked() {
+                            self.active_pillar = p;
+                        }
+                        ui.add_space(3.0);
                     }
-                }
 
-                // Global Search & User Profile
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("👤 HI").size(12.0).strong().color(self.theme.text_secondary));
-                    ui.add_space(10.0);
-                    ui.add(egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text("🔍 Search projects (⌘K)...")
-                        .desired_width(180.0));
+                    ui.add_space(16.0);
+                    ui.separator();
+                    ui.add_space(12.0);
+
+                    // Active Project Quick Insight Card in Sidebar
+                    ui.label(RichText::new("ACTIVE PROJECT").size(10.0).strong().color(self.theme.text_muted));
+                    ui.add_space(6.0);
+
+                    Frame::new()
+                        .fill(self.theme.bg_card)
+                        .corner_radius(CornerRadius::same(8))
+                        .inner_margin(Margin::same(10))
+                        .stroke(Stroke::new(1.0, self.theme.border_subtle))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new("Jembatan Busur Pelengkung").size(11.0).strong().color(self.theme.text_primary));
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("ARI:").size(10.0).color(self.theme.text_muted));
+                                ui.label(RichText::new("0.94 (Safe)").size(10.0).strong().color(self.theme.accent_green));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("DB Parts:").size(10.0).color(self.theme.text_muted));
+                                ui.label(RichText::new(format!("{} ready", self.db_components.len())).size(10.0).color(self.theme.accent_blue));
+                            });
+                        });
+
+                    // Push user profile and system status to the bottom of the sidebar
+                    ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+                        ui.add_space(10.0);
+
+                        // Version & Tech stack
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("v1.0.0 • Metal GPU 60 FPS").size(10.0).color(self.theme.text_muted));
+                        });
+
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+
+                        // User Profile (macOS HIG account row)
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("👤").size(16.0));
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new("Harids Irawan").size(12.0).strong().color(self.theme.text_primary));
+                                ui.label(RichText::new("Doctoral Research").size(10.0).color(self.theme.text_muted));
+                            });
+                        });
+                    });
                 });
             });
-        });
 
-        // 2. BOTTOM STATUS BAR
-        Panel::bottom("bottom_status_bar").frame(self.theme.sidebar_frame()).show(ui, |ui| {
+        // 2. BOTTOM STATUS BAR (Runs across content area to right edge)
+        Panel::bottom("bottom_status_bar").frame(self.theme.status_bar_frame()).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("🟢 Model: Jembatan Busur Pelengkung Baja Merah").size(11.0).color(self.theme.text_secondary));
                 ui.add_space(16.0);
@@ -225,12 +306,31 @@ impl App for EigenGraphApp {
                 ui.label(RichText::new(format!("Database Components: {} ready", self.db_components.len())).size(11.0).color(self.theme.accent_blue));
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("60 FPS • Metal GPU").size(11.0).color(self.theme.text_muted));
+                    ui.label(RichText::new("Auto-Saved • Ready").size(11.0).color(self.theme.text_muted));
                 });
             });
         });
 
-        // 3. CENTRAL PANEL (Views Router)
+        // 3. TOP CONTENT TOOLBAR (Contextual & Clean macOS Header)
+        Panel::top("content_top_header").frame(self.theme.content_top_frame()).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                // Workspace Title & Subtitle Breadcrumb
+                ui.label(RichText::new(self.active_pillar.icon()).size(16.0));
+                ui.add_space(4.0);
+                ui.label(RichText::new(self.active_pillar.clean_name()).size(14.0).strong().color(self.theme.text_primary));
+                ui.label(RichText::new("—").size(12.0).color(self.theme.text_muted));
+                ui.label(RichText::new(self.active_pillar.subtitle()).size(12.0).color(self.theme.text_secondary));
+
+                // Global Search Box
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut self.search_query)
+                        .hint_text("🔍 Search (⌘K)...")
+                        .desired_width(180.0));
+                });
+            });
+        });
+
+        // 4. CENTRAL PANEL (Views Router)
         CentralPanel::default().frame(Frame::new().fill(self.theme.bg_canvas)).show(ui, |ui| {
             match self.active_pillar {
                 NavigationPillar::MyProject => {

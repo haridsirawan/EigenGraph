@@ -68,6 +68,30 @@ impl MacTheme {
             .inner_margin(Margin::symmetric(12, 16))
     }
 
+    /// Full-height Apple macOS Left Navigation Sidebar Frame
+    pub fn mac_sidebar_frame(&self) -> Frame {
+        Frame::new()
+            .fill(self.bg_sidebar)
+            .stroke(Stroke::new(1.0, self.border_subtle))
+            .inner_margin(Margin::symmetric(12, 14))
+    }
+
+    /// Content Top Header Bar Frame (Clean macOS Toolbar)
+    pub fn content_top_frame(&self) -> Frame {
+        Frame::new()
+            .fill(self.bg_sidebar)
+            .stroke(Stroke::new(1.0, self.border_subtle))
+            .inner_margin(Margin::symmetric(18, 10))
+    }
+
+    /// Bottom Status Bar Frame
+    pub fn status_bar_frame(&self) -> Frame {
+        Frame::new()
+            .fill(self.bg_sidebar)
+            .stroke(Stroke::new(1.0, self.border_subtle))
+            .inner_margin(Margin::symmetric(16, 7))
+    }
+
     /// Top Navigation Bar Frame
     pub fn top_bar_frame(&self) -> Frame {
         Frame::new()
