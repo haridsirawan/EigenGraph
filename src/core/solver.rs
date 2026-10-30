@@ -26,6 +26,8 @@ pub struct AnalysisResult {
     pub k_free: Matrix,
     /// Maximum nodal displacement magnitude in mm
     pub max_displacement_mm: f64,
+    /// Indices of unconstrained degrees of freedom
+    pub free_dofs: Vec<usize>,
 }
 
 pub struct FemSolver;
@@ -55,12 +57,10 @@ impl FemSolver {
                 return Err(format!("Element {} has near-zero length", elem.id));
             }
 
-            // Direction cosines
             let cx = (n2.x - n1.x) / l;
             let cy = (n2.y - n1.y) / l;
             let cz = (n2.z - n1.z) / l;
 
-            // Element local-to-global stiffness
             let k_elem = match elem.element_type {
                 ElementType::Truss3D => Self::element_stiffness_truss(elem.section.area, elem.material.elastic_modulus, l, cx, cy, cz),
                 ElementType::Frame3D => Self::element_stiffness_frame(
@@ -74,7 +74,6 @@ impl FemSolver {
                 ),
             };
 
-            // Map into global DOFs
             let node1_idx = model.nodes.iter().position(|n| n.id == elem.start_node).unwrap();
             let node2_idx = model.nodes.iter().position(|n| n.id == elem.end_node).unwrap();
 
@@ -128,7 +127,6 @@ impl FemSolver {
             return Err("Model has no free degrees of freedom".to_string());
         }
 
-        // Submatrix K_ff and subvector F_f
         let mut k_ff = Matrix::zeros(n_free, n_free);
         let mut f_ff = vec![0.0; n_free];
 
@@ -143,7 +141,6 @@ impl FemSolver {
         let u_ff = k_ff.solve_gaussian(&f_ff)
             .ok_or_else(|| "Stiffness matrix is singular. The structure contains an unconstrained kinematic mechanism.".to_string())?;
 
-        // Expand back to full nodal displacement vector
         let mut u_vec = vec![0.0; total_dofs];
         for (i_f, &dof_i) in free_dofs.iter().enumerate() {
             u_vec[dof_i] = u_ff[i_f];
@@ -189,15 +186,11 @@ impl FemSolver {
             let u1 = &nodal_displacements[n1_idx];
             let u2 = &nodal_displacements[n2_idx];
 
-            // Member elongation delta = (u2 - u1) . dir
             let delta = (u2[0] - u1[0]) * cx + (u2[1] - u1[1]) * cy + (u2[2] - u1[2]) * cz;
             let axial_force = (elem.material.elastic_modulus * elem.section.area / l) * delta;
-
-            // Axial Capacity = phi * A * Fy (phi = 0.90 for steel LRFD)
             let axial_capacity = 0.90 * elem.section.area * elem.material.yield_strength;
             let p_ratio = (axial_force.abs() / (axial_capacity + 1e-12)).min(2.0);
 
-            // Bending Moments & Shear Forces for Frame Elements
             let (max_my, max_mz, max_v, dcr) = match elem.element_type {
                 ElementType::Truss3D => (0.0, 0.0, 0.0, p_ratio),
                 ElementType::Frame3D => {
@@ -206,17 +199,14 @@ impl FemSolver {
                     let iy = elem.section.iy;
                     let iz = elem.section.iz;
 
-                    // Rotations at joints
                     let theta1y = u1[4];
                     let theta2y = u2[4];
                     let theta1z = u1[5];
                     let theta2z = u2[5];
 
-                    // Transverse relative displacements
                     let delta_vy = u2[1] - u1[1];
                     let delta_vz = u2[2] - u1[2];
 
-                    // Slope-deflection bending moments (N.m)
                     let mz1 = (2.0 * e * iz / l) * (2.0 * theta1z + theta2z - (3.0 * delta_vy / l));
                     let mz2 = (2.0 * e * iz / l) * (theta1z + 2.0 * theta2z - (3.0 * delta_vy / l));
                     let my1 = (2.0 * e * iy / l) * (2.0 * theta1y + theta2y - (3.0 * delta_vz / l));
@@ -226,7 +216,6 @@ impl FemSolver {
                     let max_my = my1.abs().max(my2.abs());
                     let max_v = ((mz1 + mz2).abs() / l).max((my1 + my2).abs() / l);
 
-                    // Plastic Moment Capacity: Mpx, Mpy (phi_b = 0.90)
                     let c_depth = (elem.section.depth / 2.0).max(0.01);
                     let c_width = (elem.section.width / 2.0).max(0.01);
                     let mpz = 0.90 * (1.15 * iz / c_depth) * fy;
@@ -235,7 +224,6 @@ impl FemSolver {
                     let mz_ratio = max_mz / (mpz + 1e-12);
                     let my_ratio = max_my / (mpy + 1e-12);
 
-                    // AISC 360-16 / SNI 1729:2020 Combined P-M Interaction
                     let dcr_comb = if p_ratio >= 0.20 {
                         p_ratio + (8.0 / 9.0) * (mz_ratio + my_ratio)
                     } else {
@@ -265,10 +253,10 @@ impl FemSolver {
             global_k: k_global,
             k_free: k_ff,
             max_displacement_mm: max_disp * 1000.0,
+            free_dofs,
         })
     }
 
-    /// Forms local-to-global 12x12 stiffness matrix for a 3D Truss element
     fn element_stiffness_truss(area: f64, e: f64, l: f64, cx: f64, cy: f64, cz: f64) -> Matrix {
         let k_axial = (e * area) / l;
         let mut k = Matrix::zeros(12, 12);
@@ -286,14 +274,11 @@ impl FemSolver {
         k
     }
 
-    /// Forms local-to-global 12x12 stiffness matrix for a 3D Frame element
     fn element_stiffness_frame(
         area: f64, iy: f64, iz: f64, j_tor: f64,
         e: f64, g: f64, l: f64,
         cx: f64, cy: f64, cz: f64
     ) -> Matrix {
-        // Simplified transformation assuming primary longitudinal axis along (cx, cy, cz)
-        // plus bending and torsional stiffness
         let mut k = Matrix::zeros(12, 12);
 
         let k_ea = (e * area) / l;
@@ -314,7 +299,6 @@ impl FemSolver {
             }
         }
 
-        // Torsional and bending stabilization
         for i in 0..3 {
             k[(i + 3, i + 3)] += k_gj + k_4eiz + k_4eiy;
             k[(i + 9, i + 9)] += k_gj + k_4eiz + k_4eiy;
