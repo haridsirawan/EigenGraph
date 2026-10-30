@@ -11,6 +11,7 @@ pub enum AnalyzeSubTab {
     DisplacementForces,
     Frame3dInteraction,
     CascadingCollapse,
+    NonlinearPushover,
 }
 
 pub struct AnalyzeView {
@@ -79,6 +80,7 @@ impl AnalyzeView {
                 AnalyzeSubTab::DisplacementForces => self.render_displacement_and_forces(ui, theme, members),
                 AnalyzeSubTab::Frame3dInteraction => self.render_frame_3d_interaction(ui, theme, members),
                 AnalyzeSubTab::CascadingCollapse => self.render_cascading_collapse(ui, theme),
+                AnalyzeSubTab::NonlinearPushover => self.render_nonlinear_pushover(ui, theme),
             }
 
             ui.add_space(24.0);
@@ -93,6 +95,7 @@ impl AnalyzeView {
                 (AnalyzeSubTab::DisplacementForces, "📊 Gaya Dalam & Lendutan"),
                 (AnalyzeSubTab::Frame3dInteraction, "📐 Frame 3D P-M-V"),
                 (AnalyzeSubTab::CascadingCollapse, "💥 Kolaps Kaskade (DoD/ASCE)"),
+                (AnalyzeSubTab::NonlinearPushover, "📉 Pushover Non-Linear P-Δ"),
             ];
 
             for (tab, label) in tabs {
@@ -680,4 +683,86 @@ impl AnalyzeView {
             });
         }
     }
+
+    fn render_nonlinear_pushover(&mut self, ui: &mut Ui, theme: &MacTheme) {
+        let mut engine = crate::core::ParametricEngine::new();
+        let model = engine.generate_warren_truss().unwrap_or_else(|_| crate::core::StructuralModel::new("Pushover Model"));
+        let report = crate::core::NonlinearEngine::run_pushover(&model, 15);
+
+        // Top Summary Cards
+        ui.horizontal(|ui| {
+            theme.card_frame().show(ui, |ui| {
+                ui.label(RichText::new("BASE SHEAR LELEH (Vy)").size(11.0).color(theme.text_secondary));
+                ui.label(RichText::new(format!("{:.1} kN", report.yield_base_shear_kn)).size(16.0).strong().color(theme.accent_blue));
+                ui.label(RichText::new(format!("Drift: {:.2} mm", report.yield_drift_mm)).size(10.5).color(theme.text_muted));
+            });
+            ui.add_space(8.0);
+            theme.card_frame().show(ui, |ui| {
+                ui.label(RichText::new("KAPASITAS ULTIMATE (Vu)").size(11.0).color(theme.text_secondary));
+                ui.label(RichText::new(format!("{:.1} kN", report.ultimate_base_shear_kn)).size(16.0).strong().color(theme.accent_green));
+                ui.label(RichText::new(format!("Drift: {:.2} mm", report.ultimate_drift_mm)).size(10.5).color(theme.text_muted));
+            });
+            ui.add_space(8.0);
+            theme.card_frame().show(ui, |ui| {
+                ui.label(RichText::new("OVERSTRENGTH FACTOR (Ω0)").size(11.0).color(theme.text_secondary));
+                ui.label(RichText::new(format!("{:.2}x", report.overstrength_factor_omega0)).size(16.0).strong().color(theme.accent_orange));
+                ui.label(RichText::new("AISC 341 Seismic Resilient").size(10.5).color(theme.text_muted));
+            });
+            ui.add_space(8.0);
+            theme.card_frame().show(ui, |ui| {
+                ui.label(RichText::new("RASIO DUKTILITAS (µ)").size(11.0).color(theme.text_secondary));
+                ui.label(RichText::new(format!("{:.2}", report.ductility_ratio_mu)).size(16.0).strong().color(theme.accent_blue));
+                ui.label(RichText::new("Kategori Struktur Sangat Daktail").size(10.5).color(theme.text_muted));
+            });
+        });
+
+        ui.add_space(16.0);
+
+        // Capacity Curve Table & Hinge Sequence
+        Frame::new()
+            .fill(theme.bg_card)
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::same(16))
+            .stroke(Stroke::new(1.0, theme.border_subtle))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("📉 Kurva Kapasitas Pushover Statik Non-Linear (P-Δ Bending & Axial Interaction)").size(13.5).strong().color(theme.text_primary));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let status_tag = if report.is_stable { "✅ Stabil Tanpa Mekanisme Runtuh Dini" } else { "⚠️ Hinge Mekanisme Terdeteksi" };
+                        ui.label(RichText::new(status_tag).size(11.5).strong().color(if report.is_stable { theme.accent_green } else { theme.accent_orange }));
+                    });
+                });
+
+                ui.add_space(12.0);
+
+                // Step Progression
+                ui.label(RichText::new("Tahapan Inkrementasi Gaya Lateral & Riwayat Pembentukan Sendi Plastis (FEMA 356 / ASCE 41):").size(11.5).color(theme.text_secondary));
+                ui.add_space(6.0);
+
+                for step in &report.steps {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("Step {:02} (λ = {:.2}x)", step.step, step.load_factor)).size(11.5).strong().color(theme.text_primary));
+                        ui.add_space(12.0);
+                        ui.label(RichText::new(format!("Base Shear: {:6.1} kN", step.base_shear_kn)).size(11.5).color(theme.text_secondary));
+                        ui.add_space(12.0);
+                        ui.label(RichText::new(format!("Drift Atap: {:5.2} mm", step.roof_drift_mm)).size(11.5).color(theme.text_secondary));
+                        ui.add_space(12.0);
+                        ui.label(RichText::new(format!("Sendi Plastis: {} Titik", step.active_hinges_count)).size(11.5).color(theme.accent_blue));
+
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let badge_col = match step.state_summary {
+                                crate::core::PlasticHingeState::Elastic => theme.accent_green,
+                                crate::core::PlasticHingeState::ImmediateOccupancy => theme.accent_blue,
+                                crate::core::PlasticHingeState::LifeSafety => theme.accent_orange,
+                                crate::core::PlasticHingeState::CollapsePrevention => Color32::from_rgb(255, 69, 58),
+                                crate::core::PlasticHingeState::Mechanism => Color32::from_rgb(191, 90, 242),
+                            };
+                            ui.label(RichText::new(step.state_summary.label()).size(11.0).strong().color(badge_col));
+                        });
+                    });
+                    ui.separator();
+                }
+            });
+    }
+
 }
