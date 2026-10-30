@@ -18,29 +18,6 @@
 
 ---
 
-## 📑 Table of Contents
-1. [Engineering Background & Motivation](#-engineering-background--motivation)
-2. [Mathematical Formulations of ARI](#-mathematical-formulations-of-ari)
-   - [2.1 Michaelis-Menten Hyperbolic Saturation Normalization](#21-michaelis-menten-hyperbolic-saturation-normalization-equations-25a--25b)
-   - [2.2 Combined Mechanical Edge Weights & Castigliano Compliance Cost](#22-combined-mechanical-edge-weights--castigliano-compliance-cost-equations-27--28)
-   - [2.3 Multigraph & Edge-Disjoint K-Paths via Menger's Theorem](#23-multigraph--edge-disjoint-k-paths-via-mengers-theorem-equations-29--210)
-   - [2.4 Multi-Load & Multi-Support Topological Aggregation](#24-multi-load--multi-support-topological-aggregation-equations-211--212)
-   - [2.5 Redundancy Ratio (RR) and Pre-Disruption Utilization](#25-redundancy-ratio-rr-and-pre-disruption-utilization-equations-213--216)
-   - [2.6 Core Multiplicative Adjusted Redundancy Index (ARI)](#26-core-multiplicative-adjusted-redundancy-index-ari-equations-217--219)
-   - [2.7 Gate 1: SVD Kinematic Mechanism Guard & Spectral Leverage $h_e$](#27-gate-1-svd-kinematic-mechanism-guard--spectral-leverage-h_e-equations-41--44)
-   - [2.8 Advanced Three-Channel Formulation (ARI v2)](#28-advanced-three-channel-formulation-ari-v2-equations-413b--413c)
-3. [Canonical Verification & Numerical Benchmarks](#-canonical-verification--numerical-benchmarks)
-   - [Analytical Verification of Canonical Model M1 (Parallel Bars - Table 25)](#analytical-verification-of-canonical-model-m1-parallel-bars---table-25)
-   - [Full-Scale Empirical Benchmark: Models M1–M4 & 300 Master Models S1–S5](#full-scale-empirical-benchmark-models-m1m4--300-master-models-s1s5)
-4. [The 10D BIM Lifecycle Framework](#-the-10d-bim-lifecycle-framework)
-5. [CAD/BIM Triad Dock & Native Vector Canvas Viewport](#-cadbim-triad-dock--native-vector-canvas-viewport)
-6. [Global Floating Dynamic Island AI Copilot (`⌘K`)](#-global-floating-dynamic-island-ai-copilot-k)
-7. [In-App GitHub Releases Auto-Updater](#-in-app-github-releases-auto-updater)
-8. [Installation & Compilation Guide](#-installation--compilation-guide)
-9. [License & Acknowledgments](#-license--acknowledgments)
-
----
-
 ## 🎯 Engineering Background & Motivation
 
 For more than four decades, mainstream structural engineering software (**SAP2000, ETABS, STAAD.Pro, MIDAS, Revit**) has operated exclusively under an isolated, single-element capacity evaluation paradigm (*Capacity-Centric Design*):
