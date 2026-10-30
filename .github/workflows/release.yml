@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-macos:
-    name: Build & Publish macOS DMG
+    name: Build Universal macOS DMG (Intel + Apple Silicon)
     runs-on: macos-14
     permissions:
       contents: write
@@ -16,23 +16,46 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust Toolchain
+      - name: Install Rust Toolchain & Universal Targets
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin, aarch64-apple-darwin
 
       - name: Run Test Suite
         run: cargo test
 
-      - name: Build Release Binary
-        run: cargo build --release
+      - name: Build for Intel (x86_64)
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Build for Apple Silicon (aarch64)
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Create Universal 2 Binary (Intel + Apple Silicon)
+        run: |
+          mkdir -p target/universal
+          lipo -create -output target/universal/eigengraph \
+            target/x86_64-apple-darwin/release/eigengraph \
+            target/aarch64-apple-darwin/release/eigengraph
+          file target/universal/eigengraph
 
       - name: Package macOS App Bundle & DMG
         run: |
           mkdir -p "EigenGraph.app/Contents/MacOS"
           mkdir -p "EigenGraph.app/Contents/Resources"
-          cp target/release/eigengraph "EigenGraph.app/Contents/MacOS/"
-          if [ -f "assets/icon.png" ]; then
+          
+          # Copy Universal 2 binary
+          cp target/universal/eigengraph "EigenGraph.app/Contents/MacOS/"
+          
+          # Copy Info.plist and Icon
+          cp assets/Info.plist "EigenGraph.app/Contents/"
+          if [ -f "assets/AppIcon.icns" ]; then
+            cp assets/AppIcon.icns "EigenGraph.app/Contents/Resources/"
+          elif [ -f "assets/icon.png" ]; then
             cp assets/icon.png "EigenGraph.app/Contents/Resources/"
           fi
+          
+          # Ad-hoc code sign for macOS Gatekeeper
+          codesign --force --deep --sign - "EigenGraph.app"
           
           # Create professional staging folder with /Applications symlink
           mkdir -p dmg_staging
