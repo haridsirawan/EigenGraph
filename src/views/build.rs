@@ -1,11 +1,41 @@
 //! build.rs — Pillar 3: 3D CAD/BIM Canvas Viewport & Dedicated CAD/BIM Modeling Sidebar.
+//! Features a True 360° Interactive 3D Turntable/Orbit Viewport, Solid Profile Extrusions,
+//! Depth-Sorted Shaded Rendering (Painter's Algorithm), and Stress/ARI Gradient Contours.
 
 use egui::{Align, Align2, Color32, CornerRadius, Frame, Layout, Margin, Pos2, RichText, Sense, Stroke, Ui, Vec2};
 use crate::models::{DatabaseComponent, SidebarTab, StructuralMember};
 use crate::theme::MacTheme;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelArchetype {
+    DiagridTower3D,   // 48-Storey Diagrid Skyscraper IFC
+    TrussBridge3D,    // 3D Space Truss Arch Bridge
+    SpaceDome3D,      // Double-Layer Reticulated Dome
+    WarrenTruss2D,    // Warren 24m Standard
+}
+
+impl ModelArchetype {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::DiagridTower3D => "🏢 Diagrid Tower 3D (IFC)",
+            Self::TrussBridge3D => "🌉 Arch Bridge 3D",
+            Self::SpaceDome3D => "🌐 MERO Dome 3D",
+            Self::WarrenTruss2D => "📐 Warren 24m",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Render3DMode {
+    SolidShaded,      // 3D Extruded Shaded Polygonal Beams with Lighting
+    Wireframe,        // Crisp Vector Wireframe Lines
+}
+
 pub struct BuildView {
     pub active_sidebar_tab: SidebarTab,
+    pub active_model: ModelArchetype,
+    pub render_mode: Render3DMode,
+    pub perspective: bool,
     pub selected_member_id: Option<usize>,
     pub simulated_eliminated_ids: Vec<usize>,
     pub color_mode: String,
@@ -23,19 +53,37 @@ impl Default for BuildView {
     fn default() -> Self {
         Self {
             active_sidebar_tab: SidebarTab::Properties,
-            selected_member_id: None, // Level 1 (Global KPI) by default
+            active_model: ModelArchetype::DiagridTower3D,
+            render_mode: Render3DMode::SolidShaded,
+            perspective: true,
+            selected_member_id: None,
             simulated_eliminated_ids: Vec::new(),
             color_mode: "ARI".to_string(),
             show_grid: true,
             show_axes: true,
             show_node_labels: true,
             show_deformed_shape: false,
-            cam_yaw: 0.0,
-            cam_pitch: 0.0,
-            cam_zoom: 1.0,
+            cam_yaw: 0.65,
+            cam_pitch: 0.35,
+            cam_zoom: 1.15,
             cam_pan: Vec2::ZERO,
         }
     }
+}
+
+#[derive(Clone)]
+struct Member3D {
+    id: usize,
+    p1: (f32, f32, f32),
+    p2: (f32, f32, f32),
+    name: String,
+    section: String,
+    base_width: f32,
+    force_kn: f32,
+    capacity_kn: f32,
+    utilization: f32,
+    ari: f32,
+    is_critical: bool,
 }
 
 impl BuildView {
@@ -44,7 +92,7 @@ impl BuildView {
             // 1. UNIFIED CAD/BIM TRIAD DOCK (Properties, Project Browser, Modify, Layers)
             self.render_unified_sidebar(ui, theme, members, db_components);
 
-            // 2. 3D VIEWPORT CANVAS WITH INTERACTIVE VECTOR RENDERER
+            // 2. 3D VIEWPORT CANVAS WITH INTERACTIVE VECTOR & SOLID RENDERER
             self.render_canvas(ui, theme, members);
         });
     }
@@ -59,7 +107,7 @@ impl BuildView {
         theme.sidebar_frame().show(ui, |ui| {
             ui.set_width(320.0);
             ui.vertical(|ui| {
-                // Activity Bar Tabs (Properties, Project Browser, Modify Tools, Display Layers)
+                // Activity Bar Tabs
                 ui.horizontal(|ui| {
                     let tabs = [
                         SidebarTab::Properties,
@@ -101,137 +149,89 @@ impl BuildView {
         ui.add_space(6.0);
 
         if let Some(mid) = self.selected_member_id {
-            if let Some(m) = members.iter().find(|item| item.id == mid) {
-                // LEVEL 2: ELEMENT INSPECTOR (When an element is selected)
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("🔍 ELEMENT INSPECTOR").size(11.0).strong().color(theme.accent_blue));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.add(egui::Button::new(RichText::new("✕ Tutup / Kembali ke KPI").size(10.0).color(theme.text_secondary))
-                            .fill(theme.bg_card)
-                            .corner_radius(CornerRadius::same(4))).clicked() {
-                            self.selected_member_id = None;
-                        }
-                    });
-                });
-                ui.add_space(4.0);
+            let m_opt = members.iter().find(|item| item.id == mid);
+            let fallback_name = format!("Element 3D #{}", mid);
+            let name = m_opt.map(|m| m.name.as_str()).unwrap_or(&fallback_name);
+            let section = m_opt.map(|m| m.section.as_str()).unwrap_or("CHS 610x25");
+            let force = m_opt.map(|m| m.force_kn).unwrap_or(48.5);
+            let capacity = m_opt.map(|m| m.capacity_kn).unwrap_or(120.0);
+            let util = m_opt.map(|m| m.utilization).unwrap_or(0.404);
+            let ari = m_opt.map(|m| m.ari).unwrap_or(0.89);
+            let dcr = m_opt.map(|m| m.dcr_interaction).unwrap_or(0.45);
 
-                theme.card_frame().show(ui, |ui| {
-                    ui.label(RichText::new(&m.name).strong().size(15.0).color(theme.text_primary));
-                    ui.label(RichText::new(format!("Section Profile: {} (Frame 3D Element)", m.section)).size(12.0).color(theme.accent_blue));
-                    ui.add_space(6.0);
-                    ui.separator();
-                    ui.add_space(6.0);
-
-                    // Frame 3D Bending, Shear & Axial Forces
-                    ui.label(RichText::new("INTERNAL FORCES & MOMENTS (FRAME 3D)").size(11.0).strong().color(theme.text_secondary));
-                    ui.label(RichText::new(format!("• Axial Force (N_e): {:+.1} kN", m.force_kn)).size(11.5).color(theme.text_secondary));
-                    ui.label(RichText::new(format!("• Bending Moment My: {:.2} kN.m | Mz: {:.2} kN.m", m.moment_my_knm, m.moment_mz_knm)).size(11.5).color(theme.accent_blue));
-                    ui.label(RichText::new(format!("• Shear Force Vy: {:.1} kN", m.shear_vy_kn)).size(11.5).color(theme.text_secondary));
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("• AISC 360 LRFD P-M-V DCR:").size(11.5).color(theme.text_secondary));
-                        let dcr_col = if m.dcr_interaction < 0.70 { theme.accent_green } else if m.dcr_interaction < 1.0 { theme.accent_orange } else { theme.accent_red };
-                        ui.label(RichText::new(format!("{:.1}%", m.dcr_interaction * 100.0)).size(12.0).strong().color(dcr_col));
-                    });
-
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(6.0);
-
-                    // ARI & Redundancy Metrics
-                    ui.label(RichText::new("REDUNDANSI & INTEGRITAS STRUKTURAL").size(11.0).strong().color(theme.text_secondary));
-                    ui.label(RichText::new(format!("• Redundancy Ratio (RR): {:.4}", m.rr)).size(11.5).color(theme.accent_blue));
-                    ui.label(RichText::new(format!("• Adjusted Redundancy Index: {:.4}", m.ari)).size(11.5).strong().color(if m.ari >= 0.70 { theme.accent_green } else { theme.accent_red }));
-                    ui.label(RichText::new(format!("• Criticality Index (CI): {:.4}", m.ci)).size(11.5).color(if m.is_critical { theme.accent_red } else { theme.text_secondary }));
-                    ui.label(RichText::new(format!("• SVD Margin (m_e = 1 - h_e): {:.4}", m.svd_margin)).size(11.5).color(theme.accent_orange));
-
-                    ui.add_space(10.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-
-                    // Skenario Disrupsi Jamak (N-2 / N-k) & Runtuh Berantai
-                    ui.label(RichText::new("SIMULASI DISRUPSI JAMAK (N-2 / N-k)").size(11.0).strong().color(theme.text_secondary));
-                    ui.add_space(4.0);
-
-                    let is_in_disruption = self.simulated_eliminated_ids.contains(&mid);
-                    ui.horizontal(|ui| {
-                        if !is_in_disruption {
-                            if ui.add(egui::Button::new(RichText::new("+ Tambah ke Skenario Disrupsi").size(11.0).color(theme.text_primary))
-                                .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(6))).clicked() {
-                                self.simulated_eliminated_ids.push(mid);
-                            }
-                        } else {
-                            if ui.add(egui::Button::new(RichText::new("✕ Hapus dari Skenario").size(11.0).color(theme.accent_orange))
-                                .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(6))).clicked() {
-                                self.simulated_eliminated_ids.retain(|&id| id != mid);
-                            }
-                        }
-
-                        if !self.simulated_eliminated_ids.is_empty() {
-                            let n_count = self.simulated_eliminated_ids.len();
-                            let sim_btn = egui::Button::new(RichText::new(format!("💥 Uji N-{} Disrupsi", n_count)).size(11.0).strong().color(Color32::WHITE))
-                                .fill(Color32::from_rgb(220, 50, 50))
-                                .corner_radius(CornerRadius::same(6));
-
-                            if ui.add(sim_btn).clicked() {
-                                // Multi-disruption simulation active
-                            }
-                        }
-                    });
-
-                    if !self.simulated_eliminated_ids.is_empty() {
-                        ui.add_space(6.0);
-                        let n_count = self.simulated_eliminated_ids.len();
-                        Frame::new()
-                            .fill(Color32::from_rgb(45, 18, 18))
-                            .stroke(Stroke::new(1.0, theme.accent_red))
-                            .corner_radius(CornerRadius::same(6))
-                            .inner_margin(Margin::symmetric(10, 8))
-                            .show(ui, |ui| {
-                                ui.label(RichText::new(format!("⚠️ SKENARIO N-{} AKTIF: Batang {:?}", n_count, self.simulated_eliminated_ids)).size(11.5).strong().color(theme.accent_red));
-                                ui.label(RichText::new("• Gate 1 SVD Kinematics: STABIL BEBAS MEKANISME (rank = n_free)").size(10.5).color(theme.text_secondary));
-                                ui.label(RichText::new("• Deteksi Runtuh Berantai (Domino Failure): ZERO (PVI = 0.0)").size(10.5).color(theme.accent_green));
-                                ui.label(RichText::new("• Utilisasi Redistribusi Pasca-Disrupsi: 84.2%").size(10.5).color(theme.accent_orange));
-                            });
-
-                        ui.add_space(4.0);
-                        if ui.add(egui::Button::new(RichText::new("🔄 Pulihkan Seluruh Batang").size(11.0).strong().color(Color32::WHITE))
-                            .fill(theme.accent_green)
-                            .corner_radius(CornerRadius::same(6))).clicked() {
-                            self.simulated_eliminated_ids.clear();
-                        }
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("🔍 ELEMENT INSPECTOR").size(11.0).strong().color(theme.accent_blue));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.add(egui::Button::new(RichText::new("✕ Tutup / Kembali ke KPI").size(10.0).color(theme.text_secondary))
+                        .fill(theme.bg_card)
+                        .corner_radius(CornerRadius::same(4))).clicked() {
+                        self.selected_member_id = None;
                     }
                 });
-            }
-        } else {
-            // LEVEL 1: GLOBAL PILLAR KPI & SYSTEM ARI METRICS (When no element is selected)
+            });
+            ui.add_space(4.0);
+
             theme.card_frame().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("🌟 PILLAR KPI & SYSTEM ARI").size(11.0).strong().color(theme.text_primary));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(RichText::new("LIVE OVERVIEW").size(10.0).strong().color(theme.accent_green));
-                    });
-                });
+                ui.label(RichText::new(name).strong().size(14.0).color(theme.text_primary));
+                ui.label(RichText::new(format!("Section: {} (Frame 3D Element)", section)).size(11.5).color(theme.accent_blue));
                 ui.add_space(6.0);
                 ui.separator();
                 ui.add_space(6.0);
 
-                let kpis = [\
-                    ("Minimum System ARI", "0.940 (Grade A Safe)", theme.accent_green),
-                    ("SVD Kinematic Guard", "STABIL BEBAS MEKANISME", theme.accent_green),
-                    ("Total Tonase Baja", "48.5 Ton (ASTM A992)", theme.text_primary),
-                    ("Total Elemen Aktif", "432 Batang Terhubung", theme.accent_blue),
-                    ("Max Deflection L/800", "1.20 mm", theme.text_primary),
-                    ("System Redundancy (RR)", "0.958 (High Alternate)", theme.accent_blue),
-                    ("Criticality Index (CI_max)", "0.420 (Below 0.70)", theme.accent_green),
+                let rows = [
+                    ("Gaya Aksial (Pu)", format!("{:.1} kN", force), if force < 0.0 { theme.accent_blue } else { theme.accent_orange }),
+                    ("Kapasitas Nominal (ϕPn)", format!("{:.1} kN", capacity), theme.text_primary),
+                    ("Rasio Utilisasi (DCR)", format!("{:.1}%", util * 100.0), if util > 0.85 { theme.accent_red } else { theme.accent_green }),
+                    ("Indeks Redundansi (ARI)", format!("{:.3}", ari), if ari >= 0.85 { theme.accent_green } else { theme.accent_orange }),
+                    ("DCR Interaksi P-M-V", format!("{:.3}", dcr), theme.text_secondary),
                 ];
 
-                for (label, val, col) in kpis {
+                for (lbl, val, col) in rows {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(label).size(11.0).color(theme.text_secondary));
+                        ui.label(RichText::new(lbl).size(11.0).color(theme.text_secondary));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(RichText::new(val).size(11.0).strong().color(col));
+                            ui.label(RichText::new(val).strong().size(11.0).color(col));
+                        });
+                    });
+                    ui.add_space(2.0);
+                }
+
+                ui.add_space(8.0);
+                let is_elim = self.simulated_eliminated_ids.contains(&mid);
+                let btn_text = if is_elim { "🔄 Pulihkan Batang Ini" } else { "💥 Uji Disrupsi Batang Ini (N-1)" };
+                let btn_bg = if is_elim { theme.accent_green } else { theme.accent_red };
+
+                if ui.add(egui::Button::new(RichText::new(btn_text).size(11.0).strong().color(Color32::WHITE))
+                    .fill(btn_bg)
+                    .corner_radius(CornerRadius::same(6))
+                    .min_size(Vec2::new(ui.available_width(), 26.0))).clicked() {
+                    if is_elim {
+                        self.simulated_eliminated_ids.retain(|&x| x != mid);
+                    } else {
+                        self.simulated_eliminated_ids.push(mid);
+                    }
+                }
+            });
+        } else {
+            // Global System KPI View
+            theme.card_frame().show(ui, |ui| {
+                ui.label(RichText::new("GLOBAL REDUNDANCY KPI (SYSTEM LEVEL)").size(11.0).strong().color(theme.accent_blue));
+                ui.add_space(4.0);
+
+                let sys_rows = [
+                    ("Model Terpilih", self.active_model.label().to_string()),
+                    ("Indeks Redundansi (ARI Global)", "0.892 (Robust)".to_string()),
+                    ("Cadangan Kinematik (SVD Margin)", "99.8% (Bebas Singularitas)".to_string()),
+                    ("Defleksi Elastis Maksimum", "12.8 mm (L/1875)".to_string()),
+                    ("Faktor Amplifikasi Dinamis (DAF)", "1.25 (DoD UFC)".to_string()),
+                    ("Elemen Tereliminasi (Disrupsi)", format!("N-{}", self.simulated_eliminated_ids.len())),
+                ];
+
+                for (lbl, val) in sys_rows {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(lbl).size(10.5).color(theme.text_secondary));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(RichText::new(val).size(10.5).strong().color(theme.text_primary));
                         });
                     });
                     ui.add_space(2.0);
@@ -241,53 +241,75 @@ impl BuildView {
                 ui.separator();
                 ui.add_space(6.0);
 
-                // Quick Disruption Simulation Trigger
                 if ui.add(egui::Button::new(RichText::new("💥 Uji Disrupsi Acak N-1").size(11.0).color(theme.text_primary))
                     .fill(theme.bg_canvas)
                     .corner_radius(CornerRadius::same(6))
                     .min_size(Vec2::new(ui.available_width(), 26.0))).clicked() {
-                    self.simulated_eliminated_ids = vec![1];
+                    self.simulated_eliminated_ids = vec![4];
                 }
             });
-
-            ui.add_space(8.0);
-
-            // PARAMETRIC DRIVING VARIABLES CARD
-            theme.card_frame().show(ui, |ui| {
-                ui.label(RichText::new("🔗 PARAMETRIC DRIVING VARIABLES").size(11.0).strong().color(theme.text_secondary));
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
-
-                let vars = [
-                    ("Panjang Bentang (L)", "24.0 m"),
-                    ("Tinggi Rangka (H)", "3.2 m (L / 7.5)"),
-                    ("Segmen Panel (n)", "6 Segmen (4.0m ea)"),
-                    ("Mutu Material", "ASTM A992 / BJ41"),
-                    ("Modulus Elastisitas", "200.000 MPa"),
-                ];
-
-                for (name, val) in vars {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(name).size(11.0).color(theme.text_secondary));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(RichText::new(val).size(11.0).strong().color(theme.text_primary));
-                        });
-                    });
-                    ui.add_space(2.0);
-                }
-            });
-
-            ui.add_space(8.0);
-            Frame::new()
-                .fill(theme.bg_canvas)
-                .stroke(Stroke::new(1.0, theme.border_subtle))
-                .corner_radius(CornerRadius::same(6))
-                .inner_margin(Margin::same(10))
-                .show(ui, |ui| {
-                    ui.label(RichText::new("💡 Tip: Klik salah satu batang pada kanvas 3D atau pohon Project Browser untuk membuka Element Inspector lokal. Klik area kosong kanvas untuk kembali ke KPI.").size(10.5).color(theme.text_muted));
-                });
         }
+
+        ui.add_space(8.0);
+
+        // Model Selector in Sidebar
+        theme.card_frame().show(ui, |ui| {
+            ui.label(RichText::new("🏛️ PILIH MODEL STRUKTUR 3D").size(11.0).strong().color(theme.text_secondary));
+            ui.add_space(6.0);
+
+            let models = [
+                ModelArchetype::DiagridTower3D,
+                ModelArchetype::TrussBridge3D,
+                ModelArchetype::SpaceDome3D,
+                ModelArchetype::WarrenTruss2D,
+            ];
+
+            for m in models {
+                let is_sel = self.active_model == m;
+                if ui.selectable_label(is_sel, m.label()).clicked() {
+                    self.active_model = m;
+                    self.selected_member_id = None;
+                    self.simulated_eliminated_ids.clear();
+                    // Preset camera for each model
+                    match m {
+                        ModelArchetype::DiagridTower3D => {
+                            self.cam_yaw = 0.65;
+                            self.cam_pitch = 0.35;
+                            self.cam_zoom = 1.15;
+                            self.cam_pan = Vec2::ZERO;
+                        }
+                        ModelArchetype::TrussBridge3D => {
+                            self.cam_yaw = 0.55;
+                            self.cam_pitch = 0.28;
+                            self.cam_zoom = 1.0;
+                            self.cam_pan = Vec2::ZERO;
+                        }
+                        ModelArchetype::SpaceDome3D => {
+                            self.cam_yaw = 0.78;
+                            self.cam_pitch = 0.52;
+                            self.cam_zoom = 1.1;
+                            self.cam_pan = Vec2::ZERO;
+                        }
+                        ModelArchetype::WarrenTruss2D => {
+                            self.cam_yaw = 0.0;
+                            self.cam_pitch = 0.0;
+                            self.cam_zoom = 1.0;
+                            self.cam_pan = Vec2::ZERO;
+                        }
+                    }
+                }
+            }
+        });
+
+        ui.add_space(8.0);
+        Frame::new()
+            .fill(theme.bg_canvas)
+            .stroke(Stroke::new(1.0, theme.border_subtle))
+            .corner_radius(CornerRadius::same(6))
+            .inner_margin(Margin::same(10))
+            .show(ui, |ui| {
+                ui.label(RichText::new("💡 Kontrol Orbit 3D:\n• Klik Kiri + Geser: Putar / Orbit 360°\n• Klik Kanan + Geser: Geser / Pan Layar\n• Scroll Roda Mouse: Perbesar / Zoom").size(10.0).color(theme.text_muted));
+            });
     }
 
     fn render_browser_tab(
@@ -301,30 +323,21 @@ impl BuildView {
         ui.add_space(6.0);
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            // PARAMETRIC DATABASE INSERTION SECTION
             ui.collapsing("📦 Imported Parametric Components (Database)", |ui| {
-                ui.label(RichText::new("Components drawn in PARAMETRIC studio:").size(11.0).color(theme.text_muted));
                 for comp in db_components {
                     theme.card_frame().show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(&comp.name).size(12.0).strong().color(theme.accent_blue));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.add(egui::Button::new(RichText::new("+ Insert").size(10.0).color(Color32::WHITE))
-                                    .fill(theme.accent_blue)
-                                    .corner_radius(CornerRadius::same(4))).clicked() {
-                                    // Instantiate component into model
-                                }
-                            });
+                            ui.label(RichText::new(&comp.name).size(11.5).strong().color(theme.accent_blue));
                         });
-                        ui.label(RichText::new(format!("Category: {} • {} elements", comp.category, comp.elements_count)).size(10.0).color(theme.text_secondary));
+                        ui.label(RichText::new(format!("{} • {} elemen", comp.category, comp.elements_count)).size(10.0).color(theme.text_secondary));
                     });
-                    ui.add_space(4.0);
+                    ui.add_space(3.0);
                 }
             });
 
             ui.add_space(6.0);
 
-            ui.collapsing("📐 Structural Trusses & Frames", |ui| {
+            ui.collapsing("📐 Structural Frame Elements (Active)", |ui| {
                 for m in members {
                     let is_sel = self.selected_member_id == Some(m.id);
                     let text = format!("{}: {} (ARI: {:.2})", m.name, m.section, m.ari);
@@ -334,13 +347,17 @@ impl BuildView {
                     }
                 }
             });
+
             ui.collapsing("📍 Boundary Restraints (Supports)", |ui| {
-                ui.label(RichText::new("• Node 0: Pinned (ux=0, uy=0, uz=0)").size(11.5).color(theme.text_secondary));
-                ui.label(RichText::new("• Node 6: Roller (uy=0, uz=0)").size(11.5).color(theme.text_secondary));
+                ui.label(RichText::new("• Node 0: Pinned (ux=0, uy=0, uz=0)").size(11.0).color(theme.text_secondary));
+                ui.label(RichText::new("• Node 6: Roller (uy=0, uz=0)").size(11.0).color(theme.text_secondary));
+                ui.label(RichText::new("• Base Perimeter: Fixed Anchor Bolts").size(11.0).color(theme.text_secondary));
             });
-            ui.collapsing("⚡ Load Cases (c in D)", |ui| {
-                ui.label(RichText::new("• Case c:uy = -30.0 kN (Titik Beban P)").size(11.5).color(theme.accent_orange));
-                ui.label(RichText::new("• Self-Weight Dead Load: 48.5 Ton").size(11.5).color(theme.text_secondary));
+
+            ui.collapsing("⚡ Load Combinations (ASCE 7-22)", |ui| {
+                ui.label(RichText::new("• Combo 1: 1.2D + 1.6L").size(11.0).color(theme.accent_orange));
+                ui.label(RichText::new("• Combo 2: 1.2D + 1.0E + 0.5L (Seismic)").size(11.0).color(theme.text_secondary));
+                ui.label(RichText::new("• Alternate Path: (0.9 or 1.2)D + 0.5L").size(11.0).color(theme.text_secondary));
             });
         });
     }
@@ -351,7 +368,7 @@ impl BuildView {
 
         let tools = ["↔️ Move / Translate", "🔄 Rotate 3D", "📏 Scale", "✂️ Subdivide Member", "🪞 Mirror", "🔲 Array Pattern"];
         for t in tools {
-            if ui.add(egui::Button::new(RichText::new(t).size(12.0).color(theme.text_primary))
+            if ui.add(egui::Button::new(RichText::new(t).size(11.5).color(theme.text_primary))
                 .fill(theme.bg_card)
                 .corner_radius(CornerRadius::same(6))).clicked() {}
             ui.add_space(4.0);
@@ -365,9 +382,9 @@ impl BuildView {
         ui.label(RichText::new("3D Color Heatmap by:").size(11.0).strong().color(theme.text_primary));
         let modes = [
             ("ARI", "🎨 Heatmap Adjusted Redundancy (ARI)"),
-            ("Criticality", "🚨 Top 5 Fracture Critical Members"),
-            ("SVD Margin", "⚡ Mode Goyang SVD Kinematik"),
-            ("Axial Force", "🔥 Heatmap Rasio Kapasitas Leleh DCR"),
+            ("Criticality", "🚨 Top Fracture Critical Members"),
+            ("DCR_Stress", "🔥 Heatmap Rasio Kapasitas Leleh DCR"),
+            ("Material", "🧱 Material & Profil Penampang"),
         ];
         for (m, label) in modes {
             let is_sel = self.color_mode == m;
@@ -383,8 +400,8 @@ impl BuildView {
         ui.label(RichText::new("Visual Overlays & Grid:").size(11.0).strong().color(theme.text_primary));
         ui.add_space(4.0);
 
-        ui.checkbox(&mut self.show_grid, "3D Ground Grid (1000mm)");
-        ui.checkbox(&mut self.show_axes, "Global Coordinate Axes (XYZ)");
+        ui.checkbox(&mut self.show_grid, "3D Ground Grid Plane");
+        ui.checkbox(&mut self.show_axes, "Global Coordinate Axes (XYZ Triad)");
         ui.checkbox(&mut self.show_node_labels, "Node IDs & Boundary Restraints");
         ui.checkbox(&mut self.show_deformed_shape, "Deformed Shape Mesh (Scale 50x)");
     }
@@ -394,33 +411,49 @@ impl BuildView {
             // Contextual Top Modeling Ribbon
             Frame::new()
                 .fill(theme.bg_sidebar)
-                .inner_margin(Margin::symmetric(16, 8))
+                .inner_margin(Margin::symmetric(14, 8))
                 .stroke(Stroke::new(1.0, theme.border_subtle))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        let tools = ["👆 Select", "📍 Add Node", "📏 Draw Beam", "📌 Add Restraint", "⚡ Apply Load", "🔍 Fit All"];
-                        for t in tools {
-                            if ui.add(egui::Button::new(RichText::new(t).size(12.0).color(theme.text_primary))
-                                .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(6))).clicked() {
-                                if *t == "🔍 Fit All" {
-                                    self.cam_yaw = 0.0;
-                                    self.cam_pitch = 0.0;
-                                    self.cam_zoom = 1.0;
-                                    self.cam_pan = Vec2::ZERO;
-                                }
+                        // Render Style Toggle
+                        let is_solid = self.render_mode == Render3DMode::SolidShaded;
+                        if ui.selectable_label(is_solid, "🧱 Solid Shaded 3D").clicked() {
+                            self.render_mode = Render3DMode::SolidShaded;
+                        }
+                        if ui.selectable_label(!is_solid, "🕸️ Wireframe").clicked() {
+                            self.render_mode = Render3DMode::Wireframe;
+                        }
+
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+
+                        // Model Preset Selector
+                        ui.label(RichText::new("Model:").size(11.0).color(theme.text_muted));
+                        let models = [
+                            ModelArchetype::DiagridTower3D,
+                            ModelArchetype::TrussBridge3D,
+                            ModelArchetype::SpaceDome3D,
+                            ModelArchetype::WarrenTruss2D,
+                        ];
+                        for m in models {
+                            let is_m_sel = self.active_model == m;
+                            if ui.selectable_label(is_m_sel, m.label()).clicked() {
+                                self.active_model = m;
+                                self.selected_member_id = None;
+                                self.simulated_eliminated_ids.clear();
                             }
                         }
 
-                        // ViewCube Camera Presets
-                        ui.add_space(8.0);
+                        ui.add_space(6.0);
                         ui.separator();
-                        ui.add_space(8.0);
+                        ui.add_space(6.0);
 
-                        ui.label(RichText::new("🎥 3D Orbit:").size(11.0).color(theme.text_muted));
-                        if ui.add(egui::Button::new(RichText::new("📐 Iso").size(11.0).color(theme.text_secondary))
+                        // ViewCube Camera Presets
+                        ui.label(RichText::new("🎥").size(12.0));
+                        if ui.add(egui::Button::new(RichText::new("Iso").size(11.0).color(theme.text_secondary))
                             .fill(theme.bg_card).corner_radius(CornerRadius::same(4))).clicked() {
-                            self.cam_yaw = 0.55;
+                            self.cam_yaw = 0.65;
                             self.cam_pitch = 0.35;
                         }
                         if ui.add(egui::Button::new(RichText::new("Front").size(11.0).color(theme.text_secondary))
@@ -428,25 +461,34 @@ impl BuildView {
                             self.cam_yaw = 0.0;
                             self.cam_pitch = 0.0;
                         }
-                        if ui.add(egui::Button::new(RichText::new("🔝 Top").size(11.0).color(theme.text_secondary))
+                        if ui.add(egui::Button::new(RichText::new("Top").size(11.0).color(theme.text_secondary))
                             .fill(theme.bg_card).corner_radius(CornerRadius::same(4))).clicked() {
                             self.cam_yaw = 0.0;
-                            self.cam_pitch = 1.57;
+                            self.cam_pitch = 1.50;
                         }
                         if ui.add(egui::Button::new(RichText::new("Side").size(11.0).color(theme.text_secondary))
                             .fill(theme.bg_card).corner_radius(CornerRadius::same(4))).clicked() {
                             self.cam_yaw = 1.57;
                             self.cam_pitch = 0.0;
                         }
+                        if ui.add(egui::Button::new(RichText::new("🔍 Fit").size(11.0).color(theme.accent_blue))
+                            .fill(theme.bg_card).corner_radius(CornerRadius::same(4))).clicked() {
+                            self.cam_zoom = 1.15;
+                            self.cam_pan = Vec2::ZERO;
+                        }
 
-                        // Right-aligned Heatmap mode indicator & What-If Status
+                        // Perspective toggle
+                        if ui.selectable_label(self.perspective, "Persp").clicked() {
+                            self.perspective = !self.perspective;
+                        }
+
+                        // Right Status Badges
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let badge_text = if !self.simulated_eliminated_ids.is_empty() {
-                                format!("⚠️ DISRUPSI N-{}: BATANG {:?}", self.simulated_eliminated_ids.len(), self.simulated_eliminated_ids)
+                            let (badge_text, badge_col) = if !self.simulated_eliminated_ids.is_empty() {
+                                (format!("⚠️ DISRUPSI N-{}: BATANG {:?}", self.simulated_eliminated_ids.len(), self.simulated_eliminated_ids), theme.accent_red)
                             } else {
-                                format!("🎨 Heatmap: {}", self.color_mode)
+                                (format!("🎨 {}", self.color_mode), theme.accent_blue)
                             };
-                            let badge_col = if !self.simulated_eliminated_ids.is_empty() { theme.accent_red } else { theme.accent_blue };
 
                             Frame::new()
                                 .fill(badge_col.gamma_multiply(0.2))
@@ -454,13 +496,13 @@ impl BuildView {
                                 .corner_radius(CornerRadius::same(6))
                                 .inner_margin(Margin::symmetric(8, 2))
                                 .show(ui, |ui| {
-                                    ui.label(RichText::new(badge_text).size(11.0).strong().color(Color32::WHITE));
+                                    ui.label(RichText::new(badge_text).size(10.5).strong().color(Color32::WHITE));
                                 });
 
                             if self.selected_member_id.is_some() {
-                                if ui.add(egui::Button::new(RichText::new("✕ Clear Selection (View KPI)").size(11.0).color(theme.text_secondary))
+                                if ui.add(egui::Button::new(RichText::new("✕ Clear").size(10.5).color(theme.text_secondary))
                                     .fill(theme.bg_card)
-                                    .corner_radius(CornerRadius::same(6))).clicked() {
+                                    .corner_radius(CornerRadius::same(4))).clicked() {
                                     self.selected_member_id = None;
                                 }
                             }
@@ -468,321 +510,733 @@ impl BuildView {
                     });
                 });
 
-            // 3D Canvas Viewport Container
+            // 3D Canvas Viewport Container (Fills Available Screen Space)
+            let avail_size = ui.available_size();
+            let canvas_width = avail_size.x.max(680.0);
+            let canvas_height = (avail_size.y - 10.0).max(460.0);
+
             Frame::new()
                 .fill(Color32::from_rgb(14, 16, 22))
                 .stroke(Stroke::new(1.0, theme.border_subtle))
+                .inner_margin(Margin::same(0))
                 .show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(12.0);
+                    let (response, painter) = ui.allocate_painter(Vec2::new(canvas_width, canvas_height), Sense::click_and_drag());
+                    let rect = response.rect;
 
-                        // Simulated What-If Alert Banner if active
-                        if !self.simulated_eliminated_ids.is_empty() {
-                            Frame::new()
-                                .fill(Color32::from_rgb(40, 16, 16))
-                                .stroke(Stroke::new(1.0, theme.accent_red))
-                                .corner_radius(CornerRadius::same(8))
-                                .inner_margin(Margin::symmetric(16, 10))
-                                .show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(RichText::new("⚠️").size(18.0));
-                                        ui.vertical(|ui| {
-                                            ui.label(RichText::new(format!("SKENARIO DISRUPSI JAMAK N-{} (BATANG {:?})", self.simulated_eliminated_ids.len(), self.simulated_eliminated_ids)).size(13.0).strong().color(theme.accent_red));
-                                            ui.label(RichText::new("Gate 1 SVD Rank Check: STABIL (Bebas Mekanisme Goyang) • Efek Domino / Cascading Failure: NIHIL").size(11.5).color(theme.text_secondary));
-                                        });
-                                        ui.add_space(16.0);
-                                        if ui.add(egui::Button::new(RichText::new("🔄 Pulihkan Seluruh Batang").size(11.0).strong().color(Color32::WHITE))
-                                            .fill(theme.accent_green)
-                                            .corner_radius(CornerRadius::same(6))).clicked() {
-                                            self.simulated_eliminated_ids.clear();
-                                        }
-                                    });
-                                });
-                            ui.add_space(12.0);
+                    // Mouse Orbit, Pan, and Zoom Controls
+                    if response.dragged_by(egui::PointerButton::Secondary) || (response.dragged() && ui.input(|i| i.modifiers.shift)) {
+                        self.cam_pan += response.drag_delta();
+                    } else if response.dragged_by(egui::PointerButton::Primary) {
+                        self.cam_yaw = (self.cam_yaw + response.drag_delta().x * 0.008).rem_euclid(2.0 * std::f32::consts::PI);
+                        self.cam_pitch = (self.cam_pitch - response.drag_delta().y * 0.008).clamp(-1.52, 1.52);
+                    }
+
+                    if response.hovered() {
+                        let scroll_y = ui.input(|i| i.raw_scroll_delta.y);
+                        if scroll_y.abs() > 0.0 {
+                            self.cam_zoom = (self.cam_zoom * (1.0 + scroll_y * 0.0025)).clamp(0.15, 8.0);
                         }
+                    }
 
-                        // Canvas Vector Drawing Viewport
-                        let canvas_width = 720.0;
-                        let canvas_height = 240.0;
-                        let (response, painter) = ui.allocate_painter(Vec2::new(canvas_width, canvas_height), Sense::click_and_drag());
-                        let rect = response.rect;
+                    // 1. Background Grid & Deep Viewport Shader
+                    painter.rect_filled(rect, CornerRadius::same(0), Color32::from_rgb(15, 17, 24));
 
-                        // 3D Mouse Orbit, Pan, and Scroll Zoom Controls
-                        if response.dragged_by(egui::PointerButton::Secondary) || (response.dragged() && ui.input(|i| i.modifiers.shift)) {
-                            self.cam_pan += response.drag_delta();
-                        } else if response.dragged_by(egui::PointerButton::Primary) {
-                            self.cam_yaw += response.drag_delta().x * 0.01;
-                            self.cam_pitch = (self.cam_pitch - response.drag_delta().y * 0.01).clamp(-1.55, 1.55);
-                        }
+                    // Geometry Definitions & Model Centers
+                    let (center_3d, base_scale_unit, raw_members) = self.build_model_geometry(members);
 
-                        if response.hovered() {
-                            let scroll_y = ui.input(|i| i.raw_scroll_delta.y);
-                            if scroll_y.abs() > 0.0 {
-                                self.cam_zoom = (self.cam_zoom * (1.0 + scroll_y * 0.002)).clamp(0.2, 5.0);
-                            }
-                        }
+                    // 3D Projector Function with Camera Transformations and Z-depth
+                    let is_persp = self.perspective;
+                    let cam_yaw = self.cam_yaw;
+                    let cam_pitch = self.cam_pitch;
+                    let cam_zoom = self.cam_zoom;
+                    let cam_pan = self.cam_pan;
+                    let center_screen = rect.center();
 
-                        // 1. Background Fill
-                        painter.rect_filled(rect, CornerRadius::same(8), Color32::from_rgb(18, 20, 28));
-                        painter.rect_stroke(rect, CornerRadius::same(8), Stroke::new(1.0, theme.border_subtle), egui::StrokeKind::Outside);
+                    let project_3d = move |x: f32, y: f32, z: f32| -> (Pos2, f32) {
+                        let dx = x - center_3d.0;
+                        let dy = y - center_3d.1;
+                        let dz = z - center_3d.2;
 
-                        // 3D Projection Engine
-                        let center_x = 12.0;
-                        let center_y = 1.6;
-                        let center_z = 0.0;
+                        // Yaw rotation around Y axis
+                        let cos_y = cam_yaw.cos();
+                        let sin_y = cam_yaw.sin();
+                        let x1 = dx * cos_y + dz * sin_y;
+                        let z1 = -dx * sin_y + dz * cos_y;
 
-                        let project_3d = |x: f32, y: f32, z: f32| -> Pos2 {
-                            let dx = x - center_x;
-                            let dy = y - center_y;
-                            let dz = z - center_z;
+                        // Pitch rotation around X axis
+                        let cos_p = cam_pitch.cos();
+                        let sin_p = cam_pitch.sin();
+                        let y2 = dy * cos_p - z1 * sin_p;
+                        let z2 = dy * sin_p + z1 * cos_p;
 
-                            let cos_y = self.cam_yaw.cos();
-                            let sin_y = self.cam_yaw.sin();
-                            let x1 = dx * cos_y + dz * sin_y;
-                            let z1 = -dx * sin_y + dz * cos_y;
-
-                            let cos_p = self.cam_pitch.cos();
-                            let sin_p = self.cam_pitch.sin();
-                            let y2 = dy * cos_p - z1 * sin_p;
-
-                            let base_scale = (canvas_width - 110.0) / 24.0;
-                            let scale = base_scale * self.cam_zoom;
-                            let screen_cx = rect.center().x + self.cam_pan.x;
-                            let screen_cy = rect.center().y + self.cam_pan.y;
-
-                            Pos2::new(screen_cx + x1 * scale, screen_cy - y2 * scale)
+                        // Camera distance & perspective factor
+                        let d_cam = 55.0;
+                        let persp_factor = if is_persp {
+                            (d_cam / (d_cam + z2)).clamp(0.3, 3.0)
+                        } else {
+                            1.0
                         };
 
-                        // 2. CAD Grid
-                        if self.show_grid {
-                            let grid_step = 36.0;
-                            let mut x = rect.left() + grid_step;
-                            while x < rect.right() {
-                                painter.line_segment([Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())], Stroke::new(0.5, Color32::from_rgba_premultiplied(255, 255, 255, 12)));
-                                x += grid_step;
-                            }
-                            let mut y = rect.top() + grid_step;
-                            while y < rect.bottom() {
-                                painter.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(0.5, Color32::from_rgba_premultiplied(255, 255, 255, 12)));
-                                y += grid_step;
-                            }
+                        let scale = base_scale_unit * cam_zoom * persp_factor;
+                        let sx = center_screen.x + cam_pan.x + x1 * scale;
+                        let sy = center_screen.y + cam_pan.y - y2 * scale;
+
+                        (Pos2::new(sx, sy), z2)
+                    };
+
+                    // 2. 3D Ground Grid Plane
+                    if self.show_grid {
+                        let grid_size = 6;
+                        let grid_step = 4.0;
+                        for i in -grid_size..=grid_size {
+                            let fi = i as f32 * grid_step;
+                            let (p1, _) = project_3d(fi, 0.0, -grid_size as f32 * grid_step);
+                            let (p2, _) = project_3d(fi, 0.0, grid_size as f32 * grid_step);
+                            let alpha = if i == 0 { 40 } else { 15 };
+                            painter.line_segment([p1, p2], Stroke::new(0.6, Color32::from_rgba_premultiplied(100, 150, 220, alpha)));
+
+                            let (p3, _) = project_3d(-grid_size as f32 * grid_step, 0.0, fi);
+                            let (p4, _) = project_3d(grid_size as f32 * grid_step, 0.0, fi);
+                            painter.line_segment([p3, p4], Stroke::new(0.6, Color32::from_rgba_premultiplied(100, 150, 220, alpha)));
                         }
+                    }
 
-                        // 3. Origin Coordinate Axes & Camera Status HUD
-                        if self.show_axes {
-                            let origin = Pos2::new(rect.left() + 25.0, rect.bottom() - 25.0);
-                            painter.line_segment([origin, origin + Vec2::new(26.0, 0.0)], Stroke::new(2.0, Color32::from_rgb(255, 75, 75))); // X (Red)
-                            painter.line_segment([origin, origin - Vec2::new(0.0, 26.0)], Stroke::new(2.0, Color32::from_rgb(75, 220, 75))); // Y (Green)
-                            painter.text(origin + Vec2::new(30.0, -2.0), Align2::LEFT_CENTER, "X", egui::FontId::monospace(10.0), Color32::from_rgb(255, 100, 100));
-                            painter.text(origin - Vec2::new(2.0, 32.0), Align2::CENTER_BOTTOM, "Y", egui::FontId::monospace(10.0), Color32::from_rgb(100, 230, 100));
-                        }
+                    // 3. Process & Depth-Sort Members (Painter's Algorithm)
+                    struct RenderItem {
+                        id: usize,
+                        p1_screen: Pos2,
+                        p2_screen: Pos2,
+                        depth: f32,
+                        p1_3d: (f32, f32, f32),
+                        p2_3d: (f32, f32, f32),
+                        name: String,
+                        section: String,
+                        base_width: f32,
+                        force_kn: f32,
+                        capacity_kn: f32,
+                        utilization: f32,
+                        ari: f32,
+                        is_critical: bool,
+                    }
 
-                        painter.text(
-                            Pos2::new(rect.left() + 10.0, rect.top() + 10.0),
-                            Align2::LEFT_TOP,
-                            format!("🎥 3D Viewport: Yaw {:.0}° | Pitch {:.0}° | Zoom {:.1}x", self.cam_yaw.to_degrees(), self.cam_pitch.to_degrees(), self.cam_zoom),
-                            egui::FontId::monospace(9.5),
-                            Color32::from_rgb(130, 150, 180),
-                        );
+                    let mut render_list = Vec::with_capacity(raw_members.len());
+                    for m in &raw_members {
+                        let (sp1, z1) = project_3d(m.p1.0, m.p1.1, m.p1.2);
+                        let (sp2, z2) = project_3d(m.p2.0, m.p2.1, m.p2.2);
+                        let avg_depth = (z1 + z2) * 0.5;
 
-                        // 4. Truss Nodes Coordinates Calculation (6 Panels Warren Truss in 3D Space)
-                        let mut bot_nodes = Vec::new();
-                        for i in 0..=6 {
-                            let x = (i as f32) * 4.0;
-                            bot_nodes.push(project_3d(x, 0.0, 0.0));
-                        }
-
-                        let mut top_nodes = Vec::new();
-                        for i in 1..=5 {
-                            let x = (i as f32) * 4.0;
-                            top_nodes.push(project_3d(x, 3.2, 0.0));
-                        }
-
-                        // 5. Member Definitions (id, p1, p2, name)
-                        let mut member_draw_list = Vec::new();
-                        // Bottom chord (E1 is first panel, others 5..9)
-                        member_draw_list.push((1, bot_nodes[0], bot_nodes[1], "E1"));
-                        member_draw_list.push((5, bot_nodes[1], bot_nodes[2], "E5"));
-                        member_draw_list.push((6, bot_nodes[2], bot_nodes[3], "E6"));
-                        member_draw_list.push((7, bot_nodes[3], bot_nodes[4], "E7"));
-                        member_draw_list.push((8, bot_nodes[4], bot_nodes[5], "E8"));
-                        member_draw_list.push((9, bot_nodes[5], bot_nodes[6], "E9"));
-
-                        // Top chord (E2 is middle panel)
-                        member_draw_list.push((10, top_nodes[0], top_nodes[1], "E10"));
-                        member_draw_list.push((2, top_nodes[1], top_nodes[2], "E2"));
-                        member_draw_list.push((11, top_nodes[2], top_nodes[3], "E11"));
-                        member_draw_list.push((12, top_nodes[3], top_nodes[4], "E12"));
-
-                        // Diagonals (E3 is first diagonal web)
-                        member_draw_list.push((3, bot_nodes[0], top_nodes[0], "E3"));
-                        member_draw_list.push((13, top_nodes[0], bot_nodes[2], "E13"));
-                        member_draw_list.push((14, bot_nodes[2], top_nodes[2], "E14"));
-                        member_draw_list.push((15, top_nodes[2], bot_nodes[4], "E15"));
-                        member_draw_list.push((16, bot_nodes[4], top_nodes[4], "E16"));
-                        member_draw_list.push((17, top_nodes[4], bot_nodes[6], "E17"));
-
-                        // Vertical posts (E4 is middle post)
-                        member_draw_list.push((18, bot_nodes[1], top_nodes[0], "E18"));
-                        member_draw_list.push((19, bot_nodes[2], top_nodes[1], "E19"));
-                        member_draw_list.push((4, bot_nodes[3], top_nodes[2], "E4"));
-                        member_draw_list.push((20, bot_nodes[4], top_nodes[3], "E20"));
-                        member_draw_list.push((21, bot_nodes[5], top_nodes[4], "E21"));
-
-                        // Handle Canvas Click Selection via Point-to-Segment Proximity
-                        if response.clicked() {
-                            if let Some(pos) = response.interact_pointer_pos() {
-                                let mut hit_member = None;
-                                for (id, p1, p2, _) in &member_draw_list {
-                                    let dist = distance_to_segment(pos, *p1, *p2);
-                                    if dist < 12.0 {
-                                        hit_member = Some(*id);
-                                        break;
-                                    }
-                                }
-
-                                if let Some(id) = hit_member {
-                                    self.selected_member_id = Some(id);
-                                    self.active_sidebar_tab = SidebarTab::Properties;
-                                } else {
-                                    // Clicking empty space deselects and returns to Global System KPI
-                                    self.selected_member_id = None;
-                                }
-                            }
-                        }
-
-                        // Draw Members
-                        for (id, p1, p2, label) in &member_draw_list {
-                            let is_sel = self.selected_member_id == Some(*id);
-                            let is_elim = self.simulated_eliminated_ids.contains(id);
-
-                            let stroke_col = if is_elim {
-                                Color32::from_rgb(255, 55, 55)
-                            } else if is_sel {
-                                Color32::from_rgb(0, 210, 255)
-                            } else {
-                                match self.color_mode.as_str() {
-                                    "ARI" => {
-                                        if *id == 1 {
-                                            Color32::from_rgb(240, 160, 40) // E1 ARI 0.58
-                                        } else if *id == 2 {
-                                            Color32::from_rgb(60, 180, 110) // E2 ARI 0.65
-                                        } else {
-                                            Color32::from_rgb(50, 205, 120) // Safe
-                                        }
-                                    }
-                                    "Criticality" => {
-                                        if *id == 1 {
-                                            Color32::from_rgb(245, 70, 70)
-                                        } else {
-                                            Color32::from_rgb(65, 125, 230)
-                                        }
-                                    }
-                                    _ => Color32::from_rgb(70, 145, 230),
-                                }
-                            };
-
-                            let stroke_w = if is_sel { 3.5 } else if is_elim { 3.0 } else { 2.0 };
-                            painter.line_segment([*p1, *p2], Stroke::new(stroke_w, stroke_col));
-
-                            // Member Label along segment
-                            if is_sel || *id <= 4 {
-                                let mid_pt = Pos2::new((p1.x + p2.x) * 0.5, (p1.y + p2.y) * 0.5 - 6.0);
-                                painter.text(mid_pt, Align2::CENTER_CENTER, *label, egui::FontId::monospace(10.0), if is_sel { Color32::from_rgb(0, 220, 255) } else { theme.text_muted });
-                            }
-                        }
-
-                        // Draw Supports: Node 0 (Pinned) & Node 6 (Roller)
-                        let pin_pt = bot_nodes[0];
-                        painter.line_segment([pin_pt, pin_pt + Vec2::new(-8.0, 12.0)], Stroke::new(1.8, Color32::from_rgb(240, 180, 50)));
-                        painter.line_segment([pin_pt, pin_pt + Vec2::new(8.0, 12.0)], Stroke::new(1.8, Color32::from_rgb(240, 180, 50)));
-                        painter.line_segment([pin_pt + Vec2::new(-10.0, 12.0), pin_pt + Vec2::new(10.0, 12.0)], Stroke::new(1.8, Color32::from_rgb(240, 180, 50)));
-
-                        let roll_pt = bot_nodes[6];
-                        painter.circle_stroke(roll_pt + Vec2::new(-5.0, 7.0), 3.5, Stroke::new(1.5, Color32::from_rgb(240, 180, 50)));
-                        painter.circle_stroke(roll_pt + Vec2::new(5.0, 7.0), 3.5, Stroke::new(1.5, Color32::from_rgb(240, 180, 50)));
-                        painter.line_segment([roll_pt + Vec2::new(-10.0, 12.0), roll_pt + Vec2::new(10.0, 12.0)], Stroke::new(1.8, Color32::from_rgb(240, 180, 50)));
-
-                        // Draw Nodes
-                        for (i, p) in bot_nodes.iter().enumerate() {
-                            painter.circle_filled(*p, 4.0, Color32::from_rgb(220, 225, 235));
-                            if self.show_node_labels {
-                                painter.text(*p + Vec2::new(0.0, 14.0), Align2::CENTER_TOP, format!("N{}", i), egui::FontId::monospace(9.0), Color32::from_rgb(130, 140, 160));
-                            }
-                        }
-                        for (i, p) in top_nodes.iter().enumerate() {
-                            painter.circle_filled(*p, 4.0, Color32::from_rgb(220, 225, 235));
-                            if self.show_node_labels {
-                                painter.text(*p - Vec2::new(0.0, 12.0), Align2::CENTER_BOTTOM, format!("T{}", i + 1), egui::FontId::monospace(9.0), Color32::from_rgb(130, 140, 160));
-                            }
-                        }
-
-                        // Dimension Line at the bottom
-                        let dim_y = bot_nodes[0].y + 32.0;
-                        painter.line_segment([Pos2::new(bot_nodes[0].x, dim_y), Pos2::new(bot_nodes[6].x, dim_y)], Stroke::new(1.0, Color32::from_rgb(100, 150, 220)));
-                        painter.line_segment([Pos2::new(bot_nodes[0].x, dim_y - 4.0), Pos2::new(bot_nodes[0].x, dim_y + 4.0)], Stroke::new(1.0, Color32::from_rgb(100, 150, 220)));
-                        painter.line_segment([Pos2::new(bot_nodes[6].x, dim_y - 4.0), Pos2::new(bot_nodes[6].x, dim_y + 4.0)], Stroke::new(1.0, Color32::from_rgb(100, 150, 220)));
-                        painter.text(Pos2::new((bot_nodes[0].x + bot_nodes[6].x) * 0.5, dim_y - 8.0), Align2::CENTER_BOTTOM, "L = 24.00 m (Span)", egui::FontId::monospace(10.0), Color32::from_rgb(120, 175, 255));
-
-                        ui.add_space(10.0);
-
-                        // Truss Members Quick Inspector Cards Row
-                        theme.card_frame().show(ui, |ui| {
-                            ui.set_width(canvas_width);
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new("🌐 Interactive Member Selector").size(12.0).strong().color(theme.text_primary));
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        ui.label(RichText::new("Klik elemen untuk inspeksi Frame 3D / disrupsi N-k").size(10.5).color(theme.text_muted));
-                                    });
-                                });
-                                ui.add_space(6.0);
-
-                                ui.horizontal(|ui| {
-                                    for m in members {
-                                        let is_sel = self.selected_member_id == Some(m.id);
-                                        let is_elim = self.simulated_eliminated_ids.contains(&m.id);
-
-                                        let (card_col, status_text) = if is_elim {
-                                            (Color32::from_rgb(220, 40, 40), "DISRUPTED".to_string())
-                                        } else if m.ari >= 0.85 {
-                                            (theme.accent_green, format!("ARI: {:.2}", m.ari))
-                                        } else if m.ari >= 0.70 {
-                                            (theme.accent_blue, format!("ARI: {:.2}", m.ari))
-                                        } else {
-                                            (theme.accent_orange, format!("ARI: {:.2}", m.ari))
-                                        };
-
-                                        Frame::new()
-                                            .fill(if is_sel { theme.bg_card_hover } else { theme.bg_card })
-                                            .stroke(Stroke::new(if is_sel { 2.0 } else { 1.0 }, if is_sel { theme.accent_blue } else { theme.border_card }))
-                                            .corner_radius(CornerRadius::same(6))
-                                            .inner_margin(Margin::symmetric(10, 6))
-                                            .show(ui, |ui| {
-                                                ui.vertical(|ui| {
-                                                    ui.horizontal(|ui| {
-                                                        let circle_color = if is_elim { Color32::from_rgb(255, 60, 60) } else { card_col };
-                                                        ui.label(RichText::new("●").size(11.0).color(circle_color));
-                                                        if ui.selectable_label(is_sel, RichText::new(format!("E{}", m.id)).strong().size(11.5)).clicked() {
-                                                            self.selected_member_id = Some(m.id);
-                                                            self.active_sidebar_tab = SidebarTab::Properties;
-                                                        }
-                                                    });
-                                                    ui.label(RichText::new(&m.section).size(10.0).color(theme.text_secondary));
-                                                    ui.label(RichText::new(status_text).size(9.5).strong().color(card_col));
-                                                });
-                                            });
-                                    }
-                                });
-                            });
+                        render_list.push(RenderItem {
+                            id: m.id,
+                            p1_screen: sp1,
+                            p2_screen: sp2,
+                            depth: avg_depth,
+                            p1_3d: m.p1,
+                            p2_3d: m.p2,
+                            name: m.name.clone(),
+                            section: m.section.clone(),
+                            base_width: m.base_width,
+                            force_kn: m.force_kn,
+                            capacity_kn: m.capacity_kn,
+                            utilization: m.utilization,
+                            ari: m.ari,
+                            is_critical: m.is_critical,
                         });
+                    }
 
-                        ui.add_space(10.0);
-                        ui.label(RichText::new("⌘K untuk membuka EigenAI Copilot • Klik ruang kosong di kanvas untuk melihat Global System ARI").size(10.5).color(theme.text_muted));
-                        ui.add_space(8.0);
-                    });
+                    // Sort back-to-front by depth (most negative z2 first)
+                    render_list.sort_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
+
+                    // Hover & Click Detection
+                    let mut hovered_member: Option<usize> = None;
+                    if let Some(mouse_pos) = response.hover_pos() {
+                        // Check front-to-back for hit detection
+                        for item in render_list.iter().rev() {
+                            let dist = distance_to_segment(mouse_pos, item.p1_screen, item.p2_screen);
+                            let hit_threshold = (item.base_width * cam_zoom * 0.8).clamp(6.0, 18.0);
+                            if dist <= hit_threshold {
+                                hovered_member = Some(item.id);
+                                break;
+                            }
+                        }
+                    }
+
+                    if response.clicked() {
+                        if let Some(id) = hovered_member {
+                            self.selected_member_id = Some(id);
+                            self.active_sidebar_tab = SidebarTab::Properties;
+                        } else {
+                            self.selected_member_id = None;
+                        }
+                    }
+
+                    // 4. Render Members (Solid Shaded or Wireframe)
+                    let is_solid_mode = self.render_mode == Render3DMode::SolidShaded;
+                    let sun_dir = (0.577, 0.577, 0.577);
+
+                    for item in &render_list {
+                        let is_sel = self.selected_member_id == Some(item.id);
+                        let is_hov = hovered_member == Some(item.id);
+                        let is_elim = self.simulated_eliminated_ids.contains(&item.id);
+
+                        // Base Color Determination
+                        let base_color = if is_elim {
+                            Color32::from_rgb(255, 45, 45)
+                        } else if is_sel {
+                            Color32::from_rgb(0, 225, 255)
+                        } else {
+                            match self.color_mode.as_str() {
+                                "ARI" => {
+                                    if item.ari >= 0.85 {
+                                        Color32::from_rgb(26, 188, 120) // Emerald Green Safe
+                                    } else if item.ari >= 0.70 {
+                                        Color32::from_rgb(14, 165, 233) // Sky Blue
+                                    } else if item.ari >= 0.55 {
+                                        Color32::from_rgb(245, 158, 11) // Warning Amber
+                                    } else {
+                                        Color32::from_rgb(239, 68, 68) // Critical Red
+                                    }
+                                }
+                                "DCR_Stress" => {
+                                    if item.utilization >= 0.85 {
+                                        Color32::from_rgb(239, 68, 68) // Fiery Red Yielding
+                                    } else if item.utilization >= 0.60 {
+                                        Color32::from_rgb(245, 158, 11) // Amber
+                                    } else if item.utilization >= 0.35 {
+                                        Color32::from_rgb(34, 197, 94) // Green
+                                    } else {
+                                        Color32::from_rgb(59, 130, 246) // Blue Low Stress
+                                    }
+                                }
+                                "Criticality" => {
+                                    if item.is_critical {
+                                        Color32::from_rgb(244, 63, 94) // Magenta Critical
+                                    } else {
+                                        Color32::from_rgb(71, 85, 105) // Muted Slate
+                                    }
+                                }
+                                _ => Color32::from_rgb(90, 140, 210),
+                            }
+                        };
+
+                        let p1 = item.p1_screen;
+                        let p2 = item.p2_screen;
+                        let delta = p2 - p1;
+                        let len = delta.length();
+
+                        if len < 1.0 {
+                            continue;
+                        }
+
+                        let dir = delta / len;
+                        let normal = Vec2::new(-dir.y, dir.x);
+
+                        if is_solid_mode && !is_elim {
+                            // Compute solid extrusion width
+                            let beam_w = (item.base_width * cam_zoom * 0.8).clamp(3.0, 22.0);
+
+                            // Shading lighting factor
+                            let dx3d = item.p2_3d.0 - item.p1_3d.0;
+                            let dy3d = item.p2_3d.1 - item.p1_3d.1;
+                            let dz3d = item.p2_3d.2 - item.p1_3d.2;
+                            let len3d = (dx3d * dx3d + dy3d * dy3d + dz3d * dz3d).sqrt().max(0.1);
+                            let t3d = (dx3d / len3d, dy3d / len3d, dz3d / len3d);
+
+                            // Cross product with sun light
+                            let cross_mag = ((t3d.1 * sun_dir.2 - t3d.2 * sun_dir.1).powi(2)
+                                + (t3d.2 * sun_dir.0 - t3d.0 * sun_dir.2).powi(2)
+                                + (t3d.0 * sun_dir.1 - t3d.1 * sun_dir.0).powi(2)).sqrt();
+
+                            let shade_factor = 0.65 + 0.35 * cross_mag;
+                            let shaded_r = ((base_color.r() as f32) * shade_factor).clamp(0.0, 255.0) as u8;
+                            let shaded_g = ((base_color.g() as f32) * shade_factor).clamp(0.0, 255.0) as u8;
+                            let shaded_b = ((base_color.b() as f32) * shade_factor).clamp(0.0, 255.0) as u8;
+                            let shaded_col = Color32::from_rgb(shaded_r, shaded_g, shaded_b);
+
+                            // Extruded Quad Corners
+                            let half_w = normal * (beam_w * 0.5);
+                            let q1 = p1 + half_w;
+                            let q2 = p2 + half_w;
+                            let q3 = p2 - half_w;
+                            let q4 = p1 - half_w;
+
+                            // Fill solid polygon
+                            painter.convex_polygon(vec![q1, q2, q3, q4], shaded_col, Stroke::NONE);
+
+                            // Chamfer metallic specular highlight edge (top ridge)
+                            let highlight_col = Color32::from_rgba_premultiplied(255, 255, 255, if is_sel { 120 } else { 45 });
+                            painter.line_segment([q1, q2], Stroke::new(1.0, highlight_col));
+
+                            // Dark drop shadow edge (bottom ridge)
+                            let shadow_col = Color32::from_rgba_premultiplied(0, 0, 0, 80);
+                            painter.line_segment([q4, q3], Stroke::new(1.0, shadow_col));
+
+                            // Halo if selected or hovered
+                            if is_sel || is_hov {
+                                let halo_col = if is_sel { Color32::from_rgb(0, 230, 255) } else { Color32::from_rgb(255, 255, 255) };
+                                painter.line_segment([q1, q2], Stroke::new(2.0, halo_col));
+                                painter.line_segment([q4, q3], Stroke::new(2.0, halo_col));
+                            }
+                        } else {
+                            // Wireframe line mode
+                            let stroke_w = if is_sel { 3.5 } else if is_hov { 2.5 } else if is_elim { 2.8 } else { 1.8 };
+                            painter.line_segment([p1, p2], Stroke::new(stroke_w, base_color));
+                        }
+
+                        // Spherical MERO Node Balls at Joint Ends
+                        let node_r = (item.base_width * cam_zoom * 0.55).clamp(2.5, 7.5);
+                        painter.circle_filled(p1, node_r, Color32::from_rgb(210, 220, 235));
+                        painter.circle_stroke(p1, node_r, Stroke::new(0.8, Color32::from_rgb(80, 95, 120)));
+                        painter.circle_filled(p2, node_r, Color32::from_rgb(210, 220, 235));
+                        painter.circle_stroke(p2, node_r, Stroke::new(0.8, Color32::from_rgb(80, 95, 120)));
+
+                        // Specular dot on sphere
+                        painter.circle_filled(p1 - Vec2::new(node_r * 0.3, node_r * 0.3), node_r * 0.35, Color32::WHITE);
+                        painter.circle_filled(p2 - Vec2::new(node_r * 0.3, node_r * 0.3), node_r * 0.35, Color32::WHITE);
+                    }
+
+                    // 5. Global Coordinate XYZ Axis Triad (Bottom Left HUD)
+                    if self.show_axes {
+                        let triad_center = Pos2::new(rect.left() + 45.0, rect.bottom() - 45.0);
+                        let triad_len = 28.0;
+
+                        // Project axis directions using camera rotations
+                        let (ax_x, _) = project_3d(center_3d.0 + 1.0, center_3d.1, center_3d.2);
+                        let (ax_y, _) = project_3d(center_3d.0, center_3d.1 + 1.0, center_3d.2);
+                        let (ax_z, _) = project_3d(center_3d.0, center_3d.1, center_3d.2 + 1.0);
+                        let (ax_0, _) = project_3d(center_3d.0, center_3d.1, center_3d.2);
+
+                        let dx_screen = (ax_x - ax_0).normalized() * triad_len;
+                        let dy_screen = (ax_y - ax_0).normalized() * triad_len;
+                        let dz_screen = (ax_z - ax_0).normalized() * triad_len;
+
+                        painter.circle_filled(triad_center, 4.0, Color32::WHITE);
+                        painter.line_segment([triad_center, triad_center + dx_screen], Stroke::new(2.5, Color32::from_rgb(244, 63, 94))); // X (Red)
+                        painter.line_segment([triad_center, triad_center + dy_screen], Stroke::new(2.5, Color32::from_rgb(34, 197, 94))); // Y (Green)
+                        painter.line_segment([triad_center, triad_center + dz_screen], Stroke::new(2.5, Color32::from_rgb(59, 130, 246))); // Z (Blue)
+
+                        painter.text(triad_center + dx_screen * 1.25, Align2::CENTER_CENTER, "X", egui::FontId::monospace(10.0), Color32::from_rgb(244, 63, 94));
+                        painter.text(triad_center + dy_screen * 1.25, Align2::CENTER_CENTER, "Y", egui::FontId::monospace(10.0), Color32::from_rgb(34, 197, 94));
+                        painter.text(triad_center + dz_screen * 1.25, Align2::CENTER_CENTER, "Z", egui::FontId::monospace(10.0), Color32::from_rgb(59, 130, 246));
+                    }
+
+                    // 6. Camera Viewport HUD Overlay (Top Left & Bottom Right)
+                    painter.text(
+                        Pos2::new(rect.left() + 14.0, rect.top() + 14.0),
+                        Align2::LEFT_TOP,
+                        format!("🎥 3D VIEWPORT: {} • {}", self.active_model.label(), if is_solid_mode { "SOLID EXTRUDED" } else { "WIREFRAME" }),
+                        egui::FontId::monospace(10.5),
+                        Color32::from_rgb(140, 165, 205),
+                    );
+
+                    painter.text(
+                        Pos2::new(rect.right() - 14.0, rect.bottom() - 14.0),
+                        Align2::RIGHT_BOTTOM,
+                        format!("Yaw: {:.0}° | Pitch: {:.0}° | Zoom: {:.2}x | Elements: {}", self.cam_yaw.to_degrees(), self.cam_pitch.to_degrees(), self.cam_zoom, raw_members.len()),
+                        egui::FontId::monospace(9.5),
+                        Color32::from_rgb(110, 130, 160),
+                    );
+
+                    // 7. Floating Hover Glass Tooltip
+                    if let Some(hid) = hovered_member {
+                        if let Some(item) = render_list.iter().find(|i| i.id == hid) {
+                            if let Some(mpos) = response.hover_pos() {
+                                let tip_pos = mpos + Vec2::new(14.0, -18.0);
+                                let tip_rect = egui::Rect::from_min_size(tip_pos, Vec2::new(185.0, 75.0));
+
+                                painter.rect_filled(tip_rect, CornerRadius::same(6), Color32::from_rgba_premultiplied(20, 24, 34, 235));
+                                painter.rect_stroke(tip_rect, CornerRadius::same(6), Stroke::new(1.0, theme.accent_blue), egui::StrokeKind::Outside);
+
+                                painter.text(tip_pos + Vec2::new(8.0, 6.0), Align2::LEFT_TOP, format!("{} [{}]", item.name, item.section), egui::FontId::proportional(11.0), Color32::WHITE);
+                                painter.text(tip_pos + Vec2::new(8.0, 22.0), Align2::LEFT_TOP, format!("Aksial Pu: {:.1} kN", item.force_kn), egui::FontId::monospace(10.0), theme.accent_blue);
+                                painter.text(tip_pos + Vec2::new(8.0, 38.0), Align2::LEFT_TOP, format!("Utilisasi: {:.1}%", item.utilization * 100.0), egui::FontId::monospace(10.0), theme.accent_orange);
+                                painter.text(tip_pos + Vec2::new(8.0, 54.0), Align2::LEFT_TOP, format!("ARI Redundansi: {:.3}", item.ari), egui::FontId::monospace(10.0), theme.accent_green);
+                            }
+                        }
+                    }
                 });
         });
+    }
+
+    /// Builds 3D coordinates and elements based on active architectural archetype
+    fn build_model_geometry(&self, fallback_members: &[StructuralMember]) -> ((f32, f32, f32), f32, Vec<Member3D>) {
+        match self.active_model {
+            ModelArchetype::DiagridTower3D => {
+                let mut list = Vec::new();
+                let tiers = [
+                    (0.0, 14.0, 0.0),
+                    (16.0, 12.0, 15.0),
+                    (32.0, 10.0, 30.0),
+                    (46.0, 8.5, 45.0),
+                ];
+
+                let mut tier_coords = Vec::new();
+                for (z, r, twist_deg) in tiers {
+                    let twist_rad = (twist_deg as f32).to_radians();
+                    let mut pts = Vec::new();
+                    for i in 0..8 {
+                        let angle = twist_rad + (i as f32) * (std::f32::consts::PI * 2.0 / 8.0);
+                        let x = r * angle.cos();
+                        let y = r * angle.sin();
+                        pts.push((x, z, y));
+                    }
+                    tier_coords.push(pts);
+                }
+
+                let mut id = 1;
+                // Diagrid cross braces between tiers
+                for t in 0..3 {
+                    let lower = &tier_coords[t];
+                    let upper = &tier_coords[t + 1];
+                    for i in 0..8 {
+                        let next_i = (i + 1) % 8;
+                        list.push(Member3D {
+                            id,
+                            p1: lower[i],
+                            p2: upper[next_i],
+                            name: format!("Diagrid T{}-D1", t + 1),
+                            section: "CHS 610x25".to_string(),
+                            base_width: 8.5,
+                            force_kn: 340.0,
+                            capacity_kn: 850.0,
+                            utilization: 0.40,
+                            ari: 0.89,
+                            is_critical: false,
+                        });
+                        id += 1;
+
+                        list.push(Member3D {
+                            id,
+                            p1: lower[next_i],
+                            p2: upper[i],
+                            name: format!("Diagrid T{}-D2", t + 1),
+                            section: "CHS 610x25".to_string(),
+                            base_width: 8.5,
+                            force_kn: 320.0,
+                            capacity_kn: 850.0,
+                            utilization: 0.38,
+                            ari: 0.89,
+                            is_critical: false,
+                        });
+                        id += 1;
+                    }
+
+                    // Perimeter belt ring
+                    for i in 0..8 {
+                        let next_i = (i + 1) % 8;
+                        list.push(Member3D {
+                            id,
+                            p1: lower[i],
+                            p2: lower[next_i],
+                            name: format!("Belt Ring T{}", t + 1),
+                            section: "W24x146".to_string(),
+                            base_width: 10.0,
+                            force_kn: -120.0,
+                            capacity_kn: 620.0,
+                            utilization: 0.19,
+                            ari: 0.94,
+                            is_critical: false,
+                        });
+                        id += 1;
+                    }
+                }
+
+                // Central elevator core columns
+                for (cx, cz) in [(-4.0, -4.0), (4.0, -4.0), (4.0, 4.0), (-4.0, 4.0)] {
+                    for t in 0..3 {
+                        list.push(Member3D {
+                            id,
+                            p1: (cx, tiers[t].0, cz),
+                            p2: (cx, tiers[t + 1].0, cz),
+                            name: "Core Mega-Column".to_string(),
+                            section: "CFT 1200x50".to_string(),
+                            base_width: 12.0,
+                            force_kn: 2450.0,
+                            capacity_kn: 5200.0,
+                            utilization: 0.47,
+                            ari: 0.95,
+                            is_critical: true,
+                        });
+                        id += 1;
+                    }
+                }
+
+                // Crown MERO dome rafters converging to apex
+                let apex = (0.0, 54.0, 0.0);
+                for pt in &tier_coords[3] {
+                    list.push(Member3D {
+                        id,
+                        p1: *pt,
+                        p2: apex,
+                        name: "Crown MERO Strut".to_string(),
+                        section: "CHS 219.1".to_string(),
+                        base_width: 6.0,
+                        force_kn: 85.0,
+                        capacity_kn: 340.0,
+                        utilization: 0.25,
+                        ari: 0.98,
+                        is_critical: false,
+                    });
+                    id += 1;
+                }
+
+                ((0.0, 24.0, 0.0), 7.8, list)
+            }
+            ModelArchetype::TrussBridge3D => {
+                let mut list = Vec::new();
+                let mut id = 1;
+
+                // Two parallel trusses at Z = -3.5 and Z = +3.5
+                for &z in &[-3.5, 3.5] {
+                    let mut bot_pts = Vec::new();
+                    for i in 0..=6 {
+                        let x = (i as f32) * 4.0;
+                        bot_pts.push((x, 0.0, z));
+                    }
+
+                    // Parabolic arch rib
+                    let mut top_pts = Vec::new();
+                    for i in 0..=6 {
+                        let x = (i as f32) * 4.0;
+                        let arch_y = 6.2 * (1.0 - ((x - 12.0) / 12.0).powi(2)).max(0.0);
+                        top_pts.push((x, arch_y, z));
+                    }
+
+                    // Bottom chord
+                    for i in 0..6 {
+                        list.push(Member3D {
+                            id,
+                            p1: bot_pts[i],
+                            p2: bot_pts[i + 1],
+                            name: "Bottom Deck Chord".to_string(),
+                            section: "W14x90".to_string(),
+                            base_width: 9.0,
+                            force_kn: -420.0,
+                            capacity_kn: 1100.0,
+                            utilization: 0.38,
+                            ari: 0.92,
+                            is_critical: false,
+                        });
+                        id += 1;
+                    }
+
+                    // Arch rib chords
+                    for i in 0..6 {
+                        list.push(Member3D {
+                            id,
+                            p1: top_pts[i],
+                            p2: top_pts[i + 1],
+                            name: "Parabolic Arch Rib".to_string(),
+                            section: "Box 800x800".to_string(),
+                            base_width: 11.0,
+                            force_kn: 680.0,
+                            capacity_kn: 1450.0,
+                            utilization: 0.47,
+                            ari: 0.96,
+                            is_critical: true,
+                        });
+                        id += 1;
+                    }
+
+                    // Vertical cable hangers
+                    for i in 1..6 {
+                        list.push(Member3D {
+                            id,
+                            p1: bot_pts[i],
+                            p2: top_pts[i],
+                            name: "Cable Hanger".to_string(),
+                            section: "Steel Strand 65mm".to_string(),
+                            base_width: 5.0,
+                            force_kn: 185.0,
+                            capacity_kn: 520.0,
+                            utilization: 0.36,
+                            ari: 0.88,
+                            is_critical: false,
+                        });
+                        id += 1;
+                    }
+                }
+
+                // Transverse floor cross beams connecting the two decks
+                for i in 0..=6 {
+                    let x = (i as f32) * 4.0;
+                    list.push(Member3D {
+                        id,
+                        p1: (x, 0.0, -3.5),
+                        p2: (x, 0.0, 3.5),
+                        name: "Transverse Floor Beam".to_string(),
+                        section: "W24x84".to_string(),
+                        base_width: 8.0,
+                        force_kn: 95.0,
+                        capacity_kn: 480.0,
+                        utilization: 0.20,
+                        ari: 0.95,
+                        is_critical: false,
+                    });
+                    id += 1;
+                }
+
+                ((12.0, 3.0, 0.0), 16.0, list)
+            }
+            ModelArchetype::SpaceDome3D => {
+                let mut list = Vec::new();
+                let mut id = 1;
+                let r_outer = 16.0;
+
+                let ring_heights = [(0.0, r_outer), (6.0, 13.5), (10.5, 9.0)];
+                let mut ring_pts = Vec::new();
+
+                for (y, r) in ring_heights {
+                    let mut pts = Vec::new();
+                    for i in 0..12 {
+                        let angle = (i as f32) * (std::f32::consts::PI * 2.0 / 12.0);
+                        let x = r * angle.cos();
+                        let z = r * angle.sin();
+                        pts.push((x, y, z));
+                    }
+                    ring_pts.push(pts);
+                }
+
+                let apex = (0.0, 13.5, 0.0);
+
+                // Circumferential rings
+                for ring in &ring_pts {
+                    for i in 0..12 {
+                        let next_i = (i + 1) % 12;
+                        list.push(Member3D {
+                            id,
+                            p1: ring[i],
+                            p2: ring[next_i],
+                            name: "Dome Hoop Ring".to_string(),
+                            section: "CHS 168.3".to_string(),
+                            base_width: 6.5,
+                            force_kn: -85.0,
+                            capacity_kn: 420.0,
+                            utilization: 0.20,
+                            ari: 0.96,
+                            is_critical: false,
+                        });
+                        id += 1;
+                    }
+                }
+
+                // Meridional ribs
+                for i in 0..12 {
+                    list.push(Member3D {
+                        id,
+                        p1: ring_pts[0][i],
+                        p2: ring_pts[1][i],
+                        name: "Meridional Rib".to_string(),
+                        section: "CHS 219.1".to_string(),
+                        base_width: 7.5,
+                        force_kn: 140.0,
+                        capacity_kn: 520.0,
+                        utilization: 0.27,
+                        ari: 0.95,
+                        is_critical: false,
+                    });
+                    id += 1;
+
+                    list.push(Member3D {
+                        id,
+                        p1: ring_pts[1][i],
+                        p2: ring_pts[2][i],
+                        name: "Meridional Rib".to_string(),
+                        section: "CHS 219.1".to_string(),
+                        base_width: 7.5,
+                        force_kn: 125.0,
+                        capacity_kn: 520.0,
+                        utilization: 0.24,
+                        ari: 0.95,
+                        is_critical: false,
+                    });
+                    id += 1;
+
+                    list.push(Member3D {
+                        id,
+                        p1: ring_pts[2][i],
+                        p2: apex,
+                        name: "Apex Rafter".to_string(),
+                        section: "CHS 219.1".to_string(),
+                        base_width: 7.0,
+                        force_kn: 95.0,
+                        capacity_kn: 480.0,
+                        utilization: 0.20,
+                        ari: 0.97,
+                        is_critical: false,
+                    });
+                    id += 1;
+                }
+
+                ((0.0, 6.0, 0.0), 16.5, list)
+            }
+            ModelArchetype::WarrenTruss2D => {
+                let mut list = Vec::new();
+                let mut bot_nodes = Vec::new();
+                for i in 0..=6 {
+                    bot_nodes.push(((i as f32) * 4.0, 0.0, 0.0));
+                }
+                let mut top_nodes = Vec::new();
+                for i in 1..=5 {
+                    top_nodes.push(((i as f32) * 4.0, 3.2, 0.0));
+                }
+
+                let mut id = 1;
+                for i in 0..6 {
+                    list.push(Member3D {
+                        id,
+                        p1: bot_nodes[i],
+                        p2: bot_nodes[i + 1],
+                        name: format!("Bottom Chord E{}", id),
+                        section: "W14x90".to_string(),
+                        base_width: 8.5,
+                        force_kn: -45.2,
+                        capacity_kn: 120.0,
+                        utilization: 0.38,
+                        ari: 0.94,
+                        is_critical: false,
+                    });
+                    id += 1;
+                }
+                for i in 0..4 {
+                    list.push(Member3D {
+                        id,
+                        p1: top_nodes[i],
+                        p2: top_nodes[i + 1],
+                        name: format!("Top Chord T{}", i + 1),
+                        section: "W14x90".to_string(),
+                        base_width: 8.5,
+                        force_kn: 38.5,
+                        capacity_kn: 95.0,
+                        utilization: 0.41,
+                        ari: 0.91,
+                        is_critical: false,
+                    });
+                    id += 1;
+                }
+                for i in 0..5 {
+                    list.push(Member3D {
+                        id,
+                        p1: bot_nodes[i],
+                        p2: top_nodes[i],
+                        name: format!("Diagonal D{}", i + 1),
+                        section: "2L 4x4x3/8".to_string(),
+                        base_width: 6.0,
+                        force_kn: 82.4,
+                        capacity_kn: 90.0,
+                        utilization: 0.91,
+                        ari: 0.52,
+                        is_critical: i == 0,
+                    });
+                    id += 1;
+                }
+
+                if list.is_empty() && !fallback_members.is_empty() {
+                    // Fallback to active app members
+                }
+
+                ((12.0, 1.6, 0.0), 22.0, list)
+            }
+        }
     }
 }
 
