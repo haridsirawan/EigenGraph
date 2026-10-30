@@ -15,6 +15,7 @@ pub mod cascade;
 pub mod schedule;
 pub mod carbon;
 pub mod nonlinear;
+pub mod modal;
 
 pub use linalg::Matrix;
 pub use model::{
@@ -34,4 +35,7 @@ pub use schedule::{
 pub use carbon::{CarbonEngine, CarbonLcaReport, CarbonLcaStage, CarbonSteelRoute};
 pub use nonlinear::{
     NonlinearEngine, PlasticHinge, PlasticHingeState, PushoverReport, PushoverStep,
+};
+pub use modal::{
+    ModalAnalysisReport, ModalEngine, ModeShape, SiteClass, Sni1726Spectrum,
 };
