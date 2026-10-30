@@ -247,8 +247,14 @@ impl AiAssistantView {
             ],
             NavigationPillar::Analyze => &[
                 ("⚡ SVD Stability Nullspace", "Verify K matrix rank and detect nullspace kinematic mechanisms."),
-                ("💰 Optimize RAB for ARI ≥ 0.9", "Calculate cost impact vs redundancy trade-off to meet target ARI."),
-                ("📅 4D Staged Erection Check", "Verify structural stability across construction stages WBS 1.0 - 6.0."),
+                ("🎯 Screen Critical ARI", "Screen all members to find the lowest Adjusted Redundancy Index contributions."),
+                ("🛡️ Collapse Risk", "Perform step-by-step alternate load path analysis for critical members."),
+            ],
+            NavigationPillar::Planning => &[
+                ("💰 Hitung Otomatis RAB 5D", "Calculate full 5D construction estimate based on active parametric variables."),
+                ("📊 Ekspor Kurva S 4D", "Generate 4D erection schedule, CPM critical path, and weekly cashflow S-Curve."),
+                ("📈 Trade-Off Cost vs ARI", "Evaluate budget impact to increase system Adjusted Redundancy Index."),
+                ("🏗️ Simulasi Tahapan Ereksi", "Verify SVD kinematic stability for cantilever truss staged erection sequence."),
             ],
             NavigationPillar::Settings => &[
                 ("🔑 Test Gemini API", "Test connection to Google Gemini 2.5 Flash API endpoint."),

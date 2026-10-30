@@ -1,6 +1,6 @@
 //! parametric.rs — Pillar 2: AutoCAD-style Free Drawing Studio & Parametric Component Database.
 
-use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, RichText, Stroke, Ui};
+use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, RichText, Stroke, Ui, Vec2};
 use crate::models::{CadTool, DatabaseComponent, NavigationPillar, ParametricVariable};
 use crate::theme::MacTheme;
 
@@ -34,7 +34,7 @@ impl Default for ParametricView {
                 },
                 ParametricVariable {
                     name: "H".to_string(),
-                    expression: "L / 7.5".to_string(),
+                    expression: "3200".to_string(),
                     evaluated_value: 3200.0,
                     unit: "mm".to_string(),
                 },
@@ -49,6 +49,48 @@ impl Default for ParametricView {
                     expression: "W14x90".to_string(),
                     evaluated_value: 1.0,
                     unit: "profile".to_string(),
+                },
+                ParametricVariable {
+                    name: "bahan_density".to_string(),
+                    expression: "7850".to_string(),
+                    evaluated_value: 7850.0,
+                    unit: "kg/m³ (BJ41)".to_string(),
+                },
+                ParametricVariable {
+                    name: "kekakuan_E".to_string(),
+                    expression: "200000".to_string(),
+                    evaluated_value: 200000.0,
+                    unit: "MPa (Stiffness)".to_string(),
+                },
+                ParametricVariable {
+                    name: "harga_baja".to_string(),
+                    expression: "24500".to_string(),
+                    evaluated_value: 24500.0,
+                    unit: "Rp/kg".to_string(),
+                },
+                ParametricVariable {
+                    name: "harga_fabrikasi".to_string(),
+                    expression: "8500".to_string(),
+                    evaluated_value: 8500.0,
+                    unit: "Rp/kg".to_string(),
+                },
+                ParametricVariable {
+                    name: "harga_ereksi".to_string(),
+                    expression: "4500000".to_string(),
+                    evaluated_value: 4500000.0,
+                    unit: "Rp/ton".to_string(),
+                },
+                ParametricVariable {
+                    name: "harga_coating".to_string(),
+                    expression: "145000".to_string(),
+                    evaluated_value: 145000.0,
+                    unit: "Rp/m²".to_string(),
+                },
+                ParametricVariable {
+                    name: "harga_pondasi".to_string(),
+                    expression: "1950000".to_string(),
+                    evaluated_value: 1950000.0,
+                    unit: "Rp/m³".to_string(),
                 },
             ],
             command_line_input: String::new(),
@@ -83,7 +125,7 @@ impl ParametricView {
             // 2. MAIN WORKSPACE (Left Variables Inspector + Center Free Drawing Canvas)
             ui.horizontal(|ui| {
                 // Left Panel: Variables & Constraints
-                self.render_variables_panel(ui, theme);
+                self.render_variables_panel(ui, theme, active_pillar);
 
                 // Center: AutoCAD Free Drawing Canvas
                 self.render_drawing_canvas(ui, theme, db_components, active_pillar);
@@ -173,7 +215,7 @@ impl ParametricView {
             });
     }
 
-    fn render_variables_panel(&mut self, ui: &mut Ui, theme: &MacTheme) {
+    fn render_variables_panel(&mut self, ui: &mut Ui, theme: &MacTheme, active_pillar: &mut NavigationPillar) {
         theme.sidebar_frame().show(ui, |ui| {
             ui.set_width(300.0);
             ui.vertical(|ui| {
@@ -194,19 +236,27 @@ impl ParametricView {
 
                 // Driving Variables Table
                 ui.label(RichText::new("Driving Dimensions & Parameters").size(12.0).strong().color(theme.text_primary));
+                ui.label(RichText::new("Ubah nilai di bawah untuk update otomatis ke PLANNING").size(10.5).color(theme.accent_blue));
                 ui.add_space(4.0);
 
                 for var in &mut self.variables {
                     theme.card_frame().show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(&var.name).size(13.0).strong().color(theme.accent_blue));
-                            ui.label(RichText::new("=").size(13.0).color(theme.text_secondary));
-                            ui.label(RichText::new(&var.expression).size(12.0).color(theme.text_primary));
-                            ui.label(RichText::new(&var.unit).size(11.0).color(theme.text_muted));
+                            ui.label(RichText::new(&var.name).size(12.0).strong().color(theme.accent_blue));
+                            ui.label(RichText::new("=").size(12.0).color(theme.text_secondary));
+                            
+                            // Editable value box
+                            if ui.add(egui::TextEdit::singleline(&mut var.expression).desired_width(75.0)).changed() {
+                                if let Ok(val) = var.expression.parse::<f32>() {
+                                    var.evaluated_value = val;
+                                }
+                            }
+
+                            ui.label(RichText::new(&var.unit).size(10.5).color(theme.text_muted));
                         });
-                        ui.label(RichText::new(format!("Evaluated: {:.1} {}", var.evaluated_value, var.unit)).size(10.0).color(theme.accent_green));
+                        ui.label(RichText::new(format!("Nilai: {:.1} {}", var.evaluated_value, var.unit)).size(10.0).color(theme.accent_green));
                     });
-                    ui.add_space(4.0);
+                    ui.add_space(3.0);
                 }
 
                 ui.add_space(8.0);
@@ -219,7 +269,19 @@ impl ParametricView {
                     });
                 }
 
-                ui.add_space(12.0);
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                // Direct Navigation to PLANNING Button
+                if ui.add(egui::Button::new(RichText::new("📊 Lihat Hasil di PLANNING (5D RAB) →").size(11.5).strong().color(Color32::WHITE))
+                    .fill(theme.accent_blue)
+                    .corner_radius(CornerRadius::same(6))
+                    .min_size(Vec2::new(ui.available_width(), 30.0))).clicked() {
+                    *active_pillar = NavigationPillar::Planning;
+                }
+
+                ui.add_space(10.0);
                 ui.separator();
                 ui.add_space(8.0);
 

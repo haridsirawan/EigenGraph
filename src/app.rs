@@ -5,7 +5,7 @@ use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, Panel, CentralPa
 
 use crate::models::{DatabaseComponent, NavigationPillar, ParametricVariable, ProjectItem, ProjectStatus, StructuralMember};
 use crate::theme::MacTheme;
-use crate::views::{AiAssistantView, AnalyzeView, BuildView, MyProjectView, ParametricView, SettingsView};
+use crate::views::{AiAssistantView, AnalyzeView, BuildView, MyProjectView, ParametricView, PlanningView, SettingsView};
 
 pub struct EigenGraphApp {
     pub theme: MacTheme,
@@ -17,6 +17,7 @@ pub struct EigenGraphApp {
     pub parametric_view: ParametricView,
     pub build_view: BuildView,
     pub analyze_view: AnalyzeView,
+    pub planning_view: PlanningView,
     pub settings_view: SettingsView,
     pub ai_assistant_view: AiAssistantView,
 
@@ -37,6 +38,7 @@ impl Default for EigenGraphApp {
             parametric_view: ParametricView::default(),
             build_view: BuildView::default(),
             analyze_view: AnalyzeView::default(),
+            planning_view: PlanningView::default(),
             settings_view: SettingsView::default(),
             ai_assistant_view: AiAssistantView::default(),
 
@@ -208,12 +210,13 @@ impl App for EigenGraphApp {
                     ui.label(RichText::new("WORKSPACES").size(10.0).strong().color(self.theme.text_muted));
                     ui.add_space(6.0);
 
-                    // 5 Navigation Pillars (Apple Sidebar Capsule Buttons)
+                    // 6 Navigation Pillars (Apple Sidebar Capsule Buttons)
                     let pillars = [
                         NavigationPillar::MyProject,
                         NavigationPillar::Parametric,
                         NavigationPillar::Build,
                         NavigationPillar::Analyze,
+                        NavigationPillar::Planning,
                         NavigationPillar::Settings,
                     ];
 
@@ -354,6 +357,9 @@ impl App for EigenGraphApp {
                 }
                 NavigationPillar::Analyze => {
                     self.analyze_view.show(ui, &self.theme, &self.members);
+                }
+                NavigationPillar::Planning => {
+                    self.planning_view.show(ui, &self.theme, &self.parametric_view.variables, &self.members);
                 }
                 NavigationPillar::Settings => {
                     self.settings_view.show(ui, &self.theme);

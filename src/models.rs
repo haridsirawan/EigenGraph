@@ -2,13 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The 5 Top-Level Navigation Pillars of EigenGraph
+/// The Top-Level Navigation Pillars of EigenGraph
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NavigationPillar {
     MyProject,
     Parametric,
     Build,
     Analyze,
+    Planning,
     Settings,
 }
 
@@ -19,6 +20,7 @@ impl NavigationPillar {
             Self::Parametric => "PARAMETRIC",
             Self::Build => "BUILD",
             Self::Analyze => "ANALYZE",
+            Self::Planning => "PLANNING",
             Self::Settings => "SETTINGS",
         }
     }
@@ -29,6 +31,7 @@ impl NavigationPillar {
             Self::Parametric => "Parametric",
             Self::Build => "Build",
             Self::Analyze => "Analyze",
+            Self::Planning => "Planning",
             Self::Settings => "Settings",
         }
     }
@@ -39,6 +42,7 @@ impl NavigationPillar {
             Self::Parametric => "📐",
             Self::Build => "🏗️",
             Self::Analyze => "⚡",
+            Self::Planning => "📊",
             Self::Settings => "⚙️",
         }
     }
@@ -49,6 +53,7 @@ impl NavigationPillar {
             Self::Parametric => "AutoCAD Free Drawing & Parametric Database",
             Self::Build => "3D Assembly Canvas & Modeling Workspace",
             Self::Analyze => "Structural Health & SVD Guard",
+            Self::Planning => "5D BIM Construction Planning, RAB & Erection Schedule",
             Self::Settings => "Preferences & Integrations",
         }
     }
