@@ -282,6 +282,7 @@ impl AppUpdater {
 
                         // Execute 1-Click Silent In-Place App Replacement on macOS
                         let mount_point = "/tmp/EigenGraph_Mount";
+                        let _ = Command::new("hdiutil").arg("detach").arg(mount_point).arg("-force").output();
                         let _ = std::fs::create_dir_all(mount_point);
 
                         // 1. Silent Mount
@@ -307,22 +308,26 @@ impl AppUpdater {
                                     }
                                 }
 
-                                // 2. Copy and Overwrite in-place
-                                let _ = Command::new("rm").arg("-rf").arg(&target_app_path).output();
-                                let cp_res = Command::new("cp")
-                                    .arg("-R")
+                                // 2. Cleanly overwrite in-place using macOS ditto (preserves bundle structure without nesting)
+                                let ditto_res = Command::new("ditto")
                                     .arg(&source_app)
                                     .arg(&target_app_path)
                                     .output();
 
-                                // 3. Detach DMG
+                                // 3. Clear quarantine attribute so Gatekeeper allows immediate launch
+                                let _ = Command::new("xattr")
+                                    .arg("-cr")
+                                    .arg(&target_app_path)
+                                    .output();
+
+                                // 4. Detach DMG
                                 let _ = Command::new("hdiutil")
                                     .arg("detach")
                                     .arg(mount_point)
                                     .arg("-force")
                                     .output();
 
-                                if cp_res.map(|c| c.status.success()).unwrap_or(false) {
+                                if ditto_res.map(|c| c.status.success()).unwrap_or(false) {
                                     installed_ok = true;
                                 }
                             }
