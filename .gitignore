@@ -11,6 +11,8 @@ Icon
 
 # Disk images & temporary staging
 *.dmg
+*.app/
+EigenGraph.app/
 dmg_staging/
 /tmp/
 

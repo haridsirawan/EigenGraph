@@ -114,19 +114,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust Toolchain
+      - name: Install Rust Toolchain & Universal 2 Targets
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin, aarch64-apple-darwin
 
-      - name: Build Optimized Release Binary
-        run: cargo build --release
+      - name: Build Universal 2 Release Binary (Intel + Apple Silicon)
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: |
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          mkdir -p target/universal
+          lipo -create -output target/universal/eigengraph \
+            target/x86_64-apple-darwin/release/eigengraph \
+            target/aarch64-apple-darwin/release/eigengraph
+          file target/universal/eigengraph
 
       - name: Package macOS App Bundle & DMG
         run: |
           VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d '"' -f 2)
-          echo "Building EigenGraph macOS bundle version ${VERSION}..."
+          echo "Building EigenGraph Universal 2 macOS bundle version ${VERSION}..."
           mkdir -p "EigenGraph.app/Contents/MacOS"
           mkdir -p "EigenGraph.app/Contents/Resources"
-          cp target/release/eigengraph "EigenGraph.app/Contents/MacOS/"
+          cp target/universal/eigengraph "EigenGraph.app/Contents/MacOS/"
+          chmod +x "EigenGraph.app/Contents/MacOS/eigengraph"
           if [ -f "assets/Info.plist" ]; then
             cp assets/Info.plist "EigenGraph.app/Contents/"
             sed -i '' "s/<string>1.0.0<\/string>/<string>${VERSION}<\/string>/g" "EigenGraph.app/Contents/Info.plist" || true
@@ -137,6 +149,7 @@ jobs:
             cp assets/icon.png "EigenGraph.app/Contents/Resources/"
           fi
           codesign --force --deep --sign - "EigenGraph.app"
+          mkdir -p target/release
           mkdir -p dmg_staging
           cp -R "EigenGraph.app" dmg_staging/
           ln -s /Applications dmg_staging/Applications

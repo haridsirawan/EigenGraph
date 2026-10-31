@@ -535,7 +535,14 @@ impl App for EigenGraphApp {
                     // Version & Tech stack with Update checker button
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("EigenGraph v1.1.0 (Apple Silicon)").size(10.0).color(self.theme.text_muted));
+                            let arch_label = if cfg!(target_arch = "x86_64") {
+                                "Intel x86_64"
+                            } else if cfg!(target_arch = "aarch64") {
+                                "Apple Silicon"
+                            } else {
+                                "Universal 2"
+                            };
+                            ui.label(RichText::new(format!("EigenGraph v1.1.0 ({})", arch_label)).size(10.0).color(self.theme.text_muted));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if ui.add(egui::Button::new(RichText::new("🚀 Update").size(9.5).color(self.theme.accent_blue))
                                     .fill(self.theme.bg_card)
