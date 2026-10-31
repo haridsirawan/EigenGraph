@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/icon.png" width="130" height="130" alt="EigenGraph App Icon" style="border-radius: 26px; box-shadow: 0 12px 36px rgba(0,0,0,0.35); margin-bottom: 12px;" />
+<img src="assets/icon.png" width="128" height="128" alt="EigenGraph App Icon" />
 <br />
 <img src="assets/logo.png" width="380" alt="EigenGraph Logo" />
 
@@ -22,9 +22,9 @@
 ### 🌐 The Eigen Platform Suite
 | Module | Identity | Architectural Scope |
 | :---: | :---: | :--- |
-| **EigenGraph** | <img src="assets/logo.png" width="200" /> | 10D BIM Lifecycle Dimensions, CAD/BIM Triad Dock, IFC 4.3 OpenBIM, and Native Vector Canvas Viewport. |
-| **EigenGate** | <img src="assets/eigengate.png" width="200" /> | Sherman-Morrison Rank-1 SVD Kinematic Mechanism Guard, Fracture-Critical Member (FCM) screening, and spectral stability certification. |
-| **EigenFlow** | <img src="assets/eigenflow.png" width="200" /> | Non-linear APM progressive collapse simulation, critical path (CPM) 4D scheduling, and 6D embodied carbon LCA pipelines. |
+| **EigenGraph** | <img src="assets/logo.png" width="220" alt="EigenGraph" /> | 10D BIM Lifecycle Dimensions, CAD/BIM Triad Dock, IFC 4.3 OpenBIM, and Native Vector Canvas Viewport. |
+| **EigenGate** | <img src="assets/eigengate.png" width="220" alt="EigenGate" /> | Sherman-Morrison Rank-1 SVD Kinematic Mechanism Guard, Fracture-Critical Member (FCM) screening, and spectral stability certification. |
+| **EigenFlow** | <img src="assets/eigenflow.png" width="220" alt="EigenFlow" /> | Non-linear APM progressive collapse simulation, critical path (CPM) 4D scheduling, and 6D embodied carbon LCA pipelines. |
 
 ---
 
