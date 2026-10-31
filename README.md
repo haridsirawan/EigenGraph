@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="assets/icon.png" width="128" height="128" alt="EigenGraph App Icon" />
-<br />
 <img src="assets/logo.png" width="380" alt="EigenGraph Logo" />
 
 ### High-Performance Computational Framework for Adjusted Redundancy Index (ARI), SVD Kinematic Mechanism Guards, and 10D BIM Construction Lifecycle Analytics
