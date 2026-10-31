@@ -16,6 +16,8 @@ pub enum NavigationPillar {
     SafetyHealth,
     LeanConstruction,
     IndustrializedAutomation,
+    Prediction,
+    Results,
 }
 
 impl NavigationPillar {
@@ -32,6 +34,8 @@ impl NavigationPillar {
             NavigationPillar::SafetyHealth,
             NavigationPillar::LeanConstruction,
             NavigationPillar::IndustrializedAutomation,
+            NavigationPillar::Prediction,
+            NavigationPillar::Results,
         ]
     }
 
@@ -48,6 +52,8 @@ impl NavigationPillar {
             Self::SafetyHealth => "8. SAFETY & 8D RISK",
             Self::LeanConstruction => "9. LEAN & 9D WASTE-OPTIMIZATION",
             Self::IndustrializedAutomation => "10. AUTOMATION & 10D DfMA",
+            Self::Prediction => "PREDICTION & AI SIMULATION",
+            Self::Results => "RESULTS & EXECUTIVE AUDIT",
         }
     }
 
@@ -64,6 +70,8 @@ impl NavigationPillar {
             Self::SafetyHealth => "8D",
             Self::LeanConstruction => "9D",
             Self::IndustrializedAutomation => "10D",
+            Self::Prediction => "PRED",
+            Self::Results => "RES",
         }
     }
 
@@ -84,6 +92,8 @@ impl NavigationPillar {
             Self::SafetyHealth => "🛡️",
             Self::LeanConstruction => "♻️",
             Self::IndustrializedAutomation => "🤖",
+            Self::Prediction => "🔮",
+            Self::Results => "📊",
         }
     }
 
@@ -100,6 +110,8 @@ impl NavigationPillar {
             Self::SafetyHealth => "The integration of accident prevention strategies, site risk assessments, and emergency planning into the construction design.",
             Self::LeanConstruction => "The optimization of the construction process to minimize material waste, streamline workflow, and maximize production efficiency.",
             Self::IndustrializedAutomation => "The integration of Industry 4.0 technologies, including prefabrication, robotics, 3D printing, and automated site processes.",
+            Self::Prediction => "AI failure forecasting, progressive collapse simulation (DoD UFC), and structural serviceability degradation curves.",
+            Self::Results => "Executive structural health dashboard, comprehensive SNI/AISC code compliance matrix, and official certification dossier export.",
         }
     }
 
@@ -116,6 +128,8 @@ impl NavigationPillar {
             Self::SafetyHealth => "Safety & Health",
             Self::LeanConstruction => "Lean Construction",
             Self::IndustrializedAutomation => "Industrialized Automation",
+            Self::Prediction => "Prediction",
+            Self::Results => "Results",
         }
     }
 }

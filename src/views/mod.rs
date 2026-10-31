@@ -12,6 +12,8 @@ pub mod sustainability;
 pub mod facility;
 pub mod lean;
 pub mod industrialized;
+pub mod prediction;
+pub mod results;
 
 pub use my_project::MyProjectView;
 pub use research::ResearchConceptView;
@@ -25,3 +27,5 @@ pub use sustainability::SustainabilityView;
 pub use facility::FacilityView;
 pub use lean::LeanView;
 pub use industrialized::IndustrializedView;
+pub use prediction::PredictionView;
+pub use results::ResultsView;
