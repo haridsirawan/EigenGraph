@@ -29,6 +29,9 @@ impl ModelArchetype {
 pub enum Render3DMode {
     SolidShaded,      // 3D Extruded Shaded Polygonal Beams with Lighting
     Wireframe,        // Crisp Vector Wireframe Lines
+    AxialForceNFD,    // Normal / Axial Force Diagram Envelope (Tension red / Compression blue)
+    ShearForceSFD,    // Shear Force Diagram Envelope (Green stepped polygon)
+    BendingMomentBMD, // Bending Moment Diagram Envelope (Amber parabolic curve with peak callouts)
 }
 
 pub struct BuildView {
@@ -145,6 +148,7 @@ impl BuildView {
                     SidebarTab::ProjectBrowser => self.render_browser_tab(ui, theme, members, db_components),
                     SidebarTab::Modify => self.render_modify_tab(ui, theme),
                     SidebarTab::Layers => self.render_layers_tab(ui, theme),
+                    _ => {}
                 }
             });
         });
@@ -429,13 +433,21 @@ impl BuildView {
                 .stroke(Stroke::new(1.0, theme.border_subtle))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        // Render Style Toggle
-                        let is_solid = self.render_mode == Render3DMode::SolidShaded;
-                        if ui.selectable_label(is_solid, "🧱 Solid Shaded 3D").clicked() {
+                        // Render Style & Internal Force Diagrams Toggle
+                        if ui.selectable_label(self.render_mode == Render3DMode::SolidShaded, "🧱 Solid").clicked() {
                             self.render_mode = Render3DMode::SolidShaded;
                         }
-                        if ui.selectable_label(!is_solid, "🕸️ Wireframe").clicked() {
+                        if ui.selectable_label(self.render_mode == Render3DMode::Wireframe, "🕸️ Wireframe").clicked() {
                             self.render_mode = Render3DMode::Wireframe;
+                        }
+                        if ui.selectable_label(self.render_mode == Render3DMode::AxialForceNFD, "📊 NFD").on_hover_text("Normal / Axial Force Diagram (Tarik Merah, Tekan Biru)").clicked() {
+                            self.render_mode = Render3DMode::AxialForceNFD;
+                        }
+                        if ui.selectable_label(self.render_mode == Render3DMode::ShearForceSFD, "⚡ SFD").on_hover_text("Shear Force Diagram (Diagram Gaya Geser Melintang)").clicked() {
+                            self.render_mode = Render3DMode::ShearForceSFD;
+                        }
+                        if ui.selectable_label(self.render_mode == Render3DMode::BendingMomentBMD, "📈 BMD").on_hover_text("Bending Moment Diagram (Diagram Momen Lentur Parabolik)").clicked() {
+                            self.render_mode = Render3DMode::BendingMomentBMD;
                         }
 
                         ui.add_space(6.0);
@@ -546,7 +558,7 @@ impl BuildView {
                     }
 
                     if response.hovered() {
-                        let scroll_y = ui.input(|i| i.raw_scroll_delta.y);
+                        let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
                         if scroll_y.abs() > 0.0 {
                             self.cam_zoom = (self.cam_zoom * (1.0 + scroll_y * 0.0025)).clamp(0.15, 8.0);
                         }
@@ -709,8 +721,7 @@ impl BuildView {
                         }
                     }
 
-                    // 4. Render Members (Solid Shaded or Wireframe)
-                    let is_solid_mode = self.render_mode == Render3DMode::SolidShaded;
+                    // 4. Render Members (Solid Shaded, Wireframe, or 3D Diagrams)
                     let sun_dir = (0.577, 0.577, 0.577);
 
                     for item in &render_list {
@@ -779,56 +790,187 @@ impl BuildView {
                         let dir = delta / len;
                         let normal = Vec2::new(-dir.y, dir.x);
 
-                        if is_solid_mode && !is_elim {
-                            // Compute solid extrusion width
-                            let beam_w = (item.base_width * cam_zoom * 0.8).clamp(3.0, 22.0);
+                        match self.render_mode {
+                            Render3DMode::SolidShaded => {
+                                if !is_elim {
+                                    // Compute solid extrusion width
+                                    let beam_w = (item.base_width * cam_zoom * 0.8).clamp(3.0, 22.0);
 
-                            // Shading lighting factor
-                            let dx3d = item.p2_3d.0 - item.p1_3d.0;
-                            let dy3d = item.p2_3d.1 - item.p1_3d.1;
-                            let dz3d = item.p2_3d.2 - item.p1_3d.2;
-                            let len3d = (dx3d * dx3d + dy3d * dy3d + dz3d * dz3d).sqrt().max(0.1);
-                            let t3d = (dx3d / len3d, dy3d / len3d, dz3d / len3d);
+                                    // Shading lighting factor
+                                    let dx3d = item.p2_3d.0 - item.p1_3d.0;
+                                    let dy3d = item.p2_3d.1 - item.p1_3d.1;
+                                    let dz3d = item.p2_3d.2 - item.p1_3d.2;
+                                    let len3d = (dx3d * dx3d + dy3d * dy3d + dz3d * dz3d).sqrt().max(0.1);
+                                    let t3d = (dx3d / len3d, dy3d / len3d, dz3d / len3d);
 
-                            // Cross product with sun light
-                            let cross_mag = ((t3d.1 * sun_dir.2 - t3d.2 * sun_dir.1).powi(2)
-                                + (t3d.2 * sun_dir.0 - t3d.0 * sun_dir.2).powi(2)
-                                + (t3d.0 * sun_dir.1 - t3d.1 * sun_dir.0).powi(2)).sqrt();
+                                    // Cross product with sun light
+                                    let cross_mag = ((t3d.1 * sun_dir.2 - t3d.2 * sun_dir.1).powi(2)
+                                        + (t3d.2 * sun_dir.0 - t3d.0 * sun_dir.2).powi(2)
+                                        + (t3d.0 * sun_dir.1 - t3d.1 * sun_dir.0).powi(2)).sqrt();
 
-                            let shade_factor = 0.65 + 0.35 * cross_mag;
-                            let shaded_r = ((base_color.r() as f32) * shade_factor).clamp(0.0, 255.0) as u8;
-                            let shaded_g = ((base_color.g() as f32) * shade_factor).clamp(0.0, 255.0) as u8;
-                            let shaded_b = ((base_color.b() as f32) * shade_factor).clamp(0.0, 255.0) as u8;
-                            let shaded_col = Color32::from_rgb(shaded_r, shaded_g, shaded_b);
+                                    let shade_factor = 0.65 + 0.35 * cross_mag;
+                                    let shaded_r = ((base_color.r() as f32) * shade_factor).clamp(0.0, 255.0) as u8;
+                                    let shaded_g = ((base_color.g() as f32) * shade_factor).clamp(0.0, 255.0) as u8;
+                                    let shaded_b = ((base_color.b() as f32) * shade_factor).clamp(0.0, 255.0) as u8;
+                                    let shaded_col = Color32::from_rgb(shaded_r, shaded_g, shaded_b);
 
-                            // Extruded Quad Corners
-                            let half_w = normal * (beam_w * 0.5);
-                            let q1 = p1 + half_w;
-                            let q2 = p2 + half_w;
-                            let q3 = p2 - half_w;
-                            let q4 = p1 - half_w;
+                                    // Extruded Quad Corners
+                                    let half_w = normal * (beam_w * 0.5);
+                                    let q1 = p1 + half_w;
+                                    let q2 = p2 + half_w;
+                                    let q3 = p2 - half_w;
+                                    let q4 = p1 - half_w;
 
-                            // Fill solid polygon
-                            painter.convex_polygon(vec![q1, q2, q3, q4], shaded_col, Stroke::NONE);
+                                    // Fill solid polygon
+                                    painter.add(egui::Shape::convex_polygon(vec![q1, q2, q3, q4], shaded_col, Stroke::NONE));
 
-                            // Chamfer metallic specular highlight edge (top ridge)
-                            let highlight_col = Color32::from_rgba_premultiplied(255, 255, 255, if is_sel { 120 } else { 45 });
-                            painter.line_segment([q1, q2], Stroke::new(1.0, highlight_col));
+                                    // Chamfer metallic specular highlight edge (top ridge)
+                                    let highlight_col = Color32::from_rgba_premultiplied(255, 255, 255, if is_sel { 120 } else { 45 });
+                                    painter.line_segment([q1, q2], Stroke::new(1.0, highlight_col));
 
-                            // Dark drop shadow edge (bottom ridge)
-                            let shadow_col = Color32::from_rgba_premultiplied(0, 0, 0, 80);
-                            painter.line_segment([q4, q3], Stroke::new(1.0, shadow_col));
+                                    // Dark drop shadow edge (bottom ridge)
+                                    let shadow_col = Color32::from_rgba_premultiplied(0, 0, 0, 80);
+                                    painter.line_segment([q4, q3], Stroke::new(1.0, shadow_col));
 
-                            // Halo if selected or hovered
-                            if is_sel || is_hov {
-                                let halo_col = if is_sel { Color32::from_rgb(0, 230, 255) } else { Color32::from_rgb(255, 255, 255) };
-                                painter.line_segment([q1, q2], Stroke::new(2.0, halo_col));
-                                painter.line_segment([q4, q3], Stroke::new(2.0, halo_col));
+                                    // Halo if selected or hovered
+                                    if is_sel || is_hov {
+                                        let halo_col = if is_sel { Color32::from_rgb(0, 230, 255) } else { Color32::from_rgb(255, 255, 255) };
+                                        painter.line_segment([q1, q2], Stroke::new(2.0, halo_col));
+                                        painter.line_segment([q4, q3], Stroke::new(2.0, halo_col));
+                                    }
+                                } else {
+                                    let stroke_w = if is_sel { 3.5 } else if is_hov { 2.5 } else { 2.8 };
+                                    painter.line_segment([p1, p2], Stroke::new(stroke_w, base_color));
+                                }
                             }
-                        } else {
-                            // Wireframe line mode
-                            let stroke_w = if is_sel { 3.5 } else if is_hov { 2.5 } else if is_elim { 2.8 } else { 1.8 };
-                            painter.line_segment([p1, p2], Stroke::new(stroke_w, base_color));
+                            Render3DMode::Wireframe => {
+                                let stroke_w = if is_sel { 3.5 } else if is_hov { 2.5 } else if is_elim { 2.8 } else { 1.8 };
+                                painter.line_segment([p1, p2], Stroke::new(stroke_w, base_color));
+                            }
+                            Render3DMode::AxialForceNFD => {
+                                // Baseline member axis
+                                painter.line_segment([p1, p2], Stroke::new(1.2, Color32::from_rgb(148, 163, 184)));
+
+                                // Diagram height scaled to axial force
+                                let is_tension = item.force_kn >= 0.0;
+                                let sign = if is_tension { 1.0 } else { -1.0 };
+                                let diag_h = (item.force_kn.abs() / 8.0).clamp(4.0, 32.0) * cam_zoom.clamp(0.5, 2.5);
+                                let offset_vec = normal * (sign * diag_h);
+
+                                let d1 = p1 + offset_vec;
+                                let d2 = p2 + offset_vec;
+
+                                let fill_col = if is_tension {
+                                    Color32::from_rgba_premultiplied(239, 68, 68, 140) // Red Tension (+)
+                                } else {
+                                    Color32::from_rgba_premultiplied(59, 130, 246, 140) // Blue Compression (-)
+                                };
+                                let border_col = if is_tension {
+                                    Color32::from_rgb(239, 68, 68)
+                                } else {
+                                    Color32::from_rgb(59, 130, 246)
+                                };
+
+                                painter.add(egui::Shape::convex_polygon(vec![p1, d1, d2, p2], fill_col, Stroke::NONE));
+                                painter.line_segment([d1, d2], Stroke::new(1.8, border_col));
+                                painter.line_segment([p1, d1], Stroke::new(1.0, border_col));
+                                painter.line_segment([p2, d2], Stroke::new(1.0, border_col));
+
+                                // Midpoint annotation
+                                if is_sel || is_hov || item.force_kn.abs() > 40.0 {
+                                    let mid = p1 + delta * 0.5 + offset_vec * 1.15;
+                                    let sign_str = if is_tension { "(+) " } else { "(-) " };
+                                    painter.text(
+                                        mid,
+                                        Align2::CENTER_CENTER,
+                                        format!("{}{:.1} kN", sign_str, item.force_kn.abs()),
+                                        egui::FontId::monospace(9.5),
+                                        Color32::WHITE,
+                                    );
+                                }
+                            }
+                            Render3DMode::ShearForceSFD => {
+                                // Baseline member axis
+                                painter.line_segment([p1, p2], Stroke::new(1.2, Color32::from_rgb(148, 163, 184)));
+
+                                let vy = (item.force_kn.abs() * 0.28).clamp(3.5, 55.0);
+                                let diag_h = (vy / 4.0).clamp(4.0, 26.0) * cam_zoom.clamp(0.5, 2.5);
+                                let offset_vec = normal * diag_h;
+
+                                let d1 = p1 + offset_vec;
+                                let d2 = p2 - offset_vec;
+                                let p_mid = p1 + delta * 0.5;
+                                let d_mid1 = p_mid + offset_vec;
+                                let d_mid2 = p_mid - offset_vec;
+
+                                let fill_col = Color32::from_rgba_premultiplied(34, 197, 94, 130);
+                                let border_col = Color32::from_rgb(34, 197, 94);
+
+                                // Step 1: left half
+                                painter.add(egui::Shape::convex_polygon(vec![p1, d1, d_mid1, p_mid], fill_col, Stroke::NONE));
+                                painter.line_segment([d1, d_mid1], Stroke::new(1.8, border_col));
+                                painter.line_segment([p1, d1], Stroke::new(1.0, border_col));
+
+                                // Step 2: right half (opposite sign)
+                                painter.add(egui::Shape::convex_polygon(vec![p_mid, d_mid2, d2, p2], fill_col, Stroke::NONE));
+                                painter.line_segment([d_mid2, d2], Stroke::new(1.8, border_col));
+                                painter.line_segment([p2, d2], Stroke::new(1.0, border_col));
+                                painter.line_segment([d_mid1, d_mid2], Stroke::new(1.5, border_col));
+
+                                if is_sel || is_hov || vy > 20.0 {
+                                    painter.text(
+                                        d1 + normal * 4.0,
+                                        Align2::CENTER_CENTER,
+                                        format!("Vy: {:.1} kN", vy),
+                                        egui::FontId::monospace(9.5),
+                                        Color32::from_rgb(52, 211, 153),
+                                    );
+                                }
+                            }
+                            Render3DMode::BendingMomentBMD => {
+                                // Baseline member axis
+                                painter.line_segment([p1, p2], Stroke::new(1.2, Color32::from_rgb(148, 163, 184)));
+
+                                let my = (item.force_kn.abs() * 0.22).clamp(4.0, 75.0);
+                                let diag_h = (my / 3.5).clamp(5.0, 32.0) * cam_zoom.clamp(0.5, 2.5);
+                                let offset_vec = normal * diag_h;
+
+                                // Build parabolic polygon with 8 subdivision points
+                                let mut poly_pts = vec![p1];
+                                let mut curve_pts = Vec::new();
+                                let steps = 8;
+                                for s in 0..=steps {
+                                    let t = s as f32 / steps as f32;
+                                    let base_pt = p1 + delta * t;
+                                    let sag = 4.0 * t * (1.0 - t); // Parabolic peak at 1.0
+                                    let curve_pt = base_pt + offset_vec * sag;
+                                    curve_pts.push(curve_pt);
+                                    poly_pts.push(curve_pt);
+                                }
+                                poly_pts.push(p2);
+
+                                let fill_col = Color32::from_rgba_premultiplied(245, 158, 11, 130);
+                                let border_col = Color32::from_rgb(245, 158, 11);
+
+                                painter.add(egui::Shape::convex_polygon(poly_pts, fill_col, Stroke::NONE));
+                                for w in curve_pts.windows(2) {
+                                    painter.line_segment([w[0], w[1]], Stroke::new(2.0, border_col));
+                                }
+                                painter.line_segment([p1, curve_pts[0]], Stroke::new(1.0, border_col));
+                                painter.line_segment([p2, *curve_pts.last().unwrap()], Stroke::new(1.0, border_col));
+
+                                // Midpoint peak callout
+                                if is_sel || is_hov || my > 25.0 {
+                                    let mid_peak = p1 + delta * 0.5 + offset_vec * 1.15;
+                                    painter.text(
+                                        mid_peak,
+                                        Align2::CENTER_CENTER,
+                                        format!("M_max: {:.1} kNm", my),
+                                        egui::FontId::monospace(9.5),
+                                        Color32::from_rgb(251, 191, 36),
+                                    );
+                                }
+                            }
                         }
 
                         // Spherical MERO Node Balls at Joint Ends
@@ -869,10 +1011,17 @@ impl BuildView {
                     }
 
                     // 6. Camera Viewport HUD Overlay (Top Left & Bottom Right)
+                    let mode_str = match self.render_mode {
+                        Render3DMode::SolidShaded => "SOLID EXTRUDED",
+                        Render3DMode::Wireframe => "WIREFRAME",
+                        Render3DMode::AxialForceNFD => "DIAGRAM NFD (AKSIAL)",
+                        Render3DMode::ShearForceSFD => "DIAGRAM SFD (GESER)",
+                        Render3DMode::BendingMomentBMD => "DIAGRAM BMD (MOMEN)",
+                    };
                     painter.text(
                         Pos2::new(rect.left() + 14.0, rect.top() + 14.0),
                         Align2::LEFT_TOP,
-                        format!("🎥 3D VIEWPORT: {} • {}", self.active_model.label(), if is_solid_mode { "SOLID EXTRUDED" } else { "WIREFRAME" }),
+                        format!("🎥 3D VIEWPORT: {} • {}", self.active_model.label(), mode_str),
                         egui::FontId::monospace(10.5),
                         Color32::from_rgb(140, 165, 205),
                     );
@@ -890,15 +1039,16 @@ impl BuildView {
                         if let Some(item) = render_list.iter().find(|i| i.id == hid) {
                             if let Some(mpos) = response.hover_pos() {
                                 let tip_pos = mpos + Vec2::new(14.0, -18.0);
-                                let tip_rect = egui::Rect::from_min_size(tip_pos, Vec2::new(185.0, 75.0));
+                                let tip_rect = egui::Rect::from_min_size(tip_pos, Vec2::new(195.0, 90.0));
 
                                 painter.rect_filled(tip_rect, CornerRadius::same(6), Color32::from_rgba_premultiplied(20, 24, 34, 235));
                                 painter.rect_stroke(tip_rect, CornerRadius::same(6), Stroke::new(1.0, theme.accent_blue), egui::StrokeKind::Outside);
 
                                 painter.text(tip_pos + Vec2::new(8.0, 6.0), Align2::LEFT_TOP, format!("{} [{}]", item.name, item.section), egui::FontId::proportional(11.0), Color32::WHITE);
                                 painter.text(tip_pos + Vec2::new(8.0, 22.0), Align2::LEFT_TOP, format!("Aksial Pu: {:.1} kN", item.force_kn), egui::FontId::monospace(10.0), theme.accent_blue);
-                                painter.text(tip_pos + Vec2::new(8.0, 38.0), Align2::LEFT_TOP, format!("Utilisasi: {:.1}%", item.utilization * 100.0), egui::FontId::monospace(10.0), theme.accent_orange);
-                                painter.text(tip_pos + Vec2::new(8.0, 54.0), Align2::LEFT_TOP, format!("ARI Redundansi: {:.3}", item.ari), egui::FontId::monospace(10.0), theme.accent_green);
+                                painter.text(tip_pos + Vec2::new(8.0, 38.0), Align2::LEFT_TOP, format!("Kapasitas ϕPn: {:.1} kN", item.capacity_kn), egui::FontId::monospace(10.0), theme.text_secondary);
+                                painter.text(tip_pos + Vec2::new(8.0, 54.0), Align2::LEFT_TOP, format!("Utilisasi DCR: {:.1}%", item.utilization * 100.0), egui::FontId::monospace(10.0), theme.accent_orange);
+                                painter.text(tip_pos + Vec2::new(8.0, 70.0), Align2::LEFT_TOP, format!("ARI Redundansi: {:.3}", item.ari), egui::FontId::monospace(10.0), theme.accent_green);
                             }
                         }
                     }
