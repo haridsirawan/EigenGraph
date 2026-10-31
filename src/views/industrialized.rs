@@ -39,6 +39,7 @@ impl IndustrializedView {
             // 1. TOP SUBTABS SELECTOR
             self.render_header_bar(ui, theme);
 
+            let mut dismiss_status = false;
             if let Some(ref status_msg) = self.export_status {
                 ui.add_space(10.0);
                 theme.card_frame().show(ui, |ui| {
@@ -49,11 +50,14 @@ impl IndustrializedView {
                             if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(theme.text_muted))
                                 .fill(theme.bg_card)
                                 .corner_radius(CornerRadius::same(4))).clicked() {
-                                self.export_status = None;
+                                dismiss_status = true;
                             }
                         });
                     });
                 });
+            }
+            if dismiss_status {
+                self.export_status = None;
             }
 
             ui.add_space(14.0);
