@@ -319,6 +319,187 @@ impl Matrix {
         let nullspace_dim = s.len() - rank;
         (rank, nullspace_dim, null_vectors)
     }
+
+    /// Evaluates the 2x2 Woodbury Capacitance Matrix C = I - H for Rank-2 (N-2) simultaneous member loss:
+    /// C = [[1 - h11, -h12], [-h12, 1 - h22]]
+    /// Returns (det(C), Option<C^(-1)>).
+    pub fn woodbury_rank2_det_and_inv(h11: f64, h22: f64, h12: f64, tol: f64) -> (f64, Option<[[f64; 2]; 2]>) {
+        let c00 = 1.0 - h11;
+        let c11 = 1.0 - h22;
+        let c01 = -h12;
+        let det = c00 * c11 - c01 * c01;
+        if det <= tol {
+            (det, None)
+        } else {
+            let inv_det = 1.0 / det;
+            let inv = [
+                [c11 * inv_det, -c01 * inv_det],
+                [-c01 * inv_det, c00 * inv_det],
+            ];
+            (det, Some(inv))
+        }
+    }
+}
+
+/// Compressed Sparse Row (CSR) Matrix for high-speed O(nnz) sparse linear algebra
+#[derive(Debug, Clone, PartialEq)]
+pub struct CsrMatrix {
+    pub rows: usize,
+    pub cols: usize,
+    pub row_ptr: Vec<usize>,
+    pub col_idx: Vec<usize>,
+    pub values: Vec<f64>,
+}
+
+impl CsrMatrix {
+    /// Converts a dense Matrix into Compressed Sparse Row (CSR) format, dropping entries with |a_ij| <= drop_tol.
+    pub fn from_dense(mat: &Matrix, drop_tol: f64) -> Self {
+        let mut row_ptr = Vec::with_capacity(mat.rows + 1);
+        let mut col_idx = Vec::new();
+        let mut values = Vec::new();
+
+        row_ptr.push(0);
+        for i in 0..mat.rows {
+            for j in 0..mat.cols {
+                let val = mat[(i, j)];
+                if val.abs() > drop_tol {
+                    col_idx.push(j);
+                    values.push(val);
+                }
+            }
+            row_ptr.push(values.len());
+        }
+
+        Self {
+            rows: mat.rows,
+            cols: mat.cols,
+            row_ptr,
+            col_idx,
+            values,
+        }
+    }
+
+    /// Converts CSR matrix back to a dense Matrix.
+    pub fn to_dense(&self) -> Matrix {
+        let mut mat = Matrix::zeros(self.rows, self.cols);
+        for i in 0..self.rows {
+            let start = self.row_ptr[i];
+            let end = self.row_ptr[i + 1];
+            for idx in start..end {
+                mat[(i, self.col_idx[idx])] = self.values[idx];
+            }
+        }
+        mat
+    }
+
+    /// Number of non-zero elements stored.
+    #[inline]
+    pub fn nnz(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Sparse Matrix-Vector Multiplication: y = A * x in O(nnz) time.
+    pub fn spmv(&self, x: &[f64]) -> Vec<f64> {
+        assert_eq!(self.cols, x.len(), "Dimension mismatch in CsrMatrix::spmv");
+        let mut y = vec![0.0; self.rows];
+        for i in 0..self.rows {
+            let start = self.row_ptr[i];
+            let end = self.row_ptr[i + 1];
+            let mut sum = 0.0;
+            for idx in start..end {
+                sum += self.values[idx] * x[self.col_idx[idx]];
+            }
+            y[i] = sum;
+        }
+        y
+    }
+
+    /// Extracts main diagonal vector for Jacobi preconditioning.
+    pub fn diagonal(&self) -> Vec<f64> {
+        let n = self.rows.min(self.cols);
+        let mut diag = vec![0.0; n];
+        for i in 0..n {
+            let start = self.row_ptr[i];
+            let end = self.row_ptr[i + 1];
+            for idx in start..end {
+                if self.col_idx[idx] == i {
+                    diag[i] = self.values[idx];
+                    break;
+                }
+            }
+        }
+        diag
+    }
+
+    /// Solves Symmetric Positive-Definite (SPD) system A * x = b using Jacobi-Preconditioned Conjugate Gradient (PCG).
+    pub fn solve_pcg(&self, b: &[f64], tol: f64, max_iter: usize) -> Option<Vec<f64>> {
+        if self.rows != self.cols || self.rows != b.len() {
+            return None;
+        }
+        let n = self.rows;
+        if n == 0 {
+            return Some(vec![]);
+        }
+
+        let diag = self.diagonal();
+        let mut inv_diag = vec![1.0; n];
+        for i in 0..n {
+            if diag[i].abs() < 1e-14 {
+                return None; // Zero diagonal on SPD matrix -> singular
+            }
+            inv_diag[i] = 1.0 / diag[i];
+        }
+
+        let mut x = vec![0.0; n];
+        let ax = self.spmv(&x);
+        let mut r: Vec<f64> = b.iter().zip(ax.iter()).map(|(&bi, &axi)| bi - axi).collect();
+
+        let b_norm: f64 = b.iter().map(|&v| v * v).sum::<f64>().sqrt();
+        if b_norm < 1e-15 {
+            return Some(x);
+        }
+
+        let mut z: Vec<f64> = r.iter().zip(inv_diag.iter()).map(|(&ri, &di)| ri * di).collect();
+        let mut p = z.clone();
+        let mut rz_old: f64 = r.iter().zip(z.iter()).map(|(&ri, &zi)| ri * zi).sum();
+
+        for _iter in 0..max_iter {
+            let ap = self.spmv(&p);
+            let p_ap: f64 = p.iter().zip(ap.iter()).map(|(&pi, &api)| pi * api).sum();
+            if p_ap.abs() < 1e-20 {
+                break;
+            }
+
+            let alpha = rz_old / p_ap;
+            let mut r_norm_sq = 0.0;
+            for i in 0..n {
+                x[i] += alpha * p[i];
+                r[i] -= alpha * ap[i];
+                r_norm_sq += r[i] * r[i];
+            }
+
+            if r_norm_sq.sqrt() / b_norm < tol {
+                return Some(x);
+            }
+
+            for i in 0..n {
+                z[i] = r[i] * inv_diag[i];
+            }
+            let rz_new: f64 = r.iter().zip(z.iter()).map(|(&ri, &zi)| ri * zi).sum();
+            let beta = rz_new / (rz_old + 1e-30);
+            for i in 0..n {
+                p[i] = z[i] + beta * p[i];
+            }
+            rz_old = rz_new;
+        }
+
+        let final_r_norm: f64 = r.iter().map(|&ri| ri * ri).sum::<f64>().sqrt();
+        if final_r_norm / b_norm < tol * 100.0 {
+            Some(x)
+        } else {
+            None
+        }
+    }
 }
 
 impl Index<(usize, usize)> for Matrix {
@@ -366,5 +547,39 @@ mod tests {
         let (rank, null_dim, _) = a.rank_and_nullspace(1e-7);
         assert_eq!(rank, 1);
         assert_eq!(null_dim, 1);
+    }
+
+    #[test]
+    fn test_csr_sparse_and_pcg_solver() {
+        // 3x3 Symmetric Positive-Definite Tridiagonal Stiffness Matrix
+        let dense = Matrix::from_slice(3, 3, &[
+            4.0, -1.0,  0.0,
+           -1.0,  4.0, -1.0,
+            0.0, -1.0,  4.0,
+        ]);
+        let csr = CsrMatrix::from_dense(&dense, 1e-12);
+        assert_eq!(csr.nnz(), 7);
+        assert_eq!(csr.to_dense(), dense);
+
+        let b = vec![3.0, 2.0, 3.0];
+        let x_gauss = dense.solve_gaussian(&b).unwrap();
+        let x_pcg = csr.solve_pcg(&b, 1e-10, 100).unwrap();
+
+        for i in 0..3 {
+            assert!((x_gauss[i] - x_pcg[i]).abs() < 1e-7);
+        }
+    }
+
+    #[test]
+    fn test_woodbury_rank2_determinant() {
+        // Two independent members (h12 = 0, h11 = 0.5, h22 = 0.5) -> det = 0.25
+        let (det, inv) = Matrix::woodbury_rank2_det_and_inv(0.5, 0.5, 0.0, 1e-8);
+        assert!((det - 0.25).abs() < 1e-9);
+        assert!(inv.is_some());
+
+        // Coupled parallel mechanism: h11 = 0.5, h22 = 0.5, h12 = 0.5 -> det = 0.25 - 0.25 = 0.0 (singular!)
+        let (det_sing, inv_sing) = Matrix::woodbury_rank2_det_and_inv(0.5, 0.5, 0.5, 1e-8);
+        assert!(det_sing.abs() < 1e-9);
+        assert!(inv_sing.is_none());
     }
 }

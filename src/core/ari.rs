@@ -413,6 +413,32 @@ pub struct MultiMemberDisruptionReport {
     pub propagation_vulnerability_index: f64,
 }
 
+/// Hasil Penapisan Cepat N-2 (Pasangan 2 Batang) menggunakan Identitas Matriks Woodbury Rank-2
+#[derive(Debug, Clone)]
+pub struct N2PairRedundancyResult {
+    pub member_1_id: usize,
+    pub member_2_id: usize,
+    pub member_1_name: String,
+    pub member_2_name: String,
+    pub h11: f64,
+    pub h22: f64,
+    pub h12_coupling: f64,
+    pub woodbury_determinant: f64,
+    pub is_coupled_mechanism: bool,
+    pub max_redistributed_utilization: f64,
+    pub pair_ari: f64,
+}
+
+/// Laporan Lengkap Penapisan Kontingensi N-2 Berbasis Identitas Woodbury
+#[derive(Debug, Clone)]
+pub struct N2WoodburyScreeningReport {
+    pub total_pairs_evaluated: usize,
+    pub coupled_mechanism_pairs: usize,
+    pub critical_pairs_count: usize,
+    pub min_pair_ari: f64,
+    pub pair_results: Vec<N2PairRedundancyResult>,
+}
+
 // -----------------------------------------------------------------------------
 // 5. MESIN ARI RESMI: SHERMAN-MORRISON RANK-1 UPDATE & FAST EVALUATOR
 // -----------------------------------------------------------------------------
@@ -667,6 +693,167 @@ impl AriEngine {
             }
         }
     }
+
+    /// Penapisan Cepat Kontingensi N-2 (Dual-Member Loss) menggunakan Identitas Matriks Woodbury Rank-2.
+    /// Mengevaluasi seluruh C(m, 2) pasangan elemen tanpa merakit/memfaktorkan ulang matriks kekakuan.
+    pub fn evaluate_n2_woodbury_fast(model: &StructuralModel) -> Result<N2WoodburyScreeningReport, String> {
+        let baseline = FemSolver::solve(model)?;
+        let kinematic_guard = Self::verify_kinematics(&baseline.k_free, 1e-7);
+        if !kinematic_guard.is_stable {
+            return Err("Baseline intact structure is kinematically unstable".to_string());
+        }
+
+        let k_free_inv = baseline.k_free.inverse()
+            .ok_or_else(|| "Failed to invert free-DOF stiffness matrix".to_string())?;
+
+        let m = model.elements.len();
+        let n_free = baseline.free_dofs.len();
+
+        // Precompute projection vector a_e, compliance vector v_e = K_0^(-1) * a_e, and k_e for each member
+        let mut a_vecs: Vec<Vec<f64>> = Vec::with_capacity(m);
+        let mut v_vecs: Vec<Vec<f64>> = Vec::with_capacity(m);
+        let mut k_vals: Vec<f64> = Vec::with_capacity(m);
+        let mut h_diag: Vec<f64> = Vec::with_capacity(m);
+
+        for elem in &model.elements {
+            let n1_idx = model.nodes.iter().position(|n| n.id == elem.start_node).unwrap();
+            let n2_idx = model.nodes.iter().position(|n| n.id == elem.end_node).unwrap();
+            let n1 = &model.nodes[n1_idx];
+            let n2 = &model.nodes[n2_idx];
+
+            let l = n1.distance_to(n2);
+            let cx = (n2.x - n1.x) / l;
+            let cy = (n2.y - n1.y) / l;
+            let cz = (n2.z - n1.z) / l;
+            let k_e = (elem.material.elastic_modulus * elem.section.area) / l;
+
+            let mut a_e = vec![0.0; n_free];
+            let n1_base = n1_idx * 6;
+            let n2_base = n2_idx * 6;
+            for (free_idx, &dof) in baseline.free_dofs.iter().enumerate() {
+                if dof == n1_base { a_e[free_idx] = -cx; }
+                else if dof == n1_base + 1 { a_e[free_idx] = -cy; }
+                else if dof == n1_base + 2 { a_e[free_idx] = -cz; }
+                else if dof == n2_base { a_e[free_idx] = cx; }
+                else if dof == n2_base + 1 { a_e[free_idx] = cy; }
+                else if dof == n2_base + 2 { a_e[free_idx] = cz; }
+            }
+
+            let v_e = k_free_inv.mul_vec(&a_e);
+            let mut a_dot_v = 0.0;
+            for i in 0..n_free {
+                a_dot_v += a_e[i] * v_e[i];
+            }
+            let h_ee = (k_e * a_dot_v).clamp(0.0, 1.0);
+
+            a_vecs.push(a_e);
+            v_vecs.push(v_e);
+            k_vals.push(k_e);
+            h_diag.push(h_ee);
+        }
+
+        // Precompute cross dot products M[i][j] = a_i . v_j
+        let mut cross_dot = vec![vec![0.0; m]; m];
+        for i in 0..m {
+            for j in 0..m {
+                let mut dot = 0.0;
+                for d in 0..n_free {
+                    dot += a_vecs[i][d] * v_vecs[j][d];
+                }
+                cross_dot[i][j] = dot;
+            }
+        }
+
+        let mut pair_results = Vec::new();
+        let mut coupled_mechanism_pairs = 0;
+        let mut critical_pairs_count = 0;
+        let mut min_pair_ari: f64 = 1.0;
+
+        for i in 0..m {
+            for j in (i + 1)..m {
+                let h11 = h_diag[i];
+                let h22 = h_diag[j];
+                let sqrt_k1 = k_vals[i].sqrt();
+                let sqrt_k2 = k_vals[j].sqrt();
+                let h12 = sqrt_k1 * sqrt_k2 * cross_dot[i][j];
+
+                let (det_c, inv_c_opt) = Matrix::woodbury_rank2_det_and_inv(h11, h22, h12, MARGIN_TOL);
+
+                if let Some(inv_c) = inv_c_opt {
+                    // Valid Rank-2 Woodbury update
+                    let rhs1 = baseline.member_axial_forces[i] / (sqrt_k1 + 1e-18);
+                    let rhs2 = baseline.member_axial_forces[j] / (sqrt_k2 + 1e-18);
+
+                    let gamma1 = inv_c[0][0] * rhs1 + inv_c[0][1] * rhs2;
+                    let gamma2 = inv_c[1][0] * rhs1 + inv_c[1][1] * rhs2;
+
+                    let mut max_redist_u: f64 = 0.0;
+                    for r in 0..m {
+                        if r == i || r == j {
+                            continue;
+                        }
+                        let delta_elong = sqrt_k1 * gamma1 * cross_dot[r][i] + sqrt_k2 * gamma2 * cross_dot[r][j];
+                        let post_force = baseline.member_axial_forces[r] + k_vals[r] * delta_elong;
+                        let u_r = (post_force.abs() / (baseline.member_capacities[r] + EPS_R)).min(2.0);
+                        if u_r > max_redist_u {
+                            max_redist_u = u_r;
+                        }
+                    }
+
+                    let u_init_pair = baseline.member_utilizations[i].max(baseline.member_utilizations[j]);
+                    let delta_u = (max_redist_u - u_init_pair).max(0.0);
+                    let reserve = (1.0 - u_init_pair).max(0.05);
+                    let pair_ari = (1.0 - (delta_u / reserve)).clamp(0.0, 1.0) * det_c.clamp(0.0, 1.0).sqrt();
+
+                    if pair_ari < 0.70 || max_redist_u >= 1.0 {
+                        critical_pairs_count += 1;
+                    }
+                    min_pair_ari = min_pair_ari.min(pair_ari);
+
+                    pair_results.push(N2PairRedundancyResult {
+                        member_1_id: model.elements[i].id,
+                        member_2_id: model.elements[j].id,
+                        member_1_name: model.elements[i].name.clone(),
+                        member_2_name: model.elements[j].name.clone(),
+                        h11,
+                        h22,
+                        h12_coupling: h12,
+                        woodbury_determinant: det_c,
+                        is_coupled_mechanism: false,
+                        max_redistributed_utilization: max_redist_u,
+                        pair_ari,
+                    });
+                } else {
+                    // Coupled kinematic mechanism (Order-2 Cut Set)
+                    coupled_mechanism_pairs += 1;
+                    critical_pairs_count += 1;
+                    min_pair_ari = 0.0;
+
+                    pair_results.push(N2PairRedundancyResult {
+                        member_1_id: model.elements[i].id,
+                        member_2_id: model.elements[j].id,
+                        member_1_name: model.elements[i].name.clone(),
+                        member_2_name: model.elements[j].name.clone(),
+                        h11,
+                        h22,
+                        h12_coupling: h12,
+                        woodbury_determinant: det_c.max(0.0),
+                        is_coupled_mechanism: true,
+                        max_redistributed_utilization: 1.0,
+                        pair_ari: 0.0,
+                    });
+                }
+            }
+        }
+
+        Ok(N2WoodburyScreeningReport {
+            total_pairs_evaluated: pair_results.len(),
+            coupled_mechanism_pairs,
+            critical_pairs_count,
+            min_pair_ari,
+            pair_results,
+        })
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -770,6 +957,40 @@ mod tests {
         for m in &assessment.member_results {
             assert!(m.svd_margin > 0.0);
             assert!(m.ari > 0.0);
+        }
+    }
+
+    #[test]
+    fn test_woodbury_n2_simultaneous_screening() {
+        let mut model = StructuralModel::new("3-Bar Redundant Parallel System");
+        model.add_node(Node3D::new(0, 0.0, 0.0, 0.0).with_fixity(BoundaryFixity::fixed()));
+
+        let mut n1_fix = BoundaryFixity::free();
+        n1_fix.ux = true;
+        n1_fix.uz = true;
+        n1_fix.rx = true;
+        n1_fix.ry = true;
+        n1_fix.rz = true;
+        model.add_node(Node3D::new(1, 0.0, 1.0, 0.0).with_fixity(n1_fix));
+
+        for id in 1..=3 {
+            let mut e = Element3D::new(id, format!("Bar {}", id), 0, 1);
+            e.element_type = ElementType::Truss3D;
+            model.add_element(e);
+        }
+
+        model.add_load(NodalLoad::force_y(1, -30_000.0));
+
+        let n2_report = AriEngine::evaluate_n2_woodbury_fast(&model)
+            .expect("Woodbury N-2 screening should succeed");
+
+        // C(3, 2) = 3 pairs; in a 3-bar parallel system, removing any 2 bars leaves 1 bar intact (no mechanism!)
+        assert_eq!(n2_report.total_pairs_evaluated, 3);
+        assert_eq!(n2_report.coupled_mechanism_pairs, 0);
+        for pair in &n2_report.pair_results {
+            assert!(!pair.is_coupled_mechanism);
+            assert!(pair.woodbury_determinant > 0.0);
+            assert!(pair.pair_ari > 0.0);
         }
     }
 }

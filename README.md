@@ -7,7 +7,7 @@
 [![Release](https://img.shields.io/badge/release-v1.0.0-0A84FF.svg)](https://github.com/haridsirawan/EigenGraph/releases/tag/v1.0.0)
 [![Platform](https://img.shields.io/badge/platform-macOS%20(Universal%202:%20Apple%20Silicon%20%26%20Intel)-black.svg)](https://github.com/haridsirawan/EigenGraph/releases/tag/v1.0.0)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-25%20passed%20(100%25)-30D158.svg)](#-canonical-verification--numerical-benchmarks)
+[![Tests](https://img.shields.io/badge/tests-33%20passed%20(100%25)-30D158.svg)](#-canonical-verification--numerical-benchmarks)
 [![Engine](https://img.shields.io/badge/engine-Apple%20Metal%20GPU%2060%20FPS-purple.svg)](#-cadbim-triad-dock--native-vector-canvas-viewport)
 [![Rust](https://img.shields.io/badge/built%20with-Rust%201.80+-DEA584.svg)](https://www.rust-lang.org/)
 

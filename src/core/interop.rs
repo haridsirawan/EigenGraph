@@ -1595,6 +1595,45 @@ impl HtmlViewerExporter {
     }
 }
 
+/// Native `.eigen` Project Archive Format with FIPS SHA-256 Tamper-Evident Integrity Seal
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EigenProjectArchive {
+    pub format_version: String,
+    pub engine_version: String,
+    pub model: StructuralModel,
+    pub sha256_seal: String,
+}
+
+impl EigenProjectArchive {
+    /// Packages a StructuralModel into a signed `.eigen` JSON archive string.
+    pub fn serialize_to_eigen_json(model: &StructuralModel) -> Result<String, String> {
+        let model_json = serde_json::to_string(model).map_err(|e| e.to_string())?;
+        let sha256_seal = Sha256Hasher::digest_hex(model_json.as_bytes());
+
+        let archive = Self {
+            format_version: "EIGEN-BIM-1.1".to_string(),
+            engine_version: env!("CARGO_PKG_VERSION").to_string(),
+            model: model.clone(),
+            sha256_seal,
+        };
+
+        serde_json::to_string_pretty(&archive).map_err(|e| e.to_string())
+    }
+
+    /// Parses and cryptographically verifies a `.eigen` JSON archive string.
+    pub fn deserialize_from_eigen_json(json_str: &str) -> Result<StructuralModel, String> {
+        let archive: Self = serde_json::from_str(json_str).map_err(|e| e.to_string())?;
+        let model_json = serde_json::to_string(&archive.model).map_err(|e| e.to_string())?;
+        let computed_hash = Sha256Hasher::digest_hex(model_json.as_bytes());
+
+        if computed_hash != archive.sha256_seal {
+            return Err("SHA-256 integrity seal mismatch: project archive has been modified or corrupted.".to_string());
+        }
+
+        Ok(archive.model)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1699,5 +1738,19 @@ END-ISO-10303-21;"#;
         assert!(html.contains("const nodes ="));
         assert!(html.contains("const members ="));
         assert!(html.contains("FIPS SHA-256 DIGITAL SEAL"));
+    }
+
+    #[test]
+    fn test_eigen_project_archive_roundtrip_and_seal() {
+        let mut engine = crate::core::ParametricEngine::new();
+        let original = engine.generate_warren_truss().unwrap();
+
+        let serialized = EigenProjectArchive::serialize_to_eigen_json(&original)
+            .expect("Serialization to .eigen should succeed");
+        assert!(serialized.contains("EIGEN-BIM-1.1"));
+
+        let restored = EigenProjectArchive::deserialize_from_eigen_json(&serialized)
+            .expect("Deserialization and SHA-256 verification should succeed");
+        assert_eq!(original, restored);
     }
 }

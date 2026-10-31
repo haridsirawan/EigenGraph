@@ -1,7 +1,29 @@
 //! solver.rs — Linear Elastic Finite Element Analysis (FEA) & Stiffness Assembly Engine.
 
 use crate::core::linalg::Matrix;
-use crate::core::model::{ElementType, StructuralModel};
+use crate::core::model::{ElementType, LoadCombination, StructuralModel};
+
+/// Governing LRFD Load Combination Envelope Result for a single structural member
+#[derive(Debug, Clone)]
+pub struct MemberEnvelopeResult {
+    pub member_id: usize,
+    pub member_name: String,
+    pub max_tension_n: f64,
+    pub max_compression_n: f64,
+    pub max_shear_n: f64,
+    pub max_moment_nm: f64,
+    pub governing_dcr: f64,
+    pub governing_combination: String,
+}
+
+/// Complete Multi-Load Combination Envelope Analysis Result (SNI 1727:2020 / ASCE 7-22)
+#[derive(Debug, Clone)]
+pub struct EnvelopeAnalysisResult {
+    pub combinations_evaluated: usize,
+    pub max_envelope_displacement_mm: f64,
+    pub governing_system_combination: String,
+    pub member_envelopes: Vec<MemberEnvelopeResult>,
+}
 
 /// Result of a completed Finite Element Analysis
 #[derive(Debug, Clone)]
@@ -307,5 +329,124 @@ impl FemSolver {
         }
 
         k
+    }
+
+    /// Evaluates the Governing LRFD Load Combination Envelope (SNI 1727:2020 / ASCE 7-22)
+    /// across all specified load combinations without re-assembling or re-factoring K_ff.
+    pub fn solve_lrfd_envelope(
+        model: &StructuralModel,
+        combinations: &[LoadCombination],
+    ) -> Result<EnvelopeAnalysisResult, String> {
+        let base_res = Self::solve(model)?;
+        let combos = if combinations.is_empty() {
+            LoadCombination::standard_sni_1727_lrfd()
+        } else {
+            combinations.to_vec()
+        };
+
+        let m = model.elements.len();
+        let mut member_envelopes: Vec<MemberEnvelopeResult> = model
+            .elements
+            .iter()
+            .map(|e| MemberEnvelopeResult {
+                member_id: e.id,
+                member_name: e.name.clone(),
+                max_tension_n: 0.0,
+                max_compression_n: 0.0,
+                max_shear_n: 0.0,
+                max_moment_nm: 0.0,
+                governing_dcr: 0.0,
+                governing_combination: String::new(),
+            })
+            .collect();
+
+        let mut max_envelope_displacement_mm = 0.0;
+        let mut governing_system_combination = String::new();
+
+        for combo in &combos {
+            let mult = combo.effective_load_multiplier();
+            let combo_disp = base_res.max_displacement_mm * mult;
+            if combo_disp > max_envelope_displacement_mm {
+                max_envelope_displacement_mm = combo_disp;
+                governing_system_combination = combo.name.clone();
+            }
+
+            for i in 0..m {
+                let f_axial = base_res.member_axial_forces[i] * mult;
+                let v_shear = base_res.member_shear_forces[i] * mult;
+                let (my, mz) = base_res.member_bending_moments[i];
+                let m_tot = (my.max(mz)) * mult;
+                let dcr = (base_res.member_dcr_interactions[i] * mult).min(2.0);
+
+                let env = &mut member_envelopes[i];
+                if f_axial > env.max_tension_n {
+                    env.max_tension_n = f_axial;
+                }
+                if f_axial < -env.max_compression_n {
+                    env.max_compression_n = -f_axial;
+                }
+                if v_shear > env.max_shear_n {
+                    env.max_shear_n = v_shear;
+                }
+                if m_tot > env.max_moment_nm {
+                    env.max_moment_nm = m_tot;
+                }
+                if dcr >= env.governing_dcr {
+                    env.governing_dcr = dcr;
+                    env.governing_combination = combo.name.clone();
+                }
+            }
+        }
+
+        Ok(EnvelopeAnalysisResult {
+            combinations_evaluated: combos.len(),
+            max_envelope_displacement_mm,
+            governing_system_combination,
+            member_envelopes,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::model::{BoundaryFixity, CrossSection, Element3D, NodalLoad, Node3D};
+
+    #[test]
+    fn test_sni_1727_lrfd_load_combination_envelope() {
+        let mut model = StructuralModel::new("Simple Cantilever Column");
+        model.add_node(Node3D::new(0, 0.0, 0.0, 0.0).with_fixity(BoundaryFixity::fixed()));
+        model.add_node(Node3D::new(1, 0.0, 3.0, 0.0));
+        model.add_element(
+            Element3D::new(1, "Col-1", 0, 1)
+                .with_type(ElementType::Frame3D)
+                .with_section(CrossSection::h_300x300()),
+        );
+        model.add_load(NodalLoad::force_y(1, -150_000.0));
+
+        let combos = LoadCombination::standard_sni_1727_lrfd();
+        assert_eq!(combos.len(), 6);
+
+        let env = FemSolver::solve_lrfd_envelope(&model, &combos)
+            .expect("LRFD envelope solver should succeed");
+
+        assert_eq!(env.combinations_evaluated, 6);
+        assert_eq!(env.member_envelopes.len(), 1);
+        assert!(env.member_envelopes[0].max_compression_n > 150_000.0);
+        assert!(env.member_envelopes[0].governing_dcr > 0.0);
+        assert_eq!(env.member_envelopes[0].governing_combination, "LC2: 1.2D + 1.6L + 0.5Lr");
+    }
+
+    #[test]
+    fn test_standard_steel_catalog_properties() {
+        let catalog = CrossSection::catalog_jis_aisc();
+        assert_eq!(catalog.len(), 11);
+        for sec in &catalog {
+            assert!(sec.area > 0.0);
+            assert!(sec.iy > 0.0);
+            assert!(sec.iz > 0.0);
+            assert!(sec.radius_of_gyration_y() > 0.0);
+            assert!(sec.radius_of_gyration_z() > 0.0);
+        }
     }
 }

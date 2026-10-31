@@ -226,6 +226,193 @@ impl CrossSection {
             width: 0.150,
         }
     }
+
+    pub fn wf_150x75() -> Self {
+        Self {
+            name: "WF 150x75x5x7".to_string(),
+            area: 17.85e-4,
+            iy: 0.495e-6,
+            iz: 6.66e-6,
+            j_torsion: 2.31e-8,
+            depth: 0.150,
+            width: 0.075,
+        }
+    }
+
+    pub fn wf_200x100() -> Self {
+        Self {
+            name: "WF 200x100x5.5x8".to_string(),
+            area: 27.16e-4,
+            iy: 1.34e-6,
+            iz: 18.4e-6,
+            j_torsion: 4.68e-8,
+            depth: 0.200,
+            width: 0.100,
+        }
+    }
+
+    pub fn wf_250x125() -> Self {
+        Self {
+            name: "WF 250x125x6x9".to_string(),
+            area: 37.66e-4,
+            iy: 2.94e-6,
+            iz: 40.5e-6,
+            j_torsion: 8.15e-8,
+            depth: 0.250,
+            width: 0.125,
+        }
+    }
+
+    pub fn h_200x200() -> Self {
+        Self {
+            name: "H-Beam 200x200x8x12".to_string(),
+            area: 63.53e-4,
+            iy: 16.0e-6,
+            iz: 47.2e-6,
+            j_torsion: 28.5e-8,
+            depth: 0.200,
+            width: 0.200,
+        }
+    }
+
+    pub fn h_300x300() -> Self {
+        Self {
+            name: "H-Beam 300x300x10x15".to_string(),
+            area: 119.8e-4,
+            iy: 67.5e-6,
+            iz: 204.0e-6,
+            j_torsion: 81.2e-8,
+            depth: 0.300,
+            width: 0.300,
+        }
+    }
+
+    pub fn unp_150x75() -> Self {
+        Self {
+            name: "UNP 150x75x6.5x10".to_string(),
+            area: 23.71e-4,
+            iy: 1.14e-6,
+            iz: 8.64e-6,
+            j_torsion: 5.80e-8,
+            depth: 0.150,
+            width: 0.075,
+        }
+    }
+
+    /// Returns the complete integrated JIS G3192 / SNI / AISC Standard Steel Profile Catalog
+    pub fn catalog_jis_aisc() -> Vec<Self> {
+        vec![
+            Self::wf_150x75(),
+            Self::wf_200x100(),
+            Self::wf_250x125(),
+            Self::wf_300x150(),
+            Self::wf_400x200(),
+            Self::h_200x200(),
+            Self::h_300x300(),
+            Self::box_200x200x8(),
+            Self::tube_chs_300x10(),
+            Self::pipe_chs_150x6(),
+            Self::unp_150x75(),
+        ]
+    }
+
+    /// Radius of gyration about minor axis y: r_y = sqrt(I_y / A)
+    #[inline]
+    pub fn radius_of_gyration_y(&self) -> f64 {
+        (self.iy / self.area.max(1e-12)).sqrt()
+    }
+
+    /// Radius of gyration about major axis z: r_z = sqrt(I_z / A)
+    #[inline]
+    pub fn radius_of_gyration_z(&self) -> f64 {
+        (self.iz / self.area.max(1e-12)).sqrt()
+    }
+}
+
+/// Primary Structural Load Case Categories (SNI 1727:2020 / ASCE 7-22)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LoadCaseType {
+    Dead,     // D: Beban Mati
+    Live,     // L: Beban Hidup
+    RoofLive, // Lr: Beban Hidup Atap
+    Wind,     // W: Beban Angin
+    Seismic,  // E: Beban Gempa (SNI 1726:2019)
+}
+
+/// Factored Load Combination per SNI 1727:2020 / ASCE 7-22 Section 2.3.1 (LRFD)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoadCombination {
+    pub name: String,
+    pub factor_dead: f64,
+    pub factor_live: f64,
+    pub factor_roof_live: f64,
+    pub factor_wind: f64,
+    pub factor_seismic: f64,
+}
+
+impl LoadCombination {
+    /// Generates the 6 canonical LRFD Load Combinations per SNI 1727:2020 / ASCE 7-22
+    pub fn standard_sni_1727_lrfd() -> Vec<Self> {
+        vec![
+            Self {
+                name: "LC1: 1.4D".to_string(),
+                factor_dead: 1.4,
+                factor_live: 0.0,
+                factor_roof_live: 0.0,
+                factor_wind: 0.0,
+                factor_seismic: 0.0,
+            },
+            Self {
+                name: "LC2: 1.2D + 1.6L + 0.5Lr".to_string(),
+                factor_dead: 1.2,
+                factor_live: 1.6,
+                factor_roof_live: 0.5,
+                factor_wind: 0.0,
+                factor_seismic: 0.0,
+            },
+            Self {
+                name: "LC3: 1.2D + 1.0W + 1.0L + 0.5Lr".to_string(),
+                factor_dead: 1.2,
+                factor_live: 1.0,
+                factor_roof_live: 0.5,
+                factor_wind: 1.0,
+                factor_seismic: 0.0,
+            },
+            Self {
+                name: "LC4: 1.2D + 1.0E + 1.0L".to_string(),
+                factor_dead: 1.2,
+                factor_live: 1.0,
+                factor_roof_live: 0.0,
+                factor_wind: 0.0,
+                factor_seismic: 1.0,
+            },
+            Self {
+                name: "LC5: 0.9D + 1.0W".to_string(),
+                factor_dead: 0.9,
+                factor_live: 0.0,
+                factor_roof_live: 0.0,
+                factor_wind: 1.0,
+                factor_seismic: 0.0,
+            },
+            Self {
+                name: "LC6: 0.9D + 1.0E".to_string(),
+                factor_dead: 0.9,
+                factor_live: 0.0,
+                factor_roof_live: 0.0,
+                factor_wind: 0.0,
+                factor_seismic: 1.0,
+            },
+        ]
+    }
+
+    /// Computes the combined scalar multiplier when applied to a nominal design load vector
+    /// assuming typical structural breakdown (65% Dead, 25% Live, 10% Lateral/Environmental)
+    pub fn effective_load_multiplier(&self) -> f64 {
+        0.65 * self.factor_dead
+            + 0.25 * self.factor_live
+            + 0.05 * self.factor_roof_live
+            + 0.15 * self.factor_wind.max(self.factor_seismic)
+    }
 }
 
 /// A 3D Structural Member (Element) connecting two Nodes

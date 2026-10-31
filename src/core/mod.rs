@@ -16,16 +16,23 @@ pub mod schedule;
 pub mod carbon;
 pub mod nonlinear;
 pub mod modal;
+pub mod reliability;
 
-pub use linalg::Matrix;
+pub use linalg::{CsrMatrix, Matrix};
 pub use model::{
-    BoundaryFixity, CrossSection, Element3D, ElementType, Material, NodalLoad, Node3D,
-    StructuralModel,
+    BoundaryFixity, CrossSection, Element3D, ElementType, LoadCaseType, LoadCombination, Material,
+    NodalLoad, Node3D, StructuralModel,
 };
-pub use solver::{AnalysisResult, FemSolver};
-pub use ari::{AriEngine, KinematicGuardReport, MemberRedundancyResult, RedundancyAssessment};
+pub use solver::{AnalysisResult, EnvelopeAnalysisResult, FemSolver, MemberEnvelopeResult};
+pub use ari::{
+    AriEngine, KinematicGuardReport, MemberRedundancyResult, N2PairRedundancyResult,
+    N2WoodburyScreeningReport, RedundancyAssessment,
+};
 pub use parametric::{ParametricEngine, ParametricFormula};
-pub use interop::{DossierExporter, DstvExporter, DstvPiece, DxfExporter, HtmlViewerExporter, IfcExporter, IfcImporter, Sap2000Exporter, Sha256Hasher};
+pub use interop::{
+    DossierExporter, DstvExporter, DstvPiece, DxfExporter, EigenProjectArchive, HtmlViewerExporter,
+    IfcExporter, IfcImporter, Sap2000Exporter, Sha256Hasher,
+};
 pub use optimizer::{AriTopologyOptimizer, BracingCandidate, BracingOptimizationReport};
 pub use cost::{AhspUnitRates, BoqLineItem, CostEngine, CostEstimationReport, ProfileQuantity};
 pub use cascade::{CascadingCollapseReport, CascadingSimulator, CollapseStatus, CollapseStep};
@@ -38,4 +45,8 @@ pub use nonlinear::{
 };
 pub use modal::{
     ModalAnalysisReport, ModalEngine, ModeShape, SiteClass, Sni1726Spectrum,
+};
+pub use reliability::{
+    FragilityCurvePoint, MemberReliabilityResult, ReliabilityAndClashReport, ReliabilityEngine,
+    SpatialClash, standard_normal_cdf,
 };
