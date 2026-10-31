@@ -1,20 +1,30 @@
 <div align="center">
 
-<img src="assets/icon.png" width="140" height="140" alt="EigenGraph Logo" style="border-radius: 28px; box-shadow: 0 12px 36px rgba(0,0,0,0.4);" />
+<img src="assets/icon.png" width="130" height="130" alt="EigenGraph App Icon" style="border-radius: 26px; box-shadow: 0 12px 36px rgba(0,0,0,0.35); margin-bottom: 12px;" />
+<br />
+<img src="assets/logo.png" width="380" alt="EigenGraph Logo" />
 
-# ⚛️ EigenGraph
 ### High-Performance Computational Framework for Adjusted Redundancy Index (ARI), SVD Kinematic Mechanism Guards, and 10D BIM Construction Lifecycle Analytics
 
 [![Release](https://img.shields.io/badge/release-v1.0.0-0A84FF.svg)](https://github.com/haridsirawan/EigenGraph/releases/tag/v1.0.0)
 [![Platform](https://img.shields.io/badge/platform-macOS%20(Universal%202:%20Apple%20Silicon%20%26%20Intel)-black.svg)](https://github.com/haridsirawan/EigenGraph/releases/tag/v1.0.0)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-9%20passed%20(100%25)-30D158.svg)](#-canonical-verification--numerical-benchmarks)
+[![Tests](https://img.shields.io/badge/tests-25%20passed%20(100%25)-30D158.svg)](#-canonical-verification--numerical-benchmarks)
 [![Engine](https://img.shields.io/badge/engine-Apple%20Metal%20GPU%2060%20FPS-purple.svg)](#-cadbim-triad-dock--native-vector-canvas-viewport)
 [![Rust](https://img.shields.io/badge/built%20with-Rust%201.80+-DEA584.svg)](https://www.rust-lang.org/)
 
 *Official high-performance Rust analytical engine and desktop application ported directly from the research repository [Adjusted-Redundancy-Index](https://github.com/haridsirawan/Adjusted-Redundancy-Index).*
 
 </div>
+
+---
+
+### 🌐 The Eigen Platform Suite
+| Module | Identity | Architectural Scope |
+| :---: | :---: | :--- |
+| **EigenGraph** | <img src="assets/logo.png" width="200" /> | 10D BIM Lifecycle Dimensions, CAD/BIM Triad Dock, IFC 4.3 OpenBIM, and Native Vector Canvas Viewport. |
+| **EigenGate** | <img src="assets/eigengate.png" width="200" /> | Sherman-Morrison Rank-1 SVD Kinematic Mechanism Guard, Fracture-Critical Member (FCM) screening, and spectral stability certification. |
+| **EigenFlow** | <img src="assets/eigenflow.png" width="200" /> | Non-linear APM progressive collapse simulation, critical path (CPM) 4D scheduling, and 6D embodied carbon LCA pipelines. |
 
 ---
 

@@ -293,7 +293,7 @@ impl MyProjectView {
                                     let mut engine = crate::core::ParametricEngine::new();
                                     if let Ok(model) = engine.generate_warren_truss() {
                                         if let Ok(assessment) = crate::core::AriEngine::evaluate_redundancy(&model) {
-                                             let spec = crate::core::modal::Sni1726Spectrum::new(crate::core::modal::SiteClass::SD, 1.20, 0.50, 8.0, 1.0);
+                                            let spec = crate::core::modal::Sni1726Spectrum::new(crate::core::modal::SiteClass::SD, 1.20, 0.50, 8.0, 1.0);
                                             let modal = crate::core::modal::ModalEngine::analyze(&model, 4, spec).ok();
                                             let pushover = crate::core::nonlinear::NonlinearEngine::run_pushover(&model, 10);
                                             let rates = crate::core::cost::AhspUnitRates::default();

@@ -219,6 +219,7 @@ impl ResultsView {
                     ui.label(RichText::new("Batang ID").size(11.0).strong().color(theme.text_muted));
                     ui.label(RichText::new("Tipe").size(11.0).strong().color(theme.text_muted));
                     ui.label(RichText::new("Profil").size(11.0).strong().color(theme.text_muted));
+                    ui.label(RichText::new("Panjang (L)").size(11.0).strong().color(theme.text_muted));
                     ui.label(RichText::new("Gaya Aksial (Pu)").size(11.0).strong().color(theme.text_muted));
                     ui.label(RichText::new("Kapasitas (φPn)").size(11.0).strong().color(theme.text_muted));
                     ui.label(RichText::new("DCR Ratio").size(11.0).strong().color(theme.text_muted));
