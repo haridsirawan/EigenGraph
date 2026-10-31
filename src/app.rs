@@ -436,7 +436,7 @@ impl App for EigenGraphApp {
                 ui.add_space(14.0);
 
                 // App Brand & Active Document Badge
-                ui.label(RichText::new("EigenGraph").strong().size(13.5).color(self.theme.text_primary));
+                ui.label(RichText::new("⚛️ EigenGraph").strong().size(13.5).color(self.theme.text_primary));
                 ui.label(RichText::new("—").color(self.theme.text_muted));
                 ui.label(RichText::new(format!("{} (10D BIM)", self.active_pillar.clean_name())).size(12.5).color(self.theme.text_secondary));
 
@@ -469,7 +469,7 @@ impl App for EigenGraphApp {
             ui.add_space(6.0);
         });
 
-        // 2. UNIFIED LEFT SIDEBAR (Activity Bar with 11 Navigation Pillars)
+        // 2. UNIFIED LEFT SIDEBAR (Locked Minimalist Layout)
         Panel::left("unified_sidebar")
             .resizable(false)
             .exact_size(245.0)
@@ -479,9 +479,9 @@ impl App for EigenGraphApp {
                 .inner_margin(Margin::symmetric(10, 14)))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
-                    // Sidebar Header
-                    ui.label(RichText::new("LIFECYCLE DIMENSIONS").size(11.0).strong().color(self.theme.text_muted));
-                    ui.add_space(6.0);
+                    // Header Branding (Locked: Title only, no subtitles, no section headers)
+                    ui.label(RichText::new("⚛️ EigenGraph").strong().size(14.5).color(self.theme.text_primary));
+                    ui.add_space(10.0);
 
                     let pillars = [
                         NavigationPillar::MyLibrary,
@@ -504,7 +504,6 @@ impl App for EigenGraphApp {
                             let is_active = self.active_pillar == pillar;
                             let bg = if is_active { self.theme.accent_blue } else { Color32::TRANSPARENT };
                             let fg = if is_active { Color32::WHITE } else { self.theme.text_primary };
-                            let tag_color = if is_active { Color32::WHITE } else { self.theme.accent_blue };
 
                             let row = Frame::new()
                                 .fill(bg)
@@ -512,12 +511,7 @@ impl App for EigenGraphApp {
                                 .inner_margin(Margin::symmetric(10, 7))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        ui.label(RichText::new(pillar.icon()).size(14.0));
-                                        ui.add_space(4.0);
-                                        ui.label(RichText::new(pillar.clean_name()).size(12.5).color(fg).strong());
-                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                            ui.label(RichText::new(pillar.dimension_tag()).size(10.0).strong().color(tag_color));
-                                        });
+                                        ui.label(RichText::new(format!("{}   {}", pillar.icon(), pillar.clean_name())).size(12.5).color(fg).strong());
                                     });
                                 });
 
