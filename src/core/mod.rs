@@ -19,6 +19,7 @@ pub mod modal;
 pub mod reliability;
 pub mod connection;
 pub mod dynamics;
+pub mod vault;
 
 pub use linalg::{CsrMatrix, Matrix};
 pub use model::{
@@ -57,4 +58,7 @@ pub use connection::{
 };
 pub use dynamics::{
     DynamicsEngine, SuddenRemovalTransientReport, TimeHistoryStep,
+};
+pub use vault::{
+    AriKnowledgeMemory, InternalVault,
 };

@@ -26,8 +26,8 @@ impl Default for ParametricView {
     fn default() -> Self {
         Self {
             active_tool: CadTool::Line,
-            component_name: "Warren Truss 24m Custom".to_string(),
-            component_category: "Roof Trusses (Family S5)".to_string(),
+            component_name: "NVW_DCR Portal Frame FL1-FL6 (ASTM A992)".to_string(),
+            component_category: "NVW_DCR-LOD300_Eng-CON".to_string(),
             variables: vec![
                 ParametricVariable {
                     name: "L".to_string(),
@@ -466,10 +466,17 @@ impl ParametricView {
         };
 
         db_components.push(new_comp);
-        self.save_notification = Some(format!(
-            "Component '{}' successfully saved to Database! Switch to BUILD to assemble it into your project.",
-            self.component_name
-        ));
+        if let Ok(saved_path) = crate::core::InternalVault::autosave_parametric_components(db_components) {
+            self.save_notification = Some(format!(
+                "Komponen '{}' berhasil disimpan otomatis ke Package Contents: {} (Siap dirakit di BUILD 3D).",
+                self.component_name, saved_path
+            ));
+        } else {
+            self.save_notification = Some(format!(
+                "Component '{}' successfully saved to Database! Switch to BUILD to assemble it into your project.",
+                self.component_name
+            ));
+        }
     }
 
     fn render_db_drawer(

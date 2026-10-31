@@ -13,6 +13,7 @@ Icon
 *.dmg
 *.app/
 EigenGraph.app/
+InternalVault/
 dmg_staging/
 /tmp/
 

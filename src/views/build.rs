@@ -17,10 +17,10 @@ pub enum ModelArchetype {
 impl ModelArchetype {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::DiagridTower3D => "🏢 Diagrid Tower 3D (IFC)",
-            Self::TrussBridge3D => "🌉 Arch Bridge 3D",
-            Self::SpaceDome3D => "🌐 MERO Dome 3D",
-            Self::WarrenTruss2D => "📐 Warren 24m",
+            Self::DiagridTower3D => "🏢 NVW_DCR-LOD300 (Eng-CON Frame)",
+            Self::TrussBridge3D => "🧱 NVW_DCR-LOD200 (Eng-CON-1 & 2)",
+            Self::SpaceDome3D => "🔧 NVW_DCR-LOD300 (Eng-HVAC & Roof)",
+            Self::WarrenTruss2D => "📐 NVW_DCR-LOD100 (Arch Massing)",
         }
     }
 }

@@ -1715,7 +1715,9 @@ impl LatexExporter {
 pub struct DiskExporter;
 
 impl DiskExporter {
-    /// Writes `content` to `~/Documents/EigenGraph_Exports/<filename>` (or `/tmp/EigenGraph_Exports/<filename>` fallback)
+    /// Writes `content` by default into the Self-Contained Package Vault
+    /// (`EigenGraph.app/Contents/Resources/InternalVault/Exports/<filename>`),
+    /// with fallback to `~/Documents/EigenGraph_Exports/<filename>` or `/tmp/EigenGraph_Exports/<filename>`,
     /// and returns the full absolute file path saved.
     pub fn write_export_file(filename: &str, content: &str) -> Result<String, String> {
         let safe_name: String = filename
@@ -1729,6 +1731,26 @@ impl DiskExporter {
             })
             .collect();
 
+        // 1. Primary default target: Internal Package Vault (`Contents/Resources/InternalVault/Exports/`)
+        let vault_exports = crate::core::vault::InternalVault::exports_dir();
+        if std::fs::create_dir_all(&vault_exports).is_ok() {
+            let target = vault_exports.join(&safe_name);
+            if std::fs::write(&target, content).is_ok() {
+                let mut mem = crate::core::vault::InternalVault::load_knowledge_memory();
+                mem.total_autosaves_count += 1;
+                mem.recent_audit_log.push(format!(
+                    "Auto-Export saved to Package Vault: {}",
+                    safe_name
+                ));
+                if mem.recent_audit_log.len() > 25 {
+                    mem.recent_audit_log.remove(0);
+                }
+                let _ = crate::core::vault::InternalVault::save_knowledge_memory(&mem);
+                return Ok(target.display().to_string());
+            }
+        }
+
+        // 2. Fallback: ~/Documents/EigenGraph_Exports
         if let Ok(home) = std::env::var("HOME") {
             let docs_dir = std::path::PathBuf::from(home)
                 .join("Documents")
