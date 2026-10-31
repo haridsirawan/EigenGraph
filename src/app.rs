@@ -134,6 +134,7 @@ impl Default for EigenGraphApp {
                     ],
                     elements_count: 21,
                     created_at: "Earlier today".to_string(),
+                    ..Default::default()
                 },
                 DatabaseComponent {
                     id: "comp_2".to_string(),
@@ -146,6 +147,7 @@ impl Default for EigenGraphApp {
                     ],
                     elements_count: 8,
                     created_at: "Yesterday".to_string(),
+                    ..Default::default()
                 },
                 DatabaseComponent {
                     id: "comp_3".to_string(),
@@ -162,6 +164,7 @@ impl Default for EigenGraphApp {
                     ],
                     elements_count: 8,
                     created_at: "Demo IFC".to_string(),
+                    ..Default::default()
                 },
                 DatabaseComponent {
                     id: "comp_4".to_string(),
@@ -177,6 +180,7 @@ impl Default for EigenGraphApp {
                     ],
                     elements_count: 14,
                     created_at: "Demo IFC".to_string(),
+                    ..Default::default()
                 },
                 DatabaseComponent {
                     id: "comp_5".to_string(),
@@ -192,6 +196,7 @@ impl Default for EigenGraphApp {
                     ],
                     elements_count: 17,
                     created_at: "Demo IFC".to_string(),
+                    ..Default::default()
                 },
                 DatabaseComponent {
                     id: "comp_6".to_string(),
@@ -207,6 +212,7 @@ impl Default for EigenGraphApp {
                     ],
                     elements_count: 12,
                     created_at: "Demo IFC".to_string(),
+                    ..Default::default()
                 },
                 DatabaseComponent {
                     id: "comp_7".to_string(),
@@ -222,6 +228,7 @@ impl Default for EigenGraphApp {
                     ],
                     elements_count: 24,
                     created_at: "Demo IFC".to_string(),
+                    ..Default::default()
                 },
                 DatabaseComponent {
                     id: "comp_8".to_string(),
@@ -236,6 +243,7 @@ impl Default for EigenGraphApp {
                     ],
                     elements_count: 16,
                     created_at: "Demo IFC".to_string(),
+                    ..Default::default()
                 },
             ],
 
@@ -253,6 +261,12 @@ impl Default for EigenGraphApp {
                     is_active: true,
                     ari_score: 0.94,
                     svd_sensitivity: 0.02,
+                    ari: 0.94,
+                    dcr_interaction: 0.376,
+                    shear_vy_kn: 12.4,
+                    svd_margin: 0.98,
+                    ci: 0.06,
+                    rr: 0.94,
                 },
                 StructuralMember {
                     id: 2,
@@ -267,6 +281,12 @@ impl Default for EigenGraphApp {
                     is_active: true,
                     ari_score: 0.94,
                     svd_sensitivity: 0.02,
+                    ari: 0.94,
+                    dcr_interaction: 0.356,
+                    shear_vy_kn: 11.2,
+                    svd_margin: 0.98,
+                    ci: 0.06,
+                    rr: 0.94,
                 },
                 StructuralMember {
                     id: 3,
@@ -281,6 +301,12 @@ impl Default for EigenGraphApp {
                     is_active: true,
                     ari_score: 0.91,
                     svd_sensitivity: 0.04,
+                    ari: 0.91,
+                    dcr_interaction: 0.405,
+                    shear_vy_kn: 14.5,
+                    svd_margin: 0.96,
+                    ci: 0.09,
+                    rr: 0.91,
                 },
                 StructuralMember {
                     id: 4,
@@ -295,6 +321,12 @@ impl Default for EigenGraphApp {
                     is_active: true,
                     ari_score: 0.52,
                     svd_sensitivity: 0.18,
+                    ari: 0.52,
+                    dcr_interaction: 0.915,
+                    shear_vy_kn: 24.1,
+                    svd_margin: 0.82,
+                    ci: 0.48,
+                    rr: 0.52,
                 },
                 StructuralMember {
                     id: 5,
@@ -309,6 +341,12 @@ impl Default for EigenGraphApp {
                     is_active: true,
                     ari_score: 0.96,
                     svd_sensitivity: 0.01,
+                    ari: 0.96,
+                    dcr_interaction: 0.202,
+                    shear_vy_kn: 5.4,
+                    svd_margin: 0.99,
+                    ci: 0.04,
+                    rr: 0.96,
                 },
                 StructuralMember {
                     id: 6,
@@ -323,6 +361,12 @@ impl Default for EigenGraphApp {
                     is_active: true,
                     ari_score: 0.95,
                     svd_sensitivity: 0.01,
+                    ari: 0.95,
+                    dcr_interaction: 0.244,
+                    shear_vy_kn: 6.8,
+                    svd_margin: 0.99,
+                    ci: 0.05,
+                    rr: 0.95,
                 },
                 StructuralMember {
                     id: 7,
@@ -337,6 +381,12 @@ impl Default for EigenGraphApp {
                     is_active: true,
                     ari_score: 0.98,
                     svd_sensitivity: 0.01,
+                    ari: 0.98,
+                    dcr_interaction: 0.151,
+                    shear_vy_kn: 3.1,
+                    svd_margin: 0.99,
+                    ci: 0.02,
+                    rr: 0.98,
                 },
                 StructuralMember {
                     id: 8,
@@ -351,6 +401,12 @@ impl Default for EigenGraphApp {
                     is_active: true,
                     ari_score: 0.98,
                     svd_sensitivity: 0.01,
+                    ari: 0.98,
+                    dcr_interaction: 0.143,
+                    shear_vy_kn: 2.9,
+                    svd_margin: 0.99,
+                    ci: 0.02,
+                    rr: 0.98,
                 },
             ],
         }
@@ -358,14 +414,15 @@ impl Default for EigenGraphApp {
 }
 
 impl App for EigenGraphApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         // macOS Command+, shortcut for System Preferences
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Comma)) {
             self.show_settings = !self.show_settings;
         }
 
         // 1. TOP TITLEBAR (Native macOS Style with Window Controls, Status & Copilot Trigger)
-        Panel::top("top_titlebar").frame(Frame::new().fill(self.theme.bg_canvas)).show(ctx, |ui| {
+        Panel::top("top_titlebar").frame(Frame::new().fill(self.theme.bg_canvas)).show(ui, |ui| {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 // macOS Traffic Lights Simulation / Spacing
@@ -410,12 +467,12 @@ impl App for EigenGraphApp {
         // 2. UNIFIED LEFT SIDEBAR (Activity Bar with 11 Navigation Pillars)
         Panel::left("unified_sidebar")
             .resizable(false)
-            .exact_width(245.0)
+            .exact_size(245.0)
             .frame(Frame::new()
                 .fill(self.theme.bg_sidebar)
                 .stroke(Stroke::new(1.0, self.theme.border_subtle))
                 .inner_margin(Margin::symmetric(10, 14)))
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 ui.vertical(|ui| {
                     // Sidebar Header
                     ui.label(RichText::new("LIFECYCLE DIMENSIONS").size(11.0).strong().color(self.theme.text_muted));
@@ -479,13 +536,13 @@ impl App for EigenGraphApp {
                                 }
                             });
                         });
-                        ui.label(RichText::new("SNI 1729 / AISC 360-16 • UNY Dissertation").size(9.5).color(self.theme.text_muted));
+                        ui.label(RichText::new("SNI 1729 / AISC 360-16 • EigenGraph Platform").size(9.5).color(self.theme.text_muted));
                     });
                 });
             });
 
         // 3. SECONDARY TOOLBAR & BREADCRUMB
-        Panel::top("sub_toolbar").frame(Frame::new().fill(self.theme.bg_card)).show(ctx, |ui| {
+        Panel::top("sub_toolbar").frame(Frame::new().fill(self.theme.bg_card)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
                 ui.label(RichText::new(self.active_pillar.icon()).size(14.0));

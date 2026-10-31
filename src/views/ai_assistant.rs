@@ -5,6 +5,7 @@ use crate::models::{ChatMessage, DatabaseComponent, NavigationPillar, ProjectIte
 use crate::theme::MacTheme;
 
 pub struct AiAssistantView {
+    pub is_visible: bool,
     pub expanded: bool,
     pub chat_history: Vec<ChatMessage>,
     pub input: String,
@@ -13,6 +14,7 @@ pub struct AiAssistantView {
 impl Default for AiAssistantView {
     fn default() -> Self {
         Self {
+            is_visible: true,
             expanded: false,
             chat_history: vec![
                 ChatMessage {
@@ -385,21 +387,24 @@ impl AiAssistantView {
         } else if p_lower.contains("n-2") || p_lower.contains("disrupsi ganda") || p_lower.contains("disrupsi jamak") || p_lower.contains("domino") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
-                let report = crate::core::CascadingSimulator::simulate_disruption(&model, &[1, 2], 1.25);
-                format!(
-                    "💥 [Simulasi Disrupsi & Cascading Failure - Live Engine]:\n• Status: {:?}\n• Initial Disrupted: Member {:?}\n• Total Collapsed: {} Batang {:?}\n• Dinamika: DAF = {:.2}x | Steps: {}\n• Propagation Vulnerability Index (PVI): {:.4}\n• System Robustness (R_sys): {:.4}\n• Residual System ARI: {:.4} | Max Redistributed DCR: {:.2}%\n• Mitigasi: {}",
-                    report.status,
-                    report.initial_disrupted_ids,
-                    report.total_collapsed_ids.len(),
-                    report.total_collapsed_ids,
-                    report.daf,
-                    report.steps_count,
-                    report.pvi,
-                    report.robustness_index,
-                    report.residual_ari,
-                    report.max_redistributed_dcr * 100.0,
-                    if report.robustness_index > 0.7 { "Aman — Beban berhasil diredistribusikan tanpa meruntuhkan struktur global." } else { "Kritis — Efek domino meruntuhkan kestabilan rangka." }
-                )
+                if let Ok(report) = crate::core::CascadingSimulator::simulate_disruption(&model, &[1, 2], Some(1.25)) {
+                    format!(
+                        "💥 [Simulasi Disrupsi & Cascading Failure - Live Engine]:\n• Status: {:?}\n• Initial Disrupted: Member {:?}\n• Total Collapsed: {} Batang {:?}\n• Dinamika: DAF = {:.2}x | Steps: {}\n• Propagation Vulnerability Index (PVI): {:.4}\n• System Robustness (R_sys): {:.4}\n• Residual System ARI: {:.4} | Max Redistributed DCR: {:.2}%\n• Mitigasi: {}",
+                        report.status,
+                        report.initial_disrupted_ids,
+                        report.total_collapsed_ids.len(),
+                        report.total_collapsed_ids,
+                        report.daf,
+                        report.steps_count,
+                        report.pvi,
+                        report.robustness_index,
+                        report.residual_ari,
+                        report.max_redistributed_dcr * 100.0,
+                        if report.robustness_index > 0.7 { "Aman — Beban berhasil diredistribusikan tanpa meruntuhkan struktur global." } else { "Kritis — Efek domino meruntuhkan kestabilan rangka." }
+                    )
+                } else {
+                    "💥 [Simulasi Disrupsi]: Simulasi disrupsi menghasilkan peringatan numerik.".to_string()
+                }
             } else {
                 "💥 [Simulasi Disrupsi]: Gagal menginisialisasi model parametrik.".to_string()
             }
@@ -410,24 +415,24 @@ impl AiAssistantView {
         } else if p_lower.contains("bracing") || p_lower.contains("suggest") || p_lower.contains("rekomendasi") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
-                let report = crate::core::AriTopologyOptimizer::optimize_bracing(&model, 5);
-                if let Some(best) = report.top_candidates.first() {
-                    format!(
-                        "🪄 [AI-ARI Bracing Suggestion - Live Optimizer]:\n• Evaluasi: {} kandidat bracing dievaluasi secara otonom.\n• Rekomendasi Terbaik: Hubungkan Node {} ➔ Node {} dengan profil {}\n• Proyeksi Peningkatan: System ARI naik dari {:.4} ➔ {:.4} (+{:.1}%)\n• Status SVD: Bebas mekanisme kinematis (rank {}/{})\n• Estimasi Biaya Tambahan: Rp {:.1} Juta (+{:.2}% bobot material).",
-                        report.candidates_evaluated,
-                        best.node_a_id,
-                        best.node_b_id,
-                        best.section.name,
-                        report.baseline_ari,
-                        best.projected_system_ari,
-                        best.ari_improvement_pct,
-                        best.kinematic_guard.rank,
-                        best.kinematic_guard.active_dofs,
-                        best.additional_cost_idr / 1_000_000.0,
-                        best.weight_increase_pct
-                    )
+                if let Ok(report) = crate::core::AriTopologyOptimizer::optimize_bracing(&model, Some(5.0)) {
+                    if let Some(best) = &report.best_candidate {
+                        format!(
+                            "🪄 [AI-ARI Bracing Suggestion - Live Optimizer]:\n• Evaluasi: {} kandidat bracing dievaluasi secara otonom.\n• Rekomendasi Terbaik: Hubungkan Node {} ➔ Node {} dengan profil {}\n• Proyeksi Peningkatan: System ARI naik dari {:.4} ➔ {:.4} (+{:.1}%)\n• Status SVD: Bebas mekanisme kinematis\n• Estimasi Bobot Tambahan: {:.1} kg.",
+                            report.candidates_evaluated,
+                            best.from_node,
+                            best.to_node,
+                            best.section_name,
+                            report.baseline_min_ari,
+                            best.new_min_ari,
+                            best.delta_min_ari * 100.0,
+                            best.added_weight_kg
+                        )
+                    } else {
+                        format!("🪄 [AI-ARI Bracing Suggestion]: Struktur dasar stabil (ARI = {:.4}), tidak ada kandidat bracing tambahan yang diperlukan.", report.baseline_min_ari)
+                    }
                 } else {
-                    format!("🪄 [AI-ARI Bracing Suggestion]: Struktur dasar stabil (ARI = {:.4}), tidak ada kandidat bracing tambahan yang diperlukan.", report.baseline_ari)
+                    "🪄 [AI-ARI Bracing Suggestion]: Optimasi bracing gagal dijalankan.".to_string()
                 }
             } else {
                 "🪄 [AI-ARI Bracing Suggestion]: Gagal menginisialisasi model parametrik.".to_string()
@@ -442,7 +447,7 @@ impl AiAssistantView {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
                 let ari_assessment = crate::core::AriEngine::evaluate_redundancy(&model).ok();
-                let ifc_str = crate::core::IfcExporter::export(&model, ari_assessment.as_ref());
+                let ifc_str = crate::core::IfcExporter::export_to_ifc(&model, ari_assessment.as_ref());
                 let lines_count = ifc_str.lines().count();
                 format!(
                     "🌐 [OpenBIM IFC 4.3 Add2 Export]:\n• Schema: ISO 16739-1:2024 / IFC4X3_ADD2\n• Entitas STEP SPF: {} baris entitas berhasil digenerate.\n• Property Set: Pset_StructuralRedundancy (ARI System = {:.4}, SVD Status = Valid)\n• Kompatibilitas: Revit 2026, Tekla Structures, BlenderBIM, Solibri Anywhere.",
@@ -498,16 +503,16 @@ impl AiAssistantView {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
                 let rates = crate::core::AhspUnitRates::default();
-                let boq = crate::core::CostEngine::calculate_boq(&model, &rates);
+                let boq = crate::core::CostEngine::calculate_boq(&model, Some(&rates));
                 format!(
                     "💰 [BIM 5D Cost Intelligence - Live AHSP Engine]:\n• Total Estimasi Biaya Konstruksi: Rp {}\n• Total Bobot Baja Struktural: {:.2} Ton ({:.1} kg)\n• Rincian Item Pekerjaan (BoQ 6-Division):\n  1. {}\n  2. {}\n  3. {}\n• Efisiensi ARI per Miliar Biaya: {:.3} ARI/Miliar IDR",
                     crate::core::cost::CostEngine::format_idr(boq.total_cost_idr),
-                    boq.total_tonnage,
-                    boq.total_steel_weight_kg,
+                    boq.grand_total_steel_tonnage,
+                    boq.total_profile_steel_mass_kg,
                     boq.items.get(0).map(|i| format!("{}: Rp {}", i.description, crate::core::cost::CostEngine::format_idr(i.total_price_idr))).unwrap_or_default(),
                     boq.items.get(1).map(|i| format!("{}: Rp {}", i.description, crate::core::cost::CostEngine::format_idr(i.total_price_idr))).unwrap_or_default(),
                     boq.items.get(2).map(|i| format!("{}: Rp {}", i.description, crate::core::cost::CostEngine::format_idr(i.total_price_idr))).unwrap_or_default(),
-                    if boq.total_cost_idr > 0.0 { (0.942 / (boq.total_cost_idr / 1e9)) } else { 0.0 }
+                    if boq.total_cost_idr > 0.0 { 0.942 / (boq.total_cost_idr / 1e9) } else { 0.0 }
                 )
             } else {
                 "💰 [BIM 5D Cost Intelligence]: Gagal menghitung RAB parametrik.".to_string()
