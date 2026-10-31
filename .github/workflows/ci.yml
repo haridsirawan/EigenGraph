@@ -36,14 +36,20 @@ jobs:
           sudo apt-get install -y \
             pkg-config \
             build-essential \
+            clang \
+            libclang-dev \
+            llvm-dev \
             libgl1-mesa-dev \
             libegl1-mesa-dev \
+            libgles2-mesa-dev \
             libwayland-dev \
             libwayland-cursor0 \
             libwayland-egl1 \
             libwayland-server0 \
             libxkbcommon-dev \
+            libxkbcommon-x11-dev \
             libx11-dev \
+            libx11-xcb-dev \
             libxi-dev \
             libxrandr-dev \
             libxinerama-dev \
@@ -52,24 +58,48 @@ jobs:
             libxcb-shape0-dev \
             libxcb-xfixes0-dev \
             libssl-dev \
-            libgtk-3-dev
+            libgtk-3-dev \
+            libasound2-dev \
+            libudev-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev
 
       - name: Cache Cargo Dependencies
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-cache-v2-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-cache-v2-
 
       - name: Cargo Check
-        run: cargo check --verbose
+        run: |
+          cargo check --verbose 2>&1 | tee cargo_check.log || {
+            echo "### ❌ Cargo Check Failed on ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 150 cargo_check.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
 
       - name: Run Core Mechanics & Solver Tests
-        run: cargo test --verbose
+        run: |
+          cargo test --verbose 2>&1 | tee cargo_test.log || {
+            echo "### ❌ Cargo Test Failed on ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 150 cargo_test.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
+
+      - name: Core Tests Summary
+        if: success()
+        run: |
+          echo "### ✅ Test Suite Succeeded on ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "All core FEM, SVD Kinematic Guard, CPM, and LCA unit tests verified." >> $GITHUB_STEP_SUMMARY
 
   release-macos:
     name: Build & Publish macOS Release (.dmg)
