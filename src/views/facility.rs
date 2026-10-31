@@ -35,23 +35,23 @@ impl Default for FacilityView {
 
 impl FacilityView {
     pub fn show(&mut self, ui: &mut Ui, theme: &MacTheme, members: &[StructuralMember]) {
-        ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(8.0);
+        ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            Frame::new().inner_margin(Margin::symmetric(20, 12)).show(ui, |ui| {
+                // 1. TOP SUBTABS SELECTOR
+                self.render_header_bar(ui, theme);
 
-            // 1. TOP SUBTABS SELECTOR
-            self.render_header_bar(ui, theme);
+                ui.add_space(16.0);
 
-            ui.add_space(14.0);
+                // 2. ACTIVE SUB-TAB CONTENT
+                match self.active_subtab {
+                    FacilitySubTab::DigitalTwinShm => self.render_digital_twin_shm(ui, theme, members),
+                    FacilitySubTab::AssetRegistry => self.render_asset_registry(ui, theme, members),
+                    FacilitySubTab::PredictiveMaintenance => self.render_predictive_maintenance(ui, theme),
+                    FacilitySubTab::LifecycleCosting => self.render_lifecycle_costing(ui, theme),
+                }
 
-            // 2. ACTIVE SUB-TAB CONTENT
-            match self.active_subtab {
-                FacilitySubTab::DigitalTwinShm => self.render_digital_twin_shm(ui, theme, members),
-                FacilitySubTab::AssetRegistry => self.render_asset_registry(ui, theme, members),
-                FacilitySubTab::PredictiveMaintenance => self.render_predictive_maintenance(ui, theme),
-                FacilitySubTab::LifecycleCosting => self.render_lifecycle_costing(ui, theme),
-            }
-
-            ui.add_space(24.0);
+                ui.add_space(24.0);
+            });
         });
     }
 
@@ -59,26 +59,27 @@ impl FacilityView {
         Frame::new()
             .fill(theme.bg_card)
             .corner_radius(CornerRadius::same(10))
-            .inner_margin(Margin::same(8))
+            .inner_margin(Margin::same(6))
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let tabs = [
-                        (FacilitySubTab::DigitalTwinShm, "📡 Digital Twin & Sensor SHM"),
-                        (FacilitySubTab::AssetRegistry, "📑 Registri Aset COBie"),
-                        (FacilitySubTab::PredictiveMaintenance, "🛠️ Pemeliharaan Prediktif (ARI Alert)"),
-                        (FacilitySubTab::LifecycleCosting, "💵 30-Year Lifecycle Cost (LCC)"),
-                    ];
+                let tabs = [
+                    (FacilitySubTab::DigitalTwinShm, "📡 Digital Twin & Sensor SHM"),
+                    (FacilitySubTab::AssetRegistry, "📑 Registri Aset COBie"),
+                    (FacilitySubTab::PredictiveMaintenance, "🛠️ Pemeliharaan Prediktif (ARI Alert)"),
+                    (FacilitySubTab::LifecycleCosting, "💵 30-Year Lifecycle Cost (LCC)"),
+                ];
 
-                    for (tab, label) in tabs {
+                ui.columns(4, |cols| {
+                    for (idx, (tab, label)) in tabs.into_iter().enumerate() {
                         let is_active = self.active_subtab == tab;
                         let bg = if is_active { theme.accent_blue } else { Color32::TRANSPARENT };
                         let fg = if is_active { Color32::WHITE } else { theme.text_secondary };
 
-                        if ui.add(egui::Button::new(RichText::new(label).size(12.0).strong().color(fg))
+                        let w = cols[idx].available_width();
+                        if cols[idx].add(egui::Button::new(RichText::new(label).size(12.0).strong().color(fg))
                             .fill(bg)
-                            .corner_radius(CornerRadius::same(6))
-                            .min_size(Vec2::new(110.0, 28.0))).clicked() {
+                            .corner_radius(CornerRadius::same(7))
+                            .min_size(Vec2::new(w, 30.0))).clicked() {
                             self.active_subtab = tab;
                         }
                     }
@@ -88,14 +89,11 @@ impl FacilityView {
 
     fn render_digital_twin_shm(&mut self, ui: &mut Ui, theme: &MacTheme, _members: &[StructuralMember]) {
         // Top Real-time Sensor Status Row
-        ui.horizontal(|ui| {
-            self.render_sensor_card(ui, theme, "STRAIN GAUGE SG-01", &format!("{:.0} µε", self.simulated_strain_micro), "Tegangan Batang E1 (Aman < 1200 µε)", theme.accent_green);
-            ui.add_space(8.0);
-            self.render_sensor_card(ui, theme, "FREKUENSI ALAMI (ACC-01)", &format!("{:.2} Hz", self.simulated_freq_hz), "Mode 1 Transversal (Bebas Resonansi)", theme.accent_blue);
-            ui.add_space(8.0);
-            self.render_sensor_card(ui, theme, "LIVE ARI DEGRADATION", "0.938", "ARI(t) Degradasi Realtime (-0.4%)", theme.accent_green);
-            ui.add_space(8.0);
-            self.render_sensor_card(ui, theme, "STATUS KESEHATAN (SHM)", "🟢 NORMAL", "16 Sensor IoT Aktif Beroperasi", theme.accent_green);
+        ui.columns(4, |cols| {
+            self.render_sensor_card(&mut cols[0], theme, "STRAIN GAUGE SG-01", &format!("{:.0} µε", self.simulated_strain_micro), "Tegangan Batang E1 (Aman < 1200 µε)", theme.accent_green);
+            self.render_sensor_card(&mut cols[1], theme, "FREKUENSI ALAMI (ACC-01)", &format!("{:.2} Hz", self.simulated_freq_hz), "Mode 1 Transversal (Bebas Resonansi)", theme.accent_blue);
+            self.render_sensor_card(&mut cols[2], theme, "LIVE ARI DEGRADATION", "0.938", "ARI(t) Degradasi Realtime (-0.4%)", theme.accent_green);
+            self.render_sensor_card(&mut cols[3], theme, "STATUS KESEHATAN (SHM)", "🟢 NORMAL", "16 Sensor IoT Aktif Beroperasi", theme.accent_green);
         });
 
         ui.add_space(16.0);
@@ -236,12 +234,10 @@ impl FacilityView {
                 ui.label(RichText::new("💵 Analisis Biaya Siklus Hidup 30 Tahun (Life Cycle Costing - LCC)").size(13.5).strong().color(theme.text_primary));
                 ui.add_space(10.0);
 
-                ui.horizontal(|ui| {
-                    self.render_sensor_card(ui, theme, "BIAYA AWAL (CAPEX)", "Rp 3.84 M", "Konstruksi Awal Terverifikasi RAB 5D", theme.text_primary);
-                    ui.add_space(8.0);
-                    self.render_sensor_card(ui, theme, "ESTIMASI OPEX (30 TH)", "Rp 645 Jt", "Pemeliharaan Rutin & Sensor SHM", theme.accent_blue);
-                    ui.add_space(8.0);
-                    self.render_sensor_card(ui, theme, "PENGHEMATAN DINI ARI", "Rp 1.45 M", "Pencegahan Kerusakan Fatal Katastropik", theme.accent_green);
+                ui.columns(3, |cols| {
+                    self.render_sensor_card(&mut cols[0], theme, "BIAYA AWAL (CAPEX)", "Rp 3.84 M", "Konstruksi Awal Terverifikasi RAB 5D", theme.text_primary);
+                    self.render_sensor_card(&mut cols[1], theme, "ESTIMASI OPEX (30 TH)", "Rp 645 Jt", "Pemeliharaan Rutin & Sensor SHM", theme.accent_blue);
+                    self.render_sensor_card(&mut cols[2], theme, "PENGHEMATAN DINI ARI", "Rp 1.45 M", "Pencegahan Kerusakan Fatal Katastropik", theme.accent_green);
                 });
             });
     }
@@ -249,16 +245,16 @@ impl FacilityView {
     fn render_sensor_card(&self, ui: &mut Ui, theme: &MacTheme, title: &str, val: &str, subtitle: &str, val_color: Color32) {
         Frame::new()
             .fill(theme.bg_canvas)
-            .corner_radius(CornerRadius::same(8))
-            .inner_margin(Margin::same(12))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::same(14))
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
-                ui.set_width(175.0);
-                ui.label(RichText::new(title).size(9.5).strong().color(theme.text_muted));
-                ui.add_space(2.0);
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new(title).size(10.0).strong().color(theme.text_muted));
+                ui.add_space(4.0);
                 ui.label(RichText::new(val).size(18.0).strong().color(val_color));
-                ui.add_space(2.0);
-                ui.label(RichText::new(subtitle).size(10.0).color(theme.text_secondary));
+                ui.add_space(4.0);
+                ui.label(RichText::new(subtitle).size(10.5).color(theme.text_secondary));
             });
     }
 }

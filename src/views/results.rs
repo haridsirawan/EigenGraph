@@ -31,44 +31,44 @@ impl Default for ResultsView {
 
 impl ResultsView {
     pub fn show(&mut self, ui: &mut Ui, theme: &MacTheme, members: &[StructuralMember]) {
-        ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(8.0);
+        ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            Frame::new().inner_margin(Margin::symmetric(20, 12)).show(ui, |ui| {
+                // 1. TOP SUBTABS SELECTOR
+                self.render_header_bar(ui, theme);
 
-            // 1. TOP SUBTABS SELECTOR
-            self.render_header_bar(ui, theme);
-
-            let mut dismiss_status = false;
-            if let Some(ref status_msg) = self.export_status {
-                ui.add_space(10.0);
-                theme.card_frame().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("📊 AUDIT STATUS:").size(11.5).strong().color(theme.accent_green));
-                        ui.label(RichText::new(status_msg).size(11.5).color(theme.text_primary));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(theme.text_muted))
-                                .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(4))).clicked() {
-                                dismiss_status = true;
-                            }
+                let mut dismiss_status = false;
+                if let Some(ref status_msg) = self.export_status {
+                    ui.add_space(10.0);
+                    theme.card_frame().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("📊 AUDIT STATUS:").size(11.5).strong().color(theme.accent_green));
+                            ui.label(RichText::new(status_msg).size(11.5).color(theme.text_primary));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(theme.text_muted))
+                                    .fill(theme.bg_card)
+                                    .corner_radius(CornerRadius::same(4))).clicked() {
+                                    dismiss_status = true;
+                                }
+                            });
                         });
                     });
-                });
-            }
-            if dismiss_status {
-                self.export_status = None;
-            }
+                }
+                if dismiss_status {
+                    self.export_status = None;
+                }
 
-            ui.add_space(14.0);
+                ui.add_space(14.0);
 
-            // 2. ACTIVE SUB-TAB CONTENT
-            match self.active_subtab {
-                ResultsSubTab::ExecutiveSummary => self.render_executive_summary(ui, theme, members),
-                ResultsSubTab::MemberMatrix => self.render_member_matrix(ui, theme, members),
-                ResultsSubTab::DeformationsAndForces => self.render_deformations_and_forces(ui, theme, members),
-                ResultsSubTab::CertificationExport => self.render_certification_export(ui, theme, members),
-            }
+                // 2. ACTIVE SUB-TAB CONTENT
+                match self.active_subtab {
+                    ResultsSubTab::ExecutiveSummary => self.render_executive_summary(ui, theme, members),
+                    ResultsSubTab::MemberMatrix => self.render_member_matrix(ui, theme, members),
+                    ResultsSubTab::DeformationsAndForces => self.render_deformations_and_forces(ui, theme, members),
+                    ResultsSubTab::CertificationExport => self.render_certification_export(ui, theme, members),
+                }
 
-            ui.add_space(24.0);
+                ui.add_space(24.0);
+            });
         });
     }
 
@@ -76,27 +76,27 @@ impl ResultsView {
         Frame::new()
             .fill(theme.bg_card)
             .corner_radius(CornerRadius::same(10))
-            .inner_margin(Margin::same(8))
+            .inner_margin(Margin::same(6))
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let tabs = [
-                        (ResultsSubTab::ExecutiveSummary, "📊 Ringkasan Eksekutif & Health Card"),
-                        (ResultsSubTab::MemberMatrix, "📋 Matriks Verifikasi Batang (SNI / AISC)"),
-                        (ResultsSubTab::DeformationsAndForces, "📈 Deformasi & Gaya Dalam Amplop"),
-                        (ResultsSubTab::CertificationExport, "📑 Dokumen Audit & Ekspor Multi-Format"),
-                    ];
+                let tabs = [
+                    (ResultsSubTab::ExecutiveSummary, "📊 Ringkasan Eksekutif & Health Card"),
+                    (ResultsSubTab::MemberMatrix, "📋 Matriks Verifikasi Batang (SNI / AISC)"),
+                    (ResultsSubTab::DeformationsAndForces, "📈 Deformasi & Gaya Dalam Amplop"),
+                    (ResultsSubTab::CertificationExport, "📑 Dokumen Audit & Ekspor Multi-Format"),
+                ];
 
-                    for (tab, label) in tabs {
-                        let is_active = self.active_subtab == tab;
+                ui.columns(4, |cols| {
+                    for (i, (tab, label)) in tabs.iter().enumerate() {
+                        let is_active = self.active_subtab == *tab;
                         let bg = if is_active { theme.accent_blue } else { Color32::TRANSPARENT };
                         let fg = if is_active { Color32::WHITE } else { theme.text_secondary };
 
-                        if ui.add(egui::Button::new(RichText::new(label).size(12.0).strong().color(fg))
+                        if cols[i].add(egui::Button::new(RichText::new(*label).size(11.5).strong().color(fg))
                             .fill(bg)
                             .corner_radius(CornerRadius::same(6))
-                            .min_size(Vec2::new(120.0, 28.0))).clicked() {
-                            self.active_subtab = tab;
+                            .min_size(Vec2::new(cols[i].available_width(), 30.0))).clicked() {
+                            self.active_subtab = *tab;
                         }
                     }
                 });
@@ -140,28 +140,32 @@ impl ResultsView {
         // Metrics Grid (4 Cards)
         ui.columns(4, |cols| {
             cols[0].vertical(|ui| {
-                Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(10)).show(ui, |ui| {
+                Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(12)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
                     ui.label(RichText::new("Minimum System ARI").size(10.5).color(theme.text_muted));
                     ui.label(RichText::new(format!("{:.4}", min_ari)).size(18.0).strong().color(if min_ari >= 0.70 { theme.accent_green } else { theme.accent_orange }));
                     ui.label(RichText::new("Batas Aman ≥ 0.7000").size(9.5).color(theme.text_muted));
                 });
             });
             cols[1].vertical(|ui| {
-                Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(10)).show(ui, |ui| {
+                Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(12)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
                     ui.label(RichText::new("Average System ARI").size(10.5).color(theme.text_muted));
                     ui.label(RichText::new(format!("{:.4}", avg_ari)).size(18.0).strong().color(theme.accent_blue));
                     ui.label(RichText::new("Rata-rata 11 Batang").size(9.5).color(theme.text_muted));
                 });
             });
             cols[2].vertical(|ui| {
-                Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(10)).show(ui, |ui| {
+                Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(12)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
                     ui.label(RichText::new("Elemen Kritis (ARI < 0.7)").size(10.5).color(theme.text_muted));
                     ui.label(RichText::new(format!("{} Elemen", critical_count)).size(18.0).strong().color(if critical_count == 0 { theme.accent_green } else { theme.accent_orange }));
                     ui.label(RichText::new("Zero Collapse Potential").size(9.5).color(theme.text_muted));
                 });
             });
             cols[3].vertical(|ui| {
-                Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(10)).show(ui, |ui| {
+                Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(12)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
                     ui.label(RichText::new("Maksimum DCR Stress").size(10.5).color(theme.text_muted));
                     ui.label(RichText::new("0.684 (< 1.0)").size(18.0).strong().color(theme.accent_green));
                     ui.label(RichText::new("Kapasitas Elastis Lolos").size(9.5).color(theme.text_muted));
@@ -245,9 +249,11 @@ impl ResultsView {
                             theme.accent_orange
                         };
 
+                        let len_str = if m.name.contains("Diagonal") || m.name.contains("Web") { "5.14 m" } else { "6.00 m" };
                         ui.label(RichText::new(format!("#{}", m.id)).size(11.0).strong().color(theme.text_primary));
                         ui.label(RichText::new(m.name.clone()).size(11.0).color(theme.text_secondary));
                         ui.label(RichText::new(m.section.clone()).size(11.0).color(theme.text_secondary));
+                        ui.label(RichText::new(len_str).size(11.0).color(theme.text_secondary));
                         ui.label(RichText::new(format!("{:.1} kN", m.force_kn)).size(11.0).color(if m.force_kn >= 0.0 { theme.accent_blue } else { theme.accent_orange }));
                         ui.label(RichText::new(format!("{:.1} kN", m.capacity_kn)).size(11.0).color(theme.text_secondary));
                         ui.label(RichText::new(format!("{:.3}", dcr)).size(11.0).color(if dcr < 0.85 { theme.accent_green } else { theme.accent_orange }));

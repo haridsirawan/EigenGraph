@@ -231,29 +231,29 @@ impl PlanningView {
     ) {
         let takeoff = self.compute_takeoff(variables);
 
-        ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(8.0);
+        ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            Frame::new().inner_margin(Margin::symmetric(20, 12)).show(ui, |ui| {
+                // 1. TOP SUB-TABS SELECTOR & EXPORT BAR
+                self.render_header_bar(ui, theme, &takeoff);
 
-            // 1. TOP SUB-TABS SELECTOR & EXPORT BAR
-            self.render_header_bar(ui, theme, &takeoff);
+                ui.add_space(14.0);
 
-            ui.add_space(14.0);
+                // 2. LIVE PARAMETRIC BINDING BANNER
+                self.render_parametric_binding_banner(ui, theme, &takeoff);
 
-            // 2. LIVE PARAMETRIC BINDING BANNER
-            self.render_parametric_binding_banner(ui, theme, &takeoff);
+                ui.add_space(16.0);
 
-            ui.add_space(16.0);
+                // 3. ACTIVE SUB-TAB CONTENT
+                match self.active_subtab {
+                    PlanningSubTab::TakeoffQto => self.render_qto_takeoff(ui, theme, &takeoff, members),
+                    PlanningSubTab::DynamicRab => self.render_dynamic_rab(ui, theme, &takeoff),
+                    PlanningSubTab::Schedule4d => self.render_schedule_4d(ui, theme, &takeoff),
+                    PlanningSubTab::CostAriTradeoff => self.render_cost_ari_tradeoff(ui, theme, &takeoff),
+                    PlanningSubTab::StagedErectionSvd => self.render_staged_erection_svd(ui, theme, &takeoff),
+                }
 
-            // 3. ACTIVE SUB-TAB CONTENT
-            match self.active_subtab {
-                PlanningSubTab::TakeoffQto => self.render_qto_takeoff(ui, theme, &takeoff, members),
-                PlanningSubTab::DynamicRab => self.render_dynamic_rab(ui, theme, &takeoff),
-                PlanningSubTab::Schedule4d => self.render_schedule_4d(ui, theme, &takeoff),
-                PlanningSubTab::CostAriTradeoff => self.render_cost_ari_tradeoff(ui, theme, &takeoff),
-                PlanningSubTab::StagedErectionSvd => self.render_staged_erection_svd(ui, theme, &takeoff),
-            }
-
-            ui.add_space(24.0);
+                ui.add_space(24.0);
+            });
         });
     }
 

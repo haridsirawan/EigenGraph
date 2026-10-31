@@ -49,57 +49,57 @@ impl Default for AnalyzeView {
 
 impl AnalyzeView {
     pub fn show(&mut self, ui: &mut Ui, theme: &MacTheme, members: &[StructuralMember]) {
-        ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(8.0);
+        ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            Frame::new().inner_margin(Margin::symmetric(20, 12)).show(ui, |ui| {
+                // 1. TOP SUB-TABS SELECTOR
+                self.render_subtabs_header(ui, theme);
 
-            // 1. TOP SUB-TABS SELECTOR
-            self.render_subtabs_header(ui, theme);
-
-            let mut dismiss_status = false;
-            if let Some(ref status_msg) = self.export_status {
-                ui.add_space(10.0);
-                theme.card_frame().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("📦 AEC EXPORT READY:").size(11.5).strong().color(theme.accent_green));
-                        ui.label(RichText::new(status_msg).size(11.5).color(theme.text_primary));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(theme.text_muted))
-                                .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(4))).clicked() {
-                                dismiss_status = true;
-                            }
+                let mut dismiss_status = false;
+                if let Some(ref status_msg) = self.export_status {
+                    ui.add_space(10.0);
+                    theme.card_frame().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("📦 AEC EXPORT READY:").size(11.5).strong().color(theme.accent_green));
+                            ui.label(RichText::new(status_msg).size(11.5).color(theme.text_primary));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(theme.text_muted))
+                                    .fill(theme.bg_card)
+                                    .corner_radius(CornerRadius::same(4))).clicked() {
+                                    dismiss_status = true;
+                                }
+                            });
                         });
                     });
-                });
-            }
-            if dismiss_status {
-                self.export_status = None;
-            }
+                }
+                if dismiss_status {
+                    self.export_status = None;
+                }
 
-            ui.add_space(14.0);
+                ui.add_space(14.0);
 
-            // 2. PLANNING NAVIGATION BANNER
-            theme.card_frame().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("📊 5D CONSTRUCTION PLANNING TERSEDIA:").size(11.5).strong().color(theme.accent_blue));
-                    ui.label(RichText::new("Estimasi Biaya (RAB 5D), Schedule Ereksi WBS (4D), dan Optimasi Trade-Off Cost-ARI kini dapat diakses di pilar PLANNING.").size(11.5).color(theme.text_secondary));
+                // 2. PLANNING NAVIGATION BANNER
+                theme.card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("📊 5D CONSTRUCTION PLANNING TERSEDIA:").size(11.5).strong().color(theme.accent_blue));
+                        ui.label(RichText::new("Estimasi Biaya (RAB 5D), Schedule Ereksi WBS (4D), dan Optimasi Trade-Off Cost-ARI kini dapat diakses di pilar PLANNING.").size(11.5).color(theme.text_secondary));
+                    });
                 });
+
+                ui.add_space(14.0);
+
+                // 3. ACTIVE SUB-TAB CONTENT
+                match self.active_subtab {
+                    AnalyzeSubTab::RedundancySvd => self.render_redundancy_and_svd(ui, theme, members),
+                    AnalyzeSubTab::MemberCriticality => self.render_member_criticality(ui, theme, members),
+                    AnalyzeSubTab::DisplacementForces => self.render_displacement_and_forces(ui, theme, members),
+                    AnalyzeSubTab::Frame3dInteraction => self.render_frame_3d_interaction(ui, theme, members),
+                    AnalyzeSubTab::CascadingCollapse => self.render_cascading_collapse(ui, theme),
+                    AnalyzeSubTab::NonlinearPushover => self.render_nonlinear_pushover(ui, theme),
+                    AnalyzeSubTab::ModalDynamics => self.render_modal_dynamics(ui, theme),
+                }
+
+                ui.add_space(24.0);
             });
-
-            ui.add_space(14.0);
-
-            // 3. ACTIVE SUB-TAB CONTENT
-            match self.active_subtab {
-                AnalyzeSubTab::RedundancySvd => self.render_redundancy_and_svd(ui, theme, members),
-                AnalyzeSubTab::MemberCriticality => self.render_member_criticality(ui, theme, members),
-                AnalyzeSubTab::DisplacementForces => self.render_displacement_and_forces(ui, theme, members),
-                AnalyzeSubTab::Frame3dInteraction => self.render_frame_3d_interaction(ui, theme, members),
-                AnalyzeSubTab::CascadingCollapse => self.render_cascading_collapse(ui, theme),
-                AnalyzeSubTab::NonlinearPushover => self.render_nonlinear_pushover(ui, theme),
-                AnalyzeSubTab::ModalDynamics => self.render_modal_dynamics(ui, theme),
-            }
-
-            ui.add_space(24.0);
         });
     }
 

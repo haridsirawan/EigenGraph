@@ -31,23 +31,23 @@ impl Default for ResearchConceptView {
 
 impl ResearchConceptView {
     pub fn show(&mut self, ui: &mut Ui, theme: &MacTheme, active_pillar: &mut NavigationPillar) {
-        ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(8.0);
+        ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            Frame::new().inner_margin(Margin::symmetric(20, 12)).show(ui, |ui| {
+                // 1. TOP SUBTABS SELECTOR
+                self.render_header_bar(ui, theme);
 
-            // 1. TOP SUBTABS SELECTOR
-            self.render_header_bar(ui, theme);
+                ui.add_space(16.0);
 
-            ui.add_space(14.0);
+                // 2. ACTIVE SUB-TAB CONTENT
+                match self.active_subtab {
+                    ResearchSubTab::ConceptFeasibility => self.render_concept_feasibility(ui, theme, active_pillar),
+                    ResearchSubTab::RegulatoryCodes => self.render_regulatory_codes(ui, theme),
+                    ResearchSubTab::SurveyingSite => self.render_surveying_site(ui, theme),
+                    ResearchSubTab::AriFormulations => self.render_ari_formulations(ui, theme),
+                }
 
-            // 2. ACTIVE SUB-TAB CONTENT
-            match self.active_subtab {
-                ResearchSubTab::ConceptFeasibility => self.render_concept_feasibility(ui, theme, active_pillar),
-                ResearchSubTab::RegulatoryCodes => self.render_regulatory_codes(ui, theme),
-                ResearchSubTab::SurveyingSite => self.render_surveying_site(ui, theme),
-                ResearchSubTab::AriFormulations => self.render_ari_formulations(ui, theme),
-            }
-
-            ui.add_space(24.0);
+                ui.add_space(24.0);
+            });
         });
     }
 
@@ -55,26 +55,27 @@ impl ResearchConceptView {
         Frame::new()
             .fill(theme.bg_card)
             .corner_radius(CornerRadius::same(10))
-            .inner_margin(Margin::same(8))
+            .inner_margin(Margin::same(6))
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let tabs = [
-                        (ResearchSubTab::ConceptFeasibility, "💡 Studi Kelayakan & Gagasan Awal"),
-                        (ResearchSubTab::RegulatoryCodes, "📜 Regulasi & Standar Desain SNI/AISC"),
-                        (ResearchSubTab::SurveyingSite, "🗺️ Data Survei Tapak & Geoteknik"),
-                        (ResearchSubTab::AriFormulations, "🔬 Formulasi Resmi ARI EigenGraph"),
-                    ];
+                let tabs = [
+                    (ResearchSubTab::ConceptFeasibility, "💡 Studi Kelayakan & Gagasan Awal"),
+                    (ResearchSubTab::RegulatoryCodes, "📜 Regulasi & Standar Desain SNI/AISC"),
+                    (ResearchSubTab::SurveyingSite, "🗺️ Data Survei Tapak & Geoteknik"),
+                    (ResearchSubTab::AriFormulations, "🔬 Formulasi Resmi ARI EigenGraph"),
+                ];
 
-                    for (tab, label) in tabs {
+                ui.columns(4, |cols| {
+                    for (idx, (tab, label)) in tabs.into_iter().enumerate() {
                         let is_active = self.active_subtab == tab;
                         let bg = if is_active { theme.accent_blue } else { Color32::TRANSPARENT };
                         let fg = if is_active { Color32::WHITE } else { theme.text_secondary };
 
-                        if ui.add(egui::Button::new(RichText::new(label).size(12.0).strong().color(fg))
+                        let w = cols[idx].available_width();
+                        if cols[idx].add(egui::Button::new(RichText::new(label).size(12.0).strong().color(fg))
                             .fill(bg)
-                            .corner_radius(CornerRadius::same(6))
-                            .min_size(Vec2::new(110.0, 28.0))).clicked() {
+                            .corner_radius(CornerRadius::same(7))
+                            .min_size(Vec2::new(w, 30.0))).clicked() {
                             self.active_subtab = tab;
                         }
                     }
@@ -112,14 +113,11 @@ impl ResearchConceptView {
         ui.add_space(16.0);
 
         // KPI Cards Row
-        ui.horizontal(|ui| {
-            self.render_stat_card(ui, theme, "KELAYAKAN TEKNIS", "96.5% LAYAK", "Bentang Bebas 24m Tanpa Pilar Tengah", theme.accent_green);
-            ui.add_space(8.0);
-            self.render_stat_card(ui, theme, "TARGET REDUNDANSI", "ARI ≥ 0.85", "Kriteria Grade A Bebas Single Point of Failure", theme.accent_blue);
-            ui.add_space(8.0);
-            self.render_stat_card(ui, theme, "KELAYAKAN BIAYA", "Rp 3.84 M", "Pagu Anggaran Maks: Rp 4.20 M (Aman)", theme.text_primary);
-            ui.add_space(8.0);
-            self.render_stat_card(ui, theme, "WAKTU PELAKSANAAN", "140 Hari", "6 Tahap Ereksi Terverifikasi SVD", theme.text_primary);
+        ui.columns(4, |cols| {
+            self.render_stat_card(&mut cols[0], theme, "KELAYAKAN TEKNIS", "96.5% LAYAK", "Bentang Bebas 24m Tanpa Pilar Tengah", theme.accent_green);
+            self.render_stat_card(&mut cols[1], theme, "TARGET REDUNDANSI", "ARI ≥ 0.85", "Kriteria Grade A Bebas Single Point of Failure", theme.accent_blue);
+            self.render_stat_card(&mut cols[2], theme, "KELAYAKAN BIAYA", "Rp 3.84 M", "Pagu Anggaran Maks: Rp 4.20 M (Aman)", theme.text_primary);
+            self.render_stat_card(&mut cols[3], theme, "WAKTU PELAKSANAAN", "140 Hari", "6 Tahap Ereksi Terverifikasi SVD", theme.text_primary);
         });
 
         ui.add_space(16.0);
@@ -218,14 +216,11 @@ impl ResearchConceptView {
                 ui.label(RichText::new("🗺️ Data Survei Topografi, Tapak & Geoteknik Pondasi").size(13.5).strong().color(theme.text_primary));
                 ui.add_space(10.0);
 
-                ui.horizontal(|ui| {
-                    self.render_stat_card(ui, theme, "DAYA DUKUNG TANAH (qa)", "285.0 kPa", "Lempung Keras (Hard Clay) N-SPT > 35", theme.text_primary);
-                    ui.add_space(8.0);
-                    self.render_stat_card(ui, theme, "ZONA GEMPA DASAR", "Kelas Situs D", "Ss = 0.85g, S1 = 0.42g (Wilayah Jawa)", theme.accent_blue);
-                    ui.add_space(8.0);
-                    self.render_stat_card(ui, theme, "KECEPATAN ANGIN RENCANA", "32.0 m/s", "Tekanan Dinamis q = 0.627 kN/m²", theme.text_primary);
-                    ui.add_space(8.0);
-                    self.render_stat_card(ui, theme, "KELAS KOROSI TAPAK", "C5-High Marine", "Proteksi Cat Epoxy Sa 2.5 Polyurethane", theme.accent_green);
+                ui.columns(4, |cols| {
+                    self.render_stat_card(&mut cols[0], theme, "DAYA DUKUNG TANAH (qa)", "285.0 kPa", "Lempung Keras (Hard Clay) N-SPT > 35", theme.text_primary);
+                    self.render_stat_card(&mut cols[1], theme, "ZONA GEMPA DASAR", "Kelas Situs D", "Ss = 0.85g, S1 = 0.42g (Wilayah Jawa)", theme.accent_blue);
+                    self.render_stat_card(&mut cols[2], theme, "KECEPATAN ANGIN RENCANA", "32.0 m/s", "Tekanan Dinamis q = 0.627 kN/m²", theme.text_primary);
+                    self.render_stat_card(&mut cols[3], theme, "KELAS KOROSI TAPAK", "C5-High Marine", "Proteksi Cat Epoxy Sa 2.5 Polyurethane", theme.accent_green);
                 });
             });
     }
@@ -260,6 +255,7 @@ impl ResearchConceptView {
                         .inner_margin(Margin::same(12))
                         .stroke(Stroke::new(1.0, theme.border_subtle))
                         .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
                             ui.label(RichText::new(title).size(12.0).strong().color(theme.text_primary));
                             ui.add_space(4.0);
                             ui.label(RichText::new(eq).size(13.0).strong().color(theme.accent_blue));
@@ -274,16 +270,16 @@ impl ResearchConceptView {
     fn render_stat_card(&self, ui: &mut Ui, theme: &MacTheme, title: &str, val: &str, subtitle: &str, val_color: Color32) {
         Frame::new()
             .fill(theme.bg_canvas)
-            .corner_radius(CornerRadius::same(8))
-            .inner_margin(Margin::same(12))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::same(14))
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
-                ui.set_width(175.0);
-                ui.label(RichText::new(title).size(9.5).strong().color(theme.text_muted));
-                ui.add_space(2.0);
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new(title).size(10.0).strong().color(theme.text_muted));
+                ui.add_space(4.0);
                 ui.label(RichText::new(val).size(18.0).strong().color(val_color));
-                ui.add_space(2.0);
-                ui.label(RichText::new(subtitle).size(10.0).color(theme.text_secondary));
+                ui.add_space(4.0);
+                ui.label(RichText::new(subtitle).size(10.5).color(theme.text_secondary));
             });
     }
 }

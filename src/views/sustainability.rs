@@ -46,23 +46,23 @@ impl Default for SustainabilityView {
 
 impl SustainabilityView {
     pub fn show(&mut self, ui: &mut Ui, theme: &MacTheme, members: &[StructuralMember]) {
-        ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(8.0);
+        ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            Frame::new().inner_margin(Margin::symmetric(20, 12)).show(ui, |ui| {
+                // 1. TOP SUBTABS SELECTOR
+                self.render_header_bar(ui, theme);
 
-            // 1. TOP SUBTABS SELECTOR
-            self.render_header_bar(ui, theme);
+                ui.add_space(16.0);
 
-            ui.add_space(14.0);
+                // 2. ACTIVE SUB-TAB CONTENT
+                match self.active_subtab {
+                    SustainabilitySubTab::EmbodiedCarbon => self.render_embodied_carbon(ui, theme, members),
+                    SustainabilitySubTab::CarbonAriTradeoff => self.render_carbon_ari_tradeoff(ui, theme),
+                    SustainabilitySubTab::GreenCertification => self.render_green_certification(ui, theme),
+                    SustainabilitySubTab::EnergyLifecycle => self.render_energy_lifecycle(ui, theme),
+                }
 
-            // 2. ACTIVE SUB-TAB CONTENT
-            match self.active_subtab {
-                SustainabilitySubTab::EmbodiedCarbon => self.render_embodied_carbon(ui, theme, members),
-                SustainabilitySubTab::CarbonAriTradeoff => self.render_carbon_ari_tradeoff(ui, theme),
-                SustainabilitySubTab::GreenCertification => self.render_green_certification(ui, theme),
-                SustainabilitySubTab::EnergyLifecycle => self.render_energy_lifecycle(ui, theme),
-            }
-
-            ui.add_space(24.0);
+                ui.add_space(24.0);
+            });
         });
     }
 
@@ -70,26 +70,27 @@ impl SustainabilityView {
         Frame::new()
             .fill(theme.bg_card)
             .corner_radius(CornerRadius::same(10))
-            .inner_margin(Margin::same(8))
+            .inner_margin(Margin::same(6))
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let tabs = [
-                        (SustainabilitySubTab::EmbodiedCarbon, "🌱 Embodied Carbon (CO₂e)"),
-                        (SustainabilitySubTab::CarbonAriTradeoff, "📈 Carbon vs ARI Trade-Off"),
-                        (SustainabilitySubTab::GreenCertification, "🏅 Green Certification (LEED/Greenship)"),
-                        (SustainabilitySubTab::EnergyLifecycle, "⚡ Thermal & Lifecycle Durability"),
-                    ];
+                let tabs = [
+                    (SustainabilitySubTab::EmbodiedCarbon, "🌱 Embodied Carbon (CO₂e)"),
+                    (SustainabilitySubTab::CarbonAriTradeoff, "📈 Carbon vs ARI Trade-Off"),
+                    (SustainabilitySubTab::GreenCertification, "🏅 Green Certification (LEED/Greenship)"),
+                    (SustainabilitySubTab::EnergyLifecycle, "⚡ Thermal & Lifecycle Durability"),
+                ];
 
-                    for (tab, label) in tabs {
+                ui.columns(4, |cols| {
+                    for (idx, (tab, label)) in tabs.into_iter().enumerate() {
                         let is_active = self.active_subtab == tab;
                         let bg = if is_active { theme.accent_blue } else { Color32::TRANSPARENT };
                         let fg = if is_active { Color32::WHITE } else { theme.text_secondary };
 
-                        if ui.add(egui::Button::new(RichText::new(label).size(12.0).strong().color(fg))
+                        let w = cols[idx].available_width();
+                        if cols[idx].add(egui::Button::new(RichText::new(label).size(12.0).strong().color(fg))
                             .fill(bg)
-                            .corner_radius(CornerRadius::same(6))
-                            .min_size(Vec2::new(110.0, 28.0))).clicked() {
+                            .corner_radius(CornerRadius::same(7))
+                            .min_size(Vec2::new(w, 30.0))).clicked() {
                             self.active_subtab = tab;
                         }
                     }
@@ -124,14 +125,11 @@ impl SustainabilityView {
         let transport_co2 = total_steel_tons * 0.045; // 45 kg CO2e / ton transport
 
         // Metric Cards Row
-        ui.horizontal(|ui| {
-            self.render_stat_card(ui, theme, "TOTAL EMBODIED CARBON", &format!("{:.1} t CO₂e", total_co2), &format!("Massa Baja: {:.1} Ton (A1–A5)", total_steel_tons), theme.accent_green);
-            ui.add_space(8.0);
-            self.render_stat_card(ui, theme, "CARBON INTENSITY", &format!("{:.1} kg/m²", (total_co2 * 1000.0) / 288.0), "Bentang 24m x 12m Floor", theme.accent_blue);
-            ui.add_space(8.0);
-            self.render_stat_card(ui, theme, "PENGHEMATAN EMISI", &format!("-{:.1}%", reduction_pct), "vs. Baseline BF-BOF", if reduction_pct > 30.0 { theme.accent_green } else { theme.accent_orange });
-            ui.add_space(8.0);
-            self.render_stat_card(ui, theme, "EKO-REDUNDANSI (η)", &format!("{:.4}", eco_eff), "ARI / Total tCO₂e", theme.accent_blue);
+        ui.columns(4, |cols| {
+            self.render_stat_card(&mut cols[0], theme, "TOTAL EMBODIED CARBON", &format!("{:.1} t CO₂e", total_co2), &format!("Massa Baja: {:.1} Ton (A1–A5)", total_steel_tons), theme.accent_green);
+            self.render_stat_card(&mut cols[1], theme, "CARBON INTENSITY", &format!("{:.1} kg/m²", (total_co2 * 1000.0) / 288.0), "Bentang 24m x 12m Floor", theme.accent_blue);
+            self.render_stat_card(&mut cols[2], theme, "PENGHEMATAN EMISI", &format!("-{:.1}%", reduction_pct), "vs. Baseline BF-BOF", if reduction_pct > 30.0 { theme.accent_green } else { theme.accent_orange });
+            self.render_stat_card(&mut cols[3], theme, "EKO-REDUNDANSI (η)", &format!("{:.4}", eco_eff), "ARI / Total tCO₂e", theme.accent_blue);
         });
 
         ui.add_space(16.0);
@@ -296,12 +294,10 @@ impl SustainabilityView {
                 ui.label(RichText::new("⚡ Efisiensi Termal & Ketahanan Siklus Hidup (Life Cycle Durability)").size(13.5).strong().color(theme.text_primary));
                 ui.add_space(10.0);
 
-                ui.horizontal(|ui| {
-                    self.render_stat_card(ui, theme, "DESIGN SERVICE LIFE", "100 Tahun", "SNI Bridge Serviceability Class A", theme.text_primary);
-                    ui.add_space(8.0);
-                    self.render_stat_card(ui, theme, "COATING DURABILITY", "25+ Tahun", "C5-High Marine Grade Polyurethane", theme.accent_blue);
-                    ui.add_space(8.0);
-                    self.render_stat_card(ui, theme, "THERMAL EXPANSION", "±14.2 mm", "Elastomeric Bearing Expansion Allowance", theme.accent_green);
+                ui.columns(3, |cols| {
+                    self.render_stat_card(&mut cols[0], theme, "DESIGN SERVICE LIFE", "100 Tahun", "SNI Bridge Serviceability Class A", theme.text_primary);
+                    self.render_stat_card(&mut cols[1], theme, "COATING DURABILITY", "25+ Tahun", "C5-High Marine Grade Polyurethane", theme.accent_blue);
+                    self.render_stat_card(&mut cols[2], theme, "THERMAL EXPANSION", "±14.2 mm", "Elastomeric Bearing Expansion Allowance", theme.accent_green);
                 });
             });
     }
@@ -309,16 +305,16 @@ impl SustainabilityView {
     fn render_stat_card(&self, ui: &mut Ui, theme: &MacTheme, title: &str, val: &str, subtitle: &str, val_color: Color32) {
         Frame::new()
             .fill(theme.bg_canvas)
-            .corner_radius(CornerRadius::same(8))
-            .inner_margin(Margin::same(12))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::same(14))
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
-                ui.set_width(175.0);
-                ui.label(RichText::new(title).size(9.5).strong().color(theme.text_muted));
-                ui.add_space(2.0);
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new(title).size(10.0).strong().color(theme.text_muted));
+                ui.add_space(4.0);
                 ui.label(RichText::new(val).size(18.0).strong().color(val_color));
-                ui.add_space(2.0);
-                ui.label(RichText::new(subtitle).size(10.0).color(theme.text_secondary));
+                ui.add_space(4.0);
+                ui.label(RichText::new(subtitle).size(10.5).color(theme.text_secondary));
             });
     }
 }

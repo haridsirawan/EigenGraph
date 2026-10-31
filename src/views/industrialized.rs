@@ -33,44 +33,44 @@ impl Default for IndustrializedView {
 
 impl IndustrializedView {
     pub fn show(&mut self, ui: &mut Ui, theme: &MacTheme, _members: &[StructuralMember]) {
-        ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(8.0);
+        ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            Frame::new().inner_margin(Margin::symmetric(20, 12)).show(ui, |ui| {
+                // 1. TOP SUBTABS SELECTOR
+                self.render_header_bar(ui, theme);
 
-            // 1. TOP SUBTABS SELECTOR
-            self.render_header_bar(ui, theme);
-
-            let mut dismiss_status = false;
-            if let Some(ref status_msg) = self.export_status {
-                ui.add_space(10.0);
-                theme.card_frame().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("📦 10D EXPORT SIAP:").size(11.5).strong().color(theme.accent_green));
-                        ui.label(RichText::new(status_msg).size(11.5).color(theme.text_primary));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(theme.text_muted))
-                                .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(4))).clicked() {
-                                dismiss_status = true;
-                            }
+                let mut dismiss_status = false;
+                if let Some(ref status_msg) = self.export_status {
+                    ui.add_space(10.0);
+                    theme.card_frame().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("📦 10D EXPORT SIAP:").size(11.5).strong().color(theme.accent_green));
+                            ui.label(RichText::new(status_msg).size(11.5).color(theme.text_primary));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(theme.text_muted))
+                                    .fill(theme.bg_card)
+                                    .corner_radius(CornerRadius::same(4))).clicked() {
+                                    dismiss_status = true;
+                                }
+                            });
                         });
                     });
-                });
-            }
-            if dismiss_status {
-                self.export_status = None;
-            }
+                }
+                if dismiss_status {
+                    self.export_status = None;
+                }
 
-            ui.add_space(14.0);
+                ui.add_space(16.0);
 
-            // 2. ACTIVE SUB-TAB CONTENT
-            match self.active_subtab {
-                IndustrializedSubTab::ModularDfma => self.render_modular_dfma(ui, theme),
-                IndustrializedSubTab::RoboticAutomation => self.render_robotic_automation(ui, theme),
-                IndustrializedSubTab::AutomatedErection => self.render_automated_erection(ui, theme),
-                IndustrializedSubTab::Industry4Bridge => self.render_industry4_bridge(ui, theme),
-            }
+                // 2. ACTIVE SUB-TAB CONTENT
+                match self.active_subtab {
+                    IndustrializedSubTab::ModularDfma => self.render_modular_dfma(ui, theme),
+                    IndustrializedSubTab::RoboticAutomation => self.render_robotic_automation(ui, theme),
+                    IndustrializedSubTab::AutomatedErection => self.render_automated_erection(ui, theme),
+                    IndustrializedSubTab::Industry4Bridge => self.render_industry4_bridge(ui, theme),
+                }
 
-            ui.add_space(24.0);
+                ui.add_space(24.0);
+            });
         });
     }
 
@@ -78,26 +78,27 @@ impl IndustrializedView {
         Frame::new()
             .fill(theme.bg_card)
             .corner_radius(CornerRadius::same(10))
-            .inner_margin(Margin::same(8))
+            .inner_margin(Margin::same(6))
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let tabs = [
-                        (IndustrializedSubTab::ModularDfma, "🏭 Prefabrikasi & DfMA Modular"),
-                        (IndustrializedSubTab::RoboticAutomation, "🦾 Robotik & Pengelasan Otomatis"),
-                        (IndustrializedSubTab::AutomatedErection, "🏗️ Crane Otonom & Drone Lidar"),
-                        (IndustrializedSubTab::Industry4Bridge, "🌐 OpenBIM IFC 4.3 & IoT Bridge"),
-                    ];
+                let tabs = [
+                    (IndustrializedSubTab::ModularDfma, "🏭 Prefabrikasi & DfMA Modular"),
+                    (IndustrializedSubTab::RoboticAutomation, "🦾 Robotik & Pengelasan Otomatis"),
+                    (IndustrializedSubTab::AutomatedErection, "🏗️ Crane Otonom & Drone Lidar"),
+                    (IndustrializedSubTab::Industry4Bridge, "🌐 OpenBIM IFC 4.3 & IoT Bridge"),
+                ];
 
-                    for (tab, label) in tabs {
+                ui.columns(4, |cols| {
+                    for (idx, (tab, label)) in tabs.into_iter().enumerate() {
                         let is_active = self.active_subtab == tab;
                         let bg = if is_active { theme.accent_blue } else { Color32::TRANSPARENT };
                         let fg = if is_active { Color32::WHITE } else { theme.text_secondary };
 
-                        if ui.add(egui::Button::new(RichText::new(label).size(12.0).strong().color(fg))
+                        let w = cols[idx].available_width();
+                        if cols[idx].add(egui::Button::new(RichText::new(label).size(12.0).strong().color(fg))
                             .fill(bg)
-                            .corner_radius(CornerRadius::same(6))
-                            .min_size(Vec2::new(110.0, 28.0))).clicked() {
+                            .corner_radius(CornerRadius::same(7))
+                            .min_size(Vec2::new(w, 30.0))).clicked() {
                             self.active_subtab = tab;
                         }
                     }
@@ -106,14 +107,11 @@ impl IndustrializedView {
     }
 
     fn render_modular_dfma(&mut self, ui: &mut Ui, theme: &MacTheme) {
-        ui.horizontal(|ui| {
-            self.render_stat_card(ui, theme, "OFF-SITE FABRICATION RATIO", "82.5%", "Mayoritas Dirakit Presisi di Pabrik", theme.accent_green);
-            ui.add_space(8.0);
-            self.render_stat_card(ui, theme, "STANDARDIZATION INDEX", "91.5%", "Repetisi Sambungan Buhul Modular", theme.accent_blue);
-            ui.add_space(8.0);
-            self.render_stat_card(ui, theme, "DIMENSI MODUL TRANSPORT", "12.0 x 2.4 m", "Sesuai Regulasi Trailer Jalan Raya", theme.text_primary);
-            ui.add_space(8.0);
-            self.render_stat_card(ui, theme, "ASSEMBLY TIME AT SITE", "-60% Hari", "Perakitan Cepat Sistem Baut HTB", theme.accent_green);
+        ui.columns(4, |cols| {
+            self.render_stat_card(&mut cols[0], theme, "OFF-SITE FABRICATION RATIO", "82.5%", "Mayoritas Dirakit Presisi di Pabrik", theme.accent_green);
+            self.render_stat_card(&mut cols[1], theme, "STANDARDIZATION INDEX", "91.5%", "Repetisi Sambungan Buhul Modular", theme.accent_blue);
+            self.render_stat_card(&mut cols[2], theme, "DIMENSI MODUL TRANSPORT", "12.0 x 2.4 m", "Sesuai Regulasi Trailer Jalan Raya", theme.text_primary);
+            self.render_stat_card(&mut cols[3], theme, "ASSEMBLY TIME AT SITE", "-60% Hari", "Perakitan Cepat Sistem Baut HTB", theme.accent_green);
         });
 
         ui.add_space(16.0);
@@ -203,12 +201,10 @@ impl IndustrializedView {
                 ui.label(RichText::new("🏗️ Crane Otonom, Trajektori Anti-Tabrakan & Inspeksi Drone LiDAR").size(13.5).strong().color(theme.text_primary));
                 ui.add_space(10.0);
 
-                ui.horizontal(|ui| {
-                    self.render_stat_card(ui, theme, "CRANE TRAJECTORY CLEARANCE", "2.8 m", "Zona Bebas Tabrakan Boom Dinamis", theme.accent_green);
-                    ui.add_space(8.0);
-                    self.render_stat_card(ui, theme, "DRONE LIDAR AS-BUILT", "± 2.1 mm", "Penyimpangan Model vs Aktual Lapangan", theme.accent_blue);
-                    ui.add_space(8.0);
-                    self.render_stat_card(ui, theme, "SVD ERECTION GUARD", "Rank Penuh", "Kestabilan Tiap Tahap Terjamin Bebas Mekanisme", theme.accent_green);
+                ui.columns(3, |cols| {
+                    self.render_stat_card(&mut cols[0], theme, "CRANE TRAJECTORY CLEARANCE", "2.8 m", "Zona Bebas Tabrakan Boom Dinamis", theme.accent_green);
+                    self.render_stat_card(&mut cols[1], theme, "DRONE LIDAR AS-BUILT", "± 2.1 mm", "Penyimpangan Model vs Aktual Lapangan", theme.accent_blue);
+                    self.render_stat_card(&mut cols[2], theme, "SVD ERECTION GUARD", "Rank Penuh", "Kestabilan Tiap Tahap Terjamin Bebas Mekanisme", theme.accent_green);
                 });
             });
     }
@@ -274,7 +270,7 @@ impl IndustrializedView {
             .inner_margin(Margin::same(12))
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
-                ui.set_width(175.0);
+                ui.set_width(ui.available_width());
                 ui.label(RichText::new(title).size(9.5).strong().color(theme.text_muted));
                 ui.add_space(2.0);
                 ui.label(RichText::new(val).size(18.0).strong().color(val_color));

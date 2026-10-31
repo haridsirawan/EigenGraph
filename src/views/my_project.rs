@@ -24,25 +24,25 @@ impl Default for MyProjectView {
 
 impl MyProjectView {
     pub fn show(&mut self, ui: &mut Ui, theme: &MacTheme, projects: &[ProjectItem], active_pillar: &mut NavigationPillar) {
-        ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(8.0);
+        ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            Frame::new().inner_margin(Margin::symmetric(20, 12)).show(ui, |ui| {
+                // 1. HERO FEATURED BANNER (Mac App Store Style)
+                if let Some(featured) = projects.iter().find(|p| p.is_featured) {
+                    self.render_hero_banner(ui, theme, featured, active_pillar);
+                }
 
-            // 1. HERO FEATURED BANNER (Mac App Store Style)
-            if let Some(featured) = projects.iter().find(|p| p.is_featured) {
-                self.render_hero_banner(ui, theme, featured, active_pillar);
-            }
+                ui.add_space(20.0);
 
-            ui.add_space(24.0);
+                // 2. CATEGORY FILTER PILLS
+                self.render_category_bar(ui, theme);
 
-            // 2. CATEGORY FILTER PILLS
-            self.render_category_bar(ui, theme);
+                ui.add_space(16.0);
 
-            ui.add_space(16.0);
+                // 3. CURATED CARD GRID (Balanced 2x2 Grid with Live Vector Wireframes)
+                self.render_projects_grid(ui, theme, projects, active_pillar);
 
-            // 3. CURATED CARD GRID (3 Columns)
-            self.render_projects_grid(ui, theme, projects, active_pillar);
-
-            ui.add_space(32.0);
+                ui.add_space(24.0);
+            });
         });
 
         // 4. EIGENGRAPH ARI AUDIT DOSSIER MODAL
@@ -55,6 +55,7 @@ impl MyProjectView {
         theme.hero_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
+                    ui.set_max_width((ui.available_width() - 280.0).max(320.0));
                     ui.horizontal(|ui| {
                         Frame::new()
                             .fill(theme.accent_blue.gamma_multiply(0.2))
@@ -65,33 +66,37 @@ impl MyProjectView {
                             });
 
                         ui.add_space(6.0);
-                        ui.label(RichText::new(p.status.badge_label()).size(12.0).color(theme.text_secondary));
+                        ui.label(RichText::new(p.status.badge_label()).size(12.0).color(theme.accent_green).strong());
                     });
 
                     ui.add_space(8.0);
-                    ui.heading(RichText::new(&p.title).size(24.0).strong().color(theme.text_primary));
-                    ui.label(RichText::new(&p.description).size(14.0).color(theme.text_secondary));
+                    ui.heading(RichText::new(&p.title).size(22.0).strong().color(theme.text_primary));
+                    ui.add_space(2.0);
+                    ui.label(RichText::new(&p.description).size(13.0).color(theme.text_secondary));
 
-                    ui.add_space(12.0);
+                    ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("📊 Elements: {} | Nodes: {} | Max Disp: {:.2} mm | Min ARI: {:.2}",
+                        ui.label(RichText::new(format!(
+                            "📊 Elements: {}   •   Nodes: {}   •   Max Disp: {:.2} mm   •   Min ARI: {:.2}",
                             p.elements_count, p.nodes_count, p.max_deflection_mm, p.min_ari
                         )).size(12.0).color(theme.text_muted));
                     });
 
-                    ui.add_space(16.0);
+                    ui.add_space(14.0);
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Button::new(RichText::new("🚀 Open in Build Workspace").strong().color(Color32::WHITE))
+                        if ui.add(egui::Button::new(RichText::new("🚀 Open in 3D Workspace").size(12.5).strong().color(Color32::WHITE))
                             .fill(theme.accent_blue)
                             .corner_radius(CornerRadius::same(8))
-                            ).clicked() {
+                            .min_size(egui::Vec2::new(170.0, 32.0))).clicked() {
                             *active_pillar = NavigationPillar::ModelingGeometry;
                         }
 
-                        if ui.add(egui::Button::new(RichText::new("📜 Cetak Sertifikat Audit EigenGraph").strong().color(Color32::WHITE))
+                        ui.add_space(6.0);
+
+                        if ui.add(egui::Button::new(RichText::new("📜 Sertifikat Audit EigenGraph").size(12.5).strong().color(Color32::WHITE))
                             .fill(theme.accent_green)
                             .corner_radius(CornerRadius::same(8))
-                            ).clicked() {
+                            .min_size(egui::Vec2::new(190.0, 32.0))).clicked() {
                             self.show_dossier_modal = true;
                         }
                     });
@@ -99,16 +104,55 @@ impl MyProjectView {
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     Frame::new()
-                        .fill(Color32::from_rgb(20, 24, 32))
+                        .fill(Color32::from_rgb(18, 22, 30))
                         .corner_radius(CornerRadius::same(12))
                         .stroke(Stroke::new(1.0, theme.border_card))
-                        
+                        .inner_margin(Margin::same(10))
                         .show(ui, |ui| {
-                            ui.vertical_centered(|ui| {
-                                ui.add_space(45.0);
-                                ui.label(RichText::new("🌐 3D LIVE PREVIEW").size(14.0).strong().color(theme.accent_blue));
-                                ui.label(RichText::new("Interactive Viewport").size(11.0).color(theme.text_muted));
-                            });
+                            let (rect, _) = ui.allocate_exact_size(egui::Vec2::new(240.0, 125.0), egui::Sense::hover());
+                            let painter = ui.painter_at(rect);
+
+                            // Draw Arch Bridge Vector Wireframe
+                            let left_x = rect.left() + 18.0;
+                            let right_x = rect.right() - 18.0;
+                            let deck_y = rect.bottom() - 28.0;
+                            let span = right_x - left_x;
+                            let panels = 8;
+
+                            // Deck line
+                            painter.line_segment(
+                                [egui::pos2(left_x, deck_y), egui::pos2(right_x, deck_y)],
+                                Stroke::new(2.0, theme.accent_blue),
+                            );
+
+                            let mut prev_arch = egui::pos2(left_x, deck_y);
+                            for i in 0..=panels {
+                                let t = i as f32 / panels as f32;
+                                let x = left_x + t * span;
+                                let arch_h = 4.0 * t * (1.0 - t) * 68.0;
+                                let arch_pt = egui::pos2(x, deck_y - arch_h);
+                                let deck_pt = egui::pos2(x, deck_y);
+
+                                if i > 0 {
+                                    // Arch rib segment
+                                    painter.line_segment([prev_arch, arch_pt], Stroke::new(2.2, theme.accent_green));
+                                    // Hanger cable
+                                    if i < panels {
+                                        painter.line_segment([arch_pt, deck_pt], Stroke::new(1.0, theme.text_muted));
+                                    }
+                                }
+                                painter.circle_filled(arch_pt, 2.5, Color32::WHITE);
+                                painter.circle_filled(deck_pt, 2.0, theme.accent_blue);
+                                prev_arch = arch_pt;
+                            }
+
+                            painter.text(
+                                egui::pos2(rect.center().x, rect.bottom() - 8.0),
+                                egui::Align2::CENTER_CENTER,
+                                "🌐 3D ARCH TRUSS LIVE TOPOLOGY",
+                                egui::FontId::proportional(10.0),
+                                theme.text_secondary,
+                            );
                         });
                 });
             });
@@ -138,51 +182,100 @@ impl MyProjectView {
     }
 
     fn render_projects_grid(&self, ui: &mut Ui, theme: &MacTheme, projects: &[ProjectItem], active_pillar: &mut NavigationPillar) {
-        ui.columns(3, |columns| {
-            for (idx, p) in projects.iter().enumerate() {
-                let col = &mut columns[idx % 3];
-                theme.card_frame().show(col, |ui| {
-                    // Card 3D Preview Box
-                    Frame::new()
-                        .fill(Color32::from_rgb(26, 26, 30))
-                        .corner_radius(CornerRadius::same(8))
-                        .show(ui, |ui| {
-                            ui.vertical_centered(|ui| {
-                                ui.add_space(35.0);
-                                ui.label(RichText::new("📐 3D Wireframe Thumbnail").size(12.0).color(theme.text_muted));
+        for chunk in projects.chunks(2) {
+            ui.columns(2, |columns| {
+                for (col_idx, p) in chunk.iter().enumerate() {
+                    let col = &mut columns[col_idx];
+                    theme.card_frame().show(col, |ui| {
+                        // Card 3D Procedural Wireframe Preview Box
+                        Frame::new()
+                            .fill(Color32::from_rgb(20, 23, 30))
+                            .corner_radius(CornerRadius::same(10))
+                            .stroke(Stroke::new(1.0, theme.border_subtle))
+                            .inner_margin(Margin::symmetric(12, 8))
+                            .show(ui, |ui| {
+                                let avail_w = ui.available_width();
+                                let (rect, _) = ui.allocate_exact_size(egui::Vec2::new(avail_w, 72.0), egui::Sense::hover());
+                                let painter = ui.painter_at(rect);
+
+                                let lx = rect.left() + 16.0;
+                                let rx = rect.right() - 16.0;
+                                let by = rect.bottom() - 10.0;
+                                let ty = rect.top() + 10.0;
+                                let w = rx - lx;
+
+                                if p.id == "p1" || p.id == "p2" {
+                                    // Arch / Dome curve
+                                    let n = 8;
+                                    let mut prev = egui::pos2(lx, by);
+                                    painter.line_segment([egui::pos2(lx, by), egui::pos2(rx, by)], Stroke::new(1.4, theme.border_card));
+                                    for i in 1..=n {
+                                        let t = i as f32 / n as f32;
+                                        let x = lx + t * w;
+                                        let y = by - 4.0 * t * (1.0 - t) * (by - ty);
+                                        let pt = egui::pos2(x, y);
+                                        painter.line_segment([prev, pt], Stroke::new(1.8, theme.accent_blue));
+                                        painter.line_segment([pt, egui::pos2(x, by)], Stroke::new(0.8, theme.text_muted));
+                                        painter.circle_filled(pt, 2.2, theme.accent_green);
+                                        prev = pt;
+                                    }
+                                } else {
+                                    // Warren / Diagrid lattice
+                                    let n = 6;
+                                    painter.line_segment([egui::pos2(lx, ty), egui::pos2(rx, ty)], Stroke::new(1.8, theme.accent_blue));
+                                    painter.line_segment([egui::pos2(lx, by), egui::pos2(rx, by)], Stroke::new(1.8, theme.accent_blue));
+                                    for i in 0..n {
+                                        let t0 = i as f32 / n as f32;
+                                        let t1 = (i + 1) as f32 / n as f32;
+                                        let x0 = lx + t0 * w;
+                                        let x1 = lx + t1 * w;
+                                        let xm = 0.5 * (x0 + x1);
+                                        let col_diag = if i == 2 && p.min_ari < 0.70 { theme.accent_orange } else { theme.accent_green };
+                                        painter.line_segment([egui::pos2(x0, by), egui::pos2(xm, ty)], Stroke::new(1.4, col_diag));
+                                        painter.line_segment([egui::pos2(xm, ty), egui::pos2(x1, by)], Stroke::new(1.4, col_diag));
+                                        painter.circle_filled(egui::pos2(x0, by), 2.0, Color32::WHITE);
+                                        painter.circle_filled(egui::pos2(xm, ty), 2.0, Color32::WHITE);
+                                    }
+                                }
+                            });
+
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&p.category).size(11.0).color(theme.accent_blue).strong());
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                let status_col = if p.min_ari >= 0.70 { theme.accent_green } else { theme.accent_orange };
+                                ui.label(RichText::new(p.status.badge_label()).size(11.0).strong().color(status_col));
                             });
                         });
 
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(&p.category).size(11.0).color(theme.accent_blue).strong());
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(RichText::new(p.status.badge_label()).size(11.0).color(theme.text_secondary));
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(&p.title).size(15.0).strong().color(theme.text_primary));
+                        ui.add_space(2.0);
+                        ui.label(RichText::new(&p.description).size(12.0).color(theme.text_secondary));
+
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!(
+                                "📊 {} El  •  {} Nd  •  ARI: {:.2}",
+                                p.elements_count, p.nodes_count, p.min_ari
+                            )).size(11.5).color(theme.text_muted));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.add(egui::Button::new(RichText::new("Open Model ➔").size(11.5).strong().color(Color32::WHITE))
+                                    .fill(theme.accent_blue)
+                                    .corner_radius(CornerRadius::same(6))
+                                    .min_size(egui::Vec2::new(100.0, 26.0))).clicked() {
+                                    *active_pillar = NavigationPillar::ModelingGeometry;
+                                }
+                            });
                         });
                     });
-
-                    ui.add_space(4.0);
-                    ui.label(RichText::new(&p.title).size(15.0).strong().color(theme.text_primary));
-                    ui.label(RichText::new(&p.description).size(12.0).color(theme.text_secondary));
-
-                    ui.add_space(10.0);
-                    ui.separator();
-                    ui.add_space(6.0);
-
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("{} El | {} Nd", p.elements_count, p.nodes_count)).size(11.0).color(theme.text_muted));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add(egui::Button::new(RichText::new("Open").size(12.0).color(Color32::WHITE))
-                                .fill(theme.accent_blue)
-                                .corner_radius(CornerRadius::same(6))).clicked() {
-                                *active_pillar = NavigationPillar::ModelingGeometry;
-                            }
-                        });
-                    });
-                });
-                col.add_space(16.0);
-            }
-        });
+                }
+            });
+            ui.add_space(14.0);
+        }
     }
 
     fn render_dossier_modal(&mut self, ui: &mut Ui, theme: &MacTheme) {
