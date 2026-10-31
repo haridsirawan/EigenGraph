@@ -261,6 +261,45 @@ impl MyProjectView {
                     .hint_text("Default: EigenGraph.app/Contents/Resources/InternalVault/")
                     .desired_width(340.0));
             });
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(8.0);
+
+            // Multi-LOD Redundancy Convergence Engine Table (LOD 100 -> LOD 200 -> LOD 300)
+            let conv = crate::core::InternalVault::evaluate_nvw_multi_lod_convergence();
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("📈 MULTI-LOD REDUNDANCY CONVERGENCE AUDIT (LOD 100 ➔ LOD 200 ➔ LOD 300)").size(11.5).strong().color(theme.accent_green));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(RichText::new(format!("ΔARI: +{:.1}% • Reduksi κ(K): {:.1}x", conv.ari_gain_lod100_to_lod300_pct, conv.kappa_reduction_ratio)).size(11.0).strong().color(theme.accent_blue));
+                });
+            });
+            ui.add_space(4.0);
+            egui::Grid::new("multi_lod_convergence_grid")
+                .striped(true)
+                .min_col_width(95.0)
+                .show(ui, |ui| {
+                    ui.label(RichText::new("Tahap LOD").size(10.5).strong().color(theme.text_muted));
+                    ui.label(RichText::new("Berkas IFC").size(10.5).strong().color(theme.text_muted));
+                    ui.label(RichText::new("Nodes / Elemen").size(10.5).strong().color(theme.text_muted));
+                    ui.label(RichText::new("Indeterminasi (DSI)").size(10.5).strong().color(theme.text_muted));
+                    ui.label(RichText::new("Kondisi κ(K)").size(10.5).strong().color(theme.text_muted));
+                    ui.label(RichText::new("Avg ARI").size(10.5).strong().color(theme.text_muted));
+                    ui.label(RichText::new("Min ARI").size(10.5).strong().color(theme.text_muted));
+                    ui.end_row();
+
+                    for st in &conv.stages {
+                        ui.label(RichText::new(&st.lod_level).size(11.0).strong().color(theme.text_primary));
+                        ui.label(RichText::new(&st.ifc_filename).size(10.5).monospace().color(theme.accent_blue));
+                        ui.label(RichText::new(format!("{} / {}", st.nodes_count, st.elements_count)).size(10.5).color(theme.text_secondary));
+                        ui.label(RichText::new(format!("{} DOF", st.static_indeterminacy_dsi)).size(10.5).color(theme.text_secondary));
+                        ui.label(RichText::new(format!("{:.2e}", st.condition_number_kappa)).size(10.5).monospace().color(theme.accent_orange));
+                        ui.label(RichText::new(format!("{:.3}", st.avg_ari)).size(11.0).strong().color(theme.text_primary));
+                        let min_col = if st.min_system_ari >= 0.75 { theme.accent_green } else { theme.accent_orange };
+                        ui.label(RichText::new(format!("{:.3}", st.min_system_ari)).size(11.0).strong().color(min_col));
+                        ui.end_row();
+                    }
+                });
         });
     }
 

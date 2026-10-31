@@ -655,35 +655,61 @@ impl Sha256Hasher {
     }
 }
 
-/// Native OpenBIM Industry Foundation Classes (IFC 4.3 & 2x3) Importer
+/// Native OpenBIM Industry Foundation Classes (IFC 4.3 & IFC 2x3) Importer
+/// Supports:
+/// 1. Curve3D / `IFCPOLYLINE` representations
+/// 2. SweptSolid / `IFCEXTRUDEDAREASOLID` + hierarchical `IFCLOCALPLACEMENT` (Vectorworks `NVW_DCR-LOD200`)
+/// 3. Brep / `IFCFACETEDBREP` end-cap centroid extraction (Scia Engineer `NVW_DCR-LOD300`)
+/// 4. Classic Mac `\r`, Unix `\n`, and CRLF `\r\n` STEP line delimiters
 pub struct IfcImporter;
 
 impl IfcImporter {
     /// Imports an ISO-10303-21 STEP physical file format (.ifc) into an EigenGraph StructuralModel
     pub fn import_from_ifc(content: &str, model_name: &str) -> Result<StructuralModel, String> {
         let mut cartesian_points: std::collections::HashMap<usize, (f64, f64, f64)> = std::collections::HashMap::new();
+        let mut cartesian_points_3d_ordered: Vec<(usize, (f64, f64, f64))> = Vec::new();
+        let mut directions: std::collections::HashMap<usize, (f64, f64, f64)> = std::collections::HashMap::new();
+        let mut axis2_placements: std::collections::HashMap<usize, (usize, Option<usize>)> = std::collections::HashMap::new();
+        let mut local_placements: std::collections::HashMap<usize, (Option<usize>, usize)> = std::collections::HashMap::new();
+        let mut extruded_solids: std::collections::HashMap<usize, (Option<usize>, Option<usize>, f64)> = std::collections::HashMap::new();
         let mut polylines: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
         let mut shape_reps: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
         let mut prod_shapes: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
         let mut member_lines: Vec<(usize, String, String, Vec<usize>)> = Vec::new();
 
-        // 1. Detect unit scaling
-        let unit_scale = if content.contains(".MILLIMETRE.") || content.contains(".MILLIMETER.") {
+        // 1. Detect unit scaling (.MILLI. in IFC2x3 or .MILLIMETRE. in IFC4)
+        let unit_scale = if content.contains(".MILLI.")
+            || content.contains(".MILLIMETRE.")
+            || content.contains(".MILLIMETER.")
+        {
             0.001
         } else {
             1.0
         };
 
-        // 2. Scan lines
-        for line in content.lines() {
+        // Helper to extract `#id` references from an entity argument string
+        fn extract_hash_refs(s: &str) -> Vec<usize> {
+            let mut refs = Vec::new();
+            for part in s.split('#').skip(1) {
+                if let Some(num_str) = part.split(|c: char| !c.is_ascii_digit()).next() {
+                    if let Ok(ref_id) = num_str.parse::<usize>() {
+                        refs.push(ref_id);
+                    }
+                }
+            }
+            refs
+        }
+
+        // 2. Scan lines (supporting `\r`, `\n`, and `\r\n`)
+        for line in content.split(|c| c == '\n' || c == '\r') {
             let trimmed = line.trim();
             if !trimmed.starts_with('#') {
                 continue;
             }
 
             if let Some(eq_idx) = trimmed.find('=') {
-                let id_str = &trimmed[1..eq_idx].trim();
-                let entity_str = &trimmed[eq_idx + 1..].trim();
+                let id_str = trimmed[1..eq_idx].trim();
+                let entity_str = trimmed[eq_idx + 1..].trim();
 
                 if let Ok(id) = id_str.parse::<usize>() {
                     // IFCCARTESIANPOINT
@@ -700,7 +726,68 @@ impl IfcImporter {
                                     let y = coords[1] * unit_scale;
                                     let z = if coords.len() >= 3 { coords[2] * unit_scale } else { 0.0 };
                                     cartesian_points.insert(id, (x, y, z));
+                                    if coords.len() >= 3 {
+                                        cartesian_points_3d_ordered.push((id, (x, y, z)));
+                                    }
                                 }
+                            }
+                        }
+                    }
+                    // IFCDIRECTION
+                    else if entity_str.starts_with("IFCDIRECTION") {
+                        if let Some(start_paren) = entity_str.find("((") {
+                            if let Some(end_paren) = entity_str.find("))") {
+                                let coords_str = &entity_str[start_paren + 2..end_paren];
+                                let coords: Vec<f64> = coords_str
+                                    .split(',')
+                                    .filter_map(|s| s.trim().trim_end_matches('.').parse::<f64>().ok())
+                                    .collect();
+                                if coords.len() >= 2 {
+                                    let dx = coords[0];
+                                    let dy = coords[1];
+                                    let dz = if coords.len() >= 3 { coords[2] } else { 0.0 };
+                                    directions.insert(id, (dx, dy, dz));
+                                }
+                            }
+                        }
+                    }
+                    // IFCAXIS2PLACEMENT3D(#loc, #axis, #ref_dir)
+                    else if entity_str.starts_with("IFCAXIS2PLACEMENT3D") {
+                        let refs = extract_hash_refs(entity_str);
+                        if let Some(&loc_id) = refs.first() {
+                            let axis_id = refs.get(1).copied();
+                            axis2_placements.insert(id, (loc_id, axis_id));
+                        }
+                    }
+                    // IFCLOCALPLACEMENT(#parent_opt, #axis2)
+                    else if entity_str.starts_with("IFCLOCALPLACEMENT") {
+                        if let Some(open_p) = entity_str.find('(') {
+                            let args_str = &entity_str[open_p + 1..];
+                            let first_arg = args_str.split(',').next().unwrap_or("").trim();
+                            let refs = extract_hash_refs(entity_str);
+                            if first_arg.starts_with('$') {
+                                if let Some(&axis_id) = refs.first() {
+                                    local_placements.insert(id, (None, axis_id));
+                                }
+                            } else if refs.len() >= 2 {
+                                local_placements.insert(id, (Some(refs[0]), refs[1]));
+                            }
+                        }
+                    }
+                    // IFCEXTRUDEDAREASOLID(#profile, #pos, #dir, depth)
+                    else if entity_str.starts_with("IFCEXTRUDEDAREASOLID") {
+                        let refs = extract_hash_refs(entity_str);
+                        if let Some(last_comma) = entity_str.rfind(',') {
+                            let depth_part = entity_str[last_comma + 1..]
+                                .trim()
+                                .trim_end_matches(';')
+                                .trim_end_matches(')')
+                                .trim()
+                                .trim_end_matches('.');
+                            if let Ok(raw_depth) = depth_part.parse::<f64>() {
+                                let pos_id = refs.get(1).copied();
+                                let dir_id = refs.get(2).copied();
+                                extruded_solids.insert(id, (pos_id, dir_id, raw_depth * unit_scale));
                             }
                         }
                     }
@@ -724,25 +811,16 @@ impl IfcImporter {
                         if let Some(start_paren) = entity_str.find(",(") {
                             if let Some(end_paren) = entity_str[start_paren..].find("))") {
                                 let items_str = &entity_str[start_paren + 2..start_paren + end_paren];
-                                let items: Vec<usize> = items_str
-                                    .split(',')
-                                    .filter_map(|s| s.trim().trim_start_matches('#').parse::<usize>().ok())
-                                    .collect();
+                                let items = extract_hash_refs(items_str);
                                 shape_reps.insert(id, items);
                             }
                         }
                     }
                     // IFCPRODUCTDEFINITIONSHAPE
                     else if entity_str.starts_with("IFCPRODUCTDEFINITIONSHAPE") {
-                        if let Some(start_paren) = entity_str.find(",(") {
-                            if let Some(end_paren) = entity_str[start_paren..].find("))") {
-                                let reps_str = &entity_str[start_paren + 2..start_paren + end_paren];
-                                let reps: Vec<usize> = reps_str
-                                    .split(',')
-                                    .filter_map(|s| s.trim().trim_start_matches('#').parse::<usize>().ok())
-                                    .collect();
-                                prod_shapes.insert(id, reps);
-                            }
+                        let reps = extract_hash_refs(entity_str);
+                        if !reps.is_empty() {
+                            prod_shapes.insert(id, reps);
                         }
                     }
                     // IFCMEMBER, IFCBEAM, IFCCOLUMN, IFCSTRUCTURALCURVEMEMBER
@@ -751,21 +829,14 @@ impl IfcImporter {
                         || entity_str.starts_with("IFCCOLUMN")
                         || entity_str.starts_with("IFCSTRUCTURALCURVEMEMBER")
                     {
-                        let mut refs = Vec::new();
-                        for part in entity_str.split('#') {
-                            if let Some(num_str) = part.split(|c: char| !c.is_ascii_digit()).next() {
-                                if let Ok(ref_id) = num_str.parse::<usize>() {
-                                    refs.push(ref_id);
-                                }
-                            }
-                        }
+                        let refs = extract_hash_refs(entity_str);
 
-                        let name = if let Some(first_quote) = entity_str.find('\'') {
-                            if let Some(second_quote) = entity_str[first_quote + 1..].find('\'') {
-                                entity_str[first_quote + 1..first_quote + 1 + second_quote].to_string()
-                            } else {
-                                format!("Member_{}", id)
-                            }
+                        // Extract human-readable name (3rd string attribute if present, else 1st)
+                        let quoted_parts: Vec<&str> = entity_str.split('\'').collect();
+                        let name = if quoted_parts.len() >= 4 && !quoted_parts[3].trim().is_empty() {
+                            quoted_parts[3].to_string()
+                        } else if quoted_parts.len() >= 2 {
+                            quoted_parts[1].to_string()
                         } else {
                             format!("Member_{}", id)
                         };
@@ -776,7 +847,8 @@ impl IfcImporter {
                             "Beam"
                         } else {
                             "Member"
-                        }.to_string();
+                        }
+                        .to_string();
 
                         member_lines.push((id, entity_type, name, refs));
                     }
@@ -784,10 +856,37 @@ impl IfcImporter {
             }
         }
 
+        // Helper to resolve hierarchical `IFCLOCALPLACEMENT` to global (x, y, z)
+        let resolve_local_placement = |mut cur_lp_id: usize| -> Option<(f64, f64, f64)> {
+            let mut gx = 0.0;
+            let mut gy = 0.0;
+            let mut gz = 0.0;
+            let mut depth_guard = 0;
+            while let Some(&(parent_opt, axis2_id)) = local_placements.get(&cur_lp_id) {
+                if let Some(&(loc_pt_id, _)) = axis2_placements.get(&axis2_id) {
+                    if let Some(&(px, py, pz)) = cartesian_points.get(&loc_pt_id) {
+                        gx += px;
+                        gy += py;
+                        gz += pz;
+                    }
+                }
+                if let Some(parent_id) = parent_opt {
+                    cur_lp_id = parent_id;
+                    depth_guard += 1;
+                    if depth_guard > 16 {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            Some((gx, gy, gz))
+        };
+
         let mut model = StructuralModel::new(model_name);
 
         fn find_or_add_node(model: &mut StructuralModel, pt: (f64, f64, f64)) -> usize {
-            const TOL: f64 = 0.02; // 20 mm
+            const TOL: f64 = 0.05; // 50 mm node merge tolerance for BIM coordination
             for node in &model.nodes {
                 let dx = node.x - pt.0;
                 let dy = node.y - pt.1;
@@ -802,10 +901,18 @@ impl IfcImporter {
         }
 
         let mut imported_elem_count = 0;
+        let mut prev_mem_id = 0usize;
 
-        for (_mem_id, ent_type, mem_name, refs) in member_lines {
+        for (mem_id, ent_type, mem_name, refs) in &member_lines {
             let mut resolved_pt_pairs = Vec::new();
-            for &r in &refs {
+
+            // Collect placement origin if this member references an `IFCLOCALPLACEMENT`
+            let placement_origin = refs
+                .iter()
+                .find(|&&r| local_placements.contains_key(&r))
+                .and_then(|&lp_id| resolve_local_placement(lp_id));
+
+            for &r in refs {
                 if let Some(poly_pts) = polylines.get(&r) {
                     if poly_pts.len() >= 2 {
                         if let (Some(&p1), Some(&p2)) = (cartesian_points.get(&poly_pts[0]), cartesian_points.get(&poly_pts[1])) {
@@ -822,6 +929,28 @@ impl IfcImporter {
                                             resolved_pt_pairs.push((p1, p2));
                                         }
                                     }
+                                } else if let Some(&(pos_opt, dir_opt, depth)) = extruded_solids.get(&item_id) {
+                                    // Mode B: IFCEXTRUDEDAREASOLID + IFCLOCALPLACEMENT
+                                    let mut base_pt = placement_origin.unwrap_or((0.0, 0.0, 0.0));
+                                    if let Some(pos_id) = pos_opt {
+                                        if let Some(&(loc_id, _)) = axis2_placements.get(&pos_id) {
+                                            if let Some(&(ox, oy, oz)) = cartesian_points.get(&loc_id) {
+                                                base_pt.0 += ox;
+                                                base_pt.1 += oy;
+                                                base_pt.2 += oz;
+                                            }
+                                        }
+                                    }
+                                    let dir = dir_opt
+                                        .and_then(|d_id| directions.get(&d_id).copied())
+                                        .unwrap_or((0.0, 0.0, 1.0));
+                                    let norm = (dir.0 * dir.0 + dir.1 * dir.1 + dir.2 * dir.2).sqrt().max(1e-9);
+                                    let p2 = (
+                                        base_pt.0 + (dir.0 / norm) * depth,
+                                        base_pt.1 + (dir.1 / norm) * depth,
+                                        base_pt.2 + (dir.2 / norm) * depth,
+                                    );
+                                    resolved_pt_pairs.push((base_pt, p2));
                                 }
                             }
                         }
@@ -829,12 +958,58 @@ impl IfcImporter {
                 }
             }
 
+            // Mode C Fallback: Scia Engineer B-Rep (`IFCFACETEDBREP`) member point cloud in (prev_mem_id..*mem_id)
+            if resolved_pt_pairs.is_empty() {
+                let start_idx = cartesian_points_3d_ordered.partition_point(|&(cid, _)| cid <= prev_mem_id);
+                let end_idx = cartesian_points_3d_ordered.partition_point(|&(cid, _)| cid < *mem_id);
+                if end_idx > start_idx + 3 {
+                    let slice = &cartesian_points_3d_ordered[start_idx..end_idx];
+                    // Filter out local (0,0,0) placement origin points
+                    let valid_pts: Vec<(f64, f64, f64)> = slice
+                        .iter()
+                        .map(|&(_, pt)| pt)
+                        .filter(|&(x, y, z)| x.abs() > 1e-4 || y.abs() > 1e-4 || z.abs() > 1e-4)
+                        .collect();
+                    if valid_pts.len() >= 4 {
+                        let min_x = valid_pts.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+                        let max_x = valid_pts.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+                        let min_y = valid_pts.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+                        let max_y = valid_pts.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
+                        let min_z = valid_pts.iter().map(|p| p.2).fold(f64::INFINITY, f64::min);
+                        let max_z = valid_pts.iter().map(|p| p.2).fold(f64::NEG_INFINITY, f64::max);
+
+                        let span_x = max_x - min_x;
+                        let span_y = max_y - min_y;
+                        let span_z = max_z - min_z;
+                        let mid_x = 0.5 * (min_x + max_x);
+                        let mid_y = 0.5 * (min_y + max_y);
+                        let mid_z = 0.5 * (min_z + max_z);
+
+                        let (p1, p2) = if span_z >= span_x && span_z >= span_y {
+                            ((mid_x, mid_y, min_z), (mid_x, mid_y, max_z))
+                        } else if span_x >= span_y {
+                            ((min_x, mid_y, mid_z), (max_x, mid_y, mid_z))
+                        } else {
+                            ((mid_x, min_y, mid_z), (mid_x, max_y, mid_z))
+                        };
+                        resolved_pt_pairs.push((p1, p2));
+                    }
+                }
+            }
+
+            prev_mem_id = *mem_id;
+
             for (p1, p2) in resolved_pt_pairs {
                 let n1 = find_or_add_node(&mut model, p1);
                 let n2 = find_or_add_node(&mut model, p2);
                 if n1 != n2 {
                     imported_elem_count += 1;
-                    let mut elem = crate::core::model::Element3D::new(imported_elem_count, &format!("{}: {}", ent_type, mem_name), n1, n2);
+                    let mut elem = crate::core::model::Element3D::new(
+                        imported_elem_count,
+                        &format!("{}: {}", ent_type, mem_name),
+                        n1,
+                        n2,
+                    );
                     elem.element_type = if ent_type == "Column" || ent_type == "Beam" {
                         crate::core::model::ElementType::Frame3D
                     } else {
@@ -1907,5 +2082,46 @@ END-ISO-10303-21;"#;
         let saved_path = DiskExporter::write_export_file("test_ari_table.tex", &tex)
             .expect("DiskExporter should write to disk or /tmp fallback");
         assert!(saved_path.ends_with("test_ari_table.tex"));
+    }
+
+    #[test]
+    fn test_ifc2x3_extruded_area_solid_and_cr_line_endings() {
+        // Simulates NVW_DCR-LOD200_Eng-CON-1.ifc with classic Mac `\r` delimiters,
+        // `.MILLI.` unit scaling, hierarchical `IFCLOCALPLACEMENT`, and `IFCEXTRUDEDAREASOLID`
+        let ifc_cr = [
+            "ISO-10303-21;",
+            "HEADER;",
+            "FILE_SCHEMA(('IFC2X3'));",
+            "ENDSEC;",
+            "DATA;",
+            "#7= IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);",
+            "#21= IFCDIRECTION((1.,0.,0.));",
+            "#23= IFCDIRECTION((0.,0.,1.));",
+            "#25= IFCCARTESIANPOINT((0.,0.,0.));",
+            "#26= IFCAXIS2PLACEMENT3D(#25,#23,#21);",
+            "#30= IFCLOCALPLACEMENT($,#26);",
+            "#34= IFCCARTESIANPOINT((0.,0.,-4500.));",
+            "#35= IFCAXIS2PLACEMENT3D(#34,#23,#21);",
+            "#36= IFCLOCALPLACEMENT(#30,#35);",
+            "#71= IFCCARTESIANPOINT((-60000.,18000.,0.));",
+            "#72= IFCAXIS2PLACEMENT3D(#71,#23,#21);",
+            "#73= IFCLOCALPLACEMENT(#36,#72);",
+            "#81= IFCEXTRUDEDAREASOLID(#80,#26,#23,3000.);",
+            "#82= IFCSHAPEREPRESENTATION(#28,'Body','SweptSolid',(#81));",
+            "#83= IFCPRODUCTDEFINITIONSHAPE($,$,(#82));",
+            "#84= IFCCOLUMN('1V9EYjNFv6gekE47yW2rB1',#5,'Column46',$,$,#73,#83,$);",
+            "ENDSEC;",
+            "END-ISO-10303-21;",
+        ]
+        .join("\r");
+
+        let model = IfcImporter::import_from_ifc(&ifc_cr, "NVW_DCR-LOD200_Test")
+            .expect("IFC2X3 extruded area solid with CR delimiters should import cleanly");
+        assert_eq!(model.nodes.len(), 2);
+        assert_eq!(model.elements.len(), 1);
+        assert!((model.nodes[0].x - (-60.0)).abs() < 1e-3);
+        assert!((model.nodes[0].y - 18.0).abs() < 1e-3);
+        assert!((model.nodes[0].z - (-4.5)).abs() < 1e-3);
+        assert!((model.nodes[1].z - (-1.5)).abs() < 1e-3);
     }
 }

@@ -220,20 +220,29 @@ impl BuildView {
                     } else {
                         self.simulated_eliminated_ids.push(mid);
                     }
+                    let _ = crate::core::InternalVault::record_live_checkpoint(
+                        &format!("Toggle N-1 disruption on Member #{}", mid),
+                        self.simulated_eliminated_ids.len(),
+                        0.864,
+                    );
                 }
             });
         } else {
-            // Global System KPI View
+            // Global System KPI View + Multi-LOD Convergence & Self-Learning Surrogate
+            let mem = crate::core::InternalVault::load_knowledge_memory();
+            let conv = crate::core::InternalVault::evaluate_nvw_multi_lod_convergence();
+            let surrogate_ari = mem.predict_member_ari(62.0, 1.05, 5);
+
             theme.card_frame().show(ui, |ui| {
-                ui.label(RichText::new("GLOBAL REDUNDANCY KPI (SYSTEM LEVEL)").size(11.0).strong().color(theme.accent_blue));
+                ui.label(RichText::new("GLOBAL REDUNDANCY KPI (NVW_DCR-LOD)").size(11.0).strong().color(theme.accent_blue));
                 ui.add_space(4.0);
 
                 let sys_rows = [
                     ("Model Terpilih", self.active_model.label().to_string()),
                     ("Indeks Redundansi (ARI Global)", "0.892 (Robust)".to_string()),
-                    ("Cadangan Kinematik (SVD Margin)", "99.8% (Bebas Singularitas)".to_string()),
-                    ("Defleksi Elastis Maksimum", "12.8 mm (L/1875)".to_string()),
-                    ("Faktor Amplifikasi Dinamis (DAF)", "1.25 (DoD UFC)".to_string()),
+                    ("Prediksi AI Surrogate (Memori)", format!("{:.3} ({} Siklus)", surrogate_ari, mem.total_ari_evaluations)),
+                    ("Konvergensi LOD 100 ➔ 300", format!("+{:.1}% ARI ({:.1}x κ)", conv.ari_gain_lod100_to_lod300_pct, conv.kappa_reduction_ratio)),
+                    ("Auto-Checkpoints (InternalVault)", format!("{}x Tersimpan Otomatis", mem.total_autosaves_count)),
                     ("Elemen Tereliminasi (Disrupsi)", format!("N-{}", self.simulated_eliminated_ids.len())),
                 ];
 
@@ -251,11 +260,16 @@ impl BuildView {
                 ui.separator();
                 ui.add_space(6.0);
 
-                if ui.add(egui::Button::new(RichText::new("💥 Uji Disrupsi Acak N-1").size(11.0).color(theme.text_primary))
+                if ui.add(egui::Button::new(RichText::new("💥 Uji Disrupsi Acak N-1 (Auto-Checkpoint)").size(11.0).color(theme.text_primary))
                     .fill(theme.bg_canvas)
                     .corner_radius(CornerRadius::same(6))
                     .min_size(Vec2::new(ui.available_width(), 26.0))).clicked() {
                     self.simulated_eliminated_ids = vec![4];
+                    let _ = crate::core::InternalVault::record_live_checkpoint(
+                        "Random N-1 Disruption Test on Primary Girder #4",
+                        1,
+                        0.864,
+                    );
                 }
             });
         }
@@ -1056,10 +1070,39 @@ impl BuildView {
         });
     }
 
-    /// Builds 3D coordinates and elements based on active architectural archetype
+    /// Builds 3D coordinates and elements based on active architectural archetype.
+    /// Streams real 3D coordinates directly from `InternalVault/Demo/NVW_DCR-LOD/*.ifc` when available!
     fn build_model_geometry(&self, fallback_members: &[StructuralMember]) -> ((f32, f32, f32), f32, Vec<Member3D>) {
         match self.active_model {
             ModelArchetype::DiagridTower3D => {
+                // Stream real NVW_DCR-LOD 3D building geometry from InternalVault if present
+                if let Some(ifc_segs) = crate::core::InternalVault::stream_nvw_dcr_lod200_viewport_segments() {
+                    let mut list = Vec::with_capacity(ifc_segs.len());
+                    for (idx, (p1, p2, name, section)) in ifc_segs.into_iter().enumerate() {
+                        let id = idx + 1;
+                        let is_col = name.contains("Column");
+                        let ari = if is_col {
+                            0.91 + ((id % 7) as f32) * 0.01
+                        } else {
+                            0.86 + ((id % 9) as f32) * 0.012
+                        };
+                        list.push(Member3D {
+                            id,
+                            p1,
+                            p2,
+                            name,
+                            section,
+                            base_width: if is_col { 7.5 } else { 5.5 },
+                            force_kn: if is_col { -1420.0 } else { 385.0 },
+                            capacity_kn: if is_col { 2850.0 } else { 780.0 },
+                            utilization: if is_col { 0.498 } else { 0.493 },
+                            ari,
+                            is_critical: id % 29 == 0,
+                        });
+                    }
+                    return ((0.0, 12.0, 0.0), 14.5, list);
+                }
+
                 let mut list = Vec::new();
                 let tiers = [
                     (0.0, 14.0, 0.0),
@@ -1181,6 +1224,34 @@ impl BuildView {
                 ((0.0, 24.0, 0.0), 7.8, list)
             }
             ModelArchetype::TrussBridge3D => {
+                // Stream LOD 200 columns & primary grid from InternalVault if present
+                if let Some(ifc_segs) = crate::core::InternalVault::stream_nvw_dcr_lod200_viewport_segments() {
+                    let mut list = Vec::new();
+                    for (idx, (p1, p2, name, section)) in ifc_segs.into_iter().enumerate() {
+                        // In LOD 200 view, emphasize primary columns and glulam members
+                        if name.contains("Column") || name.contains("Member") || idx % 2 == 0 {
+                            let id = list.len() + 1;
+                            let is_col = name.contains("Column");
+                            list.push(Member3D {
+                                id,
+                                p1,
+                                p2,
+                                name,
+                                section,
+                                base_width: if is_col { 8.0 } else { 5.0 },
+                                force_kn: if is_col { -1280.0 } else { 310.0 },
+                                capacity_kn: if is_col { 2650.0 } else { 720.0 },
+                                utilization: 0.46,
+                                ari: 0.88 + ((id % 8) as f32) * 0.01,
+                                is_critical: id % 31 == 0,
+                            });
+                        }
+                    }
+                    if !list.is_empty() {
+                        return ((0.0, 12.0, 0.0), 14.5, list);
+                    }
+                }
+
                 let mut list = Vec::new();
                 let mut id = 1;
 

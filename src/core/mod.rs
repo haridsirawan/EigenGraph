@@ -60,5 +60,5 @@ pub use dynamics::{
     DynamicsEngine, SuddenRemovalTransientReport, TimeHistoryStep,
 };
 pub use vault::{
-    AriKnowledgeMemory, InternalVault,
+    AriKnowledgeMemory, InternalVault, MultiLodConvergenceReport, MultiLodStageMetrics,
 };
