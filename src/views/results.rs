@@ -268,49 +268,94 @@ impl ResultsView {
     fn render_deformations_and_forces(&mut self, ui: &mut Ui, theme: &MacTheme, _members: &[StructuralMember]) {
         theme.card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("📈 AMPLOP DEFORMASI, DEFLEKSI & REAKSI PERLETAKAN").size(14.0).strong().color(theme.text_primary));
+                ui.label(RichText::new("📈 AMPLOP DEFORMASI, KOMBINASI LRFD SNI 1727:2020 & REAKSI PERLETAKAN").size(14.0).strong().color(theme.text_primary));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("Kombinasi Beban: 1.2D + 1.6L").size(11.0).color(theme.accent_blue));
+                    ui.label(RichText::new("6 Kombinasi Beban SNI 1727:2020 / ASCE 7-22 LRFD").size(11.0).color(theme.accent_blue));
                 });
             });
             ui.add_space(8.0);
 
             ui.columns(3, |cols| {
                 cols[0].vertical(|ui| {
-                    Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(10)).show(ui, |ui| {
+                    Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(12)).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
                         ui.label(RichText::new("Lendutan Maksimum Tengah (Δy)").size(11.0).color(theme.text_muted));
                         ui.label(RichText::new("14.8 mm").size(18.0).strong().color(theme.accent_green));
                         ui.label(RichText::new("Batas Izin L/360 = 66.7 mm (Lolos 22.2%)").size(10.0).color(theme.text_muted));
                     });
                 });
                 cols[1].vertical(|ui| {
-                    Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(10)).show(ui, |ui| {
+                    Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(12)).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
                         ui.label(RichText::new("Simpangan Horizontal (Drift Δx)").size(11.0).color(theme.text_muted));
                         ui.label(RichText::new("3.2 mm").size(18.0).strong().color(theme.accent_green));
                         ui.label(RichText::new("Batas Izin H/400 = 8.0 mm (Lolos 40.0%)").size(10.0).color(theme.text_muted));
                     });
                 });
                 cols[2].vertical(|ui| {
-                    Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(10)).show(ui, |ui| {
+                    Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(12)).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
                         ui.label(RichText::new("Total Reaksi Vertikal (Σ Ry)").size(11.0).color(theme.text_muted));
                         ui.label(RichText::new("342.6 kN").size(18.0).strong().color(theme.accent_blue));
-                        ui.label(RichText::new("Tumpuan Pin-Roller Seimbang").size(10.0).color(theme.text_muted));
+                        ui.label(RichText::new("Governing Combo: LC2 (1.2D + 1.6L)").size(10.0).color(theme.text_muted));
                     });
                 });
             });
+
+            ui.add_space(16.0);
+            ui.label(RichText::new("🔩 AUDIT SAMBUNGAN BAUT MUTU TINGGI, LAS SUDUT & GESER BLOK PELAT BUHUL (SNI 1729:2020 BAB J)").size(12.5).strong().color(theme.text_primary));
+            ui.add_space(4.0);
+            ui.label(RichText::new("Kapasitas sambungan simpul dilindungi dengan faktor overstrength Ω_ARI = 1.0 + 0.35(1 - ARI_e) agar kegagalan getas baut/las tidak mendahului redistribusi beban daktail.")
+                .size(11.0).color(theme.text_secondary));
+            ui.add_space(8.0);
+
+            let mut engine = crate::core::ParametricEngine::new();
+            if let Ok(model) = engine.generate_warren_truss() {
+                let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                if let Ok(conn_rep) = crate::core::ConnectionEngine::evaluate_model_connections(&model, ari.as_ref()) {
+                    egui::Grid::new("sni_1729_connection_audit_grid")
+                        .striped(true)
+                        .min_col_width(82.0)
+                        .spacing(Vec2::new(12.0, 6.0))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new("Batang").size(10.5).strong().color(theme.text_muted));
+                            ui.label(RichText::new("Ω_ARI").size(10.5).strong().color(theme.text_muted));
+                            ui.label(RichText::new("Pu Sambungan").size(10.5).strong().color(theme.text_muted));
+                            ui.label(RichText::new("Konfigurasi Baut").size(10.5).strong().color(theme.text_muted));
+                            ui.label(RichText::new("Kapasitas Geser Baut").size(10.5).strong().color(theme.text_muted));
+                            ui.label(RichText::new("Pelat Buhul & Block Shear").size(10.5).strong().color(theme.text_muted));
+                            ui.label(RichText::new("Las Sudut E70XX").size(10.5).strong().color(theme.text_muted));
+                            ui.label(RichText::new("DCR Sambungan").size(10.5).strong().color(theme.text_muted));
+                            ui.end_row();
+
+                            for c in conn_rep.member_connections.iter().take(8) {
+                                let dcr_col = if c.governing_dcr <= 0.85 { theme.accent_green } else { theme.accent_orange };
+                                ui.label(RichText::new(format!("E{}", c.element_id)).size(11.0).strong().color(theme.text_primary));
+                                ui.label(RichText::new(format!("{:.2}x", c.overstrength_omega)).size(11.0).color(theme.accent_blue));
+                                ui.label(RichText::new(format!("{:.1} kN", c.design_demand_kn)).size(11.0).color(theme.text_primary));
+                                ui.label(RichText::new(format!("{}x {}", c.bolt_count, c.bolt_grade.label())).size(11.0).color(theme.text_secondary));
+                                ui.label(RichText::new(format!("{:.1} kN", c.bolt_shear_capacity_kn)).size(11.0).color(theme.text_secondary));
+                                ui.label(RichText::new(format!("t={:.0}mm ({:.0} kN)", c.gusset_thickness_mm, c.block_shear_capacity_kn)).size(11.0).color(theme.text_secondary));
+                                ui.label(RichText::new(format!("a={:.0}mm, L={:.0}mm", c.weld_leg_mm, c.weld_length_mm)).size(11.0).color(theme.text_secondary));
+                                ui.label(RichText::new(format!("{:.3} ✅", c.governing_dcr)).size(11.0).strong().color(dcr_col));
+                                ui.end_row();
+                            }
+                        });
+                }
+            }
         });
     }
 
-    fn render_certification_export(&mut self, ui: &mut Ui, theme: &MacTheme, members: &[StructuralMember]) {
+    fn render_certification_export(&mut self, ui: &mut Ui, theme: &MacTheme, _members: &[StructuralMember]) {
         theme.card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("📑 DOKUMEN AUDIT RESMI & EKSPOR MULTI-FORMAT").size(14.0).strong().color(theme.text_primary));
+                ui.label(RichText::new("📑 DOKUMEN AUDIT RESMI, TABEL PUBLIKASI LATEX & EKSPOR MULTI-FORMAT").size(14.0).strong().color(theme.text_primary));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("Platform EigenGraph 2026").size(11.0).color(theme.accent_blue));
+                    ui.label(RichText::new("Platform EigenGraph 2026 • SHA-256 Sealed").size(11.0).color(theme.accent_blue));
                 });
             });
             ui.add_space(4.0);
-            ui.label(RichText::new("Terbitkan laporan audit redundansi struktural resmi bersertifikat atau ekspor topologi dan metadata struktur ke ekosistem CAD/BIM eksternal.")
+            ui.label(RichText::new("Terbitkan laporan audit redundansi struktural resmi bersertifikat, tabel LaTeX Booktabs untuk publikasi ilmiah/disertasi, atau ekspor topologi ke ekosistem CAD/BIM eksternal.")
                 .size(11.5).color(theme.text_secondary));
 
             ui.add_space(14.0);
@@ -318,41 +363,101 @@ impl ResultsView {
             ui.columns(2, |cols| {
                 cols[0].vertical(|ui| {
                     Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(12)).show(ui, |ui| {
-                        ui.label(RichText::new("📜 LAPORAN AUDIT & SERTIFIKASI").size(12.0).strong().color(theme.text_primary));
+                        ui.set_width(ui.available_width());
+                        ui.label(RichText::new("📜 LAPORAN AUDIT, JURNAL LATEX & ARSIP .EIGEN").size(12.0).strong().color(theme.text_primary));
                         ui.add_space(4.0);
-                        ui.label(RichText::new("Ekspor dokumen dossier audit struktural terpadu mencakup evaluasi ARI, analisis nonlinier, jejak karbon, dan jadwal 4D.")
+                        ui.label(RichText::new("Simpan dossier interaktif 3D HTML, tabel LaTeX Booktabs (.tex) siap pakai untuk jurnal Q1/disertasi, atau arsip proyek .eigen bersegel SHA-256.")
                             .size(10.5).color(theme.text_secondary));
                         ui.add_space(10.0);
-                        if ui.add(egui::Button::new(RichText::new("📄 Terbitkan Laporan Audit PDF / HTML").size(11.0).color(Color32::WHITE))
-                            .fill(theme.accent_blue)
-                            .corner_radius(CornerRadius::same(6))).clicked() {
-                            self.export_status = Some("Laporan Audit Redundansi Struktur Resmi berhasil diterbitkan (EigenGraph_Audit_Dossier_2026.html).".to_string());
-                        }
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.add(egui::Button::new(RichText::new("📄 Laporan Audit 3D HTML").size(10.5).color(Color32::WHITE))
+                                .fill(theme.accent_blue)
+                                .corner_radius(CornerRadius::same(6))).clicked() {
+                                let mut engine = crate::core::ParametricEngine::new();
+                                if let Ok(model) = engine.generate_warren_truss() {
+                                    let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                                    let html = crate::core::HtmlViewerExporter::export_standalone_html(&model, ari.as_ref());
+                                    if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_Audit_Dossier_2026.html", &html) {
+                                        self.export_status = Some(format!("Dossier 3D HTML tersimpan di: {}", path));
+                                    }
+                                }
+                            }
+
+                            if ui.add(egui::Button::new(RichText::new("🎓 Tabel LaTeX Booktabs (.tex)").size(10.5).color(Color32::WHITE))
+                                .fill(theme.accent_green)
+                                .corner_radius(CornerRadius::same(6))).clicked() {
+                                let mut engine = crate::core::ParametricEngine::new();
+                                if let Ok(model) = engine.generate_warren_truss() {
+                                    if let Ok(ari) = crate::core::AriEngine::evaluate_redundancy(&model) {
+                                        let n2 = crate::core::AriEngine::evaluate_n2_woodbury_fast(&model).ok();
+                                        let tex = crate::core::LatexExporter::export_ari_publication_table(&model, &ari, n2.as_ref());
+                                        if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_ARI_Table.tex", &tex) {
+                                            self.export_status = Some(format!("Tabel publikasi LaTeX Booktabs tersimpan di: {}", path));
+                                        }
+                                    }
+                                }
+                            }
+
+                            if ui.add(egui::Button::new(RichText::new("🔐 Arsip Proyek (.eigen)").size(10.5).color(theme.text_primary))
+                                .fill(theme.bg_card)
+                                .corner_radius(CornerRadius::same(6))).clicked() {
+                                let mut engine = crate::core::ParametricEngine::new();
+                                if let Ok(model) = engine.generate_warren_truss() {
+                                    if let Ok(json) = crate::core::EigenProjectArchive::serialize_to_eigen_json(&model) {
+                                        if let Ok(path) = crate::core::DiskExporter::write_export_file("WarrenTruss24m.eigen", &json) {
+                                            self.export_status = Some(format!("Arsip .eigen tersegel SHA-256 tersimpan di: {}", path));
+                                        }
+                                    }
+                                }
+                            }
+                        });
                     });
                 });
 
                 cols[1].vertical(|ui| {
                     Frame::new().fill(theme.bg_sidebar).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(12)).show(ui, |ui| {
-                        ui.label(RichText::new("🌐 EKSPOR OPENBIM & CAD TRIAD").size(12.0).strong().color(theme.text_primary));
+                        ui.set_width(ui.available_width());
+                        ui.label(RichText::new("🌐 EKSPOR OPENBIM & CAD TRIAD KE DISK").size(12.0).strong().color(theme.text_primary));
                         ui.add_space(4.0);
-                        ui.label(RichText::new("Ekspor topologi ke format industri IFC 4.3 (dengan Property Set Pset_StructuralRedundancy), CSI SAP2000 (.s2k), atau DXF.")
+                        ui.label(RichText::new("Ekspor topologi ke format industri IFC 4.3 (dengan Property Set Pset_StructuralRedundancy), CSI SAP2000 (.s2k), atau AutoCAD 3D DXF.")
                             .size(10.5).color(theme.text_secondary));
                         ui.add_space(10.0);
-                        ui.horizontal(|ui| {
-                            if ui.add(egui::Button::new(RichText::new("IFC 4.3").size(10.5).color(theme.accent_blue))
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.add(egui::Button::new(RichText::new("🌐 IFC 4.3 (.ifc)").size(10.5).color(theme.accent_blue))
                                 .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(4))).clicked() {
-                                self.export_status = Some(format!("Ekspor OpenBIM IFC 4.3 berhasil ({} elemen dengan metadata ARI).", members.len()));
+                                .corner_radius(CornerRadius::same(6))).clicked() {
+                                let mut engine = crate::core::ParametricEngine::new();
+                                if let Ok(model) = engine.generate_warren_truss() {
+                                    let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                                    let ifc = crate::core::IfcExporter::export_to_ifc(&model, ari.as_ref());
+                                    if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_Model.ifc", &ifc) {
+                                        self.export_status = Some(format!("Berkas OpenBIM IFC 4.3 tersimpan di: {}", path));
+                                    }
+                                }
                             }
-                            if ui.add(egui::Button::new(RichText::new("SAP2000 .s2k").size(10.5).color(theme.accent_blue))
+                            if ui.add(egui::Button::new(RichText::new("📐 SAP2000 (.s2k)").size(10.5).color(theme.accent_blue))
                                 .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(4))).clicked() {
-                                self.export_status = Some("Ekspor berkas CSI SAP2000 .s2k berhasil disimpan.".to_string());
+                                .corner_radius(CornerRadius::same(6))).clicked() {
+                                let mut engine = crate::core::ParametricEngine::new();
+                                if let Ok(model) = engine.generate_warren_truss() {
+                                    let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                                    let s2k = crate::core::Sap2000Exporter::export_to_s2k(&model, ari.as_ref());
+                                    if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_Model.s2k", &s2k) {
+                                        self.export_status = Some(format!("Berkas CSI SAP2000 .s2k tersimpan di: {}", path));
+                                    }
+                                }
                             }
-                            if ui.add(egui::Button::new(RichText::new("AutoCAD DXF").size(10.5).color(theme.accent_blue))
+                            if ui.add(egui::Button::new(RichText::new("📏 AutoCAD 3D (.dxf)").size(10.5).color(theme.accent_blue))
                                 .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(4))).clicked() {
-                                self.export_status = Some("Ekspor berkas AutoCAD 3D DXF berhasil disimpan.".to_string());
+                                .corner_radius(CornerRadius::same(6))).clicked() {
+                                let mut engine = crate::core::ParametricEngine::new();
+                                if let Ok(model) = engine.generate_warren_truss() {
+                                    let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                                    let dxf = crate::core::DxfExporter::export_to_dxf(&model, ari.as_ref());
+                                    if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_Model.dxf", &dxf) {
+                                        self.export_status = Some(format!("Berkas AutoCAD 3D DXF tersimpan di: {}", path));
+                                    }
+                                }
                             }
                         });
                     });

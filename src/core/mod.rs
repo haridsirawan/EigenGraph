@@ -17,6 +17,8 @@ pub mod carbon;
 pub mod nonlinear;
 pub mod modal;
 pub mod reliability;
+pub mod connection;
+pub mod dynamics;
 
 pub use linalg::{CsrMatrix, Matrix};
 pub use model::{
@@ -30,8 +32,8 @@ pub use ari::{
 };
 pub use parametric::{ParametricEngine, ParametricFormula};
 pub use interop::{
-    DossierExporter, DstvExporter, DstvPiece, DxfExporter, EigenProjectArchive, HtmlViewerExporter,
-    IfcExporter, IfcImporter, Sap2000Exporter, Sha256Hasher,
+    DiskExporter, DossierExporter, DstvExporter, DstvPiece, DxfExporter, EigenProjectArchive,
+    HtmlViewerExporter, IfcExporter, IfcImporter, LatexExporter, Sap2000Exporter, Sha256Hasher,
 };
 pub use optimizer::{AriTopologyOptimizer, BracingCandidate, BracingOptimizationReport};
 pub use cost::{AhspUnitRates, BoqLineItem, CostEngine, CostEstimationReport, ProfileQuantity};
@@ -49,4 +51,10 @@ pub use modal::{
 pub use reliability::{
     FragilityCurvePoint, MemberReliabilityResult, ReliabilityAndClashReport, ReliabilityEngine,
     SpatialClash, standard_normal_cdf,
+};
+pub use connection::{
+    BoltGrade, ConnectionAuditReport, ConnectionEngine, MemberConnectionDesign,
+};
+pub use dynamics::{
+    DynamicsEngine, SuddenRemovalTransientReport, TimeHistoryStep,
 };

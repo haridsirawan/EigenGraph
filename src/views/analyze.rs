@@ -1,6 +1,6 @@
 //! analyze.rs — Pillar 4: Structural Health, SVD Guard, BIM 5D (RAB), and BIM 4D (Scheduling).
 
-use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, Stroke, Ui};
+use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, Pos2, RichText, ScrollArea, Sense, Stroke, Ui, Vec2};
 use crate::models::StructuralMember;
 use crate::theme::MacTheme;
 
@@ -145,21 +145,42 @@ impl AnalyzeView {
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0, theme.accent_blue))
                     .corner_radius(CornerRadius::same(8))).clicked() {
-                    self.export_status = Some("CSI SAP2000 .s2k script generated with geometry & ARI metrics".to_string());
+                    let mut engine = crate::core::ParametricEngine::new();
+                    if let Ok(model) = engine.generate_warren_truss() {
+                        let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                        let s2k = crate::core::Sap2000Exporter::export_to_s2k(&model, ari.as_ref());
+                        if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_SAP2000.s2k", &s2k) {
+                            self.export_status = Some(format!("CSI SAP2000 .s2k tersimpan di: {}", path));
+                        }
+                    }
                 }
 
                 if ui.add(egui::Button::new(RichText::new("📥 DXF 3D (.dxf)").size(11.5).color(Color32::WHITE))
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0, theme.accent_green))
                     .corner_radius(CornerRadius::same(8))).clicked() {
-                    self.export_status = Some("AutoCAD 3D DXF generated with color-coded ARI classification layers".to_string());
+                    let mut engine = crate::core::ParametricEngine::new();
+                    if let Ok(model) = engine.generate_warren_truss() {
+                        let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                        let dxf = crate::core::DxfExporter::export_to_dxf(&model, ari.as_ref());
+                        if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_3D.dxf", &dxf) {
+                            self.export_status = Some(format!("AutoCAD 3D DXF tersimpan di: {}", path));
+                        }
+                    }
                 }
 
                 if ui.add(egui::Button::new(RichText::new("🌐 OpenBIM (.ifc)").size(11.5).color(Color32::WHITE))
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0, Color32::from_rgb(180, 100, 255)))
                     .corner_radius(CornerRadius::same(8))).clicked() {
-                    self.export_status = Some("OpenBIM IFC 4.3 exported with custom Pset_StructuralRedundancy properties".to_string());
+                    let mut engine = crate::core::ParametricEngine::new();
+                    if let Ok(model) = engine.generate_warren_truss() {
+                        let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                        let ifc = crate::core::IfcExporter::export_to_ifc(&model, ari.as_ref());
+                        if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_OpenBIM.ifc", &ifc) {
+                            self.export_status = Some(format!("OpenBIM IFC 4.3 tersimpan di: {}", path));
+                        }
+                    }
                 }
             });
         });
@@ -387,6 +408,56 @@ impl AnalyzeView {
                 ui.add_space(3.0);
             }
         });
+
+        ui.add_space(16.0);
+
+        // N-2 WOODBURY RANK-2 SIMULTANEOUS DUAL-MEMBER SCREENING
+        theme.card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("🔥 MATRIKS SCREENING DISRUPSI GANDA SIMULTAN N-2 (WOODBURY RANK-2 IDENTITY)").size(13.0).strong().color(theme.text_primary));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(RichText::new("det(I_2 - (1-λ)H_{ab}) = (1 - (1-λ)h_a)(1 - (1-λ)h_b) - (1-λ)² h_{ab}²").size(10.5).color(theme.accent_blue));
+                });
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new("Mengevaluasi seluruh kombinasi pasangan 2 batang yang terputus secara bersamaan tanpa merakit ulang matriks kekakuan global (kompleksitas O(m²)).")
+                .size(11.5).color(theme.text_secondary));
+            ui.add_space(8.0);
+
+            let mut engine = crate::core::ParametricEngine::new();
+            if let Ok(model) = engine.generate_warren_truss() {
+                if let Ok(n2_rep) = crate::core::AriEngine::evaluate_n2_woodbury_fast(&model) {
+                    egui::Grid::new("n2_woodbury_pairs_grid")
+                        .striped(true)
+                        .min_col_width(105.0)
+                        .spacing(Vec2::new(14.0, 6.0))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new("Pasangan Batang").size(11.0).strong().color(theme.text_muted));
+                            ui.label(RichText::new("Kopling Silang |h_ab|").size(11.0).strong().color(theme.text_muted));
+                            ui.label(RichText::new("Determinan Woodbury").size(11.0).strong().color(theme.text_muted));
+                            ui.label(RichText::new("Skor ARI_ab (N-2)").size(11.0).strong().color(theme.text_muted));
+                            ui.label(RichText::new("Status Kestabilan N-2").size(11.0).strong().color(theme.text_muted));
+                            ui.end_row();
+
+                            for pair in n2_rep.pair_results.iter().take(6) {
+                                let col = if pair.is_coupled_mechanism || pair.pair_ari < 0.45 {
+                                    theme.accent_red
+                                } else if pair.pair_ari < 0.70 {
+                                    theme.accent_orange
+                                } else {
+                                    theme.accent_green
+                                };
+                                ui.label(RichText::new(format!("(E{}, E{})", pair.member_1_id, pair.member_2_id)).size(11.0).strong().color(theme.text_primary));
+                                ui.label(RichText::new(format!("{:.4}", pair.h12_coupling)).size(11.0).color(theme.text_secondary));
+                                ui.label(RichText::new(format!("{:.4}", pair.woodbury_determinant)).size(11.0).color(theme.accent_blue));
+                                ui.label(RichText::new(format!("{:.4}", pair.pair_ari)).size(11.0).strong().color(col));
+                                ui.label(RichText::new(if pair.is_coupled_mechanism { "⚠️ Mekanisme N-2" } else { "✅ Stabil Redundan" }).size(11.0).color(col));
+                                ui.end_row();
+                            }
+                        });
+                }
+            }
+        });
     }
 
     // -------------------------------------------------------------
@@ -576,6 +647,7 @@ impl AnalyzeView {
 
     fn metric_card(&self, ui: &mut Ui, theme: &MacTheme, title: &str, value: &str, sub: &str, color: Color32) {
         theme.card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.label(RichText::new(title).size(11.0).strong().color(theme.text_secondary));
             ui.add_space(4.0);
             ui.heading(RichText::new(value).size(20.0).strong().color(color));
@@ -586,6 +658,7 @@ impl AnalyzeView {
 
     fn render_stat_card(&self, ui: &mut Ui, theme: &MacTheme, title: &str, val: &str, subtitle: &str, val_color: Color32) {
         theme.card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.label(RichText::new(title).size(11.0).strong().color(theme.text_secondary));
             ui.add_space(4.0);
             ui.label(RichText::new(val).size(18.0).strong().color(val_color));
@@ -717,30 +790,11 @@ impl AnalyzeView {
         let report = crate::core::NonlinearEngine::run_pushover(&model, 15);
 
         // Top Summary Cards
-        ui.horizontal(|ui| {
-            theme.card_frame().show(ui, |ui| {
-                ui.label(RichText::new("BASE SHEAR LELEH (Vy)").size(11.0).color(theme.text_secondary));
-                ui.label(RichText::new(format!("{:.1} kN", report.yield_base_shear_kn)).size(16.0).strong().color(theme.accent_blue));
-                ui.label(RichText::new(format!("Drift: {:.2} mm", report.yield_drift_mm)).size(10.5).color(theme.text_muted));
-            });
-            ui.add_space(8.0);
-            theme.card_frame().show(ui, |ui| {
-                ui.label(RichText::new("KAPASITAS ULTIMATE (Vu)").size(11.0).color(theme.text_secondary));
-                ui.label(RichText::new(format!("{:.1} kN", report.ultimate_base_shear_kn)).size(16.0).strong().color(theme.accent_green));
-                ui.label(RichText::new(format!("Drift: {:.2} mm", report.ultimate_drift_mm)).size(10.5).color(theme.text_muted));
-            });
-            ui.add_space(8.0);
-            theme.card_frame().show(ui, |ui| {
-                ui.label(RichText::new("OVERSTRENGTH FACTOR (Ω0)").size(11.0).color(theme.text_secondary));
-                ui.label(RichText::new(format!("{:.2}x", report.overstrength_factor_omega0)).size(16.0).strong().color(theme.accent_orange));
-                ui.label(RichText::new("AISC 341 Seismic Resilient").size(10.5).color(theme.text_muted));
-            });
-            ui.add_space(8.0);
-            theme.card_frame().show(ui, |ui| {
-                ui.label(RichText::new("RASIO DUKTILITAS (µ)").size(11.0).color(theme.text_secondary));
-                ui.label(RichText::new(format!("{:.2}", report.ductility_ratio_mu)).size(16.0).strong().color(theme.accent_blue));
-                ui.label(RichText::new("Kategori Struktur Sangat Daktail").size(10.5).color(theme.text_muted));
-            });
+        ui.columns(4, |cols| {
+            self.metric_card(&mut cols[0], theme, "BASE SHEAR LELEH (Vy)", &format!("{:.1} kN", report.yield_base_shear_kn), &format!("Drift: {:.2} mm", report.yield_drift_mm), theme.accent_blue);
+            self.metric_card(&mut cols[1], theme, "KAPASITAS ULTIMATE (Vu)", &format!("{:.1} kN", report.ultimate_base_shear_kn), &format!("Drift: {:.2} mm", report.ultimate_drift_mm), theme.accent_green);
+            self.metric_card(&mut cols[2], theme, "OVERSTRENGTH FACTOR (Ω0)", &format!("{:.2}x", report.overstrength_factor_omega0), "AISC 341 Seismic Resilient", theme.accent_orange);
+            self.metric_card(&mut cols[3], theme, "RASIO DUKTILITAS (µ)", &format!("{:.2}", report.ductility_ratio_mu), "Kategori Struktur Sangat Daktail", theme.accent_blue);
         });
 
         ui.add_space(16.0);
@@ -759,6 +813,44 @@ impl AnalyzeView {
                         ui.label(RichText::new(status_tag).size(11.5).strong().color(if report.is_stable { theme.accent_green } else { theme.accent_orange }));
                     });
                 });
+
+                ui.add_space(10.0);
+
+                // LIVE VECTOR PUSHOVER CAPACITY CURVE (V_base vs Drift)
+                let desired = Vec2::new(ui.available_width(), 145.0);
+                let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                let painter = ui.painter_at(rect);
+                painter.rect_filled(rect, CornerRadius::same(6), Color32::from_rgb(12, 16, 23));
+
+                let pad_l = 38.0;
+                let pad_r = 16.0;
+                let pad_t = 14.0;
+                let pad_b = 20.0;
+                let plot_w = (rect.width() - pad_l - pad_r).max(50.0);
+                let plot_h = (rect.height() - pad_t - pad_b).max(40.0);
+                let x0 = rect.left() + pad_l;
+                let y0 = rect.bottom() - pad_b;
+
+                for i in 0..=3 {
+                    let y = y0 - (i as f32 / 3.0) * plot_h;
+                    painter.line_segment([Pos2::new(x0, y), Pos2::new(x0 + plot_w, y)], Stroke::new(0.8, Color32::from_white_alpha(18)));
+                }
+
+                let max_drift = report.ultimate_drift_mm.max(1.0) as f32 * 1.1;
+                let max_shear = report.ultimate_base_shear_kn.max(10.0) as f32 * 1.15;
+                let mut pts = Vec::with_capacity(report.steps.len() + 1);
+                pts.push(Pos2::new(x0, y0));
+                for st in &report.steps {
+                    let px = x0 + ((st.roof_drift_mm as f32) / max_drift).clamp(0.0, 1.0) * plot_w;
+                    let py = y0 - ((st.base_shear_kn as f32) / max_shear).clamp(0.0, 1.0) * plot_h;
+                    pts.push(Pos2::new(px, py));
+                }
+                for w in pts.windows(2) {
+                    painter.line_segment([w[0], w[1]], Stroke::new(2.2, theme.accent_green));
+                }
+                for &pt in pts.iter().skip(1) {
+                    painter.circle_filled(pt, 3.0, theme.accent_blue);
+                }
 
                 ui.add_space(12.0);
 
@@ -862,17 +954,51 @@ impl AnalyzeView {
                 }
 
                 if let Some(ref report) = self.modal_report {
-                    // Summary Stat Cards Row
-                    ui.horizontal(|ui| {
-                        self.render_stat_card(ui, theme, "PERIODA FUNDAMENTAL (T1)", &format!("{:.4} s", report.fundamental_period_s), &format!("Frekuensi: {:.2} Hz", report.fundamental_frequency_hz), theme.accent_blue);
-                        ui.add_space(8.0);
-                        self.render_stat_card(ui, theme, "GAYA GESER SEISMIK (V_b)", &format!("{:.1} kN", report.seismic_base_shear_kn), &format!("Cs = {:.4} • W = {:.1} kN", report.spectrum.cs, report.total_weight_kn), theme.accent_green);
-                        ui.add_space(8.0);
-                        self.render_stat_card(ui, theme, "PERCEPATAN DESAIN (SDS)", &format!("{:.3} g", report.spectrum.sds), &format!("SD1: {:.3} g • Ts: {:.2} s", report.spectrum.sd1, report.spectrum.ts), theme.text_primary);
-                        ui.add_space(8.0);
+                    // Summary Stat Cards Row (4 Columns)
+                    ui.columns(4, |cols| {
+                        self.render_stat_card(&mut cols[0], theme, "PERIODA FUNDAMENTAL (T1)", &format!("{:.4} s", report.fundamental_period_s), &format!("Frekuensi: {:.2} Hz", report.fundamental_frequency_hz), theme.accent_blue);
+                        self.render_stat_card(&mut cols[1], theme, "GAYA GESER SEISMIK (V_b)", &format!("{:.1} kN", report.seismic_base_shear_kn), &format!("Cs = {:.4} • W = {:.1} kN", report.spectrum.cs, report.total_weight_kn), theme.accent_green);
+                        self.render_stat_card(&mut cols[2], theme, "PERCEPATAN DESAIN (SDS)", &format!("{:.3} g", report.spectrum.sds), &format!("SD1: {:.3} g • Ts: {:.2} s", report.spectrum.sd1, report.spectrum.ts), theme.text_primary);
                         let badge_col = if report.is_90_percent_satisfied { theme.accent_green } else { theme.accent_orange };
-                        self.render_stat_card(ui, theme, "PARTISIPASI MASSA RAGAM", &format!("{:.1}%", report.cumulative_mass_ratio_x.max(report.cumulative_mass_ratio_y)), "Standar SNI: Min. 90%", badge_col);
+                        self.render_stat_card(&mut cols[3], theme, "PARTISIPASI MASSA RAGAM", &format!("{:.1}%", report.cumulative_mass_ratio_x.max(report.cumulative_mass_ratio_y)), "Standar SNI: Min. 90%", badge_col);
                     });
+
+                    ui.add_space(14.0);
+
+                    // LIVE VECTOR SNI 1726:2019 DESIGN RESPONSE SPECTRUM CURVE (Sa vs T)
+                    let desired = Vec2::new(ui.available_width(), 140.0);
+                    let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+                    let painter = ui.painter_at(rect);
+                    painter.rect_filled(rect, CornerRadius::same(6), Color32::from_rgb(12, 16, 23));
+
+                    let pad_l = 38.0;
+                    let pad_r = 16.0;
+                    let pad_t = 14.0;
+                    let pad_b = 20.0;
+                    let plot_w = (rect.width() - pad_l - pad_r).max(50.0);
+                    let plot_h = (rect.height() - pad_t - pad_b).max(40.0);
+                    let x0 = rect.left() + pad_l;
+                    let y0 = rect.bottom() - pad_b;
+
+                    let max_t = 3.0f32;
+                    let max_sa = (report.spectrum.sds as f32 * 1.25).max(0.5);
+                    let mut pts = Vec::with_capacity(61);
+                    for i in 0..=60 {
+                        let t = (i as f32 / 60.0) * max_t;
+                        let sa = report.spectrum.spectral_acceleration(t as f64) as f32;
+                        let px = x0 + (t / max_t) * plot_w;
+                        let py = y0 - (sa / max_sa).clamp(0.0, 1.0) * plot_h;
+                        pts.push(Pos2::new(px, py));
+                    }
+                    for w in pts.windows(2) {
+                        painter.line_segment([w[0], w[1]], Stroke::new(2.2, theme.accent_blue));
+                    }
+                    // Fundamental period T1 vertical marker
+                    let t1_x = x0 + ((report.fundamental_period_s as f32) / max_t).clamp(0.0, 1.0) * plot_w;
+                    painter.line_segment(
+                        [Pos2::new(t1_x, y0 - plot_h), Pos2::new(t1_x, y0)],
+                        Stroke::new(1.4, theme.accent_orange),
+                    );
 
                     ui.add_space(16.0);
 

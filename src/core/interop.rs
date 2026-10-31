@@ -1634,6 +1634,121 @@ impl EigenProjectArchive {
     }
 }
 
+/// Exporter for Q1 Journal / Dissertation LaTeX Booktabs Tables (.tex)
+pub struct LatexExporter;
+
+impl LatexExporter {
+    /// Generates a publication-ready LaTeX `booktabs` table summarizing member-by-member ARI
+    /// metrics ($h_e, R_e, U_e^*, \rho_e, \text{ARI}_e$) and N-2 Woodbury critical pairs.
+    pub fn export_ari_publication_table(
+        model: &StructuralModel,
+        ari: &RedundancyAssessment,
+        n2_opt: Option<&crate::core::ari::N2WoodburyScreeningReport>,
+    ) -> String {
+        let mut tex = String::new();
+        tex.push_str("% =====================================================================\n");
+        tex.push_str("% EigenGraph — Publication-Ready LaTeX Booktabs Table (Q1 / Dissertation)\n");
+        tex.push_str("% Requires: \\usepackage{booktabs, siunitx, threeparttable}\n");
+        tex.push_str("% =====================================================================\n");
+        tex.push_str("\\begin{table}[htbp]\n");
+        tex.push_str("  \\centering\n");
+        tex.push_str(&format!(
+            "  \\caption{{Structural Redundancy Audit (ARI) and Spectral Leverage Metrics for \\textit{{{}}}}}\n",
+            model.name.replace('_', "\\_")
+        ));
+        tex.push_str("  \\label{tab:eigengraph_ari_audit}\n");
+        tex.push_str("  \\begin{tabular}{clrrrrrc}\n");
+        tex.push_str("    \\toprule\n");
+        tex.push_str("    \\textbf{ID} & \\textbf{Member Type} & $N_e$ (kN) & $h_e$ & $R_e$ & $U_e^*$ & $\\textbf{ARI}_e$ & \\textbf{Status} \\\\\n");
+        tex.push_str("    \\midrule\n");
+
+        for m in &ari.member_results {
+            let elem_name = m.member_name.replace('_', "\\_");
+            let status_str = if m.ari >= 0.70 {
+                "SAFE"
+            } else if m.ari >= 0.45 {
+                "MODERATE"
+            } else {
+                "CRITICAL"
+            };
+            tex.push_str(&format!(
+                "    E{} & {} & {:.2} & {:.4} & {:.4} & {:.4} & \\textbf{{{:.4}}} & \\texttt{{{}}} \\\\\n",
+                m.member_id,
+                elem_name,
+                m.force_kn,
+                m.svd_margin,
+                m.rr,
+                m.max_redistribution_utilization,
+                m.ari,
+                status_str
+            ));
+        }
+
+        tex.push_str("    \\midrule\n");
+        tex.push_str(&format!(
+            "    \\multicolumn{{6}}{{l}}{{\\textbf{{System Global Adjusted Redundancy Index}} ($\\text{{ARI}}_{{\\text{{avg}}}}$)}} & \\textbf{{{:.4}}} & \\textbf{{Min: {:.4}}} \\\\\n",
+            ari.average_ari, ari.min_system_ari
+        ));
+
+        if let Some(n2) = n2_opt {
+            if let Some(first_pair) = n2.pair_results.first() {
+                tex.push_str(&format!(
+                    "    \\multicolumn{{6}}{{l}}{{\\textbf{{Governing }} $N-2$ \\textbf{{ Woodbury Pair}} $(E_{{{}}}, E_{{{}}})$}} & \\textbf{{{:.4}}} & \\texttt{{RANK-2}} \\\\\n",
+                    first_pair.member_1_id, first_pair.member_2_id, n2.min_pair_ari
+                ));
+            }
+        }
+
+        let seal = Sha256Hasher::digest_hex(tex.as_bytes());
+        tex.push_str("    \\bottomrule\n");
+        tex.push_str("  \\end{tabular}\n");
+        tex.push_str(&format!(
+            "  \\\\[4pt] \\footnotesize{{\\textit{{FIPS 180-4 SHA-256 Digital Seal:}} \\texttt{{{}}}}}\n",
+            &seal[..32]
+        ));
+        tex.push_str("\\end{table}\n");
+        tex
+    }
+}
+
+/// Helper to persist exported CAD/BIM/Audit files directly to disk
+pub struct DiskExporter;
+
+impl DiskExporter {
+    /// Writes `content` to `~/Documents/EigenGraph_Exports/<filename>` (or `/tmp/EigenGraph_Exports/<filename>` fallback)
+    /// and returns the full absolute file path saved.
+    pub fn write_export_file(filename: &str, content: &str) -> Result<String, String> {
+        let safe_name: String = filename
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+
+        if let Ok(home) = std::env::var("HOME") {
+            let docs_dir = std::path::PathBuf::from(home)
+                .join("Documents")
+                .join("EigenGraph_Exports");
+            if std::fs::create_dir_all(&docs_dir).is_ok() {
+                let target = docs_dir.join(&safe_name);
+                if std::fs::write(&target, content).is_ok() {
+                    return Ok(target.display().to_string());
+                }
+            }
+        }
+
+        let tmp_dir = std::path::PathBuf::from("/tmp/EigenGraph_Exports");
+        std::fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+        let target = tmp_dir.join(&safe_name);
+        std::fs::write(&target, content).map_err(|e| e.to_string())?;
+        Ok(target.display().to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1752,5 +1867,23 @@ END-ISO-10303-21;"#;
         let restored = EigenProjectArchive::deserialize_from_eigen_json(&serialized)
             .expect("Deserialization and SHA-256 verification should succeed");
         assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn test_latex_booktabs_and_disk_exporter() {
+        let mut engine = crate::core::ParametricEngine::new();
+        let model = engine.generate_warren_truss().unwrap();
+        let ari = crate::core::AriEngine::evaluate_redundancy(&model).unwrap();
+        let n2 = crate::core::AriEngine::evaluate_n2_woodbury_fast(&model).ok();
+
+        let tex = LatexExporter::export_ari_publication_table(&model, &ari, n2.as_ref());
+        assert!(tex.contains("\\begin{table}[htbp]"));
+        assert!(tex.contains("\\toprule"));
+        assert!(tex.contains("\\bottomrule"));
+        assert!(tex.contains("SHA-256 Digital Seal"));
+
+        let saved_path = DiskExporter::write_export_file("test_ari_table.tex", &tex)
+            .expect("DiskExporter should write to disk or /tmp fallback");
+        assert!(saved_path.ends_with("test_ari_table.tex"));
     }
 }

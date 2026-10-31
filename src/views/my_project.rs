@@ -31,6 +31,16 @@ impl MyProjectView {
                     self.render_hero_banner(ui, theme, featured, active_pillar);
                 }
 
+                if let Some(ref msg) = self.export_success_msg {
+                    ui.add_space(10.0);
+                    theme.card_frame().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("✅ BERKAS TERSIMPAN:").size(11.5).strong().color(theme.accent_green));
+                            ui.label(RichText::new(msg).size(11.5).color(theme.text_primary));
+                        });
+                    });
+                }
+
                 ui.add_space(20.0);
 
                 // 2. CATEGORY FILTER PILLS
@@ -98,6 +108,23 @@ impl MyProjectView {
                             .corner_radius(CornerRadius::same(8))
                             .min_size(egui::Vec2::new(190.0, 32.0))).clicked() {
                             self.show_dossier_modal = true;
+                        }
+
+                        ui.add_space(6.0);
+
+                        if ui.add(egui::Button::new(RichText::new("🔐 Simpan Arsip .eigen").size(12.0).strong().color(theme.text_primary))
+                            .fill(theme.bg_card)
+                            .stroke(Stroke::new(1.0, theme.border_subtle))
+                            .corner_radius(CornerRadius::same(8))
+                            .min_size(egui::Vec2::new(150.0, 32.0))).clicked() {
+                            let mut engine = crate::core::ParametricEngine::new();
+                            if let Ok(model) = engine.generate_warren_truss() {
+                                if let Ok(json) = crate::core::EigenProjectArchive::serialize_to_eigen_json(&model) {
+                                    if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_MasterProject.eigen", &json) {
+                                        self.export_success_msg = Some(format!("Arsip proyek .eigen bersegel SHA-256 disimpan di: {}", path));
+                                    }
+                                }
+                            }
                         }
                     });
                 });
