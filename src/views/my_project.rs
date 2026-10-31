@@ -275,13 +275,25 @@ impl MyProjectView {
                                     ui.label(RichText::new(format!("✅ {}", msg)).size(11.0).color(theme.accent_green));
                                 }
 
+                                if ui.add(egui::Button::new(RichText::new("🌐 Unduh Viewer 3D Interaktif (.html)").size(12.0).strong().color(Color32::WHITE))
+                                    .fill(Color32::from_rgb(147, 51, 234))
+                                    .corner_radius(CornerRadius::same(6))).clicked() {
+                                    let mut engine = crate::core::ParametricEngine::new();
+                                    if let Ok(model) = engine.generate_warren_truss() {
+                                        let assessment = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                                        let html = crate::core::HtmlViewerExporter::export_standalone_html(&model, assessment.as_ref());
+                                        let _ = std::fs::write("/tmp/EigenGraph_Interactive_3D_Viewer.html", &html);
+                                        self.export_success_msg = Some("Viewer 3D Interaktif HTML5 tersimpan di /tmp/EigenGraph_Interactive_3D_Viewer.html".to_string());
+                                    }
+                                }
+
                                 if ui.add(egui::Button::new(RichText::new("📄 Unduh Naskah Dossier Lengkap (.md)").size(12.0).strong().color(Color32::WHITE))
                                     .fill(theme.accent_green)
                                     .corner_radius(CornerRadius::same(6))).clicked() {
                                     let mut engine = crate::core::ParametricEngine::new();
                                     if let Ok(model) = engine.generate_warren_truss() {
                                         if let Ok(assessment) = crate::core::AriEngine::evaluate_redundancy(&model) {
-                                            let spec = crate::core::modal::Sni1726Spectrum::new(crate::core::modal::SiteClass::SD, 1.20, 0.50, 8.0, 1.0);
+                                             let spec = crate::core::modal::Sni1726Spectrum::new(crate::core::modal::SiteClass::SD, 1.20, 0.50, 8.0, 1.0);
                                             let modal = crate::core::modal::ModalEngine::analyze(&model, 4, spec).ok();
                                             let pushover = crate::core::nonlinear::NonlinearEngine::run_pushover(&model, 10);
                                             let rates = crate::core::cost::AhspUnitRates::default();

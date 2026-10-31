@@ -148,7 +148,7 @@ impl ParametricView {
         ui: &mut Ui,
         theme: &MacTheme,
         db_components: &mut Vec<DatabaseComponent>,
-        active_pillar: &mut NavigationPillar,
+        _active_pillar: &mut NavigationPillar,
     ) {
         Frame::new()
             .fill(theme.bg_sidebar)
@@ -260,7 +260,7 @@ impl ParametricView {
                             
                             // Editable value box
                             if ui.add(egui::TextEdit::singleline(&mut var.expression).desired_width(75.0)).changed() {
-                                if let Ok(val) = var.expression.parse::<f32>() {
+                                if let Ok(val) = var.expression.parse::<f64>() {
                                     var.evaluated_value = val;
                                 }
                             }
@@ -462,6 +462,7 @@ impl ParametricView {
             variables: self.variables.clone(),
             elements_count: 21,
             created_at: "Just now".to_string(),
+            ..Default::default()
         };
 
         db_components.push(new_comp);
@@ -479,6 +480,7 @@ impl ParametricView {
         active_pillar: &mut NavigationPillar,
     ) {
         let mut open = self.show_db_drawer;
+        let mut should_close = false;
         let mut load_idx: Option<usize> = None;
         let mut assemble_in_build = false;
 
@@ -519,7 +521,7 @@ impl ParametricView {
                                         .corner_radius(CornerRadius::same(4))
                                         .inner_margin(Margin::symmetric(6, 2))
                                         .show(ui, |ui| {
-                                            ui.label(RichText::new(&comp.category).size(10.0).color(theme.accent_blue));
+                                             ui.label(RichText::new(&comp.category).size(10.0).color(theme.accent_blue));
                                         });
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         ui.label(RichText::new(&comp.created_at).size(10.5).color(theme.text_muted));
@@ -566,11 +568,15 @@ impl ParametricView {
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button("Tutup").clicked() {
-                            open = false;
+                            should_close = true;
                         }
                     });
                 });
             });
+
+        if should_close {
+            open = false;
+        }
 
         self.show_db_drawer = open;
 

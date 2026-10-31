@@ -67,6 +67,10 @@ impl NavigationPillar {
         }
     }
 
+    pub fn dimension_tag(&self) -> &'static str {
+        self.badge()
+    }
+
     pub fn icon(&self) -> &'static str {
         match self {
             Self::MyLibrary => "📁",
@@ -98,6 +102,22 @@ impl NavigationPillar {
             Self::IndustrializedAutomation => "The integration of Industry 4.0 technologies, including prefabrication, robotics, 3D printing, and automated site processes.",
         }
     }
+
+    pub fn clean_name(&self) -> &'static str {
+        match self {
+            Self::MyLibrary => "My Library",
+            Self::ResearchConcept => "Research & Concept",
+            Self::DraftingDrawings => "Drafting & Drawings",
+            Self::ModelingGeometry => "Modeling & Geometry",
+            Self::TimeScheduling => "Time & Scheduling",
+            Self::CostBudgeting => "Cost & Budgeting",
+            Self::SustainabilityEnergy => "Sustainability & Energy",
+            Self::FacilityManagement => "Facility Management",
+            Self::SafetyHealth => "Safety & Health",
+            Self::LeanConstruction => "Lean Construction",
+            Self::IndustrializedAutomation => "Industrialized Automation",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +126,8 @@ pub enum ProjectStatus {
     UnderReview,
     Approved,
     Archived,
+    Safe,
+    ReviewNeeded,
 }
 
 impl ProjectStatus {
@@ -115,6 +137,8 @@ impl ProjectStatus {
             Self::UnderReview => "UNDER REVIEW",
             Self::Approved => "APPROVED",
             Self::Archived => "ARCHIVED",
+            Self::Safe => "SAFE (ARI ≥ 0.70)",
+            Self::ReviewNeeded => "REVIEW NEEDED (ARI < 0.70)",
         }
     }
 }
@@ -123,28 +147,107 @@ impl ProjectStatus {
 pub struct ProjectItem {
     pub id: String,
     pub title: String,
+    pub category: String,
     pub description: String,
-    pub last_modified: String,
-    pub status: ProjectStatus,
     pub elements_count: usize,
     pub nodes_count: usize,
-    pub max_deflection_mm: f64,
     pub min_ari: f64,
+    pub max_deflection_mm: f64,
+    pub status: ProjectStatus,
+    pub last_modified: String,
+    pub is_favorite: bool,
+    pub is_featured: bool,
+    pub tag: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParametricVariable {
+    pub name: String,
+    pub expression: String,
+    pub evaluated_value: f64,
+    pub unit: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CadTool {
+    Select,
+    Line,
+    Polyline,
+    Arc,
+    Circle,
+    Rectangle,
+    Dimension,
+    Trim,
+    Offset,
+}
+
+impl CadTool {
+    pub fn label_and_shortcut(&self) -> (&'static str, &'static str) {
+        match self {
+            Self::Select => ("Select", "Esc"),
+            Self::Line => ("Line", "L"),
+            Self::Polyline => ("Polyline", "PL"),
+            Self::Arc => ("Arc", "A"),
+            Self::Circle => ("Circle", "C"),
+            Self::Rectangle => ("Rectangle", "REC"),
+            Self::Dimension => ("Dimension", "DIM"),
+            Self::Trim => ("Trim", "TR"),
+            Self::Offset => ("Offset", "O"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StructuralMember {
     pub id: usize,
     pub name: String,
     pub section: String,
-    pub material: String,
-    pub length: f64,
-    pub axial_force_kn: f64,
+    pub force_kn: f64,
     pub capacity_kn: f64,
     pub utilization: f64,
-    pub ari_score: f64,
-    pub criticality_index: f64,
+    pub moment_my_knm: f64,
+    pub moment_mz_knm: f64,
     pub is_critical: bool,
+    pub is_active: bool,
+    pub ari_score: f64,
+    pub svd_sensitivity: f64,
+    #[serde(default)]
+    pub ari: f64,
+    #[serde(default)]
+    pub dcr_interaction: f64,
+    #[serde(default)]
+    pub shear_vy_kn: f64,
+    #[serde(default)]
+    pub svd_margin: f64,
+    #[serde(default)]
+    pub ci: f64,
+    #[serde(default)]
+    pub rr: f64,
+}
+
+impl Default for StructuralMember {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            name: String::new(),
+            section: "W14x90".to_string(),
+            force_kn: 0.0,
+            capacity_kn: 100.0,
+            utilization: 0.0,
+            moment_my_knm: 0.0,
+            moment_mz_knm: 0.0,
+            is_critical: false,
+            is_active: true,
+            ari_score: 1.0,
+            svd_sensitivity: 0.0,
+            ari: 1.0,
+            dcr_interaction: 0.0,
+            shear_vy_kn: 0.0,
+            svd_margin: 1.0,
+            ci: 0.0,
+            rr: 1.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +264,26 @@ pub enum SidebarTab {
     Materials,
     Loads,
     Settings,
+    Properties,
+    ProjectBrowser,
+    Modify,
+    Layers,
+}
+
+impl SidebarTab {
+    pub fn icon_and_name(&self) -> (&'static str, &'static str) {
+        match self {
+            Self::Geometry => ("📐", "Geometry"),
+            Self::Sections => ("📏", "Sections"),
+            Self::Materials => ("🧱", "Materials"),
+            Self::Loads => ("⬇️", "Loads"),
+            Self::Settings => ("⚙️", "Settings"),
+            Self::Properties => ("📋", "Properties"),
+            Self::ProjectBrowser => ("📁", "Browser"),
+            Self::Modify => ("✏️", "Modify"),
+            Self::Layers => ("📑", "Layers"),
+        }
+    }
 }
 
 /// A stored parametric structural component in the local database library
@@ -180,6 +303,30 @@ pub struct DatabaseComponent {
     pub est_weight_ton: f64,
     pub min_system_ari: f64,
     pub created_at: String,
+    #[serde(default)]
+    pub variables: Vec<ParametricVariable>,
+}
+
+impl Default for DatabaseComponent {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            category: String::new(),
+            description: String::new(),
+            span_m: 24.0,
+            height_m: 3.2,
+            divisions: 6,
+            default_section: "W14x90".to_string(),
+            driving_formula: "H = L / 7.5".to_string(),
+            elements_count: 25,
+            nodes_count: 14,
+            est_weight_ton: 12.8,
+            min_system_ari: 0.942,
+            created_at: "2026-10-30".to_string(),
+            variables: Vec::new(),
+        }
+    }
 }
 
 impl DatabaseComponent {
@@ -199,6 +346,7 @@ impl DatabaseComponent {
             est_weight_ton: 12.8,
             min_system_ari: 0.942,
             created_at: "2026-10-30".to_string(),
+            variables: Vec::new(),
         }
     }
 
@@ -218,6 +366,7 @@ impl DatabaseComponent {
             est_weight_ton: 18.4,
             min_system_ari: 0.915,
             created_at: "2026-10-30".to_string(),
+            variables: Vec::new(),
         }
     }
 
@@ -237,6 +386,7 @@ impl DatabaseComponent {
             est_weight_ton: 26.5,
             min_system_ari: 0.968,
             created_at: "2026-10-30".to_string(),
+            variables: Vec::new(),
         }
     }
 }
