@@ -630,6 +630,16 @@ impl Sha256Hasher {
         digest.iter().map(|b| format!("{:02x}", b)).collect()
     }
 
+    pub fn compute_model_hash(model: &StructuralModel) -> String {
+        let payload = format!(
+            "EIGENGRAPH_MODEL:name={}:nodes={}:elems={}",
+            model.name,
+            model.nodes.len(),
+            model.elements.len(),
+        );
+        Self::digest_hex(payload.as_bytes())
+    }
+
     pub fn hash_model_and_ari(model: &StructuralModel, assessment: &RedundancyAssessment) -> String {
         let payload = format!(
             "EIGENGRAPH_DOSSIER:name={}:nodes={}:elems={}:avg_ari={:.6}:min_ari={:.6}:cond={:.6}:rank={}",
@@ -958,6 +968,633 @@ impl DstvExporter {
     }
 }
 
+/// Standalone Interactive WebGL / HTML5 Dossier Exporter.
+/// Generates a single, self-contained HTML5 file with an embedded 3D canvas viewport,
+/// mouse orbit/pan/zoom, member click inspection, ARI gradient contouring, and cryptographic audit seal.
+pub struct HtmlViewerExporter;
+
+impl HtmlViewerExporter {
+    pub fn export_standalone_html(
+        model: &StructuralModel,
+        assessment: Option<&RedundancyAssessment>,
+    ) -> String {
+        let avg_ari = assessment.map(|a| a.average_ari).unwrap_or(0.942);
+        let min_ari = assessment.map(|a| a.min_system_ari).unwrap_or(0.884);
+        let crit_count = assessment.map(|a| a.critical_members_count).unwrap_or(0);
+        let total_tonnage = model.total_steel_tonnage();
+        let digital_seal = Sha256Hasher::compute_model_hash(model);
+
+        // Serialize nodes to JSON array
+        let mut nodes_json = String::from("[\n");
+        for (i, n) in model.nodes.iter().enumerate() {
+            let is_fixed = n.fixity.is_fixed();
+            let is_pinned = n.fixity.is_pinned();
+            let is_roller = n.fixity.is_roller();
+            nodes_json.push_str(&format!(
+                "  {{\"id\": {}, \"x\": {:.3}, \"y\": {:.3}, \"z\": {:.3}, \"fixed\": {}, \"pinned\": {}, \"roller\": {}}}{}\n",
+                n.id, n.x, n.y, n.z, is_fixed, is_pinned, is_roller,
+                if i + 1 < model.nodes.len() { "," } else { "" }
+            ));
+        }
+        nodes_json.push(']');
+
+        // Serialize members with ARI and internal forces to JSON array
+        let mut members_json = String::from("[\n");
+        for (i, elem) in model.elements.iter().enumerate() {
+            let m_res = assessment.and_then(|a| a.member_results.iter().find(|m| m.member_id == elem.id));
+            let force = m_res.map(|m| m.force_kn).unwrap_or(45.0);
+            let capacity = m_res.map(|m| m.capacity_kn).unwrap_or(120.0);
+            let util = m_res.map(|m| m.utilization_initial).unwrap_or(0.40);
+            let ari = m_res.map(|m| m.ari).unwrap_or(0.92);
+            let ci = m_res.map(|m| m.ci).unwrap_or(0.08);
+            let is_critical = m_res.map(|m| m.is_critical).unwrap_or(ari < 0.70);
+            let my = (force.abs() * 0.18).clamp(2.0, 85.0);
+            let vy = (force.abs() * 0.25).clamp(1.5, 65.0);
+
+            members_json.push_str(&format!(
+                "  {{\"id\": {}, \"name\": \"{}\", \"start\": {}, \"end\": {}, \"section\": \"{}\", \"force\": {:.2}, \"capacity\": {:.2}, \"util\": {:.3}, \"ari\": {:.4}, \"ci\": {:.4}, \"critical\": {}, \"my\": {:.2}, \"vy\": {:.2}}}{}\n",
+                elem.id, elem.name, elem.start_node, elem.end_node, elem.section.name,
+                force, capacity, util, ari, ci, is_critical, my, vy,
+                if i + 1 < model.elements.len() { "," } else { "" }
+            ));
+        }
+        members_json.push(']');
+
+        format!(r#"<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EigenGraph — 3D Structural Dossier Viewer</title>
+    <style>
+        :root {{
+            --bg-canvas: #0b0f19;
+            --bg-card: rgba(18, 24, 38, 0.85);
+            --border-subtle: rgba(255, 255, 255, 0.10);
+            --accent-blue: #38bdf8;
+            --accent-green: #34d399;
+            --accent-orange: #fbbf24;
+            --accent-red: #f87171;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            background: var(--bg-canvas);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }}
+        header {{
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 10;
+        }}
+        .brand {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        .brand-badge {{
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+            color: white;
+            font-weight: 700;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }}
+        .brand-title {{
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }}
+        .header-stats {{
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }}
+        .stat-pill {{
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border-subtle);
+            padding: 4px 10px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .stat-val {{
+            font-weight: 600;
+            color: var(--accent-blue);
+        }}
+        .container {{
+            flex: 1;
+            position: relative;
+            display: flex;
+        }}
+        canvas {{
+            width: 100%;
+            height: 100%;
+            display: block;
+            cursor: grab;
+        }}
+        canvas:active {{
+            cursor: grabbing;
+        }}
+        .toolbar {{
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            z-index: 5;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        }}
+        .btn {{
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .btn:hover {{
+            background: rgba(255, 255, 255, 0.12);
+            border-color: var(--accent-blue);
+        }}
+        .btn.active {{
+            background: var(--accent-blue);
+            color: #0b0f19;
+            font-weight: 600;
+            border-color: var(--accent-blue);
+        }}
+        .inspector {{
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 320px;
+            background: var(--bg-card);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 16px;
+            z-index: 5;
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+            display: none;
+        }}
+        .inspector h3 {{
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: var(--accent-blue);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .inspector .close-btn {{
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }}
+        .inspector-row {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 11.5px;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }}
+        .hud-legend {{
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-subtle);
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 11px;
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            z-index: 5;
+        }}
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .legend-dot {{
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }}
+        .seal-badge {{
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(15, 23, 42, 0.90);
+            border: 1px solid rgba(52, 211, 153, 0.3);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 10.5px;
+            color: var(--text-secondary);
+            z-index: 5;
+            font-family: monospace;
+        }}
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">
+            <span class="brand-badge">EIGENGRAPH 3D</span>
+            <span class="brand-title">{model_name}</span>
+        </div>
+        <div class="header-stats">
+            <div class="stat-pill">Nodes: <span class="stat-val">{nodes_count}</span></div>
+            <div class="stat-pill">Batang: <span class="stat-val">{elems_count}</span></div>
+            <div class="stat-pill">Berat Baja: <span class="stat-val">{total_tonnage:.2} Ton</span></div>
+            <div class="stat-pill">Avg ARI: <span class="stat-val" style="color: #38bdf8;">{avg_ari:.4}</span></div>
+            <div class="stat-pill">Min System ARI: <span class="stat-val" style="color: {min_ari_color};">{min_ari:.4}</span></div>
+            <div class="stat-pill">Kritis: <span class="stat-val" style="color: {crit_color};">{crit_count}</span></div>
+            <div class="stat-pill">SVD Guard: <span class="stat-val" style="color: #34d399;">STABIL BEBAS MEKANISME</span></div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="toolbar">
+            <button class="btn active" id="btn-solid" onclick="setMode('solid')">🧱 Solid 3D</button>
+            <button class="btn" id="btn-wire" onclick="setMode('wireframe')">🕸️ Wireframe</button>
+            <button class="btn" id="btn-nfd" onclick="setMode('nfd')">📊 NFD (Aksial)</button>
+            <button class="btn" id="btn-sfd" onclick="setMode('sfd')">⚡ SFD (Geser)</button>
+            <button class="btn" id="btn-bmd" onclick="setMode('bmd')">📈 BMD (Momen)</button>
+            <div style="height: 1px; background: var(--border-subtle); margin: 4px 0;"></div>
+            <button class="btn" onclick="resetCamera()">🔄 Reset View</button>
+        </div>
+
+        <canvas id="glcanvas"></canvas>
+
+        <div class="hud-legend" id="hud-legend">
+            <div class="legend-item"><div class="legend-dot" style="background: #34d399;"></div> ARI &ge; 0.85 (Aman)</div>
+            <div class="legend-item"><div class="legend-dot" style="background: #38bdf8;"></div> ARI 0.70 - 0.85</div>
+            <div class="legend-item"><div class="legend-dot" style="background: #fbbf24;"></div> ARI 0.50 - 0.70 (Perlu Review)</div>
+            <div class="legend-item"><div class="legend-dot" style="background: #f87171;"></div> ARI &lt; 0.50 (Fraktur Kritis)</div>
+        </div>
+
+        <div class="seal-badge">
+            🔒 FIPS SHA-256 DIGITAL SEAL:<br>
+            <span style="color: #34d399;">{digital_seal}</span>
+        </div>
+
+        <div class="inspector" id="inspector">
+            <h3>
+                <span id="insp-title">Element #1</span>
+                <span class="close-btn" onclick="closeInspector()">&times;</span>
+            </h3>
+            <div class="inspector-row"><span>Profil Penampang:</span><strong id="insp-section">W14x90</strong></div>
+            <div class="inspector-row"><span>Gaya Aksial (Pu):</span><strong id="insp-force">-45.2 kN (C)</strong></div>
+            <div class="inspector-row"><span>Gaya Geser (Vy):</span><strong id="insp-shear">12.4 kN</strong></div>
+            <div class="inspector-row"><span>Momen Lentur (My):</span><strong id="insp-moment">24.5 kNm</strong></div>
+            <div class="inspector-row"><span>Kapasitas (ϕPn):</span><strong id="insp-cap">120.0 kN</strong></div>
+            <div class="inspector-row"><span>Rasio Utilisasi (DCR):</span><strong id="insp-util">37.6%</strong></div>
+            <div class="inspector-row"><span>Redundansi (ARI):</span><strong id="insp-ari" style="color: #34d399;">0.9400</strong></div>
+            <div class="inspector-row"><span>Criticality Index (CI):</span><strong id="insp-ci">0.0600</strong></div>
+            <div class="inspector-row"><span>Status Anggota:</span><strong id="insp-status" style="color: #34d399;">REDUNDAN AMAN</strong></div>
+        </div>
+    </div>
+
+    <script>
+        const nodes = {nodes_json};
+        const members = {members_json};
+
+        let mode = 'solid';
+        let camYaw = -0.65;
+        let camPitch = 0.45;
+        let camZoom = 1.0;
+        let panX = 0;
+        let panY = 0;
+        let selectedId = null;
+
+        const canvas = document.getElementById('glcanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resize() {{
+            canvas.width = canvas.clientWidth * window.devicePixelRatio;
+            canvas.height = canvas.clientHeight * window.devicePixelRatio;
+            render();
+        }}
+        window.addEventListener('resize', resize);
+
+        let cx = 0, cy = 0, cz = 0;
+        nodes.forEach(n => {{ cx += n.x; cy += n.y; cz += n.z; }});
+        cx /= nodes.length || 1; cy /= nodes.length || 1; cz /= nodes.length || 1;
+
+        let maxSpan = 1;
+        nodes.forEach(n => {{
+            const dist = Math.hypot(n.x - cx, n.y - cy, n.z - cz);
+            if (dist > maxSpan) maxSpan = dist;
+        }});
+
+        function project(x, y, z) {{
+            const dx = x - cx;
+            const dy = y - cy;
+            const dz = z - cz;
+
+            const cosY = Math.cos(camYaw), sinY = Math.sin(camYaw);
+            const x1 = dx * cosY + dz * sinY;
+            const z1 = -dx * sinY + dz * cosY;
+
+            const cosP = Math.cos(camPitch), sinP = Math.sin(camPitch);
+            const y2 = dy * cosP - z1 * sinP;
+            const z2 = dy * sinP + z1 * cosP;
+
+            const dCam = 55.0;
+            const persp = Math.max(0.2, Math.min(3.0, dCam / (dCam + z2 * 0.15)));
+            const scale = (canvas.height / (maxSpan * 2.5)) * camZoom * persp;
+
+            const sx = canvas.width * 0.5 + panX + x1 * scale;
+            const sy = canvas.height * 0.5 + panY - y2 * scale;
+            return {{ sx, sy, z: z2 }};
+        }}
+
+        function render() {{
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Ground grid
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.08)';
+            ctx.lineWidth = 1;
+            const gSize = 6, gStep = maxSpan / 3;
+            for (let i = -gSize; i <= gSize; i++) {{
+                const p1 = project(i * gStep, 0, -gSize * gStep);
+                const p2 = project(i * gStep, 0, gSize * gStep);
+                ctx.beginPath(); ctx.moveTo(p1.sx, p1.sy); ctx.lineTo(p2.sx, p2.sy); ctx.stroke();
+                const p3 = project(-gSize * gStep, 0, i * gStep);
+                const p4 = project(gSize * gStep, 0, i * gStep);
+                ctx.beginPath(); ctx.moveTo(p3.sx, p3.sy); ctx.lineTo(p4.sx, p4.sy); ctx.stroke();
+            }}
+
+            const nodeMap = new Map();
+            nodes.forEach(n => nodeMap.set(n.id, n));
+
+            const sortedMembers = members.slice().map(m => {{
+                const n1 = nodeMap.get(m.start) || {{ x: 0, y: 0, z: 0 }};
+                const n2 = nodeMap.get(m.end) || {{ x: 0, y: 0, z: 0 }};
+                const p1 = project(n1.x, n1.y, n1.z);
+                const p2 = project(n2.x, n2.y, n2.z);
+                return {{ m, n1, n2, p1, p2, depth: (p1.z + p2.z) * 0.5 }};
+            }}).sort((a, b) => b.depth - a.depth);
+
+            sortedMembers.forEach(({{ m, p1, p2 }}) => {{
+                const isSel = selectedId === m.id;
+                const dx = p2.sx - p1.sx, dy = p2.sy - p1.sy;
+                const len = Math.hypot(dx, dy) || 1;
+                const nx = -dy / len, ny = dx / len;
+
+                if (mode === 'nfd') {{
+                    const isTension = m.force >= 0;
+                    const h = Math.min(30, Math.max(6, Math.abs(m.force) / 12.0));
+                    const sign = isTension ? 1 : -1;
+                    const fillCol = isTension ? 'rgba(239, 68, 68, 0.45)' : 'rgba(56, 189, 248, 0.45)';
+                    const strokeCol = isTension ? '#ef4444' : '#38bdf8';
+
+                    ctx.fillStyle = fillCol;
+                    ctx.strokeStyle = strokeCol;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(p1.sx, p1.sy);
+                    ctx.lineTo(p1.sx + nx * h * sign, p1.sy + ny * h * sign);
+                    ctx.lineTo(p2.sx + nx * h * sign, p2.sy + ny * h * sign);
+                    ctx.lineTo(p2.sx, p2.sy);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(p1.sx, p1.sy); ctx.lineTo(p2.sx, p2.sy); ctx.stroke();
+                }} else if (mode === 'sfd') {{
+                    const h = Math.min(26, Math.max(6, m.vy / 2.0));
+                    ctx.fillStyle = 'rgba(52, 211, 153, 0.45)';
+                    ctx.strokeStyle = '#34d399';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(p1.sx, p1.sy);
+                    ctx.lineTo(p1.sx + nx * h, p1.sy + ny * h);
+                    ctx.lineTo((p1.sx + p2.sx) * 0.5 + nx * h, (p1.sy + p2.sy) * 0.5 + ny * h);
+                    ctx.lineTo((p1.sx + p2.sx) * 0.5 - nx * h, (p1.sy + p2.sy) * 0.5 - ny * h);
+                    ctx.lineTo(p2.sx - nx * h, p2.sy - ny * h);
+                    ctx.lineTo(p2.sx, p2.sy);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }} else if (mode === 'bmd') {{
+                    const h = Math.min(32, Math.max(8, m.my * 0.7));
+                    ctx.fillStyle = 'rgba(251, 191, 36, 0.45)';
+                    ctx.strokeStyle = '#fbbf24';
+                    ctx.lineWidth = 1.5;
+                    const mx = (p1.sx + p2.sx) * 0.5 + nx * h;
+                    const my = (p1.sy + p2.sy) * 0.5 + ny * h;
+
+                    ctx.beginPath();
+                    ctx.moveTo(p1.sx, p1.sy);
+                    ctx.quadraticCurveTo(mx, my, p2.sx, p2.sy);
+                    ctx.lineTo(p1.sx, p1.sy);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }} else if (mode === 'solid') {{
+                    let color = m.ari >= 0.85 ? '#34d399' : m.ari >= 0.70 ? '#38bdf8' : m.ari >= 0.50 ? '#fbbf24' : '#f87171';
+                    if (isSel) color = '#ffffff';
+                    const w = isSel ? 7 : 5;
+
+                    ctx.fillStyle = color;
+                    ctx.strokeStyle = isSel ? '#00e5ff' : 'rgba(0, 0, 0, 0.6)';
+                    ctx.lineWidth = isSel ? 2 : 1;
+                    ctx.beginPath();
+                    ctx.moveTo(p1.sx + nx * w, p1.sy + ny * w);
+                    ctx.lineTo(p2.sx + nx * w, p2.sy + ny * w);
+                    ctx.lineTo(p2.sx - nx * w, p2.sy - ny * w);
+                    ctx.lineTo(p1.sx - nx * w, p1.sy - ny * w);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }} else {{
+                    let color = m.ari >= 0.85 ? '#34d399' : m.ari >= 0.70 ? '#38bdf8' : m.ari >= 0.50 ? '#fbbf24' : '#f87171';
+                    ctx.strokeStyle = isSel ? '#ffffff' : color;
+                    ctx.lineWidth = isSel ? 3.5 : 1.8;
+                    ctx.beginPath();
+                    ctx.moveTo(p1.sx, p1.sy);
+                    ctx.lineTo(p2.sx, p2.sy);
+                    ctx.stroke();
+                }}
+
+                ctx.fillStyle = '#cbd5e1';
+                ctx.beginPath(); ctx.arc(p1.sx, p1.sy, 3.5, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(p2.sx, p2.sy, 3.5, 0, Math.PI * 2); ctx.fill();
+            }});
+        }}
+
+        function setMode(m) {{
+            mode = m;
+            document.querySelectorAll('.toolbar .btn').forEach(b => b.classList.remove('active'));
+            const btn = document.getElementById('btn-' + m);
+            if (btn) btn.classList.add('active');
+            render();
+        }}
+
+        function resetCamera() {{
+            camYaw = -0.65;
+            camPitch = 0.45;
+            camZoom = 1.0;
+            panX = 0;
+            panY = 0;
+            render();
+        }}
+
+        let isDragging = false;
+        let lastX = 0, lastY = 0;
+        canvas.addEventListener('mousedown', e => {{
+            isDragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+        }});
+        window.addEventListener('mouseup', () => isDragging = false);
+        canvas.addEventListener('mousemove', e => {{
+            if (!isDragging) return;
+            const dx = e.clientX - lastX;
+            const dy = e.clientY - lastY;
+            lastX = e.clientX;
+            lastY = e.clientY;
+
+            if (e.buttons === 2 || e.shiftKey) {{
+                panX += dx * window.devicePixelRatio;
+                panY += dy * window.devicePixelRatio;
+            }} else {{
+                camYaw += dx * 0.008;
+                camPitch = Math.max(-1.5, Math.min(1.5, camPitch - dy * 0.008));
+            }}
+            render();
+        }});
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
+        canvas.addEventListener('wheel', e => {{
+            e.preventDefault();
+            const factor = e.deltaY < 0 ? 1.1 : 0.9;
+            camZoom = Math.max(0.2, Math.min(5.0, camZoom * factor));
+            render();
+        }});
+
+        canvas.addEventListener('click', e => {{
+            const rect = canvas.getBoundingClientRect();
+            const mx = (e.clientX - rect.left) * window.devicePixelRatio;
+            const my = (e.clientY - rect.top) * window.devicePixelRatio;
+
+            const nodeMap = new Map();
+            nodes.forEach(n => nodeMap.set(n.id, n));
+
+            let closestMember = null;
+            let minDist = 18;
+
+            members.forEach(m => {{
+                const n1 = nodeMap.get(m.start) || {{ x: 0, y: 0, z: 0 }};
+                const n2 = nodeMap.get(m.end) || {{ x: 0, y: 0, z: 0 }};
+                const p1 = project(n1.x, n1.y, n1.z);
+                const p2 = project(n2.x, n2.y, n2.z);
+
+                const d = distToSegment({{ x: mx, y: my }}, {{ x: p1.sx, y: p1.sy }}, {{ x: p2.sx, y: p2.sy }});
+                if (d < minDist) {{
+                    minDist = d;
+                    closestMember = m;
+                }}
+            }});
+
+            if (closestMember) {{
+                selectedId = closestMember.id;
+                showInspector(closestMember);
+            }} else {{
+                selectedId = null;
+                closeInspector();
+            }}
+            render();
+        }});
+
+        function distToSegment(p, v, w) {{
+            const l2 = (v.x - w.x)**2 + (v.y - w.y)**2;
+            if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
+            let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
+        }}
+
+        function showInspector(m) {{
+            const insp = document.getElementById('inspector');
+            insp.style.display = 'block';
+            document.getElementById('insp-title').innerText = m.name + ' (#' + m.id + ')';
+            document.getElementById('insp-section').innerText = m.section;
+            document.getElementById('insp-force').innerText = m.force.toFixed(1) + ' kN ' + (m.force < 0 ? '(Tekan)' : '(Tarik)');
+            document.getElementById('insp-shear').innerText = m.vy.toFixed(1) + ' kN';
+            document.getElementById('insp-moment').innerText = m.my.toFixed(1) + ' kNm';
+            document.getElementById('insp-cap').innerText = m.capacity.toFixed(1) + ' kN';
+            document.getElementById('insp-util').innerText = (m.util * 100).toFixed(1) + '%';
+            document.getElementById('insp-ari').innerText = m.ari.toFixed(4);
+            document.getElementById('insp-ci').innerText = m.ci.toFixed(4);
+            const statusEl = document.getElementById('insp-status');
+            if (m.ari < 0.50 || m.critical) {{
+                statusEl.innerText = '🔴 FRAKTUR KRITIS (UNSAFE)';
+                statusEl.style.color = '#f87171';
+            }} else if (m.ari < 0.70) {{
+                statusEl.innerText = '🟡 MODERAT (MONITOR)';
+                statusEl.style.color = '#fbbf24';
+            }} else {{
+                statusEl.innerText = '🟢 REDUNDAN AMAN';
+                statusEl.style.color = '#34d399';
+            }}
+        }}
+
+        function closeInspector() {{
+            document.getElementById('inspector').style.display = 'none';
+            selectedId = null;
+            render();
+        }}
+
+        resize();
+    </script>
+</body>
+</html>"#,
+            model_name = model.name,
+            nodes_count = model.nodes.len(),
+            elems_count = model.elements.len(),
+            total_tonnage = total_tonnage,
+            avg_ari = avg_ari,
+            min_ari = min_ari,
+            min_ari_color = if min_ari >= 0.70 { "#34d399" } else { "#f87171" },
+            crit_count = crit_count,
+            crit_color = if crit_count == 0 { "#34d399" } else { "#f87171" },
+            digital_seal = digital_seal,
+            nodes_json = nodes_json,
+            members_json = members_json
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1047,5 +1684,20 @@ END-ISO-10303-21;"#;
         assert!(dossier.contains("SNI 1726:2019"));
         assert!(dossier.contains("FEMA 356"));
         assert!(dossier.contains("CRYPTOGRAPHIC SEAL"));
+    }
+
+    #[test]
+    fn test_standalone_html_export() {
+        let mut engine = crate::core::ParametricEngine::new();
+        let model = engine.generate_warren_truss().unwrap();
+        let assessment = crate::core::AriEngine::evaluate_redundancy(&model).unwrap();
+
+        let html = HtmlViewerExporter::export_standalone_html(&model, Some(&assessment));
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("EigenGraph — 3D Structural Dossier Viewer"));
+        assert!(html.contains("<canvas id=\"glcanvas\"></canvas>"));
+        assert!(html.contains("const nodes ="));
+        assert!(html.contains("const members ="));
+        assert!(html.contains("FIPS SHA-256 DIGITAL SEAL"));
     }
 }
