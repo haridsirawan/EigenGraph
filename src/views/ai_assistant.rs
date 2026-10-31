@@ -289,6 +289,18 @@ impl AiAssistantView {
                 ("🦾 Toolpath Pengelasan Robotik", "Simulasikan jalur las otomatis robot 6-axis pada pelat buhul."),
                 ("🌐 Ekspor OpenBIM IFC 4.3", "Ekspor topologi struktur dan metadata ARI ke standar IFC buildingSMART."),
             ],
+            NavigationPillar::Prediction => &[
+                ("🔮 Simulasi Rantai Runtuh APM", "Simulasikan perambatan keruntuhan berantai nonlinier Alternate Path Method sesuai DoD UFC 4-023-03."),
+                ("⚡ Deteksi Instabilitas Kinematis SVD", "Prediksi singularitas matriks kekakuan dan mekanisme goyang sebelum keruntuhan terjadi."),
+                ("📉 Prediksi Penuaan & Kelelahan 50 Thn", "Simulasikan kurva degradasi kapasitas struktur dan redundansi akibat korosi dan beban siklik."),
+                ("🚨 AI Anomaly & Critical Stress", "Screening elemen struktur dengan probabilitas tertinggi melampaui batas leleh fy."),
+            ],
+            NavigationPillar::Results => &[
+                ("📊 Executive Summary Dashboard", "Tampilkan skor global Min ARI, jumlah batang kritis, D/C ratio maksimum, dan predikat kelayakan."),
+                ("📋 Matriks Verifikasi SNI / AISC", "Buka tabel lengkap seluruh batang dengan gaya aksial, lentur, geser, ARI, dan rasio kapasitas."),
+                ("📈 Cek Lendutan & Simpangan Antartingkat", "Verifikasi simpangan antartingkat (interstory drift) terhadap limit izin H/400 SNI 1726."),
+                ("📜 Ekspor Dossier Audit Lengkap", "Terbitkan laporan komprehensif PDF/HTML dan ekspor data topologi IFC 4.3."),
+            ],
         }
     }
 

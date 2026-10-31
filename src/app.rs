@@ -7,7 +7,8 @@ use crate::models::{DatabaseComponent, NavigationPillar, ParametricVariable, Pro
 use crate::theme::MacTheme;
 use crate::views::{
     AiAssistantView, AnalyzeView, BuildView, FacilityView, IndustrializedView, LeanView,
-    MyProjectView, ParametricView, PlanningView, ResearchConceptView, SettingsView, SustainabilityView,
+    MyProjectView, ParametricView, PlanningView, PredictionView, ResearchConceptView, ResultsView,
+    SettingsView, SustainabilityView,
 };
 
 pub struct EigenGraphApp {
@@ -16,7 +17,7 @@ pub struct EigenGraphApp {
     pub search_query: String,
     pub show_settings: bool,
 
-    // Library & 10D BIM Lifecycle Views
+    // Library & 10D BIM Lifecycle Views + Prediction & Results
     pub my_project_view: MyProjectView,         // 📁 My Library (Project Catalog & Components)
     pub research_view: ResearchConceptView,     // 1D: Research & Concept
     pub parametric_view: ParametricView,         // 2D: Drafting & Drawings
@@ -27,6 +28,8 @@ pub struct EigenGraphApp {
     pub analyze_view: AnalyzeView,               // 8D: Safety/Health & Safety
     pub lean_view: LeanView,                     // 9D: Lean Construction
     pub industrialized_view: IndustrializedView, // 10D: Industrialized Construction & Automation
+    pub prediction_view: PredictionView,         // 🔮 Prediction & AI Simulation
+    pub results_view: ResultsView,               // 📊 Results & Executive Audit
     pub settings_view: SettingsView,
     pub ai_assistant_view: AiAssistantView,
     pub updater: crate::updater::AppUpdater,
@@ -55,6 +58,8 @@ impl Default for EigenGraphApp {
             analyze_view: AnalyzeView::default(),
             lean_view: LeanView::default(),
             industrialized_view: IndustrializedView::default(),
+            prediction_view: PredictionView::default(),
+            results_view: ResultsView::default(),
             settings_view: SettingsView::default(),
             ai_assistant_view: AiAssistantView::default(),
             updater: crate::updater::AppUpdater::default(),
@@ -490,34 +495,38 @@ impl App for EigenGraphApp {
                         NavigationPillar::SafetyHealth,
                         NavigationPillar::LeanConstruction,
                         NavigationPillar::IndustrializedAutomation,
+                        NavigationPillar::Prediction,
+                        NavigationPillar::Results,
                     ];
 
-                    for pillar in pillars {
-                        let is_active = self.active_pillar == pillar;
-                        let bg = if is_active { self.theme.accent_blue } else { Color32::TRANSPARENT };
-                        let fg = if is_active { Color32::WHITE } else { self.theme.text_primary };
-                        let tag_color = if is_active { Color32::WHITE } else { self.theme.accent_blue };
+                    egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+                        for pillar in pillars {
+                            let is_active = self.active_pillar == pillar;
+                            let bg = if is_active { self.theme.accent_blue } else { Color32::TRANSPARENT };
+                            let fg = if is_active { Color32::WHITE } else { self.theme.text_primary };
+                            let tag_color = if is_active { Color32::WHITE } else { self.theme.accent_blue };
 
-                        let row = Frame::new()
-                            .fill(bg)
-                            .corner_radius(CornerRadius::same(8))
-                            .inner_margin(Margin::symmetric(10, 8))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new(pillar.icon()).size(14.0));
-                                    ui.add_space(4.0);
-                                    ui.label(RichText::new(pillar.clean_name()).size(12.5).color(fg).strong());
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        ui.label(RichText::new(pillar.dimension_tag()).size(10.0).strong().color(tag_color));
+                            let row = Frame::new()
+                                .fill(bg)
+                                .corner_radius(CornerRadius::same(8))
+                                .inner_margin(Margin::symmetric(10, 7))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(pillar.icon()).size(14.0));
+                                        ui.add_space(4.0);
+                                        ui.label(RichText::new(pillar.clean_name()).size(12.5).color(fg).strong());
+                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                            ui.label(RichText::new(pillar.dimension_tag()).size(10.0).strong().color(tag_color));
+                                        });
                                     });
                                 });
-                            });
 
-                        if row.response.interact(egui::Sense::click()).clicked() {
-                            self.active_pillar = pillar;
+                            if row.response.interact(egui::Sense::click()).clicked() {
+                                self.active_pillar = pillar;
+                            }
+                            ui.add_space(2.0);
                         }
-                        ui.add_space(2.0);
-                    }
+                    });
 
                     ui.add_space(16.0);
                     ui.separator();
@@ -631,6 +640,12 @@ impl App for EigenGraphApp {
                 }
                 NavigationPillar::IndustrializedAutomation => {
                     self.industrialized_view.show(ui, &self.theme, &self.members);
+                }
+                NavigationPillar::Prediction => {
+                    self.prediction_view.show(ui, &self.theme, &self.members);
+                }
+                NavigationPillar::Results => {
+                    self.results_view.show(ui, &self.theme, &self.members);
                 }
             }
         });
