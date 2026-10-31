@@ -14,6 +14,7 @@ eframe = { version = "0.36", default-features = false, features = [
     "glow",
 ] }
 egui = "0.36"
+image = { version = "0.25", default-features = false, features = ["png"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
@@ -30,3 +31,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "eigengraph"
 path = "src/main.rs"
+
+[[bin]]
+name = "make_icon"
+path = "src/bin/make_icon.rs"
