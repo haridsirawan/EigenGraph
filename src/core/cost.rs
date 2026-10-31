@@ -63,15 +63,31 @@ pub struct CostEstimationReport {
     pub total_surface_area_m2: f64,
     pub profile_takeoff: Vec<ProfileQuantity>,
     pub boq_items: Vec<BoqLineItem>,
+    pub items: Vec<BoqLineItem>,
     pub direct_construction_cost_idr: f64,
     pub overhead_and_profit_idr: f64,
     pub vat_idr: f64,
     pub final_project_cost_idr: f64,
+    pub total_cost_idr: f64,
 }
 
 pub struct CostEngine;
 
 impl CostEngine {
+    pub fn format_idr(val: f64) -> String {
+        let rounded = val.round() as i64;
+        let s = rounded.to_string();
+        let mut result = String::new();
+        let mut count = 0;
+        for c in s.chars().rev() {
+            if count > 0 && count % 3 == 0 {
+                result.push('.');
+            }
+            result.push(c);
+            count += 1;
+        }
+        result.chars().rev().collect()
+    }
     /// Computes full BIM 5D Quantity Takeoff (QTO) & Rencana Anggaran Biaya (RAB)
     pub fn calculate_boq(model: &StructuralModel, rates: Option<&AhspUnitRates>) -> CostEstimationReport {
         let r = rates.cloned().unwrap_or_default();
@@ -192,11 +208,13 @@ impl CostEngine {
             grand_total_steel_tonnage: all_steel_tonnage,
             total_surface_area_m2: total_surface,
             profile_takeoff,
-            boq_items,
+            boq_items: boq_items.clone(),
+            items: boq_items,
             direct_construction_cost_idr: direct_cost,
             overhead_and_profit_idr: overhead_profit,
             vat_idr: vat,
             final_project_cost_idr: grand_total,
+            total_cost_idr: grand_total,
         }
     }
 }

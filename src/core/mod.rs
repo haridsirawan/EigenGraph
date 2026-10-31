@@ -25,7 +25,7 @@ pub use model::{
 pub use solver::{AnalysisResult, FemSolver};
 pub use ari::{AriEngine, KinematicGuardReport, MemberRedundancyResult, RedundancyAssessment};
 pub use parametric::{ParametricEngine, ParametricFormula};
-pub use interop::{DossierExporter, DstvExporter, DstvPiece, DxfExporter, IfcExporter, IfcImporter, Sap2000Exporter, Sha256Hasher};
+pub use interop::{DossierExporter, DstvExporter, DstvPiece, DxfExporter, HtmlViewerExporter, IfcExporter, IfcImporter, Sap2000Exporter, Sha256Hasher};
 pub use optimizer::{AriTopologyOptimizer, BracingCandidate, BracingOptimizationReport};
 pub use cost::{AhspUnitRates, BoqLineItem, CostEngine, CostEstimationReport, ProfileQuantity};
 pub use cascade::{CascadingCollapseReport, CascadingSimulator, CollapseStatus, CollapseStep};

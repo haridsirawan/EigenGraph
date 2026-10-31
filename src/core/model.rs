@@ -47,6 +47,10 @@ impl BoundaryFixity {
     pub fn is_free(&self) -> bool {
         !self.ux && !self.uy && !self.uz && !self.rx && !self.ry && !self.rz
     }
+
+    pub fn is_roller(&self) -> bool {
+        !self.is_fixed() && !self.is_pinned() && !self.is_free()
+    }
 }
 
 /// A 3D Spatial Node in the Structural Graph
@@ -73,6 +77,13 @@ impl Node3D {
     pub fn with_fixity(mut self, fixity: BoundaryFixity) -> Self {
         self.fixity = fixity;
         self
+    }
+
+    pub fn distance_to(&self, other: &Node3D) -> f64 {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        let dz = self.z - other.z;
+        (dx * dx + dy * dy + dz * dz).sqrt()
     }
 }
 
@@ -108,6 +119,10 @@ impl Material {
             yield_strength: 355.0e6, // 355 MPa
             density: 7850.0,         // kg/m^3
         }
+    }
+
+    pub fn structural_steel() -> Self {
+        Self::steel_q355()
     }
 
     pub fn steel_a36() -> Self {
@@ -168,6 +183,10 @@ impl CrossSection {
         }
     }
 
+    pub fn w14x90() -> Self {
+        Self::wf_400x200()
+    }
+
     pub fn box_200x200x8() -> Self {
         Self {
             name: "HSS Box 200x200x8".to_string(),
@@ -178,6 +197,10 @@ impl CrossSection {
             depth: 0.200,
             width: 0.200,
         }
+    }
+
+    pub fn hss8x8() -> Self {
+        Self::box_200x200x8()
     }
 
     pub fn tube_chs_300x10() -> Self {
@@ -321,6 +344,12 @@ impl StructuralModel {
 
     pub fn find_element(&self, id: usize) -> Option<&Element3D> {
         self.elements.iter().find(|e| e.id == id)
+    }
+
+    pub fn member_length(&self, elem: &Element3D) -> Option<f64> {
+        let n1 = self.find_node(elem.start_node)?;
+        let n2 = self.find_node(elem.end_node)?;
+        Some(n1.distance_to(n2))
     }
 
     /// Computes total steel mass in kg
