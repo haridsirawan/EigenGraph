@@ -92,11 +92,16 @@ impl Matrix {
         self[(r, c)]
     }
 
-    /// Computes matrix inverse A^(-1) using column-by-column Gaussian elimination.
+    /// Computes matrix inverse A^(-1).
+    /// Automatically attempts fast Symmetric Positive-Definite (SPD) Cholesky inversion first,
+    /// falling back to column-by-column Gaussian elimination with partial pivoting for general matrices.
     /// Returns None if matrix is singular or non-square.
     pub fn inverse(&self) -> Option<Matrix> {
         if self.rows != self.cols {
             return None;
+        }
+        if let Some(chol) = self.cholesky_decompose() {
+            return Some(chol.inverse());
         }
         let n = self.rows;
         let mut inv = Matrix::zeros(n, n);
@@ -110,6 +115,62 @@ impl Matrix {
             e[j] = 0.0;
         }
         Some(inv)
+    }
+
+    /// Computes the Cholesky decomposition A = L * L^T for a Symmetric Positive-Definite (SPD) matrix.
+    /// Returns None if the matrix is not square, not symmetric within tolerance, or not positive-definite.
+    pub fn cholesky_decompose(&self) -> Option<CholeskyFactor> {
+        if self.rows != self.cols || self.rows == 0 {
+            return None;
+        }
+        let n = self.rows;
+        let mut l = Matrix::zeros(n, n);
+
+        for i in 0..n {
+            for j in 0..=i {
+                // Quick symmetry check on upper/lower entries
+                let a_ij = self[(i, j)];
+                let a_ji = self[(j, i)];
+                if (a_ij - a_ji).abs() > 1e-7 * (a_ij.abs() + a_ji.abs() + 1.0) {
+                    return None;
+                }
+
+                let mut sum = 0.0;
+                for k in 0..j {
+                    sum += l[(i, k)] * l[(j, k)];
+                }
+
+                if i == j {
+                    let diag = a_ij - sum;
+                    if diag <= 1e-13 {
+                        return None;
+                    }
+                    l[(i, i)] = diag.sqrt();
+                } else {
+                    l[(i, j)] = (a_ij - sum) / l[(j, j)];
+                }
+            }
+        }
+
+        Some(CholeskyFactor { l })
+    }
+
+    /// Solves a Symmetric Positive-Definite (SPD) system A * x = b using Cholesky L * L^T factorization
+    /// with automatic fallback to Sparse PCG (for large matrices) or Gaussian elimination.
+    pub fn solve_spd(&self, b: &[f64]) -> Option<Vec<f64>> {
+        if self.rows != self.cols || self.rows != b.len() {
+            return None;
+        }
+        if self.rows > 240 {
+            let csr = CsrMatrix::from_dense(self, 1e-13);
+            if let Some(sol) = csr.solve_pcg(b, 1e-10, self.rows * 2) {
+                return Some(sol);
+            }
+        }
+        if let Some(chol) = self.cholesky_decompose() {
+            return Some(chol.solve(b));
+        }
+        self.solve_gaussian(b)
     }
 
     /// Solves linear system A * x = b using Gaussian elimination with partial pivoting.
@@ -338,6 +399,69 @@ impl Matrix {
             ];
             (det, Some(inv))
         }
+    }
+}
+
+/// Pre-factored Cholesky Decomposition (A = L * L^T) for rapid O(N^2) forward/backward substitution
+/// across multiple right-hand sides (e.g., Newmark-Beta transient time-stepping and Sherman-Morrison inversion).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CholeskyFactor {
+    pub l: Matrix,
+}
+
+impl CholeskyFactor {
+    /// Solves A * x = (L * L^T) * x = b in O(N^2) time using forward substitution (L * y = b)
+    /// followed by backward substitution (L^T * x = y).
+    pub fn solve(&self, b: &[f64]) -> Vec<f64> {
+        let n = self.l.rows;
+        assert_eq!(n, b.len(), "Dimension mismatch in CholeskyFactor::solve");
+
+        // 1. Forward substitution: L * y = b
+        let mut y = vec![0.0; n];
+        for i in 0..n {
+            let mut sum = b[i];
+            for j in 0..i {
+                sum -= self.l[(i, j)] * y[j];
+            }
+            y[i] = sum / self.l[(i, i)];
+        }
+
+        // 2. Backward substitution: L^T * x = y
+        let mut x = vec![0.0; n];
+        for i in (0..n).rev() {
+            let mut sum = y[i];
+            for j in (i + 1)..n {
+                sum -= self.l[(j, i)] * x[j];
+            }
+            x[i] = sum / self.l[(i, i)];
+        }
+
+        x
+    }
+
+    /// Computes the exact inverse A^(-1) = (L * L^T)^(-1) using column-wise Cholesky back-substitution.
+    pub fn inverse(&self) -> Matrix {
+        let n = self.l.rows;
+        let mut inv = Matrix::zeros(n, n);
+        let mut e = vec![0.0; n];
+        for j in 0..n {
+            e[j] = 1.0;
+            let col = self.solve(&e);
+            for i in 0..n {
+                inv[(i, j)] = col[i];
+            }
+            e[j] = 0.0;
+        }
+        inv
+    }
+
+    /// Computes log(det(A)) = 2 * sum(ln(L_ii)) without floating-point overflow.
+    pub fn log_determinant(&self) -> f64 {
+        let mut sum_ln = 0.0;
+        for i in 0..self.l.rows {
+            sum_ln += self.l[(i, i)].ln();
+        }
+        2.0 * sum_ln
     }
 }
 
@@ -581,5 +705,37 @@ mod tests {
         let (det_sing, inv_sing) = Matrix::woodbury_rank2_det_and_inv(0.5, 0.5, 0.5, 1e-8);
         assert!(det_sing.abs() < 1e-9);
         assert!(inv_sing.is_none());
+    }
+
+    #[test]
+    fn test_cholesky_decomposition_and_spd_inverse() {
+        let spd = Matrix::from_slice(3, 3, &[
+            6.0, -2.0,  1.0,
+           -2.0,  5.0, -1.0,
+            1.0, -1.0,  4.0,
+        ]);
+        let chol = spd.cholesky_decompose().expect("SPD matrix should factorize via Cholesky");
+        let reconstructed = chol.l.mul(&chol.l.transpose());
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!((spd[(i, j)] - reconstructed[(i, j)]).abs() < 1e-11);
+            }
+        }
+
+        let b = vec![5.0, 2.0, 4.0];
+        let x_chol = chol.solve(&b);
+        let x_gauss = spd.solve_gaussian(&b).unwrap();
+        for i in 0..3 {
+            assert!((x_chol[i] - x_gauss[i]).abs() < 1e-11);
+        }
+
+        let inv = chol.inverse();
+        let prod = spd.mul(&inv);
+        let eye = Matrix::identity(3);
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!((prod[(i, j)] - eye[(i, j)]).abs() < 1e-11);
+            }
+        }
     }
 }

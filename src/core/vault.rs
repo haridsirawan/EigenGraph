@@ -770,8 +770,8 @@ impl InternalVault {
 
                 for elem in &model.elements {
                     if let (Some(n1), Some(n2)) = (
-                        model.nodes.get(elem.start_node),
-                        model.nodes.get(elem.end_node),
+                        model.find_node(elem.start_node),
+                        model.find_node(elem.end_node),
                     ) {
                         // Map IFC (x, y_plan, z_up) -> Viewport (x, y_up, z_depth)
                         let p1 = (

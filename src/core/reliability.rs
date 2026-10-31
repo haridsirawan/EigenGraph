@@ -183,14 +183,52 @@ impl ReliabilityEngine {
         (dist, mid)
     }
 
-    /// Scans all non-incident member pairs in a 3D StructuralModel for physical interference (clash detection).
+    /// Scans all non-incident member pairs in a 3D StructuralModel for physical interference (clash detection)
+    /// using Axis-Aligned Bounding Box (AABB) broad-phase culling followed by exact 3D segment distance.
     pub fn detect_3d_spatial_clashes(model: &StructuralModel, clearance_tol_m: f64) -> Vec<SpatialClash> {
         let mut clashes = Vec::new();
         let m = model.elements.len();
+        if m < 2 {
+            return clashes;
+        }
+
+        let mut node_map = std::collections::HashMap::with_capacity(model.nodes.len());
+        for n in &model.nodes {
+            node_map.insert(n.id, [n.x, n.y, n.z]);
+        }
+
+        // Precompute (p, q, radius, aabb_min, aabb_max) per element for broad-phase AABB culling
+        let pad_tol = clearance_tol_m.max(0.0);
+        let mut geom_cache: Vec<Option<([f64; 3], [f64; 3], f64, [f64; 3], [f64; 3])>> =
+            Vec::with_capacity(m);
+
+        for elem in &model.elements {
+            if let (Some(&p), Some(&q)) = (node_map.get(&elem.start_node), node_map.get(&elem.end_node)) {
+                let r = 0.5 * elem.section.depth.max(elem.section.width);
+                let margin = r + pad_tol;
+                let aabb_min = [
+                    p[0].min(q[0]) - margin,
+                    p[1].min(q[1]) - margin,
+                    p[2].min(q[2]) - margin,
+                ];
+                let aabb_max = [
+                    p[0].max(q[0]) + margin,
+                    p[1].max(q[1]) + margin,
+                    p[2].max(q[2]) + margin,
+                ];
+                geom_cache.push(Some((p, q, r, aabb_min, aabb_max)));
+            } else {
+                geom_cache.push(None);
+            }
+        }
 
         for i in 0..m {
+            let Some((p1, q1, r1, min1, max1)) = geom_cache[i] else {
+                continue;
+            };
+            let e1 = &model.elements[i];
+
             for j in (i + 1)..m {
-                let e1 = &model.elements[i];
                 let e2 = &model.elements[j];
 
                 // Skip elements that share a common topological connection node
@@ -202,34 +240,36 @@ impl ReliabilityEngine {
                     continue;
                 }
 
-                if let (Some(n1a), Some(n1b), Some(n2a), Some(n2b)) = (
-                    model.find_node(e1.start_node),
-                    model.find_node(e1.end_node),
-                    model.find_node(e2.start_node),
-                    model.find_node(e2.end_node),
-                ) {
-                    let p1 = [n1a.x, n1a.y, n1a.z];
-                    let q1 = [n1b.x, n1b.y, n1b.z];
-                    let p2 = [n2a.x, n2a.y, n2a.z];
-                    let q2 = [n2b.x, n2b.y, n2b.z];
+                let Some((p2, q2, r2, min2, max2)) = geom_cache[j] else {
+                    continue;
+                };
 
-                    let (center_dist, pt) = Self::segment_to_segment_distance_3d(p1, q1, p2, q2);
-                    let r1 = 0.5 * e1.section.depth.max(e1.section.width);
-                    let r2 = 0.5 * e2.section.depth.max(e2.section.width);
-                    let net_clearance = center_dist - (r1 + r2);
+                // Fast 3D AABB Broad-Phase Overlap Check
+                if max1[0] < min2[0]
+                    || min1[0] > max2[0]
+                    || max1[1] < min2[1]
+                    || min1[1] > max2[1]
+                    || max1[2] < min2[2]
+                    || min1[2] > max2[2]
+                {
+                    continue;
+                }
 
-                    if net_clearance <= clearance_tol_m {
-                        clashes.push(SpatialClash {
-                            member_a_id: e1.id,
-                            member_b_id: e2.id,
-                            member_a_name: e1.name.clone(),
-                            member_b_name: e2.name.clone(),
-                            centerline_distance_m: center_dist,
-                            net_clearance_m: net_clearance,
-                            closest_point_xyz: pt,
-                            is_hard_clash: net_clearance <= 0.0,
-                        });
-                    }
+                // Narrow-Phase Exact 3D Segment-to-Segment Distance
+                let (center_dist, pt) = Self::segment_to_segment_distance_3d(p1, q1, p2, q2);
+                let net_clearance = center_dist - (r1 + r2);
+
+                if net_clearance <= clearance_tol_m {
+                    clashes.push(SpatialClash {
+                        member_a_id: e1.id,
+                        member_b_id: e2.id,
+                        member_a_name: e1.name.clone(),
+                        member_b_name: e2.name.clone(),
+                        centerline_distance_m: center_dist,
+                        net_clearance_m: net_clearance,
+                        closest_point_xyz: pt,
+                        is_hard_clash: net_clearance <= 0.0,
+                    });
                 }
             }
         }

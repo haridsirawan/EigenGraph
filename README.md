@@ -4,10 +4,10 @@
 
 ### High-Performance Computational Framework for Adjusted Redundancy Index (ARI), SVD Kinematic Mechanism Guards, and 10D BIM Construction Lifecycle Analytics
 
-[![Release](https://img.shields.io/badge/release-v1.0.0-0A84FF.svg)](https://github.com/haridsirawan/EigenGraph/releases/tag/v1.0.0)
-[![Platform](https://img.shields.io/badge/platform-macOS%20(Universal%202:%20Apple%20Silicon%20%26%20Intel)-black.svg)](https://github.com/haridsirawan/EigenGraph/releases/tag/v1.0.0)
+[![Release](https://img.shields.io/badge/release-v1.2.0-0A84FF.svg)](https://github.com/haridsirawan/EigenGraph/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%20(Universal%202:%20Apple%20Silicon%20%26%20Intel)-black.svg)](https://github.com/haridsirawan/EigenGraph/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-33%20passed%20(100%25)-30D158.svg)](#-canonical-verification--numerical-benchmarks)
+[![Tests](https://img.shields.io/badge/tests-48%20passed%20(100%25)-30D158.svg)](#-canonical-verification--numerical-benchmarks)
 [![Engine](https://img.shields.io/badge/engine-Apple%20Metal%20GPU%2060%20FPS-purple.svg)](#-cadbim-triad-dock--native-vector-canvas-viewport)
 [![Rust](https://img.shields.io/badge/built%20with-Rust%201.80+-DEA584.svg)](https://www.rust-lang.org/)
 
@@ -225,10 +225,22 @@ Exact rational arithmetic comparison (Benchmark Closed-Form Solution vs. Rust En
 | **Criticality Index ($CI_1$)** | $\mathbf{\frac{47}{68}}$ | $\mathbf{0.691176}$ | $\mathbf{0.691176}$ | ✅ **MATCH (Tol < 1e-6)** |
 
 ### Full-Scale Empirical Benchmark: Models M1–M4 & 300 Master Models S1–S5
-1. **Canonical Testbeds M1–M4**: Exact closed-form fractional and alternate load path validation.
+1. **Canonical Testbeds M1–M4**: Exact closed-form fractional and alternate load path validation (including M1 Parallel Bars, M2 Determinate vs. Redundant Braced Truss Gate 1 SVD mechanism certification, and exact Sherman-Morrison Rank-1 vs. full refactorization equivalence).
 2. **Master Population S1–S5 (300 Structural Configurations)**:
    - Evaluated across truss spans from $12\text{ m}$ to $60\text{ m}$, spatial domes, and multi-tier space trusses.
    - 100% agreement in identifying Fracture Critical Members (FCM) compared against full non-linear dynamic time-history simulations, achieving a **99.98% reduction in computational time**.
+
+### ⚡ v1.1.0 Computational Pipeline & Core Modules (`src/core/`)
+| Subsystem | Core Module | Mathematical & Engineering Implementation |
+| :--- | :--- | :--- |
+| **Hybrid Linear Algebra** | [`src/core/linalg.rs`](src/core/linalg.rs) | Direct **Cholesky $\mathbf{L}\mathbf{L}^T$** factorization (`CholeskyFactor`) for SPD stiffness matrices, **Compressed Sparse Row (CSR)** storage with Jacobi-Preconditioned Conjugate Gradient (`solve_pcg`), and One-Sided Jacobi SVD. |
+| **3D FEM & Frame Mechanics** | [`src/core/solver.rs`](src/core/solver.rs) | Complete $12\times 12$ **3D Euler-Bernoulli Beam-Column** stiffness matrix with local-to-global orthogonal triad transformation ($\mathbf{K}_g = \mathbf{T}^T \mathbf{K}_l \mathbf{T}$), $O(1)$ node indexing, and **SNI 1727:2020 / ASCE 7-22 LRFD** 7-combination envelope solver. |
+| **ARI & $N-2$ Woodbury** | [`src/core/ari.rs`](src/core/ari.rs) | **Sherman-Morrison Rank-1** ($N-1$) and **Woodbury Rank-2** ($2\times 2$ capacitance determinant $\det(\mathbf{I}_2 - \mathbf{C}) = (1 - h_i)(1 - h_j) - h_{ij}^2$) simultaneous $N-2$ multi-element disruption screening, plus polynomial-time **Dijkstra $O(K \cdot |\mathcal{E}| \log |\mathcal{V}|)$** edge-disjoint paths. |
+| **Transient Dynamics** | [`src/core/dynamics.rs`](src/core/dynamics.rs) | Unconditionally stable implicit **Newmark-$\beta$** ($\gamma = 0.5, \beta = 0.25$) time-history integration with pre-factored Cholesky $\mathbf{K}_{\text{eff}}$ for true physical **Dynamic Amplification Factor ($\text{DAF}$)** under sudden member removal. |
+| **Non-Linear Pushover** | [`src/core/nonlinear.rs`](src/core/nonlinear.rs) | 3D geometric stiffness matrix $\mathbf{K}_g(P)$, **AISC 360-16 / SNI 1729:2020** $P\text{-}\Delta$ / $P\text{-}\delta$ amplification ($B_1, B_2$), and fiber-section plastic hinge integration with strain hardening. |
+| **Connection Protection** | [`src/core/connection.rs`](src/core/connection.rs) | **SNI 1729:2020 Section J3 / J4** bolted & welded joint verification (A325/A490 bearing, shear, block shear rupture $R_n$, and $\Omega_0$-amplified post-disruption overload protection). |
+| **Reliability & 3D Clash** | [`src/core/reliability.rs`](src/core/reliability.rs) | **First-Order Second-Moment (FOSM)** reliability index $\beta$, failure probability $P_f = \Phi(-\beta)$, lognormal seismic fragility curves, and **3D AABB-accelerated** spatial clash detection. |
+| **OpenBIM & InternalVault** | [`src/core/interop.rs`](src/core/interop.rs), [`src/core/vault.rs`](src/core/vault.rs) | Native **IFC2x3 / IFC4 (`IFCEXTRUDEDAREASOLID` + `IFCAXIS2PLACEMENT3D`)** parser, **DSTV NC1** CNC steel fabrication, **CSI SAP2000 (`.s2k`)**, **AutoCAD 3D DXF**, and SHA-256 sealed `.eigen` archives. |
 
 ---
 
@@ -236,7 +248,7 @@ Exact rational arithmetic comparison (Benchmark Closed-Form Solution vs. Rust En
 
 ### Option 1: Universal 2 macOS Disk Image (`.dmg`)
 1. Download the latest Universal DMG from **[GitHub Releases](https://github.com/haridsirawan/EigenGraph/releases/latest)**:  
-   👉 **`EigenGraph-v1.0.0.dmg`** *(Universal 2: Native on both Intel 64-bit and Apple Silicon M1–M4)*
+   👉 **`EigenGraph-macOS.dmg` (`v1.1.0`)** *(Universal 2: Native on both Intel 64-bit and Apple Silicon M1–M4)*
 2. Double-click the downloaded `.dmg` file and drag **EigenGraph.app** into the **Applications** folder.
 3. **macOS Gatekeeper Verification (First Launch)**:  
    Because the software is independently distributed outside the Mac App Store:
@@ -254,7 +266,7 @@ Ensure Rust 1.80+ is installed:
 git clone https://github.com/haridsirawan/EigenGraph.git
 cd EigenGraph
 
-# 2. Run the analytical verification test suite (9 tests)
+# 2. Run the analytical verification test suite (42 unit tests)
 cargo test
 
 # 3. Build optimized release binary

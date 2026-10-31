@@ -185,6 +185,9 @@ impl DynamicsEngine {
             k_eff[(r, r)] += m_scale * m_diag[r] + 1e-6;
         }
 
+        // Pre-factorize K_eff once outside the Newmark-Beta time loop via Cholesky L * L^T (O(N^3) -> O(N^2) per step)
+        let k_eff_chol = k_eff.cholesky_decompose();
+
         // Initial velocity v(0) = 0, initial acceleration a(0) = M^-1 * (f_red - K_red * u(0))
         let mut v = vec![0.0_f64; n];
         let ku0 = k_red.mul_vec(&u);
@@ -220,9 +223,13 @@ impl DynamicsEngine {
                 f_eff[i] += alpha_1 * k_state_c[i];
             }
 
-            let u_next = k_eff
-                .solve_gaussian(&f_eff)
-                .unwrap_or_else(|| u_stat.clone());
+            let u_next = if let Some(ref chol) = k_eff_chol {
+                chol.solve(&f_eff)
+            } else {
+                k_eff
+                    .solve_spd(&f_eff)
+                    .unwrap_or_else(|| u_stat.clone())
+            };
             let mut a_next = vec![0.0_f64; n];
             let mut v_next = vec![0.0_f64; n];
             let mut ke = 0.0_f64;

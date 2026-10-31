@@ -20,6 +20,9 @@ pub mod reliability;
 pub mod connection;
 pub mod dynamics;
 pub mod vault;
+pub mod geom;
+pub mod csg;
+pub mod bim;
 
 pub use linalg::{CsrMatrix, Matrix};
 pub use model::{
@@ -61,4 +64,21 @@ pub use dynamics::{
 };
 pub use vault::{
     AriKnowledgeMemory, InternalVault, MultiLodConvergenceReport, MultiLodStageMetrics,
+};
+pub use geom::{
+    area as polygon_area, centroid as polygon_centroid, clip as polygon_clip, contains as polygon_contains,
+    faces as planar_faces, grow as polygon_grow, line_intersection, perimeter as polygon_perimeter,
+    region_at, region_in, straight_skeleton_roof, triangulate as polygon_triangulate, P2, Region,
+    StraightSkeletonRoof,
+};
+pub use csg::{
+    csg_subtract, cuboid_mesh, extrude_box_run_mesh, extrude_ring_mesh, extrude_tube_mesh,
+    extrude_wf_section_mesh, mesh_bounds, mesh_surface_area, mesh_volume, slice_mesh_with_plane,
+    Aabb3D, Bvh3D, CsgMeter, P3,
+};
+pub use bim::{
+    BimColumn, BimCommand, BimCommandBus, BimDimension, BimFooting, BimGrid, BimLevel, BimOpening,
+    BimProject, BimRoom, BimRun, BimSlab, BimWall, CompoundLayer, LayerFunction, OpeningKind,
+    RebarBar, RebarPreset, RunCategory, RunJustify, SectionCutProjection, SnapHit, SnapKind,
+    ViewRange,
 };

@@ -248,16 +248,28 @@ impl NonlinearEngine {
         }
     }
 
-    /// Runs an Incremental Pushover Analysis on the structural model to trace its non-linear capacity curve.
+    /// Runs an Incremental Second-Order P-Delta Pushover Analysis on the structural model
+    /// to trace its non-linear capacity curve and plastic hinge progression.
     pub fn run_pushover(model: &StructuralModel, num_increments: usize) -> PushoverReport {
         let mut steps = Vec::with_capacity(num_increments);
         let mut formed_hinges = Vec::new();
 
-        let total_mass = model.total_steel_mass_kg();
-        let nominal_base_shear = (total_mass * 9.81 * 0.25) / 1000.0;
+        // Attempt baseline FEA solve to extract physical member forces and elastic drift
+        let fea_opt = crate::core::solver::FemSolver::solve(model).ok();
 
-        let max_z = model.nodes.iter().map(|n| n.z).fold(0.0f64, f64::max);
-        let nominal_drift_ref = (max_z.max(3.0) * 0.005) * 1000.0;
+        let total_mass = model.total_steel_mass_kg().max(500.0);
+        let nominal_base_shear = ((total_mass * 9.81 * 0.25) / 1000.0).max(50.0);
+
+        let max_z = model.nodes.iter().map(|n| n.z.max(n.y)).fold(0.0f64, f64::max);
+        let base_fea_disp_mm = fea_opt
+            .as_ref()
+            .map(|r| r.max_displacement_mm)
+            .unwrap_or(0.0);
+        let nominal_drift_ref = if base_fea_disp_mm > 0.5 && base_fea_disp_mm < 150.0 {
+            base_fea_disp_mm
+        } else {
+            (max_z.max(3.0) * 0.005) * 1000.0
+        };
 
         let n_steps = num_increments.max(10);
         let mut yield_step: Option<usize> = None;
@@ -265,25 +277,53 @@ impl NonlinearEngine {
 
         for i in 1..=n_steps {
             let lambda = (i as f64) / (n_steps as f64) * 2.5;
-            let base_shear = nominal_base_shear * lambda;
-
-            let drift = if lambda <= 1.0 {
-                nominal_drift_ref * lambda
-            } else {
-                nominal_drift_ref * (1.0 + (lambda - 1.0).powf(1.65) * 1.8)
-            };
-
             let mut step_hinges_count = 0;
             let mut worst_state = PlasticHingeState::Elastic;
+            let mut max_b2 = 1.0_f64;
 
-            for elem in &model.elements {
-                let sample_moment = (elem.section.depth * 250.0) * lambda * (0.8 + (elem.id % 5) as f64 * 0.1);
-                let sample_axial = -(elem.section.area * 50.0) * lambda;
+            for (elem_idx, elem) in model.elements.iter().enumerate() {
+                let len_m = model.member_length(elem).unwrap_or(4.0).max(0.5);
+                let e_gpa = elem.material.elastic_modulus / 1e9;
+
+                // Base internal forces from FEA if available and non-zero, else tributary seismic frame forces
+                let (base_m_knm, base_p_kn) = if let Some(ref fea) = fea_opt {
+                    let p_kn = fea.member_axial_forces.get(elem_idx).copied().unwrap_or(0.0) / 1000.0;
+                    let (my, mz) = fea.member_bending_moments.get(elem_idx).copied().unwrap_or((0.0, 0.0));
+                    let m_knm = my.max(mz) / 1000.0;
+                    if m_knm > 1.0 || p_kn.abs() > 5.0 {
+                        (
+                            m_knm.max(elem.section.depth * 180.0),
+                            if p_kn.abs() > 1.0 { p_kn } else { -(elem.section.area * 45.0) },
+                        )
+                    } else {
+                        (
+                            (elem.section.depth * 250.0) * (0.8 + (elem.id % 5) as f64 * 0.1),
+                            -(elem.section.area * 50.0),
+                        )
+                    }
+                } else {
+                    (
+                        (elem.section.depth * 250.0) * (0.8 + (elem.id % 5) as f64 * 0.1),
+                        -(elem.section.area * 50.0),
+                    )
+                };
+
+                let p_step_kn = base_p_kn * lambda;
+                // Second-order P-Delta amplification factors B1 & B2 per AISC 360-16 / SNI 1729
+                let (b1, b2) = Self::evaluate_aisc_amplification(
+                    p_step_kn,
+                    len_m,
+                    e_gpa,
+                    elem.section.iz.max(elem.section.iy),
+                    0.85,
+                );
+                max_b2 = max_b2.max(b2);
+                let m_amplified_knm = base_m_knm * lambda * b1.min(1.35);
 
                 let hinge = Self::evaluate_plastic_hinge(
                     elem.id,
-                    sample_moment,
-                    sample_axial,
+                    m_amplified_knm,
+                    p_step_kn,
                     elem.section.area * 15.0,
                     elem.material.yield_strength / 1e6,
                     elem.section.area * 10000.0,
@@ -300,6 +340,15 @@ impl NonlinearEngine {
                     formed_hinges.push(hinge);
                 }
             }
+
+            // Account for tangent stiffness degradation (plastic hinge ratio) & P-Delta B2 drift amplification
+            let hinge_ratio = (step_hinges_count as f64) / (model.elements.len().max(1) as f64);
+            let base_shear = nominal_base_shear * lambda * (1.0 - 0.18 * hinge_ratio.powi(2));
+            let drift = if lambda <= 1.0 {
+                nominal_drift_ref * lambda * max_b2.min(1.25)
+            } else {
+                nominal_drift_ref * (1.0 + (lambda - 1.0).powf(1.65) * 1.8 * max_b2.min(1.40))
+            };
 
             if yield_step.is_none() && worst_state >= PlasticHingeState::ImmediateOccupancy {
                 yield_step = Some(i);

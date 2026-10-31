@@ -8,15 +8,17 @@ use crate::theme::MacTheme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelArchetype {
-    DiagridTower3D,   // 48-Storey Diagrid Skyscraper IFC
-    TrussBridge3D,    // 3D Space Truss Arch Bridge
-    SpaceDome3D,      // Double-Layer Reticulated Dome
-    WarrenTruss2D,    // Warren 24m Standard
+    BimCraftBuilding3D, // BIMCraft LOD 350 Relational Building (CSG Walls, WF Mesh, Slabs & Rebar)
+    DiagridTower3D,     // 48-Storey Diagrid Skyscraper IFC
+    TrussBridge3D,      // 3D Space Truss Arch Bridge
+    SpaceDome3D,        // Double-Layer Reticulated Dome
+    WarrenTruss2D,      // Warren 24m Standard
 }
 
 impl ModelArchetype {
     pub fn label(&self) -> &'static str {
         match self {
+            Self::BimCraftBuilding3D => "🏗️ BIMCraft LOD350 (CSG + Rebar)",
             Self::DiagridTower3D => "🏢 NVW_DCR-LOD300 (Eng-CON Frame)",
             Self::TrussBridge3D => "🧱 NVW_DCR-LOD200 (Eng-CON-1 & 2)",
             Self::SpaceDome3D => "🔧 NVW_DCR-LOD300 (Eng-HVAC & Roof)",
@@ -27,6 +29,7 @@ impl ModelArchetype {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Render3DMode {
+    CsgSolidBrep,     // True 3D CSG B-Rep Triangulated Mesh (Boolean Openings, WF Flanges & Rebar)
     SolidShaded,      // 3D Extruded Shaded Polygonal Beams with Lighting
     Wireframe,        // Crisp Vector Wireframe Lines
     AxialForceNFD,    // Normal / Axial Force Diagram Envelope (Tension red / Compression blue)
@@ -53,14 +56,19 @@ pub struct BuildView {
     pub cam_pitch: f32,
     pub cam_zoom: f32,
     pub cam_pan: Vec2,
+    pub bim_bus: crate::core::BimCommandBus,
+    pub show_rebar_cage: bool,
+    pub section_box_enabled: bool,
+    pub section_box_max_z_m: f32,
+    pub modify_status_msg: Option<String>,
 }
 
 impl Default for BuildView {
     fn default() -> Self {
         Self {
             active_sidebar_tab: SidebarTab::Properties,
-            active_model: ModelArchetype::DiagridTower3D,
-            render_mode: Render3DMode::SolidShaded,
+            active_model: ModelArchetype::BimCraftBuilding3D,
+            render_mode: Render3DMode::CsgSolidBrep,
             perspective: true,
             selected_member_id: None,
             simulated_eliminated_ids: Vec::new(),
@@ -73,9 +81,14 @@ impl Default for BuildView {
             animate_vibration: false,
             vibration_phase: 0.0,
             cam_yaw: 0.65,
-            cam_pitch: 0.35,
+            cam_pitch: 0.38,
             cam_zoom: 1.15,
             cam_pan: Vec2::ZERO,
+            bim_bus: crate::core::BimCommandBus::new(),
+            show_rebar_cage: true,
+            section_box_enabled: false,
+            section_box_max_z_m: 6.5,
+            modify_status_msg: None,
         }
     }
 }
@@ -282,6 +295,7 @@ impl BuildView {
             ui.add_space(6.0);
 
             let models = [
+                ModelArchetype::BimCraftBuilding3D,
                 ModelArchetype::DiagridTower3D,
                 ModelArchetype::TrussBridge3D,
                 ModelArchetype::SpaceDome3D,
@@ -296,6 +310,13 @@ impl BuildView {
                     self.simulated_eliminated_ids.clear();
                     // Preset camera for each model
                     match m {
+                        ModelArchetype::BimCraftBuilding3D => {
+                            self.cam_yaw = 0.65;
+                            self.cam_pitch = 0.38;
+                            self.cam_zoom = 1.15;
+                            self.cam_pan = Vec2::ZERO;
+                            self.render_mode = Render3DMode::CsgSolidBrep;
+                        }
                         ModelArchetype::DiagridTower3D => {
                             self.cam_yaw = 0.65;
                             self.cam_pitch = 0.35;
@@ -347,6 +368,15 @@ impl BuildView {
         ui.add_space(6.0);
 
         egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.collapsing("🏗️ BIMCraft Relational Hierarchy (LOD 350)", |ui| {
+                ui.label(RichText::new(format!("• Levels: {} | Grids: {}", self.bim_bus.project.levels.len(), self.bim_bus.project.grids.len())).size(10.5).color(theme.accent_blue));
+                ui.label(RichText::new(format!("• CSG Walls: {} | 3D Runs: {}", self.bim_bus.project.walls.len(), self.bim_bus.project.runs.len())).size(10.5).color(theme.text_primary));
+                ui.label(RichText::new(format!("• Columns: {} | Slabs: {} | Rooms: {}", self.bim_bus.project.columns.len(), self.bim_bus.project.slabs.len(), self.bim_bus.project.rooms.len())).size(10.5).color(theme.text_secondary));
+                ui.label(RichText::new(format!("• 3D Rebar Bars: {} ({:.1} kg)", self.bim_bus.project.rebars.len(), self.bim_bus.project.total_rebar_weight_kg())).size(10.5).color(theme.accent_green));
+            });
+
+            ui.add_space(6.0);
+
             ui.collapsing("📦 Imported Parametric Components (Database)", |ui| {
                 for comp in db_components {
                     theme.card_frame().show(ui, |ui| {
@@ -386,16 +416,101 @@ impl BuildView {
         });
     }
 
-    fn render_modify_tab(&self, ui: &mut Ui, theme: &MacTheme) {
-        ui.label(RichText::new("CAD / MODIFY TOOLS").size(12.0).strong().color(theme.text_secondary));
+    fn render_modify_tab(&mut self, ui: &mut Ui, theme: &MacTheme) {
+        ui.label(RichText::new("CAD / BIM MODIFY & REINFORCE TOOLS").size(12.0).strong().color(theme.text_secondary));
         ui.add_space(6.0);
 
-        let tools = ["↔️ Move / Translate", "🔄 Rotate 3D", "📏 Scale", "✂️ Subdivide Member", "🪞 Mirror", "🔲 Array Pattern"];
-        for t in tools {
-            if ui.add(egui::Button::new(RichText::new(t).size(11.5).color(theme.text_primary))
-                .fill(theme.bg_card)
-                .corner_radius(CornerRadius::same(6))).clicked() {}
-            ui.add_space(4.0);
+        if ui.add(egui::Button::new(RichText::new("↔️ Move / Translate Wall (+500mm X)").size(11.0).color(theme.text_primary))
+            .fill(theme.bg_card).corner_radius(CornerRadius::same(6)).min_size(Vec2::new(ui.available_width(), 26.0))).clicked() {
+            if let Some(w) = self.bim_bus.project.walls.last() {
+                let wid = w.id;
+                let res = self.bim_bus.execute(crate::core::BimCommand::MoveElement {
+                    element_id: wid,
+                    delta: crate::core::P2(500.0, 0.0),
+                });
+                self.modify_status_msg = Some(res.unwrap_or_else(|e| e));
+            }
+        }
+        ui.add_space(4.0);
+
+        if ui.add(egui::Button::new(RichText::new("🔄 Rotate 3D Column (15° Increment)").size(11.0).color(theme.text_primary))
+            .fill(theme.bg_card).corner_radius(CornerRadius::same(6)).min_size(Vec2::new(ui.available_width(), 26.0))).clicked() {
+            if let Some(c) = self.bim_bus.project.columns.first() {
+                let cid = c.id;
+                let res = self.bim_bus.execute(crate::core::BimCommand::RotateElement {
+                    element_id: cid,
+                    angle_deg: 15.0,
+                });
+                self.modify_status_msg = Some(res.unwrap_or_else(|e| e));
+            }
+        }
+        ui.add_space(4.0);
+
+        if ui.add(egui::Button::new(RichText::new("✂️ Subdivide / Split Interior Wall (SL)").size(11.0).color(theme.text_primary))
+            .fill(theme.bg_card).corner_radius(CornerRadius::same(6)).min_size(Vec2::new(ui.available_width(), 26.0))).clicked() {
+            if let Some(w) = self.bim_bus.project.walls.last() {
+                let wid = w.id;
+                let mid = (w.start + w.end) * 0.5;
+                let res = self.bim_bus.execute(crate::core::BimCommand::SplitWall {
+                    wall_id: wid,
+                    split_pt: mid,
+                });
+                self.modify_status_msg = Some(res.unwrap_or_else(|e| e));
+            }
+        }
+        ui.add_space(4.0);
+
+        if ui.add(egui::Button::new(RichText::new("🪞 Mirror Elements Across Grid 2 (MM)").size(11.0).color(theme.text_primary))
+            .fill(theme.bg_card).corner_radius(CornerRadius::same(6)).min_size(Vec2::new(ui.available_width(), 26.0))).clicked() {
+            let res = self.bim_bus.execute(crate::core::BimCommand::MirrorElements {
+                axis_a: crate::core::P2(6000.0, 0.0),
+                axis_b: crate::core::P2(6000.0, 9000.0),
+            });
+            self.modify_status_msg = Some(res.unwrap_or_else(|e| e));
+        }
+        ui.add_space(4.0);
+
+        if ui.add(egui::Button::new(RichText::new("🔲 Offset / Array WF Purline (+1500mm)").size(11.0).color(theme.text_primary))
+            .fill(theme.bg_card).corner_radius(CornerRadius::same(6)).min_size(Vec2::new(ui.available_width(), 26.0))).clicked() {
+            let res = self.bim_bus.execute(crate::core::BimCommand::AddBeamRun {
+                level_id: 2,
+                category: crate::core::RunCategory::StructuralBeam,
+                start: crate::core::P2(6000.0, 1500.0),
+                end: crate::core::P2(12000.0, 1500.0),
+                width_mm: 200.0,
+                depth_mm: 400.0,
+                justify: crate::core::RunJustify::Top,
+                profile_name: "WF 400x200x8x13".to_string(),
+            });
+            self.modify_status_msg = Some(res.unwrap_or_else(|e| e));
+        }
+        ui.add_space(4.0);
+
+        if ui.add(egui::Button::new(RichText::new("🔩 Reinforce Concrete (RF) [SNI 2847]").size(11.0).strong().color(Color32::WHITE))
+            .fill(theme.accent_blue).corner_radius(CornerRadius::same(6)).min_size(Vec2::new(ui.available_width(), 28.0))).clicked() {
+            let res = self.bim_bus.execute(crate::core::BimCommand::ReinforceAllConcrete {
+                preset: crate::core::RebarPreset::default(),
+            });
+            self.modify_status_msg = Some(res.unwrap_or_else(|e| e));
+        }
+
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.add(egui::Button::new(RichText::new(format!("↩ Undo ({})", self.bim_bus.undo_stack.len())).size(10.5).color(theme.text_primary))
+                .fill(theme.bg_card).corner_radius(CornerRadius::same(5))).clicked() {
+                self.modify_status_msg = self.bim_bus.undo();
+            }
+            if ui.add(egui::Button::new(RichText::new(format!("↪ Redo ({})", self.bim_bus.redo_stack.len())).size(10.5).color(theme.text_primary))
+                .fill(theme.bg_card).corner_radius(CornerRadius::same(5))).clicked() {
+                self.modify_status_msg = self.bim_bus.redo();
+            }
+        });
+
+        if let Some(msg) = &self.modify_status_msg {
+            ui.add_space(6.0);
+            theme.card_frame().show(ui, |ui| {
+                ui.label(RichText::new(format!("✅ {}", msg)).size(10.0).color(theme.accent_green));
+            });
         }
     }
 
@@ -422,12 +537,20 @@ impl BuildView {
         ui.separator();
         ui.add_space(8.0);
 
-        ui.label(RichText::new("Visual Overlays & Grid:").size(11.0).strong().color(theme.text_primary));
+        ui.label(RichText::new("Visual Overlays & 3D Section Box:").size(11.0).strong().color(theme.text_primary));
         ui.add_space(4.0);
 
         ui.checkbox(&mut self.show_grid, "3D Ground Grid Plane");
         ui.checkbox(&mut self.show_axes, "Global Coordinate Axes (XYZ Triad)");
         ui.checkbox(&mut self.show_node_labels, "Node IDs & Boundary Restraints");
+        ui.checkbox(&mut self.show_rebar_cage, "🔩 3D Rebar Cage Overlay (Longitudinal + Stirrups)");
+        ui.checkbox(&mut self.section_box_enabled, "🔪 3D Section Box Z-Plane Cut");
+        if self.section_box_enabled {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Cut Z:").size(10.5).color(theme.text_secondary));
+                ui.add(egui::Slider::new(&mut self.section_box_max_z_m, 0.5..=8.5).text("m"));
+            });
+        }
         ui.checkbox(&mut self.show_deformed_shape, "Deformed Shape Mesh (FEM Elastic)");
         if self.show_deformed_shape {
             ui.horizontal(|ui| {
@@ -448,6 +571,9 @@ impl BuildView {
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         // Render Style & Internal Force Diagrams Toggle
+                        if ui.selectable_label(self.render_mode == Render3DMode::CsgSolidBrep, "🧊 CSG B-Rep").on_hover_text("True 3D CSG Boolean Mesh (Openings, WF Flanges & Rebar)").clicked() {
+                            self.render_mode = Render3DMode::CsgSolidBrep;
+                        }
                         if ui.selectable_label(self.render_mode == Render3DMode::SolidShaded, "🧱 Solid").clicked() {
                             self.render_mode = Render3DMode::SolidShaded;
                         }
@@ -471,6 +597,7 @@ impl BuildView {
                         // Model Preset Selector
                         ui.label(RichText::new("Model:").size(11.0).color(theme.text_muted));
                         let models = [
+                            ModelArchetype::BimCraftBuilding3D,
                             ModelArchetype::DiagridTower3D,
                             ModelArchetype::TrussBridge3D,
                             ModelArchetype::SpaceDome3D,
@@ -482,6 +609,9 @@ impl BuildView {
                                 self.active_model = m;
                                 self.selected_member_id = None;
                                 self.simulated_eliminated_ids.clear();
+                                if m == ModelArchetype::BimCraftBuilding3D {
+                                    self.render_mode = Render3DMode::CsgSolidBrep;
+                                }
                             }
                         }
 
@@ -735,13 +865,155 @@ impl BuildView {
                         }
                     }
 
-                    // 4. Render Members (Solid Shaded, Wireframe, or 3D Diagrams)
+                    // 4. Render Members (CSG Solid B-Rep Mesh, Solid Shaded, Wireframe, or 3D Diagrams)
                     let sun_dir = (0.577, 0.577, 0.577);
+
+                    // 4A. True 3D CSG B-Rep Triangulated Mesh + Rebar Cage Renderer (BIMCraft LOD 350)
+                    if self.active_model == ModelArchetype::BimCraftBuilding3D && self.render_mode == Render3DMode::CsgSolidBrep {
+                        struct TriDraw {
+                            p0: Pos2,
+                            p1: Pos2,
+                            p2: Pos2,
+                            depth: f32,
+                            fill: Color32,
+                            stroke: Stroke,
+                        }
+                        let mut tris_to_draw: Vec<TriDraw> = Vec::new();
+                        let max_y_clip = if self.section_box_enabled { self.section_box_max_z_m } else { 999.0 };
+
+                        let mut push_mesh = |mesh: &[[crate::core::P3; 3]], base_col: Color32, edge_alpha: u8| {
+                            for tri in mesh {
+                                // Convert BIM (X_mm, Y_mm, Z_mm) -> Viewport 3D (X_m, Z_m_up, Y_m)
+                                let v0 = (tri[0][0] as f32 * 0.001, tri[0][2] as f32 * 0.001, tri[0][1] as f32 * 0.001);
+                                let v1 = (tri[1][0] as f32 * 0.001, tri[1][2] as f32 * 0.001, tri[1][1] as f32 * 0.001);
+                                let v2 = (tri[2][0] as f32 * 0.001, tri[2][2] as f32 * 0.001, tri[2][1] as f32 * 0.001);
+
+                                if v0.1 > max_y_clip && v1.1 > max_y_clip && v2.1 > max_y_clip {
+                                    continue;
+                                }
+
+                                let ux = v1.0 - v0.0;
+                                let uy = v1.1 - v0.1;
+                                let uz = v1.2 - v0.2;
+                                let vx = v2.0 - v0.0;
+                                let vy = v2.1 - v0.1;
+                                let vz = v2.2 - v0.2;
+                                let nx = uy * vz - uz * vy;
+                                let ny = uz * vx - ux * vz;
+                                let nz = ux * vy - uy * vx;
+                                let nlen = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-5);
+                                let dot_sun = ((nx / nlen) * sun_dir.0 + (ny / nlen) * sun_dir.1 + (nz / nlen) * sun_dir.2).abs();
+                                let shade = 0.58 + 0.42 * dot_sun;
+
+                                let col = Color32::from_rgba_unmultiplied(
+                                    ((base_col.r() as f32) * shade).clamp(0.0, 255.0) as u8,
+                                    ((base_col.g() as f32) * shade).clamp(0.0, 255.0) as u8,
+                                    ((base_col.b() as f32) * shade).clamp(0.0, 255.0) as u8,
+                                    base_col.a(),
+                                );
+
+                                let (sp0, z0) = project_3d(v0.0, v0.1, v0.2);
+                                let (sp1, z1) = project_3d(v1.0, v1.1, v1.2);
+                                let (sp2, z2) = project_3d(v2.0, v2.1, v2.2);
+                                let avg_z = (z0 + z1 + z2) / 3.0;
+
+                                tris_to_draw.push(TriDraw {
+                                    p0: sp0,
+                                    p1: sp1,
+                                    p2: sp2,
+                                    depth: avg_z,
+                                    fill: col,
+                                    stroke: Stroke::new(0.4, Color32::from_rgba_unmultiplied(210, 225, 245, edge_alpha)),
+                                });
+                            }
+                        };
+
+                        // 1. Slabs with Boolean Shaft Voids
+                        for s in &self.bim_bus.project.slabs {
+                            let z = self.bim_bus.project.level_elevation(s.level_id);
+                            let mesh = s.mesh_3d(z);
+                            push_mesh(&mesh, Color32::from_rgba_unmultiplied(80, 105, 135, 195), 35);
+                        }
+                        // 2. Walls with CSG Door & Window Voids
+                        let wall_col = if self.show_rebar_cage {
+                            Color32::from_rgba_unmultiplied(120, 145, 175, 135)
+                        } else {
+                            Color32::from_rgba_unmultiplied(145, 165, 190, 240)
+                        };
+                        for w in &self.bim_bus.project.walls {
+                            let z_base = self.bim_bus.project.level_elevation(w.base_level_id);
+                            let z_top = w
+                                .top_level_id
+                                .map(|id| self.bim_bus.project.level_elevation(id))
+                                .unwrap_or(z_base + w.unconnected_height_mm);
+                            let mesh = w.mesh_3d(z_base, z_top);
+                            push_mesh(&mesh, wall_col, 45);
+                        }
+                        // 3. Columns & Footings
+                        for c in &self.bim_bus.project.columns {
+                            let z_base = self.bim_bus.project.level_elevation(c.base_level_id);
+                            let z_top = self.bim_bus.project.level_elevation(c.top_level_id);
+                            let mesh = c.mesh_3d(z_base, z_top);
+                            push_mesh(&mesh, Color32::from_rgba_unmultiplied(65, 160, 220, 215), 55);
+                        }
+                        // 4. 3D Runs (True Wide-Flange I-Beams, RC Beams, MEP Ducts)
+                        for r in &self.bim_bus.project.runs {
+                            let z = self.bim_bus.project.level_elevation(r.level_id);
+                            let mesh = r.mesh_3d(z);
+                            let rcol = match r.category {
+                                crate::core::RunCategory::StructuralBeam if r.is_wf_profile => {
+                                    Color32::from_rgba_unmultiplied(245, 158, 11, 245)
+                                }
+                                crate::core::RunCategory::StructuralBeam => {
+                                    if self.show_rebar_cage {
+                                        Color32::from_rgba_unmultiplied(45, 185, 130, 145)
+                                    } else {
+                                        Color32::from_rgba_unmultiplied(45, 185, 130, 235)
+                                    }
+                                }
+                                _ => Color32::from_rgba_unmultiplied(56, 189, 248, 220),
+                            };
+                            push_mesh(&mesh, rcol, 55);
+                        }
+
+                        // Depth-sort all CSG B-Rep triangles back-to-front
+                        tris_to_draw.sort_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
+                        for td in &tris_to_draw {
+                            painter.add(egui::Shape::convex_polygon(vec![td.p0, td.p1, td.p2], td.fill, td.stroke));
+                        }
+
+                        // 5. 3D Rebar Cage Overlay (Longitudinal & Stirrup loops)
+                        if self.show_rebar_cage {
+                            for bar in &self.bim_bus.project.rebars {
+                                if bar.points_3d.len() >= 2 {
+                                    let bar_col = if bar.closed_stirrup {
+                                        Color32::from_rgb(251, 191, 36)
+                                    } else {
+                                        Color32::from_rgb(244, 63, 94)
+                                    };
+                                    let stroke_w = if bar.closed_stirrup { 1.1 } else { 2.0 };
+                                    for seg in bar.points_3d.windows(2) {
+                                        let v0 = (seg[0][0] as f32 * 0.001, seg[0][2] as f32 * 0.001, seg[0][1] as f32 * 0.001);
+                                        let v1 = (seg[1][0] as f32 * 0.001, seg[1][2] as f32 * 0.001, seg[1][1] as f32 * 0.001);
+                                        if v0.1 <= max_y_clip || v1.1 <= max_y_clip {
+                                            let (sp0, _) = project_3d(v0.0, v0.1, v0.2);
+                                            let (sp1, _) = project_3d(v1.0, v1.1, v1.2);
+                                            painter.line_segment([sp0, sp1], Stroke::new(stroke_w, bar_col));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     for item in &render_list {
                         let is_sel = self.selected_member_id == Some(item.id);
                         let is_hov = hovered_member == Some(item.id);
                         let is_elim = self.simulated_eliminated_ids.contains(&item.id);
+
+                        if self.active_model == ModelArchetype::BimCraftBuilding3D && self.render_mode == Render3DMode::CsgSolidBrep && !is_sel && !is_hov && !is_elim {
+                            continue;
+                        }
 
                         // Base Color Determination
                         let base_color = if is_elim {
@@ -805,7 +1077,7 @@ impl BuildView {
                         let normal = Vec2::new(-dir.y, dir.x);
 
                         match self.render_mode {
-                            Render3DMode::SolidShaded => {
+                            Render3DMode::CsgSolidBrep | Render3DMode::SolidShaded => {
                                 if !is_elim {
                                     // Compute solid extrusion width
                                     let beam_w = (item.base_width * cam_zoom * 0.8).clamp(3.0, 22.0);
@@ -1026,6 +1298,7 @@ impl BuildView {
 
                     // 6. Camera Viewport HUD Overlay (Top Left & Bottom Right)
                     let mode_str = match self.render_mode {
+                        Render3DMode::CsgSolidBrep => "CSG SOLID B-REP + 3D REBAR",
                         Render3DMode::SolidShaded => "SOLID EXTRUDED",
                         Render3DMode::Wireframe => "WIREFRAME",
                         Render3DMode::AxialForceNFD => "DIAGRAM NFD (AKSIAL)",
@@ -1074,6 +1347,33 @@ impl BuildView {
     /// Streams real 3D coordinates directly from `InternalVault/Demo/NVW_DCR-LOD/*.ifc` when available!
     fn build_model_geometry(&self, fallback_members: &[StructuralMember]) -> ((f32, f32, f32), f32, Vec<Member3D>) {
         match self.active_model {
+            ModelArchetype::BimCraftBuilding3D => {
+                let fem = self.bim_bus.project.to_structural_model();
+                let mut list = Vec::with_capacity(fem.elements.len());
+                for (idx, el) in fem.elements.iter().enumerate() {
+                    let n1 = &fem.nodes[el.start_node];
+                    let n2 = &fem.nodes[el.end_node];
+                    // Convert FEM (X, Y_up, Z) -> Viewport (X, Y_up, Z)
+                    let p1 = (n1.x as f32, n1.y as f32, n1.z as f32);
+                    let p2 = (n2.x as f32, n2.y as f32, n2.z as f32);
+                    let is_col = el.name.contains("Col") || el.name.contains("CL");
+                    let ari = 0.88 + ((idx % 7) as f32) * 0.015;
+                    list.push(Member3D {
+                        id: idx + 1,
+                        p1,
+                        p2,
+                        name: el.name.clone(),
+                        section: if is_col { "RC 400x400".to_string() } else { "WF / RC Beam".to_string() },
+                        base_width: if is_col { 8.5 } else { 6.5 },
+                        force_kn: if is_col { -640.0 } else { 215.0 },
+                        capacity_kn: if is_col { 1450.0 } else { 520.0 },
+                        utilization: 0.42,
+                        ari,
+                        is_critical: idx == 0,
+                    });
+                }
+                ((6.0, 2.5, 4.5), 26.0, list)
+            }
             ModelArchetype::DiagridTower3D => {
                 // Stream real NVW_DCR-LOD 3D building geometry from InternalVault if present
                 if let Some(ifc_segs) = crate::core::InternalVault::stream_nvw_dcr_lod200_viewport_segments() {

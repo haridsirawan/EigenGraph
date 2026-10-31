@@ -930,20 +930,29 @@ impl IfcImporter {
                                         }
                                     }
                                 } else if let Some(&(pos_opt, dir_opt, depth)) = extruded_solids.get(&item_id) {
-                                    // Mode B: IFCEXTRUDEDAREASOLID + IFCLOCALPLACEMENT
+                                    // Mode B: IFCEXTRUDEDAREASOLID + IFCLOCALPLACEMENT (+ Axis orientation)
                                     let mut base_pt = placement_origin.unwrap_or((0.0, 0.0, 0.0));
+                                    let mut axis_override: Option<(f64, f64, f64)> = None;
                                     if let Some(pos_id) = pos_opt {
-                                        if let Some(&(loc_id, _)) = axis2_placements.get(&pos_id) {
+                                        if let Some(&(loc_id, axis_id_opt)) = axis2_placements.get(&pos_id) {
                                             if let Some(&(ox, oy, oz)) = cartesian_points.get(&loc_id) {
                                                 base_pt.0 += ox;
                                                 base_pt.1 += oy;
                                                 base_pt.2 += oz;
                                             }
+                                            if let Some(ax_id) = axis_id_opt {
+                                                axis_override = directions.get(&ax_id).copied();
+                                            }
                                         }
                                     }
-                                    let dir = dir_opt
+                                    let mut dir = dir_opt
                                         .and_then(|d_id| directions.get(&d_id).copied())
                                         .unwrap_or((0.0, 0.0, 1.0));
+                                    if let Some(ax) = axis_override {
+                                        if dir.0.abs() < 1e-5 && dir.1.abs() < 1e-5 && dir.2 > 0.0 {
+                                            dir = ax;
+                                        }
+                                    }
                                     let norm = (dir.0 * dir.0 + dir.1 * dir.1 + dir.2 * dir.2).sqrt().max(1e-9);
                                     let p2 = (
                                         base_pt.0 + (dir.0 / norm) * depth,

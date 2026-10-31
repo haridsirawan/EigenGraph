@@ -279,6 +279,95 @@ fn combinations<T: Clone>(slice: &[T], k: usize) -> Vec<Vec<T>> {
     result
 }
 
+/// Polynomial-time O(K * |E| log |V|) Successive Shortest Edge-Disjoint Paths (Dijkstra / Suurballe)
+/// fallback for large 3D structural graphs where exhaustive DFS exceeds `max_states`.
+pub fn find_k_shortest_edge_disjoint_paths(
+    graph: &Multigraph,
+    source: usize,
+    target: usize,
+    edge_costs: &HashMap<usize, f64>,
+    k_limit: usize,
+) -> Vec<Vec<usize>> {
+    let mut disjoint_paths = Vec::with_capacity(k_limit);
+    let mut used_edges = HashSet::new();
+
+    for _ in 0..k_limit {
+        let mut dist: HashMap<usize, f64> = HashMap::new();
+        let mut prev: HashMap<usize, (usize, usize)> = HashMap::new(); // node -> (prev_node, edge_id)
+        let mut visited: HashSet<usize> = HashSet::new();
+
+        for &n in &graph.nodes {
+            dist.insert(n, f64::INFINITY);
+        }
+        dist.insert(source, 0.0);
+
+        loop {
+            // Find unvisited node with minimum distance
+            let mut u_opt = None;
+            let mut best_d = f64::INFINITY;
+            for (&node, &d) in &dist {
+                if !visited.contains(&node) && d < best_d {
+                    best_d = d;
+                    u_opt = Some(node);
+                }
+            }
+
+            let u = match u_opt {
+                Some(n) => n,
+                None => break,
+            };
+            if u == target {
+                break;
+            }
+            visited.insert(u);
+
+            if let Some(incident_edges) = graph.adj.get(&u) {
+                for &eid in incident_edges {
+                    if used_edges.contains(&eid) {
+                        continue;
+                    }
+                    if let Some(v) = graph.other_node(eid, u) {
+                        if visited.contains(&v) {
+                            continue;
+                        }
+                        let cost = edge_costs.get(&eid).copied().unwrap_or(1.0 / EPS_W).max(0.0);
+                        let alt = best_d + cost;
+                        if alt < *dist.get(&v).unwrap_or(&f64::INFINITY) {
+                            dist.insert(v, alt);
+                            prev.insert(v, (u, eid));
+                        }
+                    }
+                }
+            }
+        }
+
+        if !prev.contains_key(&target) {
+            break;
+        }
+
+        // Reconstruct shortest path
+        let mut path_edges = Vec::new();
+        let mut curr = target;
+        while curr != source {
+            if let Some(&(p_node, eid)) = prev.get(&curr) {
+                path_edges.push(eid);
+                used_edges.insert(eid);
+                curr = p_node;
+            } else {
+                break;
+            }
+        }
+        path_edges.reverse();
+        if !path_edges.is_empty() {
+            disjoint_paths.push(path_edges);
+        } else {
+            break;
+        }
+    }
+
+    disjoint_paths
+}
+
 pub fn compute_pair_score(
     graph: &Multigraph,
     source: usize,
@@ -291,7 +380,7 @@ pub fn compute_pair_score(
         return (om1 / EPS_D, true);
     }
 
-    let (combos, certified) = enumerate_edge_disjoint_paths(
+    let (mut combos, certified) = enumerate_edge_disjoint_paths(
         graph,
         source,
         target,
@@ -300,7 +389,18 @@ pub fn compute_pair_score(
     );
 
     if !certified {
-        return (0.0, false);
+        // Fallback to polynomial-time Dijkstra successive edge-disjoint shortest paths
+        let greedy_paths = find_k_shortest_edge_disjoint_paths(
+            graph,
+            source,
+            target,
+            edge_costs,
+            config.k_paths,
+        );
+        if greedy_paths.is_empty() {
+            return (0.0, true);
+        }
+        combos = vec![greedy_paths];
     }
 
     let om = rank_weights(config.k_paths, config.gamma);
@@ -479,37 +579,58 @@ impl AriEngine {
         let k_free_inv = baseline.k_free.inverse()
             .ok_or_else(|| "Failed to invert free-DOF stiffness matrix".to_string())?;
 
-        let mut member_results = Vec::new();
+        let mut member_results = Vec::with_capacity(model.elements.len());
         let total_free_dofs = baseline.free_dofs.len();
+
+        // O(1) lookup tables for node index and global-DOF-to-free-DOF index
+        let mut node_idx_map = HashMap::with_capacity(model.nodes.len());
+        for (idx, n) in model.nodes.iter().enumerate() {
+            node_idx_map.insert(n.id, idx);
+        }
+        let mut dof_to_free = HashMap::with_capacity(total_free_dofs);
+        for (free_idx, &gdof) in baseline.free_dofs.iter().enumerate() {
+            dof_to_free.insert(gdof, free_idx);
+        }
+
+        // Precompute element geometry & stiffness once: (n1_base, n2_base, cx, cy, cz, k_elem)
+        let elem_geom: Vec<(usize, usize, f64, f64, f64, f64)> = model
+            .elements
+            .iter()
+            .map(|e| {
+                let n1_idx = node_idx_map[&e.start_node];
+                let n2_idx = node_idx_map[&e.end_node];
+                let n1 = &model.nodes[n1_idx];
+                let n2 = &model.nodes[n2_idx];
+                let l = n1.distance_to(n2).max(1e-9);
+                let cx = (n2.x - n1.x) / l;
+                let cy = (n2.y - n1.y) / l;
+                let cz = (n2.z - n1.z) / l;
+                let k_e = (e.material.elastic_modulus * e.section.area) / l;
+                (n1_idx * 6, n2_idx * 6, cx, cy, cz, k_e)
+            })
+            .collect();
 
         for (elem_idx, elem) in model.elements.iter().enumerate() {
             let f_init = baseline.member_axial_forces[elem_idx];
             let cap = baseline.member_capacities[elem_idx];
             let u_init = baseline.member_utilizations[elem_idx];
 
-            let n1_idx = model.nodes.iter().position(|n| n.id == elem.start_node).unwrap();
-            let n2_idx = model.nodes.iter().position(|n| n.id == elem.end_node).unwrap();
-            let n1 = &model.nodes[n1_idx];
-            let n2 = &model.nodes[n2_idx];
+            let (n1_base, n2_base, cx, cy, cz, k_elem) = elem_geom[elem_idx];
 
-            let l = n1.distance_to(n2);
-            let cx = (n2.x - n1.x) / l;
-            let cy = (n2.y - n1.y) / l;
-            let cz = (n2.z - n1.z) / l;
-            let k_elem = (elem.material.elastic_modulus * elem.section.area) / l;
-
-            // Bentuk vektor kompatibilitas a_e pada derajat kebebasan bebas
+            // Bentuk vektor kompatibilitas a_e pada derajat kebebasan bebas dalam waktu O(1)
             let mut a_free = vec![0.0; total_free_dofs];
-            let n1_base = n1_idx * 6;
-            let n2_base = n2_idx * 6;
-
-            for (free_idx, &dof) in baseline.free_dofs.iter().enumerate() {
-                if dof == n1_base { a_free[free_idx] = -cx; }
-                else if dof == n1_base + 1 { a_free[free_idx] = -cy; }
-                else if dof == n1_base + 2 { a_free[free_idx] = -cz; }
-                else if dof == n2_base { a_free[free_idx] = cx; }
-                else if dof == n2_base + 1 { a_free[free_idx] = cy; }
-                else if dof == n2_base + 2 { a_free[free_idx] = cz; }
+            let dof_entries = [
+                (n1_base, -cx),
+                (n1_base + 1, -cy),
+                (n1_base + 2, -cz),
+                (n2_base, cx),
+                (n2_base + 1, cy),
+                (n2_base + 2, cz),
+            ];
+            for &(gdof, coeff) in &dof_entries {
+                if let Some(&f_idx) = dof_to_free.get(&gdof) {
+                    a_free[f_idx] = coeff;
+                }
             }
 
             // Vektor pengaruh v_e = K_0^(-1) * a_e
@@ -517,8 +638,10 @@ impl AriEngine {
 
             // Spectral leverage: h_e = k_e * a_e^T * K_0^(-1) * a_e (Persamaan 4.1)
             let mut a_dot_v = 0.0;
-            for i in 0..total_free_dofs {
-                a_dot_v += a_free[i] * v_e[i];
+            for &(gdof, coeff) in &dof_entries {
+                if let Some(&f_idx) = dof_to_free.get(&gdof) {
+                    a_dot_v += coeff * v_e[f_idx];
+                }
             }
             let h_e = (k_elem * a_dot_v).clamp(0.0, 1.0);
             let stability_margin = 1.0 - h_e;
@@ -546,36 +669,29 @@ impl AriEngine {
             let factor = f_init / stability_margin;
             let mut max_redistributed_u: f64 = 0.0;
 
-            for (other_idx, other_elem) in model.elements.iter().enumerate() {
+            for other_idx in 0..model.elements.len() {
                 if other_idx == elem_idx {
                     continue; // Batang yang dieliminasi memiliki gaya 0
                 }
 
-                let on1_idx = model.nodes.iter().position(|n| n.id == other_elem.start_node).unwrap();
-                let on2_idx = model.nodes.iter().position(|n| n.id == other_elem.end_node).unwrap();
-                let on1 = &model.nodes[on1_idx];
-                let on2 = &model.nodes[on2_idx];
+                let (on1_base, on2_base, ocx, ocy, ocz, k_other) = elem_geom[other_idx];
 
-                let ol = on1.distance_to(on2);
-                let ocx = (on2.x - on1.x) / ol;
-                let ocy = (on2.y - on1.y) / ol;
-                let ocz = (on2.z - on1.z) / ol;
-
-                let on1_base = on1_idx * 6;
-                let on2_base = on2_idx * 6;
-
-                // Hitung delta elongasi tambahan: a_j^T * v_e
+                // Hitung delta elongasi tambahan: a_j^T * v_e dalam waktu O(1) (6 lookups)
                 let mut delta_v = 0.0;
-                for (free_idx, &dof) in baseline.free_dofs.iter().enumerate() {
-                    if dof == on1_base { delta_v -= ocx * v_e[free_idx]; }
-                    else if dof == on1_base + 1 { delta_v -= ocy * v_e[free_idx]; }
-                    else if dof == on1_base + 2 { delta_v -= ocz * v_e[free_idx]; }
-                    else if dof == on2_base { delta_v += ocx * v_e[free_idx]; }
-                    else if dof == on2_base + 1 { delta_v += ocy * v_e[free_idx]; }
-                    else if dof == on2_base + 2 { delta_v += ocz * v_e[free_idx]; }
+                let other_entries = [
+                    (on1_base, -ocx),
+                    (on1_base + 1, -ocy),
+                    (on1_base + 2, -ocz),
+                    (on2_base, ocx),
+                    (on2_base + 1, ocy),
+                    (on2_base + 2, ocz),
+                ];
+                for &(gdof, coeff) in &other_entries {
+                    if let Some(&f_idx) = dof_to_free.get(&gdof) {
+                        delta_v += coeff * v_e[f_idx];
+                    }
                 }
 
-                let k_other = (other_elem.material.elastic_modulus * other_elem.section.area) / ol;
                 let delta_force = k_other * factor * delta_v;
                 let post_force = baseline.member_axial_forces[other_idx] + delta_force;
                 let other_cap = baseline.member_capacities[other_idx];
@@ -709,6 +825,15 @@ impl AriEngine {
         let m = model.elements.len();
         let n_free = baseline.free_dofs.len();
 
+        let mut node_idx_map = HashMap::with_capacity(model.nodes.len());
+        for (idx, n) in model.nodes.iter().enumerate() {
+            node_idx_map.insert(n.id, idx);
+        }
+        let mut dof_to_free = HashMap::with_capacity(n_free);
+        for (free_idx, &gdof) in baseline.free_dofs.iter().enumerate() {
+            dof_to_free.insert(gdof, free_idx);
+        }
+
         // Precompute projection vector a_e, compliance vector v_e = K_0^(-1) * a_e, and k_e for each member
         let mut a_vecs: Vec<Vec<f64>> = Vec::with_capacity(m);
         let mut v_vecs: Vec<Vec<f64>> = Vec::with_capacity(m);
@@ -716,12 +841,12 @@ impl AriEngine {
         let mut h_diag: Vec<f64> = Vec::with_capacity(m);
 
         for elem in &model.elements {
-            let n1_idx = model.nodes.iter().position(|n| n.id == elem.start_node).unwrap();
-            let n2_idx = model.nodes.iter().position(|n| n.id == elem.end_node).unwrap();
+            let n1_idx = node_idx_map[&elem.start_node];
+            let n2_idx = node_idx_map[&elem.end_node];
             let n1 = &model.nodes[n1_idx];
             let n2 = &model.nodes[n2_idx];
 
-            let l = n1.distance_to(n2);
+            let l = n1.distance_to(n2).max(1e-9);
             let cx = (n2.x - n1.x) / l;
             let cy = (n2.y - n1.y) / l;
             let cz = (n2.z - n1.z) / l;
@@ -730,19 +855,26 @@ impl AriEngine {
             let mut a_e = vec![0.0; n_free];
             let n1_base = n1_idx * 6;
             let n2_base = n2_idx * 6;
-            for (free_idx, &dof) in baseline.free_dofs.iter().enumerate() {
-                if dof == n1_base { a_e[free_idx] = -cx; }
-                else if dof == n1_base + 1 { a_e[free_idx] = -cy; }
-                else if dof == n1_base + 2 { a_e[free_idx] = -cz; }
-                else if dof == n2_base { a_e[free_idx] = cx; }
-                else if dof == n2_base + 1 { a_e[free_idx] = cy; }
-                else if dof == n2_base + 2 { a_e[free_idx] = cz; }
+            let dof_entries = [
+                (n1_base, -cx),
+                (n1_base + 1, -cy),
+                (n1_base + 2, -cz),
+                (n2_base, cx),
+                (n2_base + 1, cy),
+                (n2_base + 2, cz),
+            ];
+            for &(gdof, coeff) in &dof_entries {
+                if let Some(&f_idx) = dof_to_free.get(&gdof) {
+                    a_e[f_idx] = coeff;
+                }
             }
 
             let v_e = k_free_inv.mul_vec(&a_e);
             let mut a_dot_v = 0.0;
-            for i in 0..n_free {
-                a_dot_v += a_e[i] * v_e[i];
+            for &(gdof, coeff) in &dof_entries {
+                if let Some(&f_idx) = dof_to_free.get(&gdof) {
+                    a_dot_v += coeff * v_e[f_idx];
+                }
             }
             let h_ee = (k_e * a_dot_v).clamp(0.0, 1.0);
 
@@ -991,6 +1123,79 @@ mod tests {
             assert!(!pair.is_coupled_mechanism);
             assert!(pair.woodbury_determinant > 0.0);
             assert!(pair.pair_ari > 0.0);
+        }
+    }
+
+    #[test]
+    fn test_m2_determinate_vs_redundant_braced_truss_gate1() {
+        // Canonical M2-A: Statically determinate 2-bar V-truss supporting node 2 in X-Y plane
+        let mut m2_det = StructuralModel::new("M2-A Determinate 2-Bar V-Truss");
+        m2_det.add_node(Node3D::new(0, -1.0, 1.0, 0.0).with_fixity(BoundaryFixity::fixed()));
+        m2_det.add_node(Node3D::new(1, 1.0, 1.0, 0.0).with_fixity(BoundaryFixity::fixed()));
+
+        let mut n2_fix = BoundaryFixity::free();
+        n2_fix.uz = true;
+        n2_fix.rx = true;
+        n2_fix.ry = true;
+        n2_fix.rz = true;
+        m2_det.add_node(Node3D::new(2, 0.0, 0.0, 0.0).with_fixity(n2_fix));
+
+        m2_det.add_element(Element3D::new(1, "Left Diagonal", 0, 2).with_type(ElementType::Truss3D));
+        m2_det.add_element(Element3D::new(2, "Right Diagonal", 1, 2).with_type(ElementType::Truss3D));
+        m2_det.add_load(NodalLoad::force_y(2, -40_000.0));
+
+        let res_det = AriEngine::evaluate_redundancy_fast(&m2_det)
+            .expect("Determinate V-truss should evaluate");
+        // In a 2-bar determinate truss with 2 free DOFs (ux, uy), removing EITHER bar induces a kinematic mechanism (h_e = 1.0 -> m_e = 0.0, ARI = 0.0)
+        assert_eq!(res_det.critical_members_count, 2);
+        for m in &res_det.member_results {
+            assert!(m.svd_margin <= MARGIN_TOL);
+            assert_eq!(m.ari, 0.0);
+            assert!(m.is_critical);
+        }
+
+        // Canonical M2-B: Add a 3rd vertical suspension bar (0, 1, 0) -> (0, 0, 0) -> Statically indeterminate (DSI = 1)
+        let mut m2_red = m2_det.clone();
+        m2_red.add_node(Node3D::new(3, 0.0, 1.0, 0.0).with_fixity(BoundaryFixity::fixed()));
+        m2_red.add_element(Element3D::new(3, "Center Vertical Tie", 3, 2).with_type(ElementType::Truss3D));
+
+        let res_red = AriEngine::evaluate_redundancy_fast(&m2_red)
+            .expect("Redundant 3-bar truss should evaluate");
+        for m in &res_red.member_results {
+            assert!(m.svd_margin > 0.10, "Member {} should have positive stability margin", m.member_id);
+            assert!(m.ari > 0.0, "Member {} should have positive ARI", m.member_id);
+        }
+    }
+
+    #[test]
+    fn test_sherman_morrison_vs_full_refactorization_exact_equivalence() {
+        // Verify that Sherman-Morrison O(N^2) post-disruption force redistribution matches full O(N^3) FEM re-solve
+        let mut engine = crate::core::parametric::ParametricEngine::new();
+        let mut model = engine.generate_warren_truss().expect("Warren truss");
+        model.add_load(NodalLoad::force_y(3, -50_000.0));
+
+        let fast_report = AriEngine::evaluate_redundancy_fast(&model).unwrap();
+
+        // Pick a redundant member (with svd_margin > 0.05) and compare max_redistribution_utilization against full FEM solve of damaged model
+        for m_res in &fast_report.member_results {
+            if m_res.svd_margin > 0.05 {
+                let mut damaged = model.clone();
+                damaged.elements.retain(|e| e.id != m_res.member_id);
+                let exact_damaged = FemSolver::solve(&damaged).expect("Damaged model should solve");
+                let exact_max_u = exact_damaged
+                    .member_utilizations
+                    .iter()
+                    .copied()
+                    .fold(0.0_f64, f64::max);
+                assert!(
+                    (m_res.max_redistribution_utilization - exact_max_u).abs() < 1e-6,
+                    "Sherman-Morrison post-disruption utilization ({:.8}) != Exact FEM ({:.8}) for member {}",
+                    m_res.max_redistribution_utilization,
+                    exact_max_u,
+                    m_res.member_id
+                );
+                break;
+            }
         }
     }
 }
