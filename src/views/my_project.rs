@@ -195,21 +195,21 @@ impl MyProjectView {
     fn render_internal_vault_panel(&mut self, ui: &mut Ui, theme: &MacTheme) {
         let vault_root = crate::core::InternalVault::vault_root_dir();
         let mem = crate::core::InternalVault::load_knowledge_memory();
-        let ifc_files = crate::core::InternalVault::list_nvw_dcr_lod_ifc_files();
+        let categories = crate::core::InternalVault::list_all_vault_categories();
 
         theme.card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("🧠 SELF-CONTAINED PACKAGE VAULT & AI LEARNING MEMORY (Contents/Resources/InternalVault)").size(13.0).strong().color(theme.accent_blue));
+                ui.label(RichText::new("⚛️ EIGENGRAPH ENGINEERING VAULT & KNOWLEDGE MEMORY").size(13.0).strong().color(theme.accent_blue));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.add(egui::Button::new(RichText::new("🔄 Sinkronisasi & Latih Memori ARI").size(11.5).strong().color(Color32::WHITE))
                         .fill(theme.accent_green)
                         .corner_radius(CornerRadius::same(6))).clicked() {
                         let mut engine = crate::core::ParametricEngine::new();
                         if let Ok(mut model) = engine.generate_warren_truss() {
-                            model.name = "NVW_DCR-LOD300_Eng-CON".to_string();
-                            if let Ok(path) = crate::core::InternalVault::autosave_project_model("NVW_DCR-LOD300_Eng-CON.eigen", &model) {
+                            model.name = "Proyek_Aktif_Warren".to_string();
+                            if let Ok(path) = crate::core::InternalVault::autosave_project_model("Proyek_Aktif_Warren.eigen", &model) {
                                 self.export_success_msg = Some(format!(
-                                    "Memori AI & Arsip NVW_DCR-LOD diperbarui di Package Contents: {}",
+                                    "Memori AI & Arsip Proyek diperbarui di Vault: {}",
                                     path
                                 ));
                             }
@@ -219,22 +219,24 @@ impl MyProjectView {
             });
 
             ui.add_space(6.0);
-            ui.label(
-                RichText::new(format!(
-                    "📂 Lokasi Default Internal Paket Aplikasi: {}",
-                    vault_root.display()
-                ))
-                .size(11.5)
-                .monospace()
-                .color(theme.text_secondary),
-            );
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "📂 Lokasi Aktif Vault: {}",
+                        vault_root.display()
+                    ))
+                    .size(11.5)
+                    .monospace()
+                    .color(theme.text_secondary),
+                );
+            });
 
             ui.add_space(8.0);
             ui.columns(4, |cols| {
                 cols[0].vertical(|ui| {
-                    ui.label(RichText::new("EMBEDDED NVW_DCR-LOD").size(10.0).strong().color(theme.text_muted));
-                    ui.label(RichText::new(format!("{} Berkas IFC", ifc_files.len().max(8))).size(15.0).strong().color(theme.accent_blue));
-                    ui.label(RichText::new("LOD 100, 200, 300 (767 MB)").size(10.5).color(theme.text_secondary));
+                    ui.label(RichText::new("KATEGORI TERORGANISIR").size(10.0).strong().color(theme.text_muted));
+                    ui.label(RichText::new(format!("{} Folder Kategori", categories.len())).size(15.0).strong().color(theme.accent_blue));
+                    ui.label(RichText::new("Auto-Taxonomy Routing").size(10.5).color(theme.text_secondary));
                 });
                 cols[1].vertical(|ui| {
                     ui.label(RichText::new("SIKLUS PEMBELAJARAN AI").size(10.0).strong().color(theme.text_muted));
@@ -247,7 +249,7 @@ impl MyProjectView {
                     ui.label(RichText::new(format!("{} Komponen Parametrik", mem.total_parametric_mutations)).size(10.5).color(theme.text_secondary));
                 });
                 cols[3].vertical(|ui| {
-                    let best_sec = mem.learned_optimal_sections.first().map(|s| s.as_str()).unwrap_or("ASTM A992 W24x104");
+                    let best_sec = mem.learned_optimal_sections.first().map(|s| s.as_str()).unwrap_or("RC Column 500x500");
                     ui.label(RichText::new("PROFIL TEROPTIMASI").size(10.0).strong().color(theme.text_muted));
                     ui.label(RichText::new(best_sec).size(13.0).strong().color(Color32::WHITE));
                     ui.label(RichText::new("Rekomendasi Memori Historis").size(10.5).color(theme.text_secondary));
@@ -256,10 +258,18 @@ impl MyProjectView {
 
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("🎯 Target Penyimpanan Kustom (Opsional — Kosongkan untuk Default InternalVault):").size(11.0).color(theme.text_muted));
-                ui.add(egui::TextEdit::singleline(&mut self.custom_vault_override)
-                    .hint_text("Default: EigenGraph.app/Contents/Resources/InternalVault/")
-                    .desired_width(340.0));
+                ui.label(RichText::new("🎯 Ganti Target Folder Vault:").size(11.0).color(theme.text_muted));
+                let resp = ui.add(egui::TextEdit::singleline(&mut self.custom_vault_override)
+                    .hint_text("Ketik path folder kustom (misal: /Users/nama/Documents/MyVault)...")
+                    .desired_width(320.0));
+                if resp.lost_focus() && !self.custom_vault_override.trim().is_empty() {
+                    let path = std::path::PathBuf::from(self.custom_vault_override.trim());
+                    let _ = crate::core::InternalVault::set_custom_vault_dir(path);
+                }
+                if ui.button(RichText::new("Terapkan").size(11.0)).clicked() && !self.custom_vault_override.trim().is_empty() {
+                    let path = std::path::PathBuf::from(self.custom_vault_override.trim());
+                    let _ = crate::core::InternalVault::set_custom_vault_dir(path);
+                }
             });
 
             ui.add_space(10.0);
