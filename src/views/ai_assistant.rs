@@ -231,6 +231,8 @@ impl AiAssistantView {
     pub fn get_chips_for_pillar(pillar: NavigationPillar) -> &'static [(&'static str, &'static str)] {
         match pillar {
             NavigationPillar::MyLibrary => &[
+                ("📁 Inspeksi Vault Penuh", "Inspeksi seluruh isi, direktori kategori, dan berkas di Vault aktif saat ini."),
+                ("🧹 Rapikan & Strukturkan Vault", "Merapikan seluruh isi Vault, validasi JSON, dan sinkronkan metadata kategori."),
                 ("📑 Ringkasan Portofolio", "Summarize all projects and compare redundancy indices across the portfolio."),
                 ("📜 Sertifikat Audit EigenGraph", "Buka dan cetak Surat Hasil Audit Redundansi Struktural EigenGraph 2026."),
                 ("📊 Rank by Safety", "Sort projects by minimum ARI score and deflection criteria."),
@@ -242,12 +244,16 @@ impl AiAssistantView {
                 ("🔬 Tampilkan Formulasi ARI", "Tinjau persamaan resmi formulasi EigenGraph (Michaelis-Menten dan SVD Guard)."),
             ],
             NavigationPillar::DraftingDrawings => &[
+                ("🤖 Selesaikan Struktur Aktif", "Bantu selesaikan elemen balok penghubung dan pembesian otomatis pada struktur yang sedang dikerjakan."),
+                ("📁 Status Live Vault", "Tinjau status penyimpanan autosave dan riwayat perubahan model di Vault."),
                 ("🪄 Rekomendasi Bracing ARI", "Jalankan AI-ARI Topology Suggestion untuk eliminasi titik rawan runtuh."),
                 ("📐 Warren Truss 24m", "Generate parametric Warren truss with L=24m, H=3.2m, n=6."),
                 ("🔗 Bind H = L / 7.5", "Apply driving formula constraint between height and span."),
                 ("💾 Save to DB", "Save drawn parametric component into project database."),
             ],
             NavigationPillar::ModelingGeometry => &[
+                ("🤖 Selesaikan Struktur Aktif", "Bantu selesaikan elemen balok penghubung dan pembesian otomatis pada struktur yang sedang dikerjakan."),
+                ("📁 Inspeksi Vault Penuh", "Inspeksi seluruh isi, direktori kategori, dan berkas di Vault aktif saat ini."),
                 ("💥 Uji Disrupsi Jamak (N-2)", "Simulasikan pelepasan 2 batang sekaligus dan deteksi efek domino runtuh."),
                 ("⚡ Check SVD Mechanism", "Run full singular value decomposition rank verification on the current structure."),
                 ("🎯 Screen Critical ARI", "Screen all members to find the lowest Adjusted Redundancy Index contributions."),
@@ -319,7 +325,109 @@ impl AiAssistantView {
         });
 
         let p_lower = prompt.to_lowercase();
-        let response_msg = if p_lower.contains("ragam") || p_lower.contains("modal") || p_lower.contains("sni 1726") || p_lower.contains("gempa") || p_lower.contains("spektrum") || p_lower.contains("frekuensi alami") {
+        let response_msg = if p_lower.contains("inspeksi vault") || p_lower.contains("lihat vault") || p_lower.contains("buka vault") || p_lower.contains("isi vault") || p_lower.contains("status vault") || p_lower.contains("daftar vault") || p_lower.contains("list vault") {
+            crate::core::InternalVault::inspect_vault_summary()
+        } else if p_lower.contains("status live") || p_lower.contains("live context") || p_lower.contains("live state") {
+            let ctx = crate::core::InternalVault::get_live_ai_prompt_context();
+            format!("🧠 [EigenAI Live Vault Context]:\n{}", ctx)
+        } else if p_lower.contains("rapikan vault") || p_lower.contains("strukturkan vault") || p_lower.contains("bersihkan vault") || p_lower.contains("organisir vault") || p_lower.contains("restruktur vault") || p_lower.contains("organize vault") {
+            match crate::core::InternalVault::restructure_and_organize_vault() {
+                Ok(rep) => {
+                    let log_preview = if rep.log.len() > 6 {
+                        rep.log[..6].join("\n  • ")
+                    } else {
+                        rep.log.join("\n  • ")
+                    };
+                    format!(
+                        "🧹 [EigenAI Copilot — Restrukturisasi & Pembersihan Vault Berhasil]:\n• Direktori Root: {}\n• Total Berkas Dipindai: {}\n• Berkas Nyasar Ditata Ulang: {}\n• Berkas Rusak 0-Byte Dibersihkan: {}\n• Status Integritas: {}\n• Kategori Terverifikasi ({}): {}\n• Log Aktivitas:\n  • {}",
+                        rep.vault_root,
+                        rep.total_files_scanned,
+                        rep.files_reorganized,
+                        rep.stale_cleaned_count,
+                        rep.integrity_status,
+                        rep.categories_verified.len(),
+                        rep.categories_verified.join(", "),
+                        log_preview
+                    )
+                }
+                Err(e) => format!("🧹 [EigenAI Vault Restructure]: Gagal menjalankan restrukturisasi: {}", e),
+            }
+        } else if p_lower.contains("selesaikan struktur") || p_lower.contains("lengkapi balok") || p_lower.contains("lengkapi kolom") || p_lower.contains("selesaikan desain") || p_lower.contains("bantu selesaikan") || p_lower.contains("autocomplete") {
+            match crate::core::InternalVault::ai_autocomplete_active_structure() {
+                Ok(msg) => msg,
+                Err(e) => format!("🤖 [EigenAI Copilot]: {}", e),
+            }
+        } else if p_lower.starts_with("baca file ") || p_lower.starts_with("lihat file ") || p_lower.starts_with("cat ") || p_lower.starts_with("read file ") {
+            let raw_arg = if let Some(s) = prompt.strip_prefix("baca file ") {
+                s
+            } else if let Some(s) = prompt.strip_prefix("lihat file ") {
+                s
+            } else if let Some(s) = prompt.strip_prefix("cat ") {
+                s
+            } else if let Some(s) = prompt.strip_prefix("read file ") {
+                s
+            } else {
+                ""
+            }.trim();
+
+            if let Some((cat, fname)) = raw_arg.split_once('/') {
+                match crate::core::InternalVault::ai_read_vault_file(cat.trim(), fname.trim()) {
+                    Ok(content) => {
+                        let preview = if content.len() > 1500 {
+                            format!("{}...\n[Dipotong: total {} byte]", &content[..1500], content.len())
+                        } else {
+                            content
+                        };
+                        format!("📖 [EigenAI Vault Reader — {}/{}]:\n```json\n{}\n```", cat.trim(), fname.trim(), preview)
+                    }
+                    Err(e) => format!("📖 [EigenAI Vault Reader]: {}", e),
+                }
+            } else {
+                "📖 [EigenAI Vault Reader]: Format perintah salah. Gunakan: `baca file <Kategori>/<NamaBerkas.json>` (Contoh: `baca file Columns/col_001_Kolom_500x500.json`).".to_string()
+            }
+        } else if p_lower.starts_with("hapus file ") || p_lower.starts_with("delete file ") || p_lower.starts_with("rm ") {
+            let raw_arg = if let Some(s) = prompt.strip_prefix("hapus file ") {
+                s
+            } else if let Some(s) = prompt.strip_prefix("delete file ") {
+                s
+            } else if let Some(s) = prompt.strip_prefix("rm ") {
+                s
+            } else {
+                ""
+            }.trim();
+
+            if let Some((cat, fname)) = raw_arg.split_once('/') {
+                match crate::core::InternalVault::ai_delete_vault_file(cat.trim(), fname.trim()) {
+                    Ok(_) => format!("🗑️ [EigenAI Vault Deletion]: Berkas '{}/{}' berhasil dihapus dari Vault dengan aman.", cat.trim(), fname.trim()),
+                    Err(e) => format!("🗑️ [EigenAI Vault Deletion]: Gagal menghapus: {}", e),
+                }
+            } else {
+                "🗑️ [EigenAI Vault Deletion]: Format perintah salah. Gunakan: `hapus file <Kategori>/<NamaBerkas.json>`.".to_string()
+            }
+        } else if p_lower.starts_with("tulis file ") || p_lower.starts_with("write file ") || p_lower.starts_with("modifikasi file ") {
+            let raw_arg = if let Some(s) = prompt.strip_prefix("tulis file ") {
+                s
+            } else if let Some(s) = prompt.strip_prefix("write file ") {
+                s
+            } else if let Some(s) = prompt.strip_prefix("modifikasi file ") {
+                s
+            } else {
+                ""
+            }.trim();
+
+            if let Some((target_path, content)) = raw_arg.split_once(' ') {
+                if let Some((cat, fname)) = target_path.split_once('/') {
+                    match crate::core::InternalVault::ai_write_vault_file(cat.trim(), fname.trim(), content.trim()) {
+                        Ok(p) => format!("✍️ [EigenAI Vault Writer]: Berhasil menulis berkas ke {}\nKategori: {} | Ukuran: {} byte", p.display(), cat.trim(), content.trim().len()),
+                        Err(e) => format!("✍️ [EigenAI Vault Writer]: Gagal menulis: {}", e),
+                    }
+                } else {
+                    "✍️ [EigenAI Vault Writer]: Format path harus `<Kategori>/<NamaBerkas>`. Contoh: `tulis file Custom_Components/catatan.txt ini isinya`.".to_string()
+                }
+            } else {
+                "✍️ [EigenAI Vault Writer]: Format perintah salah. Gunakan: `tulis file <Kategori>/<NamaBerkas> <isi konten>`.".to_string()
+            }
+        } else if p_lower.contains("ragam") || p_lower.contains("modal") || p_lower.contains("sni 1726") || p_lower.contains("gempa") || p_lower.contains("spektrum") || p_lower.contains("frekuensi alami") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
                 let spec = crate::core::modal::Sni1726Spectrum::new(crate::core::modal::SiteClass::SD, 1.20, 0.50, 8.0, 1.0);
@@ -583,7 +691,13 @@ impl AiAssistantView {
         } else if p_lower.contains("save") || p_lower.contains("db") {
             "💾 [Database Sync]: Current parametric component saved to project database. Available immediately for 3D assembly in BUILD.".to_string()
         } else {
-            format!("⚛️ [EigenAI Copilot]: Command '{}' received in {} workspace. Structural topology, geometric constraints, and stiffness matrices verified.", prompt, pillar.clean_name())
+            let vault_ctx = crate::core::InternalVault::get_live_ai_prompt_context();
+            format!(
+                "⚛️ [EigenAI Copilot]: Command '{}' received in {} workspace.\n\n{}\n\nStructural topology, geometric constraints, and stiffness matrices verified.",
+                prompt,
+                pillar.clean_name(),
+                vault_ctx
+            )
         };
 
         self.chat_history.push(ChatMessage {
@@ -591,5 +705,61 @@ impl AiAssistantView {
             message: response_msg,
             time: "Just now".to_string(),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ai_copilot_full_vault_access() {
+        let _guard = crate::core::vault::TEST_VAULT_LOCK.lock().unwrap();
+        let temp_dir = std::env::temp_dir().join(format!("eigengraph_ai_assistant_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::create_dir_all(&temp_dir);
+        crate::core::vault::InternalVault::set_runtime_vault_dir(temp_dir.clone());
+
+        let mut ai = AiAssistantView::default();
+        let members = vec![];
+        let projects = vec![];
+        let mut db_components = vec![];
+
+        // 1. Test inspect vault summary
+        ai.execute_prompt("inspeksi vault", NavigationPillar::MyLibrary, &members, &projects, &mut db_components);
+        let last_msg = &ai.chat_history.last().unwrap().message;
+        assert!(last_msg.contains("Audit & Inspeksi Vault Penuh"));
+        assert!(last_msg.contains("Folder Kategori"));
+
+        // 2. Test writing file via Copilot
+        ai.execute_prompt("tulis file Custom_Components/test_ai.txt Halo dari EigenAI", NavigationPillar::MyLibrary, &members, &projects, &mut db_components);
+        let last_msg = &ai.chat_history.last().unwrap().message;
+        assert!(last_msg.contains("Berhasil menulis berkas"));
+        assert!(temp_dir.join("Custom_Components").join("test_ai.txt").exists());
+
+        // 3. Test reading file via Copilot
+        ai.execute_prompt("baca file Custom_Components/test_ai.txt", NavigationPillar::MyLibrary, &members, &projects, &mut db_components);
+        let last_msg = &ai.chat_history.last().unwrap().message;
+        assert!(last_msg.contains("Halo dari EigenAI"));
+
+        // 4. Test restructuring vault via Copilot
+        ai.execute_prompt("rapikan vault", NavigationPillar::MyLibrary, &members, &projects, &mut db_components);
+        let last_msg = &ai.chat_history.last().unwrap().message;
+        assert!(last_msg.contains("Restrukturisasi & Pembersihan Vault Berhasil"));
+
+        // 5. Test deleting file via Copilot
+        ai.execute_prompt("hapus file Custom_Components/test_ai.txt", NavigationPillar::MyLibrary, &members, &projects, &mut db_components);
+        let last_msg = &ai.chat_history.last().unwrap().message;
+        assert!(last_msg.contains("berhasil dihapus dari Vault"));
+        assert!(!temp_dir.join("Custom_Components").join("test_ai.txt").exists());
+
+        // 6. Test live context in general query
+        ai.execute_prompt("bagaimana kondisi desain kita?", NavigationPillar::ModelingGeometry, &members, &projects, &mut db_components);
+        let last_msg = &ai.chat_history.last().unwrap().message;
+        assert!(last_msg.contains("Live Vault Working Context"));
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        crate::core::vault::InternalVault::reset_runtime_vault_dir();
     }
 }
