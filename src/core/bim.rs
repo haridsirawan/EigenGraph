@@ -2061,14 +2061,16 @@ pub struct BimCommandBus {
 
 impl BimCommandBus {
     pub fn new() -> Self {
-        Self {
+        let bus = Self {
             project: BimProject::sample_bimcraft_building(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             log: vec![
                 "Initialized BIMCraft-grade Relational Building Model (Levels 1-3, Grids 1-3/A-C, CSG Openings & Rebar)".to_string(),
             ],
-        }
+        };
+        crate::core::InternalVault::sync_live_bim_state(&bus.project, "Model Initialized");
+        bus
     }
 
     /// Executes a `BimCommand` transactionally, recording a snapshot on `undo_stack`.
@@ -2078,6 +2080,7 @@ impl BimCommandBus {
         self.undo_stack.push(snapshot);
         self.redo_stack.clear();
         self.log.push(msg.clone());
+        crate::core::InternalVault::sync_live_bim_state(&self.project, &msg);
         Ok(msg)
     }
 
@@ -2094,6 +2097,7 @@ impl BimCommandBus {
         self.redo_stack.push(cur);
         let msg = format!("Undo applied ({} steps remaining)", self.undo_stack.len());
         self.log.push(msg.clone());
+        crate::core::InternalVault::sync_live_bim_state(&self.project, &msg);
         Some(msg)
     }
 
@@ -2103,6 +2107,7 @@ impl BimCommandBus {
         self.undo_stack.push(cur);
         let msg = format!("Redo applied ({} steps remaining)", self.redo_stack.len());
         self.log.push(msg.clone());
+        crate::core::InternalVault::sync_live_bim_state(&self.project, &msg);
         Some(msg)
     }
 

@@ -84,7 +84,49 @@ flowchart TD
 
 ---
 
-## 4. Keamanan Folder & Pencegahan Dianggap "File Sampah"
+## 4. Sistem Autosave Reaktif Tanpa Klik (Zero-Friction Reactive Auto-Sync) & Konteks AI Real-Time
+
+Sesuai filosofi pengguna: **Pengguna tidak perlu menunggu balok atau kolom selesai dirancang untuk menekan tombol "Save" atau "Input"**.
+Sistem Vault bekerja secara reaktif di latar belakang (*event-driven* melalui `BimCommandBus`):
+
+```
++--------------------------------------------------------------------------------+
+|        Pengguna Menggambar/Memodelkan di Kanvas 3D (Pilar 4: Modeling)        |
+|   - Pasang Kolom 500x500 di Titik Buhul B-2                                    |
+|   - Tarik Garis Balok WF 400x200 dari B-2 ke B-3                               |
+|   - Pasang Kait Tulangan Sengkang Gempa 135 deg                                |
++--------------------------------------------------------------------------------+
+                                       |
+                   BimCommandBus::execute(BimCommand)
+                                       v
++--------------------------------------------------------------------------------+
+|       InternalVault::sync_live_bim_state (Otomatis & Real-Time)                |
+|   1. Columns/     -> File 'col_001_Column_C1.json' langsung terbuat/terupdate   |
+|   2. Beams/       -> File 'beam_001_Girder_B1.json' langsung terbuat            |
+|   3. Rebar/       -> File 'active_model_rebars.json' langsung diperbarui        |
+|   4. AI_Context/  -> 'live_design_state.json' menulis status kerja terkini      |
+|   5. Projects/    -> 'active_live_project.json' menyimpan snapshot instan      |
++--------------------------------------------------------------------------------+
+                                       |
+       Saat Pengguna Memanggil AI: "Tolong Bantu Selesaikan Struktur Ini"
+                                       v
++--------------------------------------------------------------------------------+
+|                    AI Langsung Tahu Konteks Pekerjaan                          |
+|   - AI membaca 'AI_Context/live_design_state.json':                            |
+|     "Insinyur sedang merancang Balok B-1 di Lantai 2 antara Kolom C-1 & C-2.   |
+|      Koneksi ujung balok belum kaku. Nilai live ARI saat ini = 0.78.           |
+|      Rekomendasi AI: Tambahkan pengaku bresing diagonal untuk capai ARI 0.92." |
++--------------------------------------------------------------------------------+
+```
+
+### Karakteristik Autosave Reaktif:
+1. **Zero Manual Save**: Tidak ada tombol "Simpan ke Vault" yang membosankan. Begitu kuas/garis mouse selesai ditarik, datanya sudah tersimpan aman di disk.
+2. **Sinkronisasi Penghapusan (Auto-Delete)**: Jika pengguna menghapus balok atau kolom (atau menekan `Undo`), file JSON terkait di folder Vault secara otomatis ikut dibersihkan (*garbage-collected*).
+3. **Konteks AI Lengkap (*AI-Ready Architecture*)**: File `AI_Context/live_design_state.json` mencatat histori aksi terakhir, jumlah elemen aktif, status kelengkapan buhul, dan indikator ARI real-time.
+
+---
+
+## 5. Keamanan Folder & Pencegahan Dianggap "File Sampah"
 
 Di dalam folder Vault yang dipilih pengguna, sistem otomatis menyertakan:
 1. **Icon Khusus Logo EigenGraph** (Logo atom ⚛️ agar tampil eksklusif di Finder / File Explorer).

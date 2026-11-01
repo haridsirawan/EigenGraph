@@ -115,6 +115,25 @@ impl AriKnowledgeMemory {
     }
 }
 
+/// Real-time manifest of the work-in-progress design state for zero-friction AI collaboration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveAiDesignState {
+    pub project_name: String,
+    pub last_action: String,
+    pub total_elements_count: usize,
+    pub columns_count: usize,
+    pub beams_count: usize,
+    pub walls_count: usize,
+    pub slabs_count: usize,
+    pub footings_count: usize,
+    pub rebars_count: usize,
+    pub levels_count: usize,
+    pub grids_count: usize,
+    pub live_status: String,
+    pub ai_context_summary: String,
+    pub timestamp_utc: String,
+}
+
 pub struct InternalVault;
 
 impl InternalVault {
@@ -422,13 +441,256 @@ Folder ini aman untuk disinkronkan ke Google Drive, Dropbox, atau GitHub.
         let _ = std::fs::create_dir_all(root.join("Beams"));
         let _ = std::fs::create_dir_all(root.join("Slabs"));
         let _ = std::fs::create_dir_all(root.join("Walls"));
+        let _ = std::fs::create_dir_all(root.join("Footings"));
         let _ = std::fs::create_dir_all(root.join("Rebar"));
         let _ = std::fs::create_dir_all(root.join("Materials"));
         let _ = std::fs::create_dir_all(root.join("Hydraulic_Structures"));
         let _ = std::fs::create_dir_all(root.join("KnowledgeBase"));
         let _ = std::fs::create_dir_all(root.join("Exports"));
+        let _ = std::fs::create_dir_all(root.join("AI_Context"));
         Self::ensure_vault_notice(&root);
         root
+    }
+
+    /// Reactive Zero-Click Auto-Synchronizer:
+    /// Automatically synchronizes the active BIM project and all its in-progress elements
+    /// directly into the Vault without requiring any manual save or export clicks.
+    ///
+    /// Every element currently being drafted is auto-routed to its category folder:
+    /// - `Columns/` -> JSON per active column (cleaned automatically on element deletion)
+    /// - `Beams/` -> JSON per active beam/run
+    /// - `Walls/` -> JSON per active wall
+    /// - `Slabs/` -> JSON per active slab
+    /// - `Footings/` -> JSON per active footing
+    /// - `Rebar/` -> JSON for reinforcement bars
+    /// - `Projects/active_live_project.json` -> full snapshot of the relational model
+    /// - `AI_Context/live_design_state.json` -> real-time AI context manifest
+    pub fn sync_live_bim_state(project: &crate::core::bim::BimProject, last_action: &str) {
+        let root = Self::vault_root_dir();
+        let _ = Self::ensure_subdirectories();
+
+        // 1. Autosave full active project snapshot into Projects/
+        let proj_dir = Self::auto_route_category("Projects");
+        if let Ok(json) = serde_json::to_string_pretty(project) {
+            let _ = std::fs::write(proj_dir.join("active_live_project.json"), json);
+        }
+
+        // 2. Sync Columns/ (save active columns & clean removed ones)
+        let col_dir = Self::auto_route_category("Columns");
+        let active_col_ids: std::collections::HashSet<usize> = project.columns.iter().map(|c| c.id).collect();
+        if let Ok(entries) = std::fs::read_dir(&col_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                    if name.starts_with("col_") && name.ends_with(".json") {
+                        if let Some(id_str) = name.strip_prefix("col_").and_then(|s| s.split('_').next()) {
+                            if let Ok(id) = id_str.parse::<usize>() {
+                                if !active_col_ids.contains(&id) {
+                                    let _ = std::fs::remove_file(&path);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for col in &project.columns {
+            let fname = format!("col_{:03}_{}.json", col.id, col.name.replace(' ', "_"));
+            if let Ok(json) = serde_json::to_string_pretty(col) {
+                let _ = std::fs::write(col_dir.join(fname), json);
+            }
+        }
+
+        // 3. Sync Beams/ (save active runs & clean removed ones)
+        let beam_dir = Self::auto_route_category("Beams");
+        let active_run_ids: std::collections::HashSet<usize> = project.runs.iter().map(|r| r.id).collect();
+        if let Ok(entries) = std::fs::read_dir(&beam_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                    if name.starts_with("beam_") && name.ends_with(".json") {
+                        if let Some(id_str) = name.strip_prefix("beam_").and_then(|s| s.split('_').next()) {
+                            if let Ok(id) = id_str.parse::<usize>() {
+                                if !active_run_ids.contains(&id) {
+                                    let _ = std::fs::remove_file(&path);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for run in &project.runs {
+            let fname = format!("beam_{:03}_{}.json", run.id, run.name.replace(' ', "_"));
+            if let Ok(json) = serde_json::to_string_pretty(run) {
+                let _ = std::fs::write(beam_dir.join(fname), json);
+            }
+        }
+
+        // 4. Sync Walls/
+        let wall_dir = Self::auto_route_category("Walls");
+        let active_wall_ids: std::collections::HashSet<usize> = project.walls.iter().map(|w| w.id).collect();
+        if let Ok(entries) = std::fs::read_dir(&wall_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                    if name.starts_with("wall_") && name.ends_with(".json") {
+                        if let Some(id_str) = name.strip_prefix("wall_").and_then(|s| s.split('_').next()) {
+                            if let Ok(id) = id_str.parse::<usize>() {
+                                if !active_wall_ids.contains(&id) {
+                                    let _ = std::fs::remove_file(&path);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for wall in &project.walls {
+            let fname = format!("wall_{:03}_{}.json", wall.id, wall.name.replace(' ', "_"));
+            if let Ok(json) = serde_json::to_string_pretty(wall) {
+                let _ = std::fs::write(wall_dir.join(fname), json);
+            }
+        }
+
+        // 5. Sync Slabs/
+        let slab_dir = Self::auto_route_category("Slabs");
+        let active_slab_ids: std::collections::HashSet<usize> = project.slabs.iter().map(|s| s.id).collect();
+        if let Ok(entries) = std::fs::read_dir(&slab_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                    if name.starts_with("slab_") && name.ends_with(".json") {
+                        if let Some(id_str) = name.strip_prefix("slab_").and_then(|s| s.split('_').next()) {
+                            if let Ok(id) = id_str.parse::<usize>() {
+                                if !active_slab_ids.contains(&id) {
+                                    let _ = std::fs::remove_file(&path);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for slab in &project.slabs {
+            let fname = format!("slab_{:03}_{}.json", slab.id, slab.name.replace(' ', "_"));
+            if let Ok(json) = serde_json::to_string_pretty(slab) {
+                let _ = std::fs::write(slab_dir.join(fname), json);
+            }
+        }
+
+        // 6. Sync Footings/
+        let footing_dir = Self::auto_route_category("Footings");
+        let active_footing_ids: std::collections::HashSet<usize> = project.footings.iter().map(|f| f.id).collect();
+        if let Ok(entries) = std::fs::read_dir(&footing_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                    if name.starts_with("footing_") && name.ends_with(".json") {
+                        if let Some(id_str) = name.strip_prefix("footing_").and_then(|s| s.split('_').next()) {
+                            if let Ok(id) = id_str.parse::<usize>() {
+                                if !active_footing_ids.contains(&id) {
+                                    let _ = std::fs::remove_file(&path);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for f in &project.footings {
+            let fname = format!("footing_{:03}_{}.json", f.id, f.name.replace(' ', "_"));
+            if let Ok(json) = serde_json::to_string_pretty(f) {
+                let _ = std::fs::write(footing_dir.join(fname), json);
+            }
+        }
+
+        // 7. Sync Rebar/
+        let rebar_dir = Self::auto_route_category("Rebar");
+        let rebar_file = rebar_dir.join("active_model_rebars.json");
+        if !project.rebars.is_empty() {
+            if let Ok(json) = serde_json::to_string_pretty(&project.rebars) {
+                let _ = std::fs::write(&rebar_file, json);
+            }
+        } else if rebar_file.exists() {
+            let _ = std::fs::remove_file(&rebar_file);
+        }
+
+        // 8. Write AI Context Manifest in `AI_Context/live_design_state.json`
+        let ai_dir = root.join("AI_Context");
+        let _ = std::fs::create_dir_all(&ai_dir);
+        let total_elems = project.columns.len()
+            + project.runs.len()
+            + project.walls.len()
+            + project.slabs.len()
+            + project.footings.len();
+
+        let ai_summary = format!(
+            "Model '{}' sedang aktif: {} kolom, {} balok/run, {} dinding, {} pelat, {} pondasi, {} tulangan. Aksi terakhir: '{}'.",
+            project.project_name,
+            project.columns.len(),
+            project.runs.len(),
+            project.walls.len(),
+            project.slabs.len(),
+            project.footings.len(),
+            project.rebars.len(),
+            last_action
+        );
+
+        let ai_state = LiveAiDesignState {
+            project_name: project.project_name.clone(),
+            last_action: last_action.to_string(),
+            total_elements_count: total_elems,
+            columns_count: project.columns.len(),
+            beams_count: project.runs.len(),
+            walls_count: project.walls.len(),
+            slabs_count: project.slabs.len(),
+            footings_count: project.footings.len(),
+            rebars_count: project.rebars.len(),
+            levels_count: project.levels.len(),
+            grids_count: project.grids.len(),
+            live_status: if total_elems == 0 { "Empty Canvas".to_string() } else { "In-Progress Design".to_string() },
+            ai_context_summary: ai_summary,
+            timestamp_utc: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| format!("Epoch +{}s", d.as_secs()))
+                .unwrap_or_else(|_| "Live".to_string()),
+        };
+
+        if let Ok(json) = serde_json::to_string_pretty(&ai_state) {
+            let _ = std::fs::write(ai_dir.join("live_design_state.json"), json);
+        }
+
+        // 9. Update Self-Learning Knowledge Memory
+        let mut mem = Self::load_knowledge_memory();
+        mem.total_autosaves_count += 1;
+        let audit = format!("[Live Auto-Sync] {}: {} elemen", last_action, total_elems);
+        if mem.recent_audit_log.last() != Some(&audit) {
+            mem.recent_audit_log.push(audit);
+            if mem.recent_audit_log.len() > 25 {
+                mem.recent_audit_log.remove(0);
+            }
+        }
+        let _ = Self::save_knowledge_memory(&mem);
+    }
+
+    /// Reads the real-time AI design state manifest from `AI_Context/live_design_state.json`.
+    pub fn read_live_ai_context() -> Option<LiveAiDesignState> {
+        let path = Self::vault_root_dir().join("AI_Context").join("live_design_state.json");
+        let content = std::fs::read_to_string(&path).ok()?;
+        serde_json::from_str::<LiveAiDesignState>(&content).ok()
+    }
+
+    /// Generates markdown AI context for seamless pair programming and automated assistance.
+    pub fn get_live_ai_prompt_context() -> String {
+        if let Some(state) = Self::read_live_ai_context() {
+            format!(
+                "## Live Vault Working Context\n- **Project**: {}\n- **Status**: {}\n- **Active Elements**: {} ({} Columns, {} Beams, {} Walls, {} Slabs, {} Rebars)\n- **Last User Action**: {}\n- **AI Summary**: {}",
+                state.project_name, state.live_status, state.total_elements_count, state.columns_count, state.beams_count, state.walls_count, state.slabs_count, state.rebars_count, state.last_action, state.ai_context_summary
+            )
+        } else {
+            "## Live Vault Working Context\n- Vault ready for modeling. No active session yet.".to_string()
+        }
     }
 
     pub fn demo_nvw_dir() -> PathBuf {
@@ -1035,6 +1297,55 @@ mod tests {
         assert!(cat_names.contains(&"Columns".to_string()));
         assert!(cat_names.contains(&"Beams".to_string()));
         assert!(cat_names.contains(&"Hydraulic_Structures".to_string()));
+
+        // Cleanup
+        InternalVault::reset_runtime_vault_dir();
+        let _ = std::fs::remove_dir_all(&temp_vault);
+    }
+
+    #[test]
+    fn test_reactive_autosave_and_live_ai_context() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let temp_vault = std::env::temp_dir().join(format!("eigengraph_test_reactive_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_vault);
+        InternalVault::set_runtime_vault_dir(temp_vault.clone());
+
+        // 1. Initialize BimCommandBus (simulates user starting modeling)
+        let mut bus = crate::core::bim::BimCommandBus::new();
+
+        // 2. Add a new Column via BimCommand (simulates user placing a column)
+        let cmd = crate::core::bim::BimCommand::AddColumn {
+            base_level_id: 1,
+            top_level_id: 2,
+            pos: crate::core::geom::P2(5000.0, 5000.0),
+            width_mm: 600.0,
+            depth_mm: 600.0,
+            is_round: false,
+            profile_name: "RC_Kolom_Utama_600x600".to_string(),
+        };
+        bus.execute(cmd).expect("AddColumn should succeed");
+
+        // 3. Verify that the Column was reactively autosaved into Vault/Columns/ WITHOUT clicking save!
+        let col_files = InternalVault::list_items_in_category("Columns");
+        assert!(!col_files.is_empty(), "Columns folder should contain live autosaved column files");
+        assert!(col_files.iter().any(|f| f.contains("col_")));
+
+        // 4. Verify AI context manifest in AI_Context/live_design_state.json
+        let ai_context = InternalVault::read_live_ai_context()
+            .expect("AI context manifest should be auto-created");
+        assert!(ai_context.columns_count >= 1);
+        assert!(ai_context.last_action.contains("Column") || ai_context.last_action.contains("Added"));
+        assert!(ai_context.ai_context_summary.contains("kolom"));
+
+        // 5. Test AI Prompt helper
+        let ai_prompt = InternalVault::get_live_ai_prompt_context();
+        assert!(ai_prompt.contains("Live Vault Working Context"));
+        assert!(ai_prompt.contains("Columns"));
+
+        // 6. Test reactive Undo/Deletion: call bus.undo()
+        bus.undo().expect("Undo should succeed");
+        let ai_context_after_undo = InternalVault::read_live_ai_context().unwrap();
+        assert!(ai_context_after_undo.last_action.contains("Undo"));
 
         // Cleanup
         InternalVault::reset_runtime_vault_dir();
