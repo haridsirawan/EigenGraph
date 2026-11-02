@@ -91,6 +91,82 @@ impl SettingsView {
                 ui.label(RichText::new("Digunakan untuk otentikasi update otomatis dari aplikasi jika repositori GitHub berstatus privat.").size(11.0).color(theme.text_muted));
             });
 
+            ui.add_space(16.0);
+
+            // Group 4: About EigenGraph
+            theme.card_frame().show(ui, |ui| {
+                ui.label(RichText::new("ABOUT EIGENGRAPH").strong().size(12.0).color(theme.accent_blue));
+                ui.separator();
+                ui.add_space(8.0);
+
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
+                    ui.label(RichText::new(format!("v{} (Universal Multi-Platform)", env!("CARGO_PKG_VERSION"))).size(13.0).color(theme.accent_green).strong());
+                });
+
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Author & Lead Developer:").strong().size(12.0).color(theme.text_primary));
+                    ui.label(RichText::new("Harids Irawan <harids.irawan@gmail.com>").size(12.0).color(theme.text_secondary));
+                });
+
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Architecture:").strong().size(12.0).color(theme.text_primary));
+                    let arch = if cfg!(target_arch = "aarch64") {
+                        "Apple Silicon (aarch64)"
+                    } else if cfg!(target_arch = "x86_64") {
+                        "x86_64 64-bit"
+                    } else {
+                        "Universal"
+                    };
+                    let os = if cfg!(target_os = "macos") {
+                        "macOS"
+                    } else if cfg!(target_os = "windows") {
+                        "Windows"
+                    } else if cfg!(target_os = "linux") {
+                        "Linux"
+                    } else {
+                        "Desktop"
+                    };
+                    ui.label(RichText::new(format!("{} • {}", os, arch)).size(12.0).color(theme.text_secondary));
+                });
+
+                ui.add_space(8.0);
+                ui.label(RichText::new("Theoretical & Computational Foundations:").strong().size(12.0).color(theme.text_primary));
+                ui.label(
+                    RichText::new(
+                        "• Linear Adjusted Redundancy Index (ARI) with Sherman-Morrison O(N²) fast update\n\
+                         • Woodbury Rank-2 (N-2) simultaneous multi-element disruption screening\n\
+                         • Euler elastic buckling & AISC 360-16 B1 moment amplification geometric stiffness guard\n\
+                         • SVD Kinematic Mechanism Guard (m_e = 1 - h_e) for instant singularity detection\n\
+                         • Planar Half-Edge Face Arrangement & Non-Recursive BSP Tree Solid CSG Subtraction\n\
+                         • 2D Sheet Composer (A4, A3, A2, A1) with Vector PDF 1.4 & SVG Blueprint Generation\n\
+                         • Obsidian-Compliant Reactive Autosave Internal Vault with Copilot Integration"
+                    )
+                    .size(11.0)
+                    .color(theme.text_muted)
+                );
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Design Standards:").strong().size(11.5).color(theme.text_primary));
+                    ui.label(RichText::new("AISC 360-16 • ACI 318-19 • SNI 1729:2020 • SNI 2847:2019 • SNI 1726:2019").size(11.0).color(theme.text_secondary));
+                });
+
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Integrity & License:").strong().size(11.5).color(theme.text_primary));
+                    ui.label(RichText::new("NIST FIPS 180-4 SHA-256 Validated • Dual MIT / Apache 2.0").size(11.0).color(theme.text_secondary));
+                });
+
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Repository:").strong().size(11.5).color(theme.text_primary));
+                    ui.hyperlink_to("github.com/haridsirawan/EigenGraph", "https://github.com/haridsirawan/EigenGraph");
+                });
+            });
+
             ui.add_space(24.0);
         });
     }

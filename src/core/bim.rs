@@ -2215,7 +2215,7 @@ trailer << /Size 6 /Root 1 0 R >>\n%%EOF\n"
         out.push_str("ISO-10303-21;\nHEADER;\n");
         out.push_str("FILE_DESCRIPTION(('ViewDefinition [ReferenceView_V1.2]'),'2;1');\n");
         out.push_str(&format!(
-            "FILE_NAME('{}.ifc','2026-10-31T22:00:00',('EigenGraph BIMCraft Engine'),('EigenGraph 10D'),'EigenGraph v1.1.0','EigenGraph IFC4','');\n",
+            "FILE_NAME('{}.ifc','2026-10-31T22:00:00',('EigenGraph BIMCraft Engine'),('EigenGraph 10D'),'EigenGraph v2.0.0','EigenGraph IFC4','');\n",
             self.project_name
         ));
         out.push_str("FILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n");
@@ -2811,6 +2811,7 @@ mod tests {
 
     #[test]
     fn test_bim_sample_building_rooms_rebar_and_live_ari() {
+        let _guard = crate::core::vault::TEST_VAULT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bus = BimCommandBus::new();
         assert_eq!(bus.project.levels.len(), 3);
         assert_eq!(bus.project.grids.len(), 6);
@@ -2833,6 +2834,7 @@ mod tests {
 
     #[test]
     fn test_transactional_command_bus_undo_redo_and_section_cut_export() {
+        let _guard = crate::core::vault::TEST_VAULT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let mut bus = BimCommandBus::new();
         let initial_walls = bus.project.walls.len();
 

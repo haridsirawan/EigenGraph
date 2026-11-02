@@ -714,7 +714,7 @@ mod tests {
 
     #[test]
     fn test_ai_copilot_full_vault_access() {
-        let _guard = crate::core::vault::TEST_VAULT_LOCK.lock().unwrap();
+        let _guard = crate::core::vault::TEST_VAULT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let temp_dir = std::env::temp_dir().join(format!("eigengraph_ai_assistant_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_dir);
         let _ = std::fs::create_dir_all(&temp_dir);

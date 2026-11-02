@@ -1410,7 +1410,7 @@ mod tests {
 
     #[test]
     fn test_internal_vault_autosave_and_clean_catalog() {
-        let _guard = TEST_VAULT_LOCK.lock().unwrap();
+        let _guard = TEST_VAULT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let temp_vault = std::env::temp_dir().join(format!("eigengraph_test_clean_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_vault);
         InternalVault::set_runtime_vault_dir(temp_vault.clone());
@@ -1451,7 +1451,7 @@ mod tests {
 
     #[test]
     fn test_obsidian_vault_auto_taxonomy_and_routing() {
-        let _guard = TEST_VAULT_LOCK.lock().unwrap();
+        let _guard = TEST_VAULT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // Use an isolated temporary directory for testing
         let temp_vault = std::env::temp_dir().join(format!("eigengraph_test_vault_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_vault);
@@ -1547,7 +1547,7 @@ mod tests {
 
     #[test]
     fn test_reactive_autosave_and_live_ai_context() {
-        let _guard = TEST_VAULT_LOCK.lock().unwrap();
+        let _guard = TEST_VAULT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let temp_vault = std::env::temp_dir().join(format!("eigengraph_test_reactive_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_vault);
         InternalVault::set_runtime_vault_dir(temp_vault.clone());

@@ -1,6 +1,6 @@
 [package]
 name = "eigengraph"
-version = "1.2.0"
+version = "2.0.0"
 edition = "2021"
 authors = ["Harids Irawan <harids.irawan@gmail.com>"]
 description = "EigenGraph - Desktop BIM & Structural Graph Analytics with Mac App Store UI"
