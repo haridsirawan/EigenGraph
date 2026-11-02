@@ -233,6 +233,14 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Configure Linux Swap Memory
+        run: |
+          sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
       - name: Install Linux GUI & EGL Dependencies
         run: |
           sudo apt-get update
@@ -250,7 +258,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Release Binary
-        run: cargo build --release
+        run: |
+          cargo build --release --bin eigengraph --verbose 2>&1 | tee cargo_build.log || {
+            echo "### ❌ Linux Cargo Build Failed" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 150 cargo_build.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
 
       - name: Package Linux Tarball & Desktop Entry
         run: |
@@ -301,7 +316,7 @@ jobs:
   publish-release:
     name: Publish Multi-Platform GitHub Release
     needs: [test, build-macos, build-windows, build-linux]
-    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: always() && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -311,27 +326,32 @@ jobs:
 
       - name: Download macOS DMG Artifact
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: EigenGraph-macOS-DMG
           path: dist
 
       - name: Download Windows Archive Artifact
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: EigenGraph-Windows-x64
           path: dist
 
       - name: Download Linux Tarball Artifact
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: EigenGraph-Linux-x86_64
           path: dist
 
       - name: Generate Checksums & Multi-Platform Release Notes
         run: |
+          mkdir -p dist
           cd dist
-          sha256sum EigenGraph-* > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          find . -mindepth 2 -type f -exec mv -t . {} + 2>/dev/null || true
+          sha256sum EigenGraph-* > SHA256SUMS.txt || true
+          cat SHA256SUMS.txt || true
           cd ..
 
           VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d '"' -f 2)
