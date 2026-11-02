@@ -33,6 +33,7 @@ pub struct AriConfig {
     pub w_c: f64,           // Bobot kanal kapasitas penampang pada ARI v2 (Eq 4.13b, default 0.45)
     pub w_d: f64,           // Bobot kanal kontrol deformasi pada ARI v2 (Eq 4.13b, default 0.30)
     pub z_th: f64,          // Ambang batas aman utilisasi/defleksi sebelum penalti (Eq 4.13c, default 0.70)
+    pub include_geometric_stiffness: bool, // Evaluasi efek tekuk P-Delta & Kg pascadisrupsi (default: true)
 }
 
 impl Default for AriConfig {
@@ -49,6 +50,7 @@ impl Default for AriConfig {
             w_c: 0.45,
             w_d: 0.30,
             z_th: 0.70,
+            include_geometric_stiffness: true,
         }
     }
 }
@@ -496,6 +498,10 @@ pub struct MemberRedundancyResult {
     pub ci: f64,
     pub svd_margin: f64,
     pub is_critical: bool,
+    pub euler_buckling_kn: f64,
+    pub b1_amplification: f64,
+    pub buckling_margin: f64,
+    pub second_order_dcr: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -592,8 +598,8 @@ impl AriEngine {
             dof_to_free.insert(gdof, free_idx);
         }
 
-        // Precompute element geometry & stiffness once: (n1_base, n2_base, cx, cy, cz, k_elem)
-        let elem_geom: Vec<(usize, usize, f64, f64, f64, f64)> = model
+        // Precompute element geometry & stiffness once: (n1_base, n2_base, cx, cy, cz, k_elem, length, e_modulus, i_min)
+        let elem_geom: Vec<(usize, usize, f64, f64, f64, f64, f64, f64, f64)> = model
             .elements
             .iter()
             .map(|e| {
@@ -606,16 +612,21 @@ impl AriEngine {
                 let cy = (n2.y - n1.y) / l;
                 let cz = (n2.z - n1.z) / l;
                 let k_e = (e.material.elastic_modulus * e.section.area) / l;
-                (n1_idx * 6, n2_idx * 6, cx, cy, cz, k_e)
+                let i_min = e.section.iy.min(e.section.iz).max(1e-12);
+                let e_mod = e.material.elastic_modulus;
+                (n1_idx * 6, n2_idx * 6, cx, cy, cz, k_e, l, e_mod, i_min)
             })
             .collect();
+
+        let pi = std::f64::consts::PI;
 
         for (elem_idx, elem) in model.elements.iter().enumerate() {
             let f_init = baseline.member_axial_forces[elem_idx];
             let cap = baseline.member_capacities[elem_idx];
             let u_init = baseline.member_utilizations[elem_idx];
 
-            let (n1_base, n2_base, cx, cy, cz, k_elem) = elem_geom[elem_idx];
+            let (n1_base, n2_base, cx, cy, cz, k_elem, l_elem, e_elem, imin_elem) = elem_geom[elem_idx];
+            let p_euler_init = (pi * pi * e_elem * imin_elem) / (l_elem * l_elem);
 
             // Bentuk vektor kompatibilitas a_e pada derajat kebebasan bebas dalam waktu O(1)
             let mut a_free = vec![0.0; total_free_dofs];
@@ -660,6 +671,10 @@ impl AriEngine {
                     ci: 1.0,
                     svd_margin: 0.0,
                     is_critical: true,
+                    euler_buckling_kn: p_euler_init / 1000.0,
+                    b1_amplification: 20.0,
+                    buckling_margin: 0.0,
+                    second_order_dcr: 1.0,
                 });
                 continue;
             }
@@ -668,13 +683,16 @@ impl AriEngine {
             // u^(-e) = u_0 + [ D_e^(0) / (1 - h_e) ] * v_e
             let factor = f_init / stability_margin;
             let mut max_redistributed_u: f64 = 0.0;
+            let mut max_second_order_u: f64 = 0.0;
+            let mut governing_b1: f64 = 1.0;
+            let mut min_buckling_margin: f64 = 1.0;
 
             for other_idx in 0..model.elements.len() {
                 if other_idx == elem_idx {
                     continue; // Batang yang dieliminasi memiliki gaya 0
                 }
 
-                let (on1_base, on2_base, ocx, ocy, ocz, k_other) = elem_geom[other_idx];
+                let (on1_base, on2_base, ocx, ocy, ocz, k_other, o_l, o_e, o_imin) = elem_geom[other_idx];
 
                 // Hitung delta elongasi tambahan: a_j^T * v_e dalam waktu O(1) (6 lookups)
                 let mut delta_v = 0.0;
@@ -695,18 +713,49 @@ impl AriEngine {
                 let delta_force = k_other * factor * delta_v;
                 let post_force = baseline.member_axial_forces[other_idx] + delta_force;
                 let other_cap = baseline.member_capacities[other_idx];
-                let other_u = (post_force.abs() / (other_cap + EPS_R)).min(2.0);
 
-                if other_u > max_redistributed_u {
-                    max_redistributed_u = other_u;
+                // Second-Order P-Delta & Geometric Stiffness (Kg) Buckling Check
+                let mut b1 = 1.0;
+                let mut buckle_margin = 1.0;
+                let mut post_force_amplified = post_force.abs();
+
+                if post_force < 0.0 {
+                    // Member subjected to post-disruption compression
+                    let p_comp = post_force.abs();
+                    let p_euler_other = (pi * pi * o_e * o_imin) / (o_l * o_l);
+                    let ratio = p_comp / (p_euler_other + 1e-9);
+                    buckle_margin = (1.0 - ratio).max(0.0);
+
+                    if ratio < 0.95 {
+                        b1 = (1.0 / (1.0 - ratio)).max(1.0);
+                    } else {
+                        b1 = 20.0; // Near or beyond elastic Euler critical limit
+                    }
+                    post_force_amplified = p_comp * b1;
+                }
+
+                let linear_u = (post_force.abs() / (other_cap + EPS_R)).min(2.0);
+                let second_order_u = (post_force_amplified / (other_cap + EPS_R)).min(2.0);
+
+                if linear_u > max_redistributed_u {
+                    max_redistributed_u = linear_u;
+                }
+                if second_order_u > max_second_order_u {
+                    max_second_order_u = second_order_u;
+                }
+                if buckle_margin < min_buckling_margin {
+                    min_buckling_margin = buckle_margin;
+                    governing_b1 = b1;
                 }
             }
 
             let delta_u = (max_redistributed_u - u_init).max(0.0);
             let reserve = (1.0 - u_init).max(0.05);
-            let ari_val = (1.0 - (delta_u / reserve)).clamp(0.0, 1.0);
+            // ARI is penalized by second-order geometric stiffness destabilization
+            let ari_val = ((1.0 - (delta_u / reserve)).clamp(0.0, 1.0) * min_buckling_margin.sqrt()).clamp(0.0, 1.0);
             let rr_val = (1.0 - (max_redistributed_u - u_init).abs()).clamp(0.0, 1.0);
             let ci_val = 1.0 - ari_val;
+            let effective_stability_margin = stability_margin.min(min_buckling_margin);
 
             member_results.push(MemberRedundancyResult {
                 member_id: elem.id,
@@ -718,8 +767,12 @@ impl AriEngine {
                 ari: ari_val,
                 rr: rr_val,
                 ci: ci_val,
-                svd_margin: stability_margin,
-                is_critical: ari_val < 0.70 || max_redistributed_u >= 1.0,
+                svd_margin: effective_stability_margin,
+                is_critical: ari_val < 0.70 || max_redistributed_u >= 1.0 || max_second_order_u >= 1.0 || min_buckling_margin < 0.10,
+                euler_buckling_kn: p_euler_init / 1000.0,
+                b1_amplification: governing_b1,
+                buckling_margin: min_buckling_margin,
+                second_order_dcr: max_second_order_u,
             });
         }
 
@@ -1196,6 +1249,41 @@ mod tests {
                 );
                 break;
             }
+        }
+    }
+
+    #[test]
+    fn test_ari_geometric_stiffness_euler_buckling_penalty() {
+        let mut model = StructuralModel::new("Parallel Compression Struts");
+        model.add_node(Node3D::new(0, 0.0, 0.0, 0.0).with_fixity(BoundaryFixity::fixed()));
+        let mut n1_fix = BoundaryFixity::free();
+        n1_fix.ux = true;
+        n1_fix.uz = true;
+        n1_fix.rx = true;
+        n1_fix.ry = true;
+        n1_fix.rz = true;
+        model.add_node(Node3D::new(1, 0.0, 3.0, 0.0).with_fixity(n1_fix));
+
+        let mut e1 = Element3D::new(1, "Strut 1", 0, 1).with_type(ElementType::Truss3D);
+        e1.section.area = 0.005;
+        e1.section.iy = 2.0e-6;
+        e1.section.iz = 2.0e-6;
+        let mut e2 = Element3D::new(2, "Strut 2", 0, 1).with_type(ElementType::Truss3D);
+        e2.section.area = 0.005;
+        e2.section.iy = 2.0e-6;
+        e2.section.iz = 2.0e-6;
+        model.add_element(e1);
+        model.add_element(e2);
+
+        // Apply compressive load
+        model.add_load(NodalLoad::force_y(1, -50_000.0));
+
+        let report = AriEngine::evaluate_redundancy_fast(&model).expect("ARI evaluation");
+        assert_eq!(report.member_results.len(), 2);
+        for m in &report.member_results {
+            assert!(m.euler_buckling_kn > 0.0);
+            assert!(m.b1_amplification >= 1.0);
+            assert!(m.buckling_margin >= 0.0 && m.buckling_margin <= 1.0);
         }
     }
 }
