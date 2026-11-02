@@ -18,7 +18,6 @@ Do NOT alter, rearrange, add badge tags, or reintroduce sub-headings under ANY c
 
 ### Mandatory Rules for the Left Sidebar:
 1. **Header Branding**:
-   - MUST display only the clean title: `⚛️ EigenGraph`.
    - Do NOT add subtitle strings underneath (no "10D BIM", no dimension labels).
 2. **No Section Headers**:
    - Do NOT add dividing headers such as `LIBRARY`, `WORKSPACES`, `LIFECYCLE DIMENSIONS`, or `ANALYTICS & EXECUTIVE`.
