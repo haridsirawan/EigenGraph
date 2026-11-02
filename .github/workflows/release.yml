@@ -1,10 +1,10 @@
-name: Manual Release Build
+name: Manual Multi-Platform Release Build
 
 on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release tag override (optional, defaults to Cargo.toml version)'
+        description: 'Release tag override (optional, e.g. v1.2.0, defaults to Cargo.toml version)'
         required: false
         default: ''
 
@@ -55,11 +55,9 @@ jobs:
             cp -R InternalVault/* "EigenGraph.app/Contents/Resources/InternalVault/" 2>/dev/null || true
           fi
 
-          # Copy Universal 2 binary
           cp target/universal/eigengraph "EigenGraph.app/Contents/MacOS/"
           chmod +x "EigenGraph.app/Contents/MacOS/eigengraph"
 
-          # Copy Info.plist and Icon
           if [ -f "assets/Info.plist" ]; then
             cp assets/Info.plist "EigenGraph.app/Contents/"
             sed -i '' "s/<string>1.0.0<\/string>/<string>${VERSION}<\/string>/g" "EigenGraph.app/Contents/Info.plist" || true
@@ -71,31 +69,256 @@ jobs:
             cp assets/icon.png "EigenGraph.app/Contents/Resources/"
           fi
 
-          # Ad-hoc code sign for macOS Gatekeeper
           codesign --force --deep --sign - "EigenGraph.app"
 
-          # Create professional staging folder with /Applications symlink
           mkdir -p dmg_staging
           cp -R "EigenGraph.app" dmg_staging/
           ln -s /Applications dmg_staging/Applications
 
-          TAG_NAME="${{ github.event.inputs.tag_name }}"
-          if [ -z "$TAG_NAME" ]; then
-            TAG_NAME="v${VERSION}"
-          fi
-
           hdiutil create -volname "EigenGraph" -srcfolder "dmg_staging" -ov -format UDZO "EigenGraph-macOS.dmg"
-          cp "EigenGraph-macOS.dmg" "EigenGraph-${TAG_NAME}.dmg"
           rm -rf dmg_staging EigenGraph.app
 
-      - name: Create GitHub Release & Upload Asset
-        uses: softprops/action-gh-release@v2
+      - name: Upload macOS DMG Artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.event.inputs.tag_name || 'v1.2.0' }}
-          name: "EigenGraph ${{ github.event.inputs.tag_name || 'v1.2.0' }}"
-          generate_release_notes: true
-          files: |
-            EigenGraph-macOS.dmg
-            EigenGraph-*.dmg
+          name: EigenGraph-macOS-DMG
+          path: EigenGraph-macOS.dmg
+
+  build-windows:
+    name: Build Windows Release (.zip)
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Test Suite
+        run: cargo test
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Package Windows Release Archive
+        shell: pwsh
+        run: |
+          $VERSION = (Select-String -Path Cargo.toml -Pattern '^version = "(.*?)"').Matches.Groups[1].Value
+          $stage = "staging/EigenGraph-Windows-x64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item target/release/eigengraph.exe -Destination $stage/
+          if (Test-Path "assets") {
+            Copy-Item -Recurse assets -Destination $stage/
+          }
+          if (Test-Path "InternalVault") {
+            Copy-Item -Recurse InternalVault -Destination $stage/
+          }
+          @"
+============================================================
+ EigenGraph — High-Performance 10D BIM & Structural Analytics
+ Platform: Windows x64 (Windows 10 / Windows 11)
+ Version:  v$VERSION
+============================================================
+
+Cara Menjalankan:
+1. Ekstrak seluruh isi arsip ZIP ini ke direktori pilihan Anda.
+2. Klik ganda pada 'eigengraph.exe' untuk menjalankan aplikasi.
+3. Database komponen parametrik dan vault proyek akan otomatis
+   tersinkronisasi secara real-time.
+
+Dokumentasi & Dukungan: https://github.com/haridsirawan/EigenGraph
+"@ | Out-File -FilePath "$stage/README.txt" -Encoding utf8
+
+          Compress-Archive -Path "$stage/*" -DestinationPath "EigenGraph-Windows-x64.zip" -Force
+
+      - name: Upload Windows Archive Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EigenGraph-Windows-x64
+          path: EigenGraph-Windows-x64.zip
+
+  build-linux:
+    name: Build Linux Release (.tar.gz)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Linux GUI & EGL Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config build-essential clang libclang-dev llvm-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev \
+            libwayland-dev libwayland-cursor0 libwayland-egl1 libwayland-server0 \
+            libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev \
+            libxi-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libssl-dev libgtk-3-dev libasound2-dev libudev-dev \
+            libfontconfig1-dev libfreetype6-dev
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Test Suite
+        run: cargo test
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Package Linux Tarball & Desktop Entry
+        run: |
+          STAGE_DIR="staging/EigenGraph-Linux-x86_64"
+          mkdir -p "${STAGE_DIR}"
+          cp target/release/eigengraph "${STAGE_DIR}/"
+          chmod +x "${STAGE_DIR}/eigengraph"
+          if [ -d "assets" ]; then
+            cp -r assets "${STAGE_DIR}/"
+          fi
+          if [ -d "InternalVault" ]; then
+            cp -r InternalVault "${STAGE_DIR}/"
+          fi
+
+          cat << 'EOF' > "${STAGE_DIR}/eigengraph.desktop"
+[Desktop Entry]
+Name=EigenGraph
+Comment=High-Performance 10D BIM & Structural Analytics
+Exec=eigengraph
+Icon=eigengraph
+Terminal=false
+Type=Application
+Categories=Development;Engineering;Science;
+EOF
+
+          cat << 'EOF' > "${STAGE_DIR}/install.sh"
+#!/usr/bin/env bash
+set -e
+INSTALL_BIN="${HOME}/.local/bin"
+DESKTOP_DIR="${HOME}/.local/share/applications"
+ICON_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"
+
+mkdir -p "$INSTALL_BIN" "$DESKTOP_DIR" "$ICON_DIR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+cp "$SCRIPT_DIR/eigengraph" "$INSTALL_BIN/"
+chmod +x "$INSTALL_BIN/eigengraph"
+
+if [ -f "$SCRIPT_DIR/assets/icon.png" ]; then
+  cp "$SCRIPT_DIR/assets/icon.png" "$ICON_DIR/eigengraph.png"
+fi
+
+sed "s|Exec=eigengraph|Exec=$INSTALL_BIN/eigengraph|g" "$SCRIPT_DIR/eigengraph.desktop" > "$DESKTOP_DIR/eigengraph.desktop"
+sed -i "s|Icon=eigengraph|Icon=$ICON_DIR/eigengraph.png|g" "$DESKTOP_DIR/eigengraph.desktop"
+
+echo "✅ EigenGraph installed successfully to $INSTALL_BIN/eigengraph"
+EOF
+          chmod +x "${STAGE_DIR}/install.sh"
+
+          tar -czvf "EigenGraph-Linux-x86_64.tar.gz" -C staging EigenGraph-Linux-x86_64
+
+      - name: Upload Linux Tarball Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EigenGraph-Linux-x86_64
+          path: EigenGraph-Linux-x86_64.tar.gz
+
+  publish-release:
+    name: Publish Multi-Platform Release to GitHub
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download macOS DMG Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: EigenGraph-macOS-DMG
+          path: dist
+
+      - name: Download Windows Archive Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: EigenGraph-Windows-x64
+          path: dist
+
+      - name: Download Linux Tarball Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: EigenGraph-Linux-x86_64
+          path: dist
+
+      - name: Generate Checksums & Multi-Platform Release Notes
+        run: |
+          cd dist
+          sha256sum EigenGraph-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cd ..
+
+          VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d '"' -f 2)
+          USER_TAG="${{ github.event.inputs.tag_name }}"
+          TAG_NAME="${USER_TAG:-v${VERSION}}"
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
+
+          python3 -c '
+          import os
+          version = os.environ.get("VERSION", "1.2.0")
+          tag = os.environ.get("TAG_NAME", "v1.2.0")
+
+          with open("dist/SHA256SUMS.txt", "r") as f:
+              checksums = f.read().strip()
+
+          notes = f"""### 🚀 EigenGraph {tag} — Universal Multi-Platform Release (macOS, Windows & Linux)
+
+          Rilis resmi aplikasi **EigenGraph** kini tersedia lengkap untuk seluruh sistem operasi desktop: **macOS (Universal 2: Apple Silicon & Intel)**, **Windows 10/11 (64-bit)**, dan **Linux (Ubuntu, Debian, Fedora, Arch)**.
+
+          ---
+
+          #### 📦 Paket Unduhan Resmi:
+
+          | Platform / Sistem Operasi | File Rilis | Deskripsi & Petunjuk Instalasi |
+          | :--- | :--- | :--- |
+          | 🍎 **macOS (Universal 2)** | [`EigenGraph-macOS.dmg`](https://github.com/haridsirawan/EigenGraph/releases/download/{tag}/EigenGraph-macOS.dmg) | Kompatibel native dengan **Apple Silicon (M1/M2/M3/M4)** dan **Intel x86_64** (macOS 11+). Buka file DMG lalu seret ke folder `/Applications`. |
+          | 🪟 **Windows (64-bit)** | [`EigenGraph-Windows-x64.zip`](https://github.com/haridsirawan/EigenGraph/releases/download/{tag}/EigenGraph-Windows-x64.zip) | Kompatibel dengan **Windows 10 & Windows 11**. Ekstrak ZIP dan jalankan `eigengraph.exe`. |
+          | 🐧 **Linux (x86_64)** | [`EigenGraph-Linux-x86_64.tar.gz`](https://github.com/haridsirawan/EigenGraph/releases/download/{tag}/EigenGraph-Linux-x86_64.tar.gz) | Kompatibel dengan **Ubuntu 20.04+, Debian, Fedora, Arch**. Ekstrak lalu jalankan `./install.sh` atau langsung `./eigengraph`. |
+
+          ---
+
+          #### 🌟 Fitur Unggulan Terbaru:
+          - **🖥️ Antarmuka Native Minimalis (Gaya macOS App Store)**: Sidebar menyatu penuh dari atas ke bawah (*full-height*), kolom pencarian native (`🔍 Search`), profil pengguna di bawah, dan canvas kerja minimalis bersih tanpa strip bar.
+          - **📐 2D Sheet Composer & Blueprints**: Cetak gambar kerja skala resmi (A4, A3, A2, A1) multi-viewport (Denah, Potongan Core A-A, BoQ Schedule, Kop Gambar) ke **PDF Vektor 1.4** dan **SVG**.
+          - **⚡ Kekakuan Geometris $K_g(P)$ pada ARI Linier**: Perlindungan tekuk Euler elastis & amplifikasi $B_1$ orde kedua AISC 360-16 dalam kecepatan $O(N^2)$ Sherman-Morrison.
+          - **🗄️ Obsidian Auto-Taxonomy Internal Vault**: Autosave reaktif otomatis tanpa tombol simpan manual, terintegrasi penuh ke AI Assistant Copilot.
+
+          ---
+
+          #### 🔐 Verifikasi Integritas SHA-256:
+          ```text
+          {checksums}
+          ```
+          """
+          with open("dist/RELEASE_NOTES.md", "w") as f:
+              f.write(notes.strip())
+          '
+
+      - name: Publish to GitHub Releases
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            echo "Release ${TAG_NAME} already exists. Uploading all platform assets..."
+            gh release upload "${TAG_NAME}" dist/EigenGraph-* dist/SHA256SUMS.txt --clobber
+            gh release edit "${TAG_NAME}" --notes-file dist/RELEASE_NOTES.md
+          else
+            echo "Creating new multi-platform GitHub Release ${TAG_NAME}..."
+            gh release create "${TAG_NAME}" dist/EigenGraph-* dist/SHA256SUMS.txt \
+              --title "EigenGraph ${TAG_NAME} — Multi-Platform (macOS, Windows & Linux)" \
+              --notes-file dist/RELEASE_NOTES.md
+          fi

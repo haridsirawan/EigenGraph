@@ -89,13 +89,20 @@ impl App for EigenGraphApp {
                 .inner_margin(Margin::symmetric(12, 10)))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
-                    // macOS Window Controls (Traffic Lights) at Top of Sidebar
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.add_space(2.0);
-                        ui.label(RichText::new("🔴  🟡  🟢").size(9.5));
-                    });
-                    ui.add_space(14.0);
+                    // Window Controls Header (macOS Traffic Lights or Multi-platform Spacing)
+                    #[cfg(target_os = "macos")]
+                    {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(2.0);
+                            ui.label(RichText::new("🔴  🟡  🟢").size(9.5));
+                        });
+                        ui.add_space(14.0);
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        ui.add_space(10.0);
+                    }
 
                     // Native Search Bar (App Store Style)
                     Frame::new()

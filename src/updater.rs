@@ -132,7 +132,15 @@ impl AppUpdater {
                             if let Some(assets) = json.get("assets").and_then(|v| v.as_array()) {
                                 for asset in assets {
                                     if let Some(name) = asset.get("name").and_then(|v| v.as_str()) {
-                                        if name.ends_with(".dmg") {
+                                        let is_match = if cfg!(target_os = "windows") {
+                                            name.ends_with(".zip") || name.ends_with(".exe")
+                                        } else if cfg!(target_os = "linux") {
+                                            name.ends_with(".tar.gz") || name.ends_with(".AppImage")
+                                        } else {
+                                            name.ends_with(".dmg")
+                                        };
+
+                                        if is_match {
                                             if let Some(url) = asset.get("browser_download_url").and_then(|v| v.as_str()) {
                                                 dmg_download_url = url.to_string();
                                             }
@@ -149,7 +157,14 @@ impl AppUpdater {
                             }
 
                             if dmg_download_url.is_empty() {
-                                dmg_download_url = format!("https://github.com/haridsirawan/EigenGraph/releases/download/{}/EigenGraph-macOS.dmg", tag_name);
+                                let fallback_asset = if cfg!(target_os = "windows") {
+                                    "EigenGraph-Windows-x64.zip"
+                                } else if cfg!(target_os = "linux") {
+                                    "EigenGraph-Linux-x86_64.tar.gz"
+                                } else {
+                                    "EigenGraph-macOS.dmg"
+                                };
+                                dmg_download_url = format!("https://github.com/haridsirawan/EigenGraph/releases/download/{}/{}", tag_name, fallback_asset);
                             }
 
                             let mut state = shared.lock().unwrap();

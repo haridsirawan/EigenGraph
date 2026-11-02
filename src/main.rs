@@ -11,10 +11,21 @@ fn main() -> eframe::Result {
         .with_inner_size(Vec2::new(1440.0, 900.0))
         .with_min_inner_size(Vec2::new(1024.0, 700.0))
         .with_transparent(false)
-        .with_fullsize_content_view(true)
-        .with_titlebar_shown(false)
-        .with_title_shown(false)
         .with_active(true);
+
+    #[cfg(target_os = "macos")]
+    {
+        viewport = viewport
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        viewport = viewport
+            .with_decorations(true);
+    }
 
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")) {
         viewport = viewport.with_icon(icon);

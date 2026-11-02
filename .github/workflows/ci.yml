@@ -101,10 +101,10 @@ jobs:
           echo "### ✅ Test Suite Succeeded on ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
           echo "All core FEM, SVD Kinematic Guard, CPM, and LCA unit tests verified." >> $GITHUB_STEP_SUMMARY
 
-  release-macos:
-    name: Build & Publish macOS Release (.dmg)
+  build-macos:
+    name: Build macOS Universal 2 Release (.dmg)
     needs: test
-    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     permissions:
       contents: write
@@ -169,38 +169,242 @@ jobs:
           name: EigenGraph-macOS-DMG
           path: target/release/EigenGraph-macOS.dmg
 
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  build-windows:
+    name: Build Windows Release (.zip)
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Package Windows Release Archive
+        shell: pwsh
+        run: |
+          $VERSION = (Select-String -Path Cargo.toml -Pattern '^version = "(.*?)"').Matches.Groups[1].Value
+          Write-Host "Packaging Windows Release v$VERSION..."
+          $stage = "staging/EigenGraph-Windows-x64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item target/release/eigengraph.exe -Destination $stage/
+          if (Test-Path "assets") {
+            Copy-Item -Recurse assets -Destination $stage/
+          }
+          if (Test-Path "InternalVault") {
+            Copy-Item -Recurse InternalVault -Destination $stage/
+          }
+          @"
+============================================================
+ EigenGraph — High-Performance 10D BIM & Structural Analytics
+ Platform: Windows x64 (Windows 10 / Windows 11)
+ Version:  v$VERSION
+============================================================
+
+Cara Menjalankan:
+1. Ekstrak seluruh isi arsip ZIP ini ke direktori pilihan Anda.
+2. Klik ganda pada 'eigengraph.exe' untuk menjalankan aplikasi.
+3. Database komponen parametrik dan vault proyek akan otomatis
+   tersinkronisasi secara real-time.
+
+Dokumentasi & Dukungan: https://github.com/haridsirawan/EigenGraph
+"@ | Out-File -FilePath "$stage/README.txt" -Encoding utf8
+
+          New-Item -ItemType Directory -Force -Path target/release | Out-Null
+          Compress-Archive -Path "$stage/*" -DestinationPath "target/release/EigenGraph-Windows-x64.zip" -Force
+          Write-Host "Created target/release/EigenGraph-Windows-x64.zip successfully."
+
+      - name: Upload Windows Archive Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EigenGraph-Windows-x64
+          path: target/release/EigenGraph-Windows-x64.zip
+
+  build-linux:
+    name: Build Linux Release (.tar.gz)
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux GUI & EGL Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config build-essential clang libclang-dev llvm-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev \
+            libwayland-dev libwayland-cursor0 libwayland-egl1 libwayland-server0 \
+            libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev \
+            libxi-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libssl-dev libgtk-3-dev libasound2-dev libudev-dev \
+            libfontconfig1-dev libfreetype6-dev
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Package Linux Tarball & Desktop Entry
         run: |
           VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d '"' -f 2)
+          echo "Packaging Linux Release v${VERSION}..."
+          STAGE_DIR="staging/EigenGraph-Linux-x86_64"
+          mkdir -p "${STAGE_DIR}"
+          cp target/release/eigengraph "${STAGE_DIR}/"
+          chmod +x "${STAGE_DIR}/eigengraph"
+          if [ -d "assets" ]; then
+            cp -r assets "${STAGE_DIR}/"
+          fi
+          if [ -d "InternalVault" ]; then
+            cp -r InternalVault "${STAGE_DIR}/"
+          fi
+
+          cat << 'EOF' > "${STAGE_DIR}/eigengraph.desktop"
+[Desktop Entry]
+Name=EigenGraph
+Comment=High-Performance 10D BIM & Structural Analytics
+Exec=eigengraph
+Icon=eigengraph
+Terminal=false
+Type=Application
+Categories=Development;Engineering;Science;
+EOF
+
+          cat << 'EOF' > "${STAGE_DIR}/install.sh"
+#!/usr/bin/env bash
+set -e
+INSTALL_BIN="${HOME}/.local/bin"
+DESKTOP_DIR="${HOME}/.local/share/applications"
+ICON_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"
+
+mkdir -p "$INSTALL_BIN" "$DESKTOP_DIR" "$ICON_DIR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+cp "$SCRIPT_DIR/eigengraph" "$INSTALL_BIN/"
+chmod +x "$INSTALL_BIN/eigengraph"
+
+if [ -f "$SCRIPT_DIR/assets/icon.png" ]; then
+  cp "$SCRIPT_DIR/assets/icon.png" "$ICON_DIR/eigengraph.png"
+fi
+
+sed "s|Exec=eigengraph|Exec=$INSTALL_BIN/eigengraph|g" "$SCRIPT_DIR/eigengraph.desktop" > "$DESKTOP_DIR/eigengraph.desktop"
+sed -i "s|Icon=eigengraph|Icon=$ICON_DIR/eigengraph.png|g" "$DESKTOP_DIR/eigengraph.desktop"
+
+echo "✅ EigenGraph installed successfully to $INSTALL_BIN/eigengraph"
+echo "Launch it from your application menu or run 'eigengraph' in terminal."
+EOF
+          chmod +x "${STAGE_DIR}/install.sh"
+
+          mkdir -p target/release
+          tar -czvf target/release/EigenGraph-Linux-x86_64.tar.gz -C staging EigenGraph-Linux-x86_64
+
+      - name: Upload Linux Tarball Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EigenGraph-Linux-x86_64
+          path: target/release/EigenGraph-Linux-x86_64.tar.gz
+
+  publish-release:
+    name: Publish Multi-Platform GitHub Release
+    needs: [test, build-macos, build-windows, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download macOS DMG Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: EigenGraph-macOS-DMG
+          path: dist
+
+      - name: Download Windows Archive Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: EigenGraph-Windows-x64
+          path: dist
+
+      - name: Download Linux Tarball Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: EigenGraph-Linux-x86_64
+          path: dist
+
+      - name: Generate Checksums & Multi-Platform Release Notes
+        run: |
+          cd dist
+          sha256sum EigenGraph-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cd ..
+
+          VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d '"' -f 2)
           TAG_NAME="v${VERSION}"
-          echo "Target Release Tag: ${TAG_NAME}"
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
 
           python3 -c '
-          notes = """### 🚀 EigenGraph v1.2.0 — BIMCraft-Grade 2D/3D Modeling, CSG B-Rep & Live ARI Suite
+          import os
+          version = os.environ.get("VERSION", "1.2.0")
+          tag = os.environ.get("TAG_NAME", "v1.2.0")
 
-          #### 🌟 Highlight Pembaruan Utama (v1.2.0):
-          - **🧊 Kernel Geometri Planar 2D & 3D Solid CSG B-Rep (`geom.rs` & `csg.rs`)**: Dilengkapi *Planar Half-Edge Face Arrangement* untuk deteksi ruangan tertutup (`BimRoom`) otomatis pada pertemuan dinding T/X, *Concave Ear-Clipping Triangulation*, *Straight-Skeleton Roof Generator*, serta *Non-Recursive BSP Tree CSG Subtraction* untuk memotong bukaan pintu/jendela pada dinding dan *shaft* pada pelat lantai.
-          - **🏗️ Entitas BIM Relasional LOD 350 & Penulangan Beton 3D (`bim.rs`)**: Dinding berlapis majemuk (*Compound Layers*), Balok miring/datar dengan *Top/Centre/Bottom Justification*, profil 3D *Wide-Flange (I-Beam)* dan pipa tabung 24-sisi, serta generator tulangan beton otomatis (`RebarBar` & `reinforce_host`) sesuai SNI 2847:2019 (tulangan pokok, sengkang gempa kait 135°, dan jaring pondasi tapak).
-          - **📐 Studio 2D Drafting, Object Snaps & Live Section Cut (`parametric.rs`)**: Mendukung *Object Snaps* bergaya Revit (`SE, SM, SI, SC, SP, SN, SG`), pengunci sudut 15°, *Floor Plan View Range (+1200mm)*, *Live Section Cut* dengan arsiran *Poché* + titik potong tulangan (*rebar cut dots*), serta *Sheet A101 Composer* dengan ekspor langsung ke **Vector PDF 1.4**, **SVG**, dan **Full Spatial Hierarchy IFC4**.
-          - **⚡ Transactional Command Bus & Dual Physical-to-Analytical FEM/ARI**: Setiap aksi pemodelan (`WA, BM, CL, DR, WN, RF, Move, Rotate, Split, Mirror, Offset`) berjalan di atas `BimCommandBus` dengan *Unlimited Undo/Redo* dan tersinkronisasi langsung ke solver Cholesky $\\mathbf{L}\\mathbf{L}^T$, *SVD Kinematic Guard*, dan *Adjusted Redundancy Index (ARI)*.
-          - **🛡️ 48/48 Kanonikal Unit Tests Verified (100% Pass)**: Mencakup seluruh uji mekanika struktur, Cholesky/PCG CSR, Sherman-Morrison $O(N^2)$, Woodbury Rank-2 ($N-2$), Newmark-$\\beta$ DAF, SNI 1729, serta kernel geometri CSG & BIMCraft.
+          with open("dist/SHA256SUMS.txt", "r") as f:
+              checksums = f.read().strip()
 
-          #### 📦 Download macOS Installer:
-          Unduh dan buka file **EigenGraph-macOS.dmg** di bawah ini untuk menginstal di macOS (Universal 2: Apple Silicon M1/M2/M3/M4 & Intel x86_64), atau gunakan tombol **🚀 Update** langsung dari dalam aplikasi EigenGraph.
+          notes = f"""### 🚀 EigenGraph {tag} — Universal Multi-Platform Release (macOS, Windows & Linux)
+
+          Rilis resmi aplikasi **EigenGraph** kini tersedia lengkap untuk seluruh sistem operasi desktop: **macOS (Universal 2: Apple Silicon & Intel)**, **Windows 10/11 (64-bit)**, dan **Linux (Ubuntu, Debian, Fedora, Arch)**.
+
+          ---
+
+          #### 📦 Paket Unduhan Resmi:
+
+          | Platform / Sistem Operasi | File Rilis | Deskripsi & Petunjuk Instalasi |
+          | :--- | :--- | :--- |
+          | 🍎 **macOS (Universal 2)** | [`EigenGraph-macOS.dmg`](https://github.com/haridsirawan/EigenGraph/releases/download/{tag}/EigenGraph-macOS.dmg) | Kompatibel native dengan **Apple Silicon (M1/M2/M3/M4)** dan **Intel x86_64** (macOS 11+). Buka file DMG lalu seret ke folder `/Applications`. |
+          | 🪟 **Windows (64-bit)** | [`EigenGraph-Windows-x64.zip`](https://github.com/haridsirawan/EigenGraph/releases/download/{tag}/EigenGraph-Windows-x64.zip) | Kompatibel dengan **Windows 10 & Windows 11**. Ekstrak ZIP dan jalankan `eigengraph.exe`. |
+          | 🐧 **Linux (x86_64)** | [`EigenGraph-Linux-x86_64.tar.gz`](https://github.com/haridsirawan/EigenGraph/releases/download/{tag}/EigenGraph-Linux-x86_64.tar.gz) | Kompatibel dengan **Ubuntu 20.04+, Debian, Fedora, Arch**. Ekstrak lalu jalankan `./install.sh` atau langsung `./eigengraph`. |
+
+          ---
+
+          #### 🌟 Fitur Unggulan Terbaru:
+          - **🖥️ Antarmuka Native Minimalis (Gaya macOS App Store)**: Sidebar menyatu penuh dari atas ke bawah (*full-height*), kolom pencarian native (`🔍 Search`), profil pengguna di bawah, dan canvas kerja minimalis bersih tanpa strip bar.
+          - **📐 2D Sheet Composer & Blueprints**: Cetak gambar kerja skala resmi (A4, A3, A2, A1) multi-viewport (Denah, Potongan Core A-A, BoQ Schedule, Kop Gambar) ke **PDF Vektor 1.4** dan **SVG**.
+          - **⚡ Kekakuan Geometris $K_g(P)$ pada ARI Linier**: Perlindungan tekuk Euler elastis & amplifikasi $B_1$ orde kedua AISC 360-16 dalam kecepatan $O(N^2)$ Sherman-Morrison.
+          - **🗄️ Obsidian Auto-Taxonomy Internal Vault**: Autosave reaktif otomatis tanpa tombol simpan manual, terintegrasi penuh ke AI Assistant Copilot.
+
+          ---
+
+          #### 🔐 Verifikasi Integritas SHA-256:
+          ```text
+          {checksums}
+          ```
           """
-          with open("/tmp/release_notes.md", "w") as f:
+          with open("dist/RELEASE_NOTES.md", "w") as f:
               f.write(notes.strip())
           '
 
+      - name: Publish to GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
-            echo "Release ${TAG_NAME} already exists. Updating DMG asset and notes..."
-            gh release upload "${TAG_NAME}" target/release/EigenGraph-macOS.dmg --clobber
-            gh release edit "${TAG_NAME}" --notes-file /tmp/release_notes.md
+            echo "Release ${TAG_NAME} already exists. Uploading all platform assets..."
+            gh release upload "${TAG_NAME}" dist/EigenGraph-* dist/SHA256SUMS.txt --clobber
+            gh release edit "${TAG_NAME}" --notes-file dist/RELEASE_NOTES.md
           else
-            echo "Creating new GitHub Release ${TAG_NAME}..."
-            gh release create "${TAG_NAME}" target/release/EigenGraph-macOS.dmg \
-              --title "EigenGraph ${TAG_NAME} — High-Performance ARI, Woodbury N-2 & 10D BIM Suite" \
-              --notes-file /tmp/release_notes.md
+            echo "Creating new multi-platform GitHub Release ${TAG_NAME}..."
+            gh release create "${TAG_NAME}" dist/EigenGraph-* dist/SHA256SUMS.txt \
+              --title "EigenGraph ${TAG_NAME} — Multi-Platform (macOS, Windows & Linux)" \
+              --notes-file dist/RELEASE_NOTES.md
           fi
