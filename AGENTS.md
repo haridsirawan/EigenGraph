@@ -16,14 +16,17 @@ Do NOT alter, rearrange, add badge tags, or reintroduce sub-headings under ANY c
 2. **Explicit Override Keyword**:
    - Any modification to the Left Sidebar or App Chrome layout requires an explicit directive starting with `UBAH_UI:` or `UBAH_SIDEBAR:`. Without this prefix, the UI must remain 100% untouched.
 
-### Mandatory Rules for the Left Sidebar:
-1. **Header Branding**:
-   - Do NOT add subtitle strings underneath (no "10D BIM", no dimension labels).
-2. **No Section Headers**:
+### Mandatory Rules for the Left Sidebar (macOS App Store Style):
+1. **Full-Height Geometry & Window Controls**:
+   - The sidebar must run uninterrupted from the very top of the window to the bottom (`y = 0` to window height). It must never be truncated or cut off by top panels.
+   - macOS Traffic Lights (`🔴  🟡  🟢`) sit inside the sidebar header.
+2. **Header & Search Bar (No Logo)**:
+   - Do NOT display any application logo or "EigenGraph" brand header at the top of the sidebar.
+   - A native pill search bar (`🔍 Search`) sits directly beneath the traffic lights to filter navigation pillars.
+3. **No Section Headers & No Badge Tags**:
    - Do NOT add dividing headers such as `LIBRARY`, `WORKSPACES`, `LIFECYCLE DIMENSIONS`, or `ANALYTICS & EXECUTIVE`.
-3. **No Badge Tags**:
    - Do NOT display pill badges like `LIB`, `1D`, `2D`, ..., `10D`.
-   - Each button MUST be rendered cleanly with its emoji icon and title: `format!("{}   {}", p.icon(), p.clean_name())`.
+   - Each button MUST be rendered cleanly with its emoji icon and title: `format!("{}   {}", p.icon(), p.clean_name())`, styled with subtle rounded pill selection.
 4. **Exact Ordered List of 13 Navigation Pillars**:
    1. `📁   My Library`
    2. `💡   Research & Concept`
@@ -38,9 +41,12 @@ Do NOT alter, rearrange, add badge tags, or reintroduce sub-headings under ANY c
    11. `🤖   Industrialized & Automation`
    12. `🔮   Prediction`
    13. `📊   Results`
-5. **Footer Branding**:
-   - Displays clean version & architecture (e.g. `EigenGraph v1.1.0 (Universal 2)` or `(Intel x86_64)`).
-   - Single clean update button (`🚀 Update`).
-6. **Window Icon**:
+5. **Bottom Profile & Settings Row**:
+   - Pinned at the bottom: User Profile (`👤 Harids Irawan`) with Settings gear (`⚙️`) to open System Preferences (⌘,).
+   - Quick triggers for `✨ AI Copilot` (⌘K) and `🚀 Update`.
+6. **Minimalist Workspace (No Strip Bars)**:
+   - Do NOT add secondary strip bars, breadcrumbs, or horizontal toolbars across the workspace canvas.
+   - Clean view heading with subtle dividing separator line.
+7. **Window Icon**:
    - Window icon is hard-embedded from `assets/icon.png` via `eframe::icon_data::from_png_bytes`.
    - macOS application bundle icon is `assets/AppIcon.icns`.

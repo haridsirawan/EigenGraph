@@ -79,62 +79,41 @@ impl App for EigenGraphApp {
             self.show_settings = !self.show_settings;
         }
 
-        // 1. TOP TITLEBAR (Native macOS Style with Window Controls, Status & Copilot Trigger)
-        Panel::top("top_titlebar").frame(Frame::new().fill(self.theme.bg_canvas)).show(ui, |ui| {
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                // macOS Traffic Lights Simulation / Spacing
-                ui.add_space(12.0);
-                ui.label(RichText::new("🔴  🟡  🟢").size(10.0));
-                ui.add_space(14.0);
-
-                // App Brand & Active Document Badge
-                ui.label(RichText::new("⚛️ EigenGraph").strong().size(13.5).color(self.theme.text_primary));
-                ui.label(RichText::new("—").color(self.theme.text_muted));
-                ui.label(RichText::new(format!("{} (10D BIM)", self.active_pillar.clean_name())).size(12.5).color(self.theme.text_secondary));
-
-                // Right side: Status and Shortcuts
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.add_space(16.0);
-
-                    // Quick AI Copilot Trigger Pill (Command+K)
-                    let copilot_btn = egui::Button::new(
-                        RichText::new("✨ AI Copilot (⌘K)")
-                            .size(11.5)
-                            .strong()
-                            .color(if self.ai_assistant_view.is_visible { Color32::WHITE } else { self.theme.accent_blue })
-                    )
-                    .fill(if self.ai_assistant_view.is_visible { self.theme.accent_blue } else { self.theme.bg_card })
-                    .corner_radius(CornerRadius::same(6))
-                    .stroke(Stroke::new(1.0, self.theme.accent_blue.gamma_multiply(0.4)));
-
-                    if ui.add(copilot_btn).clicked() {
-                        self.ai_assistant_view.is_visible = !self.ai_assistant_view.is_visible;
-                    }
-
-                    ui.add_space(8.0);
-                    // System Status Indicator
-                    ui.label(RichText::new("⚡ SVD Guard: Active").size(11.0).color(self.theme.accent_green));
-                    ui.label(RichText::new("•").color(self.theme.text_muted));
-                    ui.label(RichText::new("ISO 14040 LCA").size(11.0).color(self.theme.text_muted));
-                });
-            });
-            ui.add_space(6.0);
-        });
-
-        // 2. UNIFIED LEFT SIDEBAR (Locked Minimalist Layout)
+        // 1. UNIFIED FULL-HEIGHT LEFT SIDEBAR (Native macOS App Store Style)
         Panel::left("unified_sidebar")
             .resizable(false)
-            .exact_size(245.0)
+            .exact_size(240.0)
             .frame(Frame::new()
-                .fill(self.theme.bg_sidebar)
-                .stroke(Stroke::new(1.0, self.theme.border_subtle))
-                .inner_margin(Margin::symmetric(10, 14)))
+                .fill(Color32::from_rgb(34, 34, 36))
+                .stroke(Stroke::new(1.0, Color32::from_rgb(48, 48, 52)))
+                .inner_margin(Margin::symmetric(12, 10)))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
-                    // Header Branding (Locked: Title only, no subtitles, no section headers)
-                    ui.label(RichText::new("⚛️ EigenGraph").strong().size(14.5).color(self.theme.text_primary));
-                    ui.add_space(10.0);
+                    // macOS Window Controls (Traffic Lights) at Top of Sidebar
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(2.0);
+                        ui.label(RichText::new("🔴  🟡  🟢").size(9.5));
+                    });
+                    ui.add_space(14.0);
+
+                    // Native Search Bar (App Store Style)
+                    Frame::new()
+                        .fill(Color32::from_rgb(44, 44, 48))
+                        .corner_radius(CornerRadius::same(6))
+                        .inner_margin(Margin::symmetric(8, 5))
+                        .stroke(Stroke::new(0.8, Color32::from_rgb(58, 58, 64)))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.search_query)
+                                        .hint_text("🔍 Search")
+                                        .desired_width(ui.available_width() - 4.0)
+                                        .frame(Frame::NONE),
+                                );
+                            });
+                        });
+                    ui.add_space(14.0);
 
                     let pillars = [
                         NavigationPillar::MyLibrary,
@@ -152,104 +131,180 @@ impl App for EigenGraphApp {
                         NavigationPillar::Results,
                     ];
 
-                    egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-                        for pillar in pillars {
-                            let is_active = self.active_pillar == pillar;
-                            let bg = if is_active { self.theme.accent_blue } else { Color32::TRANSPARENT };
-                            let fg = if is_active { Color32::WHITE } else { self.theme.text_primary };
+                    // Fixed height for bottom section (user profile + utilities)
+                    let bottom_section_height = 84.0;
+                    let nav_area_height = (ui.available_height() - bottom_section_height).max(100.0);
 
-                            let row = Frame::new()
-                                .fill(bg)
-                                .corner_radius(CornerRadius::same(8))
-                                .inner_margin(Margin::symmetric(10, 7))
-                                .show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(RichText::new(format!("{}   {}", pillar.icon(), pillar.clean_name())).size(12.5).color(fg).strong());
-                                    });
-                                });
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(ui.available_width(), nav_area_height),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+                                for pillar in pillars {
+                                    // Search filter
+                                    if !self.search_query.trim().is_empty() {
+                                        let q = self.search_query.trim().to_lowercase();
+                                        let name = pillar.clean_name().to_lowercase();
+                                        if !name.contains(&q) {
+                                            continue;
+                                        }
+                                    }
 
-                            if row.response.interact(egui::Sense::click()).clicked() {
-                                self.active_pillar = pillar;
-                            }
-                            ui.add_space(2.0);
-                        }
-                    });
+                                    let is_active = self.active_pillar == pillar;
+                                    let (rect, response) = ui.allocate_exact_size(
+                                        Vec2::new(ui.available_width(), 32.0),
+                                        egui::Sense::click(),
+                                    );
 
-                    ui.add_space(16.0);
-                    ui.separator();
-                    ui.add_space(8.0);
+                                    if response.clicked() {
+                                        self.active_pillar = pillar;
+                                    }
 
-                    // Version & Tech stack with Update checker button
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            let arch_label = if cfg!(target_arch = "x86_64") {
-                                "Intel x86_64"
-                            } else if cfg!(target_arch = "aarch64") {
-                                "Apple Silicon"
-                            } else {
-                                "Universal 2"
-                            };
-                            ui.label(RichText::new(format!("EigenGraph v1.1.0 ({})", arch_label)).size(10.0).color(self.theme.text_muted));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.add(egui::Button::new(RichText::new("🚀 Update").size(9.5).color(self.theme.accent_blue))
-                                    .fill(self.theme.bg_card)
-                                    .corner_radius(CornerRadius::same(4))).clicked() {
-                                    self.updater.github_token = self.settings_view.github_token.clone();
-                                    self.updater.check_for_updates();
+                                    let is_hovered = response.hovered();
+                                    let fill_color = if is_active {
+                                        Color32::from_rgba_premultiplied(255, 255, 255, 32)
+                                    } else if is_hovered {
+                                        Color32::from_rgba_premultiplied(255, 255, 255, 14)
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    };
+
+                                    if fill_color != Color32::TRANSPARENT {
+                                        ui.painter().rect_filled(rect, CornerRadius::same(6), fill_color);
+                                    }
+
+                                    let text_color = if is_active {
+                                        Color32::WHITE
+                                    } else if is_hovered {
+                                        Color32::WHITE
+                                    } else {
+                                        Color32::from_rgb(200, 200, 206)
+                                    };
+
+                                    let item_label = format!("{}   {}", pillar.icon(), pillar.clean_name());
+                                    ui.painter().text(
+                                        rect.left_center() + Vec2::new(10.0, 0.0),
+                                        Align2::LEFT_CENTER,
+                                        item_label,
+                                        egui::FontId::proportional(12.5),
+                                        text_color,
+                                    );
+
+                                    ui.add_space(2.0);
                                 }
                             });
-                        });
-                        ui.label(RichText::new("SNI 1729 / AISC 360-16 • EigenGraph Platform").size(9.5).color(self.theme.text_muted));
-                    });
-                });
-            });
+                        },
+                    );
 
-        // 3. SECONDARY TOOLBAR & BREADCRUMB
-        Panel::top("sub_toolbar").frame(Frame::new().fill(self.theme.bg_card)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.add_space(12.0);
-                ui.label(RichText::new(self.active_pillar.icon()).size(14.0));
-                ui.add_space(4.0);
-                ui.label(RichText::new(self.active_pillar.title()).strong().size(12.0).color(self.theme.accent_blue));
-                ui.label(RichText::new("—").color(self.theme.text_muted));
-                ui.label(RichText::new(self.active_pillar.subtitle()).size(11.0).color(self.theme.text_secondary));
-
-                // Global Search Box, Update Button, Settings Button & Copilot Toggle in Toolbar
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.add_space(12.0);
-
-                    if ui.selectable_label(self.ai_assistant_view.is_visible, "✨ Copilot").clicked() {
-                        self.ai_assistant_view.is_visible = !self.ai_assistant_view.is_visible;
-                    }
-
+                    // Bottom: User Profile & System Preferences (macOS App Store Style)
+                    ui.separator();
                     ui.add_space(4.0);
 
-                    if ui.add(egui::Button::new(RichText::new("🚀 Update").size(11.5).color(self.theme.text_secondary))
-                        .fill(self.theme.bg_card)
-                        .corner_radius(CornerRadius::same(6))).on_hover_text("Check for software updates").clicked() {
-                        self.updater.github_token = self.settings_view.github_token.clone();
-                        self.updater.check_for_updates();
+                    let (prof_rect, prof_resp) = ui.allocate_exact_size(
+                        Vec2::new(ui.available_width(), 36.0),
+                        egui::Sense::click(),
+                    );
+                    let prof_hovered = prof_resp.hovered();
+                    let prof_fill = if self.show_settings {
+                        Color32::from_rgba_premultiplied(255, 255, 255, 32)
+                    } else if prof_hovered {
+                        Color32::from_rgba_premultiplied(255, 255, 255, 14)
+                    } else {
+                        Color32::TRANSPARENT
+                    };
+                    if prof_fill != Color32::TRANSPARENT {
+                        ui.painter().rect_filled(prof_rect, CornerRadius::same(6), prof_fill);
                     }
 
-                    ui.add_space(4.0);
+                    // Avatar Circle
+                    let avatar_pos = prof_rect.left_center() + Vec2::new(14.0, 0.0);
+                    ui.painter().circle_filled(avatar_pos, 11.5, Color32::from_rgb(52, 92, 160));
+                    ui.painter().text(
+                        avatar_pos,
+                        Align2::CENTER_CENTER,
+                        "HI",
+                        egui::FontId::proportional(9.0),
+                        Color32::WHITE,
+                    );
 
-                    if ui.add(egui::Button::new(RichText::new("⚙️").size(13.0).color(self.theme.text_secondary))
-                        .fill(self.theme.bg_card)
-                        .corner_radius(CornerRadius::same(6))).on_hover_text("System Preferences (⌘,)").clicked() {
+                    // User Name
+                    ui.painter().text(
+                        prof_rect.left_center() + Vec2::new(32.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        "Harids Irawan",
+                        egui::FontId::proportional(12.5),
+                        Color32::WHITE,
+                    );
+
+                    // Gear icon on right
+                    ui.painter().text(
+                        prof_rect.right_center() - Vec2::new(10.0, 0.0),
+                        Align2::RIGHT_CENTER,
+                        "⚙️",
+                        egui::FontId::proportional(12.0),
+                        Color32::from_rgb(160, 160, 165),
+                    );
+
+                    if prof_resp.on_hover_text("System Preferences (⌘,)").clicked() {
                         self.show_settings = !self.show_settings;
                     }
 
-                    ui.add_space(8.0);
+                    ui.add_space(4.0);
 
-                    ui.add(egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text("🔍 Filter workspace...")
-                        .desired_width(150.0));
+                    // Secondary Tools (AI Copilot & Update Trigger)
+                    ui.horizontal(|ui| {
+                        let copilot_active = self.ai_assistant_view.is_visible;
+                        if ui.add(
+                            egui::Button::new(
+                                RichText::new("✨ AI Copilot")
+                                    .size(10.5)
+                                    .color(if copilot_active { Color32::WHITE } else { self.theme.accent_blue }),
+                            )
+                            .fill(if copilot_active { self.theme.accent_blue } else { Color32::TRANSPARENT })
+                            .corner_radius(CornerRadius::same(4)),
+                        )
+                        .on_hover_text("Buka AI Copilot Assistant (⌘K)")
+                        .clicked()
+                        {
+                            self.ai_assistant_view.is_visible = !self.ai_assistant_view.is_visible;
+                        }
+
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.add(
+                                egui::Button::new(RichText::new("🚀 Update").size(10.0).color(self.theme.text_muted))
+                                    .fill(Color32::TRANSPARENT),
+                            )
+                            .on_hover_text("Periksa pembaruan perangkat lunak")
+                            .clicked()
+                            {
+                                self.updater.github_token = self.settings_view.github_token.clone();
+                                self.updater.check_for_updates();
+                            }
+                        });
+                    });
                 });
             });
-        });
 
-        // 4. CENTRAL PANEL (Views Router for Library & 10D BIM Dimensions)
+        // 2. CENTRAL PANEL (Clean Minimalist Workspace without Strip Bar)
         CentralPanel::default().frame(Frame::new().fill(self.theme.bg_canvas)).show(ui, |ui| {
+            // Elegant App Store Style View Header
+            ui.add_space(20.0);
+            ui.horizontal(|ui| {
+                ui.add_space(24.0);
+                ui.label(
+                    RichText::new(self.active_pillar.clean_name())
+                        .size(26.0)
+                        .strong()
+                        .color(self.theme.text_primary),
+                );
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.add_space(24.0);
+                ui.separator();
+            });
+            ui.add_space(12.0);
+
             match self.active_pillar {
                 NavigationPillar::MyLibrary => {
                     self.my_project_view.show(ui, &self.theme, &self.projects, &mut self.active_pillar);
