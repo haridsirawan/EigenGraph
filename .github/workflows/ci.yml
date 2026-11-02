@@ -198,21 +198,21 @@ jobs:
           if (Test-Path "InternalVault") {
             Copy-Item -Recurse InternalVault -Destination $stage/
           }
-          @"
-============================================================
- EigenGraph — High-Performance 10D BIM & Structural Analytics
- Platform: Windows x64 (Windows 10 / Windows 11)
- Version:  v$VERSION
-============================================================
-
-Cara Menjalankan:
-1. Ekstrak seluruh isi arsip ZIP ini ke direktori pilihan Anda.
-2. Klik ganda pada 'eigengraph.exe' untuk menjalankan aplikasi.
-3. Database komponen parametrik dan vault proyek akan otomatis
-   tersinkronisasi secara real-time.
-
-Dokumentasi & Dukungan: https://github.com/haridsirawan/EigenGraph
-"@ | Out-File -FilePath "$stage/README.txt" -Encoding utf8
+          Set-Content -Path "$stage/README.txt" -Value @(
+            "============================================================",
+            " EigenGraph — High-Performance 10D BIM & Structural Analytics",
+            " Platform: Windows x64 (Windows 10 / Windows 11)",
+            " Version:  v$VERSION",
+            "============================================================",
+            "",
+            "Cara Menjalankan:",
+            "1. Ekstrak seluruh isi arsip ZIP ini ke direktori pilihan Anda.",
+            "2. Klik ganda pada 'eigengraph.exe' untuk menjalankan aplikasi.",
+            "3. Database komponen parametrik dan vault proyek akan otomatis",
+            "   tersinkronisasi secara real-time.",
+            "",
+            "Dokumentasi & Dukungan: https://github.com/haridsirawan/EigenGraph"
+          ) -Encoding utf8
 
           New-Item -ItemType Directory -Force -Path target/release | Out-Null
           Compress-Archive -Path "$stage/*" -DestinationPath "target/release/EigenGraph-Windows-x64.zip" -Force
@@ -267,40 +267,26 @@ Dokumentasi & Dukungan: https://github.com/haridsirawan/EigenGraph
             cp -r InternalVault "${STAGE_DIR}/"
           fi
 
-          cat << 'EOF' > "${STAGE_DIR}/eigengraph.desktop"
-[Desktop Entry]
-Name=EigenGraph
-Comment=High-Performance 10D BIM & Structural Analytics
-Exec=eigengraph
-Icon=eigengraph
-Terminal=false
-Type=Application
-Categories=Development;Engineering;Science;
-EOF
+          printf '[Desktop Entry]\nName=EigenGraph\nComment=High-Performance 10D BIM & Structural Analytics\nExec=eigengraph\nIcon=eigengraph\nTerminal=false\nType=Application\nCategories=Development;Engineering;Science;\n' > "${STAGE_DIR}/eigengraph.desktop"
 
-          cat << 'EOF' > "${STAGE_DIR}/install.sh"
-#!/usr/bin/env bash
-set -e
-INSTALL_BIN="${HOME}/.local/bin"
-DESKTOP_DIR="${HOME}/.local/share/applications"
-ICON_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"
-
-mkdir -p "$INSTALL_BIN" "$DESKTOP_DIR" "$ICON_DIR"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-cp "$SCRIPT_DIR/eigengraph" "$INSTALL_BIN/"
-chmod +x "$INSTALL_BIN/eigengraph"
-
-if [ -f "$SCRIPT_DIR/assets/icon.png" ]; then
-  cp "$SCRIPT_DIR/assets/icon.png" "$ICON_DIR/eigengraph.png"
-fi
-
-sed "s|Exec=eigengraph|Exec=$INSTALL_BIN/eigengraph|g" "$SCRIPT_DIR/eigengraph.desktop" > "$DESKTOP_DIR/eigengraph.desktop"
-sed -i "s|Icon=eigengraph|Icon=$ICON_DIR/eigengraph.png|g" "$DESKTOP_DIR/eigengraph.desktop"
-
-echo "✅ EigenGraph installed successfully to $INSTALL_BIN/eigengraph"
-echo "Launch it from your application menu or run 'eigengraph' in terminal."
-EOF
+          {
+            echo '#!/usr/bin/env bash'
+            echo 'set -e'
+            echo 'INSTALL_BIN="${HOME}/.local/bin"'
+            echo 'DESKTOP_DIR="${HOME}/.local/share/applications"'
+            echo 'ICON_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"'
+            echo 'mkdir -p "$INSTALL_BIN" "$DESKTOP_DIR" "$ICON_DIR"'
+            echo 'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"'
+            echo 'cp "$SCRIPT_DIR/eigengraph" "$INSTALL_BIN/"'
+            echo 'chmod +x "$INSTALL_BIN/eigengraph"'
+            echo 'if [ -f "$SCRIPT_DIR/assets/icon.png" ]; then'
+            echo '  cp "$SCRIPT_DIR/assets/icon.png" "$ICON_DIR/eigengraph.png"'
+            echo 'fi'
+            echo 'sed "s|Exec=eigengraph|Exec=$INSTALL_BIN/eigengraph|g" "$SCRIPT_DIR/eigengraph.desktop" > "$DESKTOP_DIR/eigengraph.desktop"'
+            echo 'sed -i "s|Icon=eigengraph|Icon=$ICON_DIR/eigengraph.png|g" "$DESKTOP_DIR/eigengraph.desktop"'
+            echo 'echo "✅ EigenGraph installed successfully to $INSTALL_BIN/eigengraph"'
+            echo 'echo "Launch it from your application menu or run eigengraph in terminal."'
+          } > "${STAGE_DIR}/install.sh"
           chmod +x "${STAGE_DIR}/install.sh"
 
           mkdir -p target/release
