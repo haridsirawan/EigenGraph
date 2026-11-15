@@ -24,9 +24,9 @@ impl AnalyzeView {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
                 let (publish_icon, publish_text) = if self.published_to_dossier {
-                    (AppIcon::CheckCircle, "Synced to MY PROJECT")
+                    (AppIcon::CheckCircle, "Synced to Vault")
                 } else {
-                    (AppIcon::UploadImport, "Publish to MY PROJECT Dossier")
+                    (AppIcon::UploadImport, "Publish to Vault Dossier")
                 };
                 let publish_bg = if self.published_to_dossier {
                     theme.accent_green
@@ -49,7 +49,7 @@ impl AnalyzeView {
                 {
                     self.published_to_dossier = true;
                     self.export_status =
-                        Some("Model & ARI Analytics synced to MY PROJECT Dossier".to_string());
+                        Some("Model & ARI Analytics synced to Vault Dossier".to_string());
                 }
 
                 if icons::icon_button(
@@ -200,6 +200,105 @@ impl AnalyzeView {
                 &mut self.active_subtab,
                 active_category.subtabs(),
             );
+
+            ui.add_space(6.0);
+
+            // Tier 3: Phase 45 Earth-to-Site Hazard Coupling & Geometry <-> Analysis Bridge
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+                icons::icon_label(
+                    ui,
+                    AppIcon::Globe,
+                    12.0,
+                    theme.accent_blue,
+                    format!(
+                        "Earth {}: Elev {:+.1}m | Ss {:.2}g / S1 {:.2}g | Wind {:.0} m/s | {}",
+                        self.site_coupling.site_label,
+                        self.site_coupling.elevation_m,
+                        self.site_coupling.seismic_pga_ss_g,
+                        self.site_coupling.seismic_pga_s1_g,
+                        self.site_coupling.design_wind_ms,
+                        self.site_coupling.recommended_soil_class,
+                    ),
+                    10.5,
+                    theme.text_secondary,
+                    false,
+                );
+
+                if icons::icon_button(
+                    ui,
+                    AppIcon::Target,
+                    "Sync Earth Hazard -> Seismic & Wind",
+                    10.5,
+                    Color32::WHITE,
+                    theme.accent_green,
+                    Stroke::NONE,
+                    CornerRadius::same(6),
+                    Vec2::new(0.0, 24.0),
+                )
+                .on_hover_text("Apply active EigenEarth pin Ss/S1 seismic acceleration, design wind speed & soil class to Analysis inputs")
+                .clicked()
+                {
+                    self.ss_val = self.site_coupling.seismic_pga_ss_g;
+                    self.s1_val = self.site_coupling.seismic_pga_s1_g;
+                    self.wind_v_ms = self.site_coupling.design_wind_ms;
+                    if self.site_coupling.recommended_soil_class.starts_with("SE") {
+                        self.site_class = crate::core::SiteClass::SE;
+                    } else if self.site_coupling.recommended_soil_class.starts_with("SC") {
+                        self.site_class = crate::core::SiteClass::SC;
+                    } else {
+                        self.site_class = crate::core::SiteClass::SD;
+                    }
+                    self.export_status = Some(format!(
+                        "Applied Earth site telemetry ({}) -> Ss={:.2}g, S1={:.2}g, V={:.0} m/s ({:?}).",
+                        self.site_coupling.site_label, self.ss_val, self.s1_val, self.wind_v_ms, self.site_class
+                    ));
+                }
+
+                if icons::icon_button(
+                    ui,
+                    AppIcon::Cube3D,
+                    "Highlight in Geometry 3D ->",
+                    10.5,
+                    Color32::WHITE,
+                    theme.accent_blue,
+                    Stroke::NONE,
+                    CornerRadius::same(6),
+                    Vec2::new(0.0, 24.0),
+                )
+                .on_hover_text("Jump to Geometry 3D viewport and highlight active critical member with DCR stress & NFD diagram")
+                .clicked()
+                {
+                    let focus_id = (self.woodbury_disrupt_elem_id > 0)
+                        .then_some(self.woodbury_disrupt_elem_id);
+                    self.requested_geometry_jump = Some((
+                        focus_id,
+                        Some(crate::views::build::Render3DMode::AxialForceNFD),
+                        Some("DCR_Stress".to_string()),
+                    ));
+                }
+
+                if icons::icon_button(
+                    ui,
+                    AppIcon::Rebar,
+                    "Rebar BBS in Drafting ->",
+                    10.5,
+                    theme.text_primary,
+                    theme.bg_canvas,
+                    Stroke::new(1.0, theme.border_subtle),
+                    CornerRadius::same(6),
+                    Vec2::new(0.0, 24.0),
+                )
+                .on_hover_text("Jump to Drafting module's below-toolbar Rebar BBS detailing sub-menu")
+                .clicked()
+                {
+                    self.requested_drafting_jump = Some(crate::views::parametric::DraftingSubTab::RebarBbs);
+                }
+
+                if let Some(ref note) = self.linked_from_geometry_note {
+                    icons::pill_badge(ui, AppIcon::LinkChain, note.clone(), theme.accent_orange);
+                }
+            });
         });
     }
 

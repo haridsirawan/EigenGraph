@@ -393,6 +393,8 @@ impl App for EigenGraphApp {
             } else {
                 self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
             }
+            self.sync_earth_maps();
+            self.sync_lifecycle_from_canvas();
         }
 
         self.theme.apply_to_ctx(&ctx);
@@ -435,6 +437,7 @@ impl App for EigenGraphApp {
                     self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
                     self.sync_bim_to_fem();
                     self.sync_earth_maps();
+                    self.sync_lifecycle_from_canvas();
                 }
                 self.autosave_hydrated = true;
             } else {
@@ -725,20 +728,21 @@ impl App for EigenGraphApp {
                         }
                         if std::mem::take(&mut self.my_project_view.request_save_active_to_vault) {
                             let raw_name = self.my_project_view.save_project_name_input.trim();
-                            let proj_name = if raw_name.is_empty() {
-                                "Workspace_Project"
+                            let proj_name: String = if raw_name.is_empty() {
+                                "Workspace_Project".to_string()
                             } else {
-                                raw_name
+                                raw_name.to_string()
                             };
-                            self.build_view.bim_bus.project.project_name = proj_name.to_string();
-                            self.parametric_view.bim_bus.project.project_name = proj_name.to_string();
+                            self.build_view.bim_bus.project.project_name = proj_name.clone();
+                            self.parametric_view.bim_bus.project.project_name = proj_name.clone();
+                            self.sync_lifecycle_to_canvas();
                             let mut archive = self.universal_canvas.build_unified_archive(
                                 &self.build_view.bim_bus.project,
                                 &self.members,
                                 &self.parametric_view.variables,
                                 workspace_snapshot.clone(),
                             );
-                            archive.project_name = proj_name.to_string();
+                            archive.project_name = proj_name.clone();
                             let safe_file: String = proj_name
                                 .chars()
                                 .map(|c| {
@@ -778,6 +782,7 @@ impl App for EigenGraphApp {
                             self.apply_typology_template(kind);
                         }
                         if std::mem::take(&mut self.my_project_view.request_export_active_archive) {
+                            self.sync_lifecycle_to_canvas();
                             self.universal_canvas.export_unified_file(
                                 &self.build_view.bim_bus.project,
                                 &self.members,
@@ -808,6 +813,7 @@ impl App for EigenGraphApp {
                                         self.sync_bim_to_fem();
                                         self.build_view.fit_view_to_project(&mut self.universal_canvas, &self.members);
                                         self.sync_earth_maps();
+                                        self.sync_lifecycle_from_canvas();
                                         self.my_project_view.export_success_msg = Some(format!(
                                             "Loaded workspace '{}' ({} BIM elements, {} drawings, {} FEM members) from Vault.",
                                             entry.name,
@@ -912,6 +918,7 @@ impl App for EigenGraphApp {
                                 | crate::views::planning::PlanningSubTab::StagedErectionSvd
                                 | crate::views::planning::PlanningSubTab::ScheduleRiskMonteCarlo
                                 | crate::views::planning::PlanningSubTab::ResourceLeveling4d
+                                | crate::views::planning::PlanningSubTab::SiteDailyDiaryFleet
                         ) {
                             self.planning_view.active_subtab =
                                 crate::views::planning::PlanningSubTab::Schedule4d;
@@ -935,6 +942,7 @@ impl App for EigenGraphApp {
                                 | crate::views::planning::PlanningSubTab::WbsHierarchy
                                 | crate::views::planning::PlanningSubTab::EarnedValueEvm
                                 | crate::views::planning::PlanningSubTab::ValueEngineeringBid
+                                | crate::views::planning::PlanningSubTab::ProcurementContractsClaims
                         ) {
                             self.planning_view.active_subtab =
                                 crate::views::planning::PlanningSubTab::DynamicRab;
@@ -1038,6 +1046,36 @@ impl App for EigenGraphApp {
                         });
                     });
             });
+
+        // Bidirectional Geometry <-> Analysis & Drafting deep-link bridge
+        if let Some((tab, member_id, note)) = self.build_view.requested_analysis_jump.take() {
+            self.analyze_view.active_subtab = tab;
+            if let Some(id) = member_id {
+                self.analyze_view.woodbury_disrupt_elem_id = id;
+            }
+            self.analyze_view.linked_from_geometry_note = Some(note);
+            self.active_pillar = NavigationPillar::AnalysisSimulation;
+        }
+        if let Some((member_id, render_mode, color_mode)) =
+            self.analyze_view.requested_geometry_jump.take()
+        {
+            if let Some(id) = member_id {
+                self.build_view.selected_member_id = Some(id);
+            }
+            if let Some(mode) = render_mode {
+                self.build_view.render_mode = mode;
+            }
+            if let Some(cm) = color_mode {
+                self.build_view.color_mode = cm;
+            }
+            self.build_view.analysis_panel_open = true;
+            self.active_pillar = NavigationPillar::GeometryAssembly;
+        }
+        if let Some(subtab) = self.analyze_view.requested_drafting_jump.take() {
+            self.parametric_view.active_drafting_subtab = subtab;
+            self.parametric_view.drafting_submenu_open = true;
+            self.active_pillar = NavigationPillar::ParametricDED;
+        }
 
         self.maybe_autosave_workspace(&ctx, &workspace_snapshot);
 
@@ -1879,6 +1917,29 @@ impl EigenGraphApp {
         );
         self.last_uc_earth = synced;
         self.last_res_earth = synced;
+        self.sync_site_coupling();
+    }
+
+    fn sync_site_coupling(&mut self) {
+        let coupling = self.universal_canvas.active_site_coupling();
+        self.universal_canvas.lifecycle_ops.site_coupling = coupling.clone();
+        self.analyze_view.site_coupling = coupling.clone();
+        self.planning_view.site_coupling = coupling.clone();
+        self.lean_view.site_coupling = coupling;
+    }
+
+    fn sync_lifecycle_to_canvas(&mut self) {
+        self.sync_site_coupling();
+        self.universal_canvas.lifecycle_ops.procurement = self.planning_view.procurement.clone();
+        self.universal_canvas.lifecycle_ops.daily_diary = self.planning_view.daily_diary.clone();
+        self.universal_canvas.lifecycle_ops.qa_qc = self.lean_view.qa_qc.clone();
+    }
+
+    fn sync_lifecycle_from_canvas(&mut self) {
+        self.planning_view.procurement = self.universal_canvas.lifecycle_ops.procurement.clone();
+        self.planning_view.daily_diary = self.universal_canvas.lifecycle_ops.daily_diary.clone();
+        self.lean_view.qa_qc = self.universal_canvas.lifecycle_ops.qa_qc.clone();
+        self.sync_site_coupling();
     }
 
     fn handle_imported_file(&mut self, payload: crate::core::web_bridge::ImportedFilePayload) {
@@ -1948,6 +2009,7 @@ impl EigenGraphApp {
             self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
             self.sync_bim_to_fem();
             self.sync_earth_maps();
+            self.sync_lifecycle_from_canvas();
             let msg = format!(
                 "Loaded workspace archive '{}' ({} BIM elems, {} drawings).",
                 payload.filename,
@@ -2009,6 +2071,7 @@ impl EigenGraphApp {
             return;
         }
 
+        self.sync_lifecycle_to_canvas();
         let archive = self.universal_canvas.build_unified_archive(
             &self.build_view.bim_bus.project,
             &self.members,

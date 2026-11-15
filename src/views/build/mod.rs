@@ -110,7 +110,6 @@ pub enum BimRibbonTab {
     Structure,
     MepSystems,
     CivilInfra,
-    AnalysisFea,
     Time4D,
     Cost5D,
     Sustainability6D,
@@ -127,7 +126,6 @@ impl BimRibbonTab {
             Self::Structure => AppIcon::Column,
             Self::MepSystems => AppIcon::Bolt,
             Self::CivilInfra => AppIcon::Globe,
-            Self::AnalysisFea => AppIcon::Compass,
             Self::Time4D => AppIcon::Clock,
             Self::Cost5D => AppIcon::Coins,
             Self::Sustainability6D => AppIcon::Leaf,
@@ -144,7 +142,6 @@ impl BimRibbonTab {
             Self::Structure => "Structure",
             Self::MepSystems => "MEP Systems",
             Self::CivilInfra => "Civil & Terrain",
-            Self::AnalysisFea => "FEA Solver",
             Self::Time4D => "4D Phased",
             Self::Cost5D => "5D Cost",
             Self::Sustainability6D => "6D Green",
@@ -154,6 +151,14 @@ impl BimRibbonTab {
             Self::SheetsDed => "Sheets & DED",
         }
     }
+}
+
+/// Phase 45: Below-toolbar external Structural Analysis sub-menus in Geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeometryAnalysisSubTab {
+    DiagramsAndHeatmap,
+    SolverAndN1,
+    CriticalMembersBridge,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -297,6 +302,10 @@ pub struct BuildView {
     pub point_cloud_overlay_enabled: bool,
     pub point_cloud_raw_ascii: String,
     pub point_cloud_status: Option<String>,
+    // Phase 45: Below-toolbar external Structural Analysis Sub-Menu + Bidirectional Bridge to Analysis
+    pub active_analysis_subtab: GeometryAnalysisSubTab,
+    pub analysis_panel_open: bool,
+    pub requested_analysis_jump: Option<(crate::views::analyze::AnalyzeSubTab, Option<usize>, String)>,
 }
 
 impl Default for BuildView {
@@ -410,6 +419,9 @@ impl Default for BuildView {
             point_cloud_overlay_enabled: true,
             point_cloud_raw_ascii: "0.0,0.0,0.0,+2.8\n6000.0,0.0,3200.0,-4.1\n3000.0,4500.0,0.0,+11.4\n9000.0,2000.0,3500.0,+3.2\n12000.0,6000.0,0.0,-12.6".to_string(),
             point_cloud_status: None,
+            active_analysis_subtab: GeometryAnalysisSubTab::DiagramsAndHeatmap,
+            analysis_panel_open: true,
+            requested_analysis_jump: None,
         }
     }
 }
@@ -470,5 +482,10 @@ impl BuildView {
                     sidebar_toggle_inset_px,
                 );
             });
+
+        ui.add_space(10.0);
+
+        // External Below-Toolbar Structural Analysis Sub-Menu Panel (Diagrams/Heatmap, FEA Solver & N-1, Critical Bridge)
+        self.render_below_toolbar_structural_analysis(ui, theme, members, universal_canvas);
     }
 }

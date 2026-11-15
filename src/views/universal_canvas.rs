@@ -13,7 +13,10 @@ use crate::core::gis::earth_globe::{
     EarthBrushAction, GlobeScreenTransform, MegastructureKind, PlanetaryWorldState,
 };
 use crate::core::gis::SlippyMapState;
-use crate::core::{BimProject, DiskExporter, Sha256Hasher};
+use crate::core::{
+    compute_site_environmental_coupling, BimProject, DiskExporter, LifecycleOpsState,
+    Sha256Hasher, SiteEnvironmentalCoupling,
+};
 use crate::icons::{self, AppIcon};
 use crate::models::{NavigationPillar, ParametricVariable, StructuralMember};
 use crate::theme::{MacTheme, ThemeMode};
@@ -259,6 +262,8 @@ pub struct UnifiedWorkspaceArchive {
     pub globe_mode: bool,
     #[serde(default)]
     pub planetary_world: PlanetaryWorldState,
+    #[serde(default)]
+    pub lifecycle_ops: LifecycleOpsState,
     pub sha256_seal: String,
 }
 
@@ -408,6 +413,8 @@ pub struct UniversalCanvasState {
     pub earth_world: PlanetaryWorldState,
     pub last_globe_xform: Option<GlobeScreenTransform>,
     pub pending_earth_arc_start: Option<(f64, f64)>,
+    // Phase 45: Persisted MEP sizing, Commercial Procurement/VO, Site Diary, QA/QC & Earth Site Coupling
+    pub lifecycle_ops: LifecycleOpsState,
 }
 
 impl Default for UniversalCanvasState {
@@ -468,11 +475,22 @@ impl Default for UniversalCanvasState {
             earth_world: PlanetaryWorldState::default(),
             last_globe_xform: None,
             pending_earth_arc_start: None,
+            lifecycle_ops: LifecycleOpsState::default(),
         }
     }
 }
 
 impl UniversalCanvasState {
+    /// Computes coupled geotechnical, seismic, wind, flood, and site logistics telemetry
+    /// from the currently anchored Earth coordinate (or viewport focus) and planetary terrain.
+    pub fn active_site_coupling(&self) -> SiteEnvironmentalCoupling {
+        let (lat, lon) = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        compute_site_environmental_coupling(lat, lon, &self.earth_world)
+    }
     /// Theme-aware canvas viewport background matching Universal Canvas across all modules.
     pub fn canvas_bg(theme: &MacTheme) -> Color32 {
         if theme.is_dark() {
@@ -1751,6 +1769,11 @@ impl UniversalCanvasState {
             map_zoom: Some(self.world_map.zoom_level),
             globe_mode: self.globe_mode,
             planetary_world: self.earth_world.clone(),
+            lifecycle_ops: {
+                let mut ops = self.lifecycle_ops.clone();
+                ops.site_coupling = self.active_site_coupling();
+                ops
+            },
             sha256_seal: String::new(),
         }
     }
@@ -1833,6 +1856,8 @@ impl UniversalCanvasState {
         self.globe_mode = archive.globe_mode;
         self.earth_world = archive.planetary_world;
         self.earth_world.recompute_vitals();
+        self.lifecycle_ops = archive.lifecycle_ops;
+        self.lifecycle_ops.site_coupling = self.active_site_coupling();
         self.status_message = Some(format!(
             "Imported verified 1-file workspace '{}' ({} canvas objects)",
             archive.project_name,
@@ -6176,5 +6201,53 @@ mod tests {
         assert!(rect.expand(40.0).contains(p));
         let back_mm = canvas.screen_to_world(rect, p);
         assert!(back_mm[0].abs() < 25_000_000.0 && back_mm[1].abs() < 25_000_000.0);
+    }
+
+    #[test]
+    fn test_phase45_lifecycle_archive_roundtrip() {
+        let mut canvas = UniversalCanvasState::default();
+        canvas.ground_origin_lat_lon = (-6.12, 106.85);
+        canvas.ground_origin_anchored = true;
+        canvas.lifecycle_ops.mep_sizing.floor_area_m2 = 2450.0;
+        canvas.lifecycle_ops.procurement.retention_pct = 7.5;
+        canvas
+            .lifecycle_ops
+            .daily_diary
+            .entries
+            .push(crate::core::DailyDiaryEntry {
+                day_label: "Day 45 (Thu)".to_string(),
+                weather: "Clear".to_string(),
+                temp_c: 32.0,
+                workable_hours: 9.0,
+                carpentry_crew: 22,
+                rebar_crew: 18,
+                concrete_crew: 16,
+                mep_crew: 14,
+                crane_util_pct: 91.0,
+                pump_m3_poured: 140.0,
+                incident_free: true,
+                remarks: "Transfer deck pour complete".to_string(),
+            });
+        canvas.lifecycle_ops.qa_qc.ncrs[0].closed = true;
+
+        let bim = BimProject::sample_bimcraft_building();
+        let members = vec![StructuralMember::default()];
+        let vars = Vec::new();
+        let archive = canvas.build_unified_archive(&bim, &members, &vars, sample_settings());
+        let json = archive.to_pretty_json().expect("serialize");
+
+        let mut restored = UniversalCanvasState::default();
+        let mut out_bim = BimProject::default();
+        let mut out_members = Vec::new();
+        let mut out_vars = Vec::new();
+        let _ = restored
+            .apply_unified_archive(&json, &mut out_bim, &mut out_members, &mut out_vars)
+            .expect("restore");
+
+        assert!((restored.lifecycle_ops.mep_sizing.floor_area_m2 - 2450.0).abs() < 1e-6);
+        assert!((restored.lifecycle_ops.procurement.retention_pct - 7.5).abs() < 1e-6);
+        assert_eq!(restored.lifecycle_ops.daily_diary.entries.len(), 4);
+        assert!(restored.lifecycle_ops.qa_qc.ncrs[0].closed);
+        assert!(restored.lifecycle_ops.site_coupling.seismic_pga_ss_g >= 0.85);
     }
 }

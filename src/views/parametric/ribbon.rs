@@ -52,14 +52,12 @@ impl ParametricView {
                         );
                         ui.separator();
 
-                        // View Mode Switcher
+                        // View Mode Switcher (upper interactive canvas views only)
                         let views = [
                             (DraftingViewMode::FloorPlanViewRange, AppIcon::MapPin, "Plan"),
                             (DraftingViewMode::LiveSectionCutPoche, AppIcon::SectionCut, "Section"),
                             (DraftingViewMode::SheetLayoutA101, AppIcon::Document, "Sheet 2D"),
                             (DraftingViewMode::VisualNodeGraphDynamo, AppIcon::NodesGraph, "Dynamo"),
-                            (DraftingViewMode::RebarBbsDetailing, AppIcon::Rebar, "Rebar"),
-                            (DraftingViewMode::ElevationsAndMepRiser, AppIcon::Building, "Elev/MEP"),
                         ];
                         for (vm, icon, vlabel) in views {
                             let selected = self.view_mode == vm;

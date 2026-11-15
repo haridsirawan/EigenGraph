@@ -21,6 +21,7 @@ pub enum LeanSubTab {
     JitDelivery,
     TaktConcreteDispatch,
     RfiSubmittalTracker,
+    QaQcLabAndCommissioning,
 }
 
 pub struct LeanView {
@@ -48,6 +49,12 @@ pub struct LeanView {
     pub rfi_items: Vec<RfiSubmittalItem>,
     pub rfi_sla_days: u32,
     pub rfi_auto_flag_lps: bool,
+    // Phase 45: Field QA/QC (Concrete Lab, ITP Hold Points, NCR/Punch List, MEP T&C) + Earth Coupling
+    pub qa_qc: crate::core::FieldQualityControlLedger,
+    pub site_coupling: crate::core::SiteEnvironmentalCoupling,
+    pub new_qc_zone: String,
+    pub new_qc_day28_mpa: f32,
+    pub new_ncr_desc: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -257,6 +264,11 @@ impl Default for LeanView {
             rfi_items: RfiSubmittalItem::default_ledger(),
             rfi_sla_days: 5,
             rfi_auto_flag_lps: true,
+            qa_qc: crate::core::FieldQualityControlLedger::default(),
+            site_coupling: crate::core::SiteEnvironmentalCoupling::default(),
+            new_qc_zone: "L04 Zone-B Core Pour".to_string(),
+            new_qc_day28_mpa: 42.5,
+            new_ncr_desc: "Concrete cover spacer spacing < 1000mm check".to_string(),
         }
     }
 }
@@ -323,6 +335,9 @@ impl LeanView {
                     LeanSubTab::RfiSubmittalTracker => {
                         self.render_rfi_submittal_tracker(ui, theme, features);
                     }
+                    LeanSubTab::QaQcLabAndCommissioning => {
+                        self.render_qa_qc_lab_and_commissioning(ui, theme);
+                    }
                 }
 
                 ui.add_space(64.0);
@@ -349,6 +364,7 @@ impl LeanView {
                     (LeanSubTab::JitDelivery, crate::icons::AppIcon::Truck, "Just-In-Time (JIT) Delivery Buffer".to_string()),
                     (LeanSubTab::TaktConcreteDispatch, crate::icons::AppIcon::Layers, "Takt Trains & Pour Dispatch".to_string()),
                     (LeanSubTab::RfiSubmittalTracker, crate::icons::AppIcon::Document, "RFI & Submittal SLA".to_string()),
+                    (LeanSubTab::QaQcLabAndCommissioning, crate::icons::AppIcon::CheckCircle, "QA/QC Lab, ITP, NCR & T&C".to_string()),
                 ];
 
                 ui.horizontal_wrapped(|ui| {
@@ -1638,6 +1654,220 @@ impl LeanView {
         });
     }
 
+    fn render_qa_qc_lab_and_commissioning(&mut self, ui: &mut Ui, theme: &MacTheme) {
+        let score = self.qa_qc.evaluate_scorecard();
+        let site = self.site_coupling.clone();
+
+        theme.card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                crate::icons::icon_label(
+                    ui,
+                    crate::icons::AppIcon::CheckCircle,
+                    14.0,
+                    theme.accent_green,
+                    "FIELD QA/QC LAB (CYLINDER f'c), ITP HOLD POINTS, NCR PUNCH LIST & MEP T&C",
+                    12.5,
+                    theme.accent_green,
+                    true,
+                );
+                crate::icons::pill_badge(
+                    ui,
+                    crate::icons::AppIcon::Globe,
+                    format!("Earth Site: {} ({})", site.site_label, site.recommended_soil_class),
+                    theme.accent_blue,
+                );
+            });
+            ui.add_space(10.0);
+
+            self.render_responsive_cards(
+                ui,
+                theme,
+                &[
+                    (
+                        "28-Day Cylinder Pass Rate",
+                        format!("{:.1}%", score.fc_pass_rate_pct),
+                        format!("{} pour batches tested (SNI/ASTM C39)", self.qa_qc.batches.len()),
+                        if score.fc_pass_rate_pct >= 80.0 {
+                            theme.accent_green
+                        } else {
+                            theme.accent_orange
+                        },
+                    ),
+                    (
+                        "ITP Hold Points Cleared",
+                        format!("{}/{}", score.itp_cleared_count, score.itp_total_count),
+                        "Witness / Hold inspection sign-off gate".to_string(),
+                        theme.accent_blue,
+                    ),
+                    (
+                        "Open NCR / Punch Items",
+                        format!("{}", score.open_ncr_count),
+                        "Non-conformance closeout status".to_string(),
+                        if score.open_ncr_count == 0 {
+                            theme.accent_green
+                        } else {
+                            theme.accent_red
+                        },
+                    ),
+                    (
+                        "MEP T&C Witness Readiness",
+                        format!("{:.1}%", score.mep_tc_pass_pct),
+                        "Hydrostatic, Megger & TAB balancing".to_string(),
+                        if score.mep_tc_pass_pct >= 85.0 {
+                            theme.accent_green
+                        } else {
+                            theme.accent_orange
+                        },
+                    ),
+                ],
+            );
+
+            ui.add_space(12.0);
+            ui.label(RichText::new("1. CONCRETE CYLINDER LAB & SLUMP LOG").size(11.0).strong().color(theme.accent_blue));
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                let zw = ui_kit::clamped_row_width(ui, 110.0, 210.0, 190.0);
+                ui.label(RichText::new("Pour Zone:").size(10.5).color(theme.text_secondary));
+                ui.add(egui::TextEdit::singleline(&mut self.new_qc_zone).desired_width(zw));
+                ui.label(RichText::new("28d MPa:").size(10.5).color(theme.text_secondary));
+                ui.add(egui::DragValue::new(&mut self.new_qc_day28_mpa).range(15.0..=85.0).speed(0.5));
+                if crate::icons::icon_button(
+                    ui,
+                    crate::icons::AppIcon::Plus,
+                    "Log Test Batch",
+                    10.5,
+                    Color32::WHITE,
+                    theme.accent_blue,
+                    Stroke::NONE,
+                    CornerRadius::same(6),
+                    Vec2::new(0.0, 24.0),
+                )
+                .clicked()
+                {
+                    let n = 2601 + self.qa_qc.batches.len();
+                    self.qa_qc.batches.push(crate::core::ConcreteCylinderBatch {
+                        batch_id: format!("CY-{n}"),
+                        pour_zone: self.new_qc_zone.clone(),
+                        target_fc_mpa: 40.0,
+                        slump_mm: 125.0,
+                        day7_mpa: (self.new_qc_day28_mpa * 0.72),
+                        day28_mpa: self.new_qc_day28_mpa,
+                    });
+                    self.export_status = Some(format!("Logged Concrete Cylinder Batch CY-{n}."));
+                }
+            });
+            ui.add_space(6.0);
+            ScrollArea::horizontal().id_salt("qa_qc_lab_scroll").show(ui, |ui| {
+                egui::Grid::new("qa_qc_lab_grid")
+                    .striped(true)
+                    .spacing(Vec2::new(12.0, 5.0))
+                    .show(ui, |ui| {
+                        for h in ["Batch", "Structural Pour Zone", "Target f'c", "Slump", "7-Day", "28-Day", "Lab Status"] {
+                            ui.label(RichText::new(h).size(10.5).strong().color(theme.accent_blue));
+                        }
+                        ui.end_row();
+                        for b in &self.qa_qc.batches {
+                            let ok = b.passes_fc();
+                            ui.label(RichText::new(&b.batch_id).size(10.5).monospace().color(theme.text_primary));
+                            ui.label(RichText::new(&b.pour_zone).size(10.5).color(theme.text_secondary));
+                            ui.label(RichText::new(format!("{:.0} MPa", b.target_fc_mpa)).size(10.5).color(theme.text_muted));
+                            ui.label(RichText::new(format!("{:.0} mm", b.slump_mm)).size(10.5).color(theme.text_secondary));
+                            ui.label(RichText::new(format!("{:.1} MPa", b.day7_mpa)).size(10.5).monospace().color(theme.text_muted));
+                            ui.label(RichText::new(format!("{:.1} MPa", b.day28_mpa)).size(10.5).strong().color(if ok { theme.accent_green } else { theme.accent_red }));
+                            ui.label(RichText::new(if ok { "PASS" } else { "CORING CHECK" }).size(10.5).strong().color(if ok { theme.accent_green } else { theme.accent_red }));
+                            ui.end_row();
+                        }
+                    });
+            });
+
+            ui.add_space(12.0);
+            ui.label(RichText::new("2. ITP HOLD POINTS & NCR / PUNCH LIST CLOSEOUT").size(11.0).strong().color(theme.accent_orange));
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                let nw = ui_kit::clamped_row_width(ui, 120.0, 260.0, 170.0);
+                ui.add(egui::TextEdit::singleline(&mut self.new_ncr_desc).desired_width(nw));
+                if crate::icons::icon_button(
+                    ui,
+                    crate::icons::AppIcon::Plus,
+                    "Raise Field NCR",
+                    10.5,
+                    Color32::WHITE,
+                    theme.accent_orange,
+                    Stroke::NONE,
+                    CornerRadius::same(6),
+                    Vec2::new(0.0, 24.0),
+                )
+                .clicked()
+                {
+                    let n = 15 + self.qa_qc.ncrs.len();
+                    self.qa_qc.ncrs.push(crate::core::NcrPunchItem {
+                        ncr_id: format!("NCR-{n:03}"),
+                        discipline: "STR".to_string(),
+                        location: "Active Floor Zone".to_string(),
+                        description: self.new_ncr_desc.clone(),
+                        critical: false,
+                        closed: false,
+                    });
+                }
+            });
+            ui.add_space(6.0);
+            ScrollArea::horizontal().id_salt("qa_qc_itp_ncr_scroll").show(ui, |ui| {
+                egui::Grid::new("qa_qc_itp_ncr_grid")
+                    .striped(true)
+                    .spacing(Vec2::new(12.0, 5.0))
+                    .show(ui, |ui| {
+                        for h in ["Ref / Type", "Scope / Location", "Inspection / Sign-Off"] {
+                            ui.label(RichText::new(h).size(10.5).strong().color(theme.accent_blue));
+                        }
+                        ui.end_row();
+                        for itp in &mut self.qa_qc.itps {
+                            ui.label(RichText::new(format!("{} (HOLD)", itp.code)).size(10.5).strong().color(theme.accent_blue));
+                            ui.label(RichText::new(&itp.activity).size(10.5).color(theme.text_secondary));
+                            if ui.selectable_label(itp.signed_off, if itp.signed_off { "Signed Off" } else { "Sign-Off Hold" }).clicked() {
+                                itp.signed_off = !itp.signed_off;
+                            }
+                            ui.end_row();
+                        }
+                        for ncr in &mut self.qa_qc.ncrs {
+                            let tag_col = if ncr.closed { theme.accent_green } else if ncr.critical { theme.accent_red } else { theme.accent_orange };
+                            ui.label(RichText::new(format!("{} [{}]", ncr.ncr_id, ncr.discipline)).size(10.5).strong().color(tag_col));
+                            ui.label(RichText::new(format!("{}: {}", ncr.location, ncr.description)).size(10.5).color(theme.text_secondary));
+                            if ui.selectable_label(ncr.closed, if ncr.closed { "Closed" } else { "Verify & Close" }).clicked() {
+                                ncr.closed = !ncr.closed;
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+
+            ui.add_space(12.0);
+            ui.label(RichText::new("3. MEP TESTING & COMMISSIONING (T&C) HANDOVER GATES").size(11.0).strong().color(theme.accent_green));
+            ui.add_space(6.0);
+            ScrollArea::horizontal().id_salt("qa_qc_mep_tc_scroll").show(ui, |ui| {
+                egui::Grid::new("qa_qc_mep_tc_grid")
+                    .striped(true)
+                    .spacing(Vec2::new(12.0, 5.0))
+                    .show(ui, |ui| {
+                        for h in ["System", "Test Protocol", "Target Spec", "Measured Value", "Witness Gate"] {
+                            ui.label(RichText::new(h).size(10.5).strong().color(theme.accent_blue));
+                        }
+                        ui.end_row();
+                        for t in &mut self.qa_qc.mep_tests {
+                            ui.label(RichText::new(&t.system).size(10.5).strong().color(theme.text_primary));
+                            ui.label(RichText::new(&t.protocol).size(10.5).color(theme.text_secondary));
+                            ui.label(RichText::new(&t.target_spec).size(10.5).color(theme.text_muted));
+                            ui.label(RichText::new(&t.measured_val).size(10.5).monospace().color(theme.accent_blue));
+                            if ui.selectable_label(t.witnessed_pass, if t.witnessed_pass { "Passed" } else { "Sign T&C" }).clicked() {
+                                t.witnessed_pass = !t.witnessed_pass;
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+        });
+    }
+
     fn render_stat_card(&self, ui: &mut Ui, theme: &MacTheme, title: &str, val: &str, subtitle: &str, val_color: Color32) {
         ui_kit::stat_card(ui, theme, title, val, subtitle, val_color);
     }
@@ -1670,5 +1900,52 @@ mod tests {
         let cleared = evaluate_rfi_sla_status(&ledger, 5);
         assert_eq!(cleared.overdue_count, 0);
         assert!(cleared.approval_pct > init.approval_pct);
+    }
+
+    #[test]
+    fn test_phase45_qa_qc_lab_itp_ncr_and_mep_tc_ledger() {
+        let mut lv = super::LeanView::default();
+        lv.active_subtab = super::LeanSubTab::QaQcLabAndCommissioning;
+        let before = lv.qa_qc.evaluate_scorecard();
+        assert!(before.fc_pass_rate_pct > 0.0);
+        assert!(before.open_ncr_count >= 1);
+
+        for ncr in &mut lv.qa_qc.ncrs {
+            ncr.closed = true;
+        }
+        let after = lv.qa_qc.evaluate_scorecard();
+        assert_eq!(after.open_ncr_count, 0);
+        assert!(after.itp_total_count >= after.itp_cleared_count);
+
+        let theme = crate::theme::MacTheme::default();
+        let bim = BimProject::sample_bimcraft_building();
+        let mut features = super::FeatureRegistry::default();
+        for win_w in [1000.0_f32, 700.0, 390.0] {
+            let ctx = egui::Context::default();
+            let mut inner_max_x = 0.0_f32;
+            let mut panel_max_x = 0.0_f32;
+            for _ in 0..2 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(win_w, 900.0))),
+                    ..Default::default()
+                };
+                let mut output = ctx.run_ui(input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        egui::Frame::new().inner_margin(egui::Margin::symmetric(14, 12)).show(ui, |ui| {
+                            panel_max_x = ui.max_rect().right();
+                            let resp = ui.vertical(|ui| {
+                                lv.show(ui, &theme, &[], &bim, &mut features);
+                            });
+                            inner_max_x = resp.response.rect.right();
+                        });
+                    });
+                });
+                output.textures_delta.clear();
+            }
+            assert!(
+                inner_max_x <= panel_max_x + 2.0,
+                "Lean QA/QC overflow @ {win_w}: inner_max_x={inner_max_x:.1} > panel_max_x={panel_max_x:.1}"
+            );
+        }
     }
 }

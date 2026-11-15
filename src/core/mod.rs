@@ -39,6 +39,7 @@ pub mod blast;
 pub mod fire;
 pub mod ifc;
 pub mod gis;
+pub mod lifecycle_ops;
 pub mod web_bridge;
 
 pub use linalg::{CsrMatrix, Matrix};
@@ -178,6 +179,14 @@ pub use gis::{
     TinPoint, TinSurfaceMesh, TinTriangle, UtmZoneInfo, WebMercator,
     EARTH_HALF_CIRCUMFERENCE, EARTH_RADIUS_METERS, MAX_LATITUDE, MIN_LATITUDE,
     UTM_FALSE_EASTING, UTM_FALSE_NORTHING_SOUTH, UTM_SCALE_FACTOR_CENTRAL,
+};
+pub use lifecycle_ops::{
+    compute_mep_engineering_sizing, compute_site_environmental_coupling,
+    CommercialPositionSummary, ConcreteCylinderBatch, DailyDiaryEntry, DailyDiarySummary,
+    FieldQualityControlLedger, ItpInspectionItem, LifecycleOpsState, MepSizingInput,
+    MepSizingResult, MepTestingItem, NcrPunchItem, ProcurementContractLedger, ProcurementStatus,
+    PurchaseOrderRow, QualityScorecardSummary, SiteDailyDiaryLedger, SiteEnvironmentalCoupling,
+    VariationOrderRow,
 };
 
 

@@ -7,6 +7,21 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.4.5] - 2026-11-15 — Phase 45: External Below-Toolbar Detailing & Structural Sub-Menus, Earth-Coupled Lifecycle Ops & Cross-Pillar Bridge
+
+### Added & Changed
+- **External Below-Toolbar Sub-Menus in Drafting & Geometry (`src/views/parametric/`, `src/views/build/`)**:
+  - Restructured **Drafting** so the upper 2D canvas remains strictly for interactive CAD/BIM authoring (`Floor Plan`, `Section Cut`, `Sheet 2D`, `Dynamo Graph`, plus `Rebar [RF]` tool), while moving **Rebar BBS** and **Elevations & MEP Riser** outside below the toolbar alongside the new **MEP Engineering Sizing** studio inside an expanded-by-default collapsible panel.
+  - Restructured **Geometry** by moving 3D structural diagram overlays (`NFD`, `SFD`, `BMD`, `Heat`), FEA/N-1 screening controls, and structural badges out of the upper 3D viewport toolbar into a dedicated below-toolbar **Structural Analysis** sub-menu panel (`3D Diagrams & Heatmap`, `FEA Solver & N-1`, `Critical Check & -> Analysis`) without merging the `Geometry` and `Analysis` pillars.
+- **Four Lifecycle Execution & Engineering Additions (`src/core/lifecycle_ops.rs`, `src/views/planning.rs`, `src/views/lean.rs`, `src/views/parametric/detailing_2d.rs`)**:
+  - Added interactive **MEP Engineering Sizing** in `Drafting` (HVAC CFM/TR & GI duct velocity/friction, Plumbing WSFU/DN/pump head, and 3-phase IEC kVA/breaker/Cu feeder sizing with 1-click BIM area sync and live BIM pipe/cable-tray run creation).
+  - Added **Procurement, Contracts, IPC Claims & VO** (`Budgeting`), **Site Daily Diary & Heavy Fleet Log** (`Scheduling`), and **Field QA/QC Cylinder Lab, ITP Hold Points, NCR Punch List & MEP T&C** (`Construction`), all persisted cleanly in `UnifiedWorkspaceArchive`.
+- **Earth-to-Site Environmental Coupling, Cross-Pillar Bridge & Width Parity (`src/core/lifecycle_ops.rs`, `src/views/analyze/`, `src/views/universal_canvas.rs`, `src/ui_kit.rs`, `src/app.rs`)**:
+  - Coupled live Earth Globe coordinates and terraforming defenses (`compute_site_environmental_coupling`) to seismic/wind hazard screening (`Analysis`), rain/wind downtime (`Scheduling`), remote logistics factors (`Budgeting`), and geotechnical/concrete QA/QC alerts (`Construction`).
+  - Added bidirectional **Geometry ↔ Analysis ↔ Drafting** jump actions, updated the Analysis header `"Vault"` quick-link label, hardened `ui_kit::responsive_grid_n` / `ui_kit::stat_card` against column rounding overflow across `390px / 700px / 1000px` viewports, and verified 198 passing unit tests with zero warnings.
+
+---
+
 ## [v0.4.4] - 2026-11-15 — Phase 44: Streamlined Sidebar Module Nomenclature
 
 ### Changed

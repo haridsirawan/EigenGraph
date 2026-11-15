@@ -10,7 +10,7 @@ impl ParametricView {
         theme: &MacTheme,
         _db_components: &mut Vec<DatabaseComponent>,
         _active_pillar: &mut NavigationPillar,
-        features: &mut FeatureRegistry,
+        _features: &mut FeatureRegistry,
         universal_canvas: &mut crate::views::universal_canvas::UniversalCanvasState,
         members: &[crate::models::StructuralMember],
         _workspace_settings: crate::views::universal_canvas::WorkspaceCanvasSettings,
@@ -35,42 +35,6 @@ impl ParametricView {
                     ui,
                     slot_resp.response.rect,
                     "parametric_dynamo",
-                    &mut universal_canvas.is_frozen,
-                    sidebar_toggle_inset_px,
-                );
-            UniversalCanvasState::paint_floating_freeze_pill(
-                ui.painter(),
-                pill_rect,
-                theme,
-                universal_canvas.is_frozen,
-                pill_hovered,
-            );
-        } else if matches!(
-            self.view_mode,
-            DraftingViewMode::RebarBbsDetailing | DraftingViewMode::ElevationsAndMepRiser
-        ) {
-            let slot_resp = ui.vertical(|ui| {
-                ui.set_width(avail_w);
-                ui.set_max_width(avail_w);
-                egui::ScrollArea::vertical()
-                    .id_salt("parametric_detailing_slots_scroll")
-                    .max_height(canvas_h)
-                    .show(ui, |ui| match self.view_mode {
-                        DraftingViewMode::RebarBbsDetailing => {
-                            self.render_rebar_bbs_detailing(ui, theme, features);
-                        }
-                        DraftingViewMode::ElevationsAndMepRiser => {
-                            self.render_elevations_mep_riser(ui, theme, features);
-                        }
-                        _ => {}
-                    });
-            });
-            self.last_canvas_rect = Some(slot_resp.response.rect);
-            let (pill_rect, _in_pill, pill_hovered) =
-                UniversalCanvasState::interact_floating_freeze_pill(
-                    ui,
-                    slot_resp.response.rect,
-                    "parametric_detailing",
                     &mut universal_canvas.is_frozen,
                     sidebar_toggle_inset_px,
                 );
@@ -159,9 +123,7 @@ impl ParametricView {
                 DraftingViewMode::SheetLayoutA101 => {
                     self.draw_sheet_layout_a101(&painter, rect, theme);
                 }
-                DraftingViewMode::VisualNodeGraphDynamo
-                | DraftingViewMode::RebarBbsDetailing
-                | DraftingViewMode::ElevationsAndMepRiser => {}
+                DraftingViewMode::VisualNodeGraphDynamo => {}
             }
 
             UniversalCanvasState::paint_floating_freeze_pill(
@@ -226,8 +188,6 @@ impl ParametricView {
                     DraftingViewMode::LiveSectionCutPoche => "Live Section Cut A-A".to_string(),
                     DraftingViewMode::SheetLayoutA101 => format!("Sheet {}", self.sheet_number),
                     DraftingViewMode::VisualNodeGraphDynamo => "Dynamo Node Graph".to_string(),
-                    DraftingViewMode::RebarBbsDetailing => "Rebar & BBS".to_string(),
-                    DraftingViewMode::ElevationsAndMepRiser => "Elevations & MEP".to_string(),
                 };
                 let counts_txt = format!(
                     "{} • {}W / {}C / {}B / {}Rm • ARI {:.3}",

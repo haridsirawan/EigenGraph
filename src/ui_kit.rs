@@ -38,9 +38,27 @@ where
     let mut idx = 0;
     while idx < count {
         let row_len = (count - idx).min(cols);
-        ui.columns(row_len, |col_uis| {
+        let avail = ui.available_width();
+        let gap = ui.spacing().item_spacing.x;
+        let col_w = ((avail - gap * (row_len.saturating_sub(1)) as f32) / row_len as f32)
+            .floor()
+            .max(60.0);
+        ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
             for c in 0..row_len {
-                render_cell(&mut col_uis[c], idx + c);
+                if c > 0 {
+                    ui.add_space(gap);
+                }
+                ui.allocate_ui_with_layout(
+                    Vec2::new(col_w, 0.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(col_w);
+                        ui.set_max_width(col_w);
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                        render_cell(ui, idx + c);
+                    },
+                );
             }
         });
         idx += row_len;
@@ -285,7 +303,10 @@ pub fn stat_card(
         .stroke(Stroke::new(1.0, theme.border_card))
         .inner_margin(Margin::same(12))
         .show(ui, |ui| {
-            ui.set_width(ui.available_width());
+            let inner_w = ui.available_width().max(40.0);
+            ui.set_width(inner_w);
+            ui.set_max_width(inner_w);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
             ui.label(RichText::new(title).size(10.0).strong().color(theme.text_muted));
             ui.add_space(4.0);
             ui.label(RichText::new(value).size(18.0).strong().color(accent));

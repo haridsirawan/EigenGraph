@@ -1722,14 +1722,11 @@ impl BuildView {
                     icons::pill_badge(ui, AppIcon::Cube3D, "Geometry • 3D", theme.accent_blue);
                     ui.separator();
 
-                    // Render Style & Internal Force Diagrams
+                    // Geometry 3D Render Styles (Structural diagrams & heatmaps live in external Structural Analysis below)
                     let modes = [
                         (Render3DMode::CsgSolidBrep, AppIcon::Cube3D, "CSG B-Rep", "True 3D CSG Boolean Mesh (Openings, WF Flanges & Rebar)"),
                         (Render3DMode::SolidShaded, AppIcon::SolidBox, "Solid", "Shaded solid structural frame"),
                         (Render3DMode::Wireframe, AppIcon::Wireframe, "Wireframe", "Vector wireframe members"),
-                        (Render3DMode::AxialForceNFD, AppIcon::ChartBar, "NFD", "Normal / Axial Force Diagram (Red=Tension, Blue=Compression)"),
-                        (Render3DMode::ShearForceSFD, AppIcon::Bolt, "SFD", "Shear Force Diagram (SFD)"),
-                        (Render3DMode::BendingMomentBMD, AppIcon::ChartLine, "BMD", "Bending Moment Diagram (BMD)"),
                     ];
                     for (rm, icon, lbl, tip) in modes {
                         let sel = self.render_mode == rm;
@@ -1749,30 +1746,6 @@ impl BuildView {
                         {
                             self.render_mode = rm;
                         }
-                    }
-
-                    let (heat_lbl, next_heat) = match self.color_mode.as_str() {
-                        "ARI" => ("Heat: ARI", "DCR_Stress"),
-                        "DCR_Stress" => ("Heat: DCR%", "Tension_Compression"),
-                        "Tension_Compression" => ("Heat: ±Force", "Criticality"),
-                        _ => ("Heat: Critical", "ARI"),
-                    };
-                    if icons::icon_button(
-                        ui,
-                        AppIcon::Palette,
-                        heat_lbl,
-                        10.5,
-                        Color32::WHITE,
-                        Color32::from_rgb(30, 64, 115),
-                        Stroke::NONE,
-                        CornerRadius::same(6),
-                        Vec2::new(0.0, 26.0),
-                    )
-                    .on_hover_text("Cycle 3D FEM Color Heatmap: ARI Redundancy -> DCR Utilization -> Axial Force -> Fracture Critical")
-                    .clicked()
-                    {
-                        self.color_mode = next_heat.to_string();
-                        self.modify_status_msg = Some(format!("3D Viewport heatmap switched to {}", next_heat));
                     }
 
                     ui.separator();
@@ -2159,26 +2132,7 @@ impl BuildView {
                         universal_canvas.shortcuts_modal_open = !universal_canvas.shortcuts_modal_open;
                     }
 
-                    // Active Disruption / Palette Badges & Selection Clear
-                    if !self.simulated_eliminated_ids.is_empty() {
-                        icons::pill_badge(
-                            ui,
-                            AppIcon::AlertTriangle,
-                            format!(
-                                "N-{} DISRUPTION: {:?}",
-                                self.simulated_eliminated_ids.len(),
-                                self.simulated_eliminated_ids
-                            ),
-                            theme.accent_red,
-                        );
-                    } else {
-                        icons::pill_badge(
-                            ui,
-                            AppIcon::Palette,
-                            self.color_mode.clone(),
-                            theme.accent_blue,
-                        );
-                    }
+                    // Selection Clear (Structural analysis & N-1 controls live in below-toolbar panel)
                     if self.selected_member_id.is_some()
                         && icons::icon_button(
                             ui,
@@ -3249,6 +3203,399 @@ impl BuildView {
         }
         let n = list.len() as f32;
         ((sx / n, sy / n, sz / n), 26.0, list)
+    }
+
+    /// Phase 45: External below-toolbar Structural Analysis sub-menu panel in Geometry.
+    /// Houses 3D Diagrams (NFD/SFD/BMD) & Heatmaps, FEA Solvers & N-1 Disruption, Critical Member check,
+    /// Earth Site Hazard coupling, and bidirectional quick-jump to Analysis.
+    pub(super) fn render_below_toolbar_structural_analysis(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        members: &[StructuralMember],
+        universal_canvas: &mut crate::views::universal_canvas::UniversalCanvasState,
+    ) {
+        let site = universal_canvas.active_site_coupling();
+
+        Frame::new()
+            .fill(theme.bg_card)
+            .corner_radius(CornerRadius::same(10))
+            .stroke(Stroke::new(1.0, theme.border_subtle))
+            .inner_margin(Margin::symmetric(12, 8))
+            .show(ui, |ui| {
+                let inner_w = ui.available_width().max(120.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+
+                // Header Sub-Menu Strip + Collapse Toggle
+                ui.horizontal_wrapped(|ui| {
+                    icons::pill_badge(ui, AppIcon::Shield, "Structural Analysis", theme.accent_blue);
+                    ui.separator();
+
+                    let tabs = [
+                        (GeometryAnalysisSubTab::DiagramsAndHeatmap, AppIcon::ChartBar, "3D Diagrams & Heatmap"),
+                        (GeometryAnalysisSubTab::SolverAndN1, AppIcon::Bolt, "FEA Solver & N-1"),
+                        (GeometryAnalysisSubTab::CriticalMembersBridge, AppIcon::LinkChain, "Critical Check & -> Analysis"),
+                    ];
+                    for (tab, icon, lbl) in tabs {
+                        let sel = self.active_analysis_subtab == tab;
+                        if icons::icon_button(
+                            ui,
+                            icon,
+                            lbl,
+                            11.0,
+                            if sel { Color32::WHITE } else { theme.text_secondary },
+                            if sel { theme.accent_blue } else { theme.bg_canvas },
+                            Stroke::new(1.0, if sel { theme.accent_blue } else { theme.border_subtle }),
+                            CornerRadius::same(6),
+                            Vec2::new(0.0, 26.0),
+                        )
+                        .clicked()
+                        {
+                            self.active_analysis_subtab = tab;
+                            self.analysis_panel_open = true;
+                        }
+                    }
+
+                    if !self.simulated_eliminated_ids.is_empty() {
+                        icons::pill_badge(
+                            ui,
+                            AppIcon::AlertTriangle,
+                            format!("N-{} Active", self.simulated_eliminated_ids.len()),
+                            theme.accent_red,
+                        );
+                    }
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let toggle_lbl = if self.analysis_panel_open { "Collapse" } else { "Expand" };
+                        let toggle_icon = if self.analysis_panel_open {
+                            AppIcon::ChevronDown
+                        } else {
+                            AppIcon::ArrowRight
+                        };
+                        if icons::icon_button(
+                            ui,
+                            toggle_icon,
+                            toggle_lbl,
+                            10.0,
+                            theme.text_secondary,
+                            theme.bg_sidebar,
+                            Stroke::new(1.0, theme.border_subtle),
+                            CornerRadius::same(5),
+                            Vec2::new(0.0, 24.0),
+                        )
+                        .on_hover_text("Collapse or expand Structural Analysis sub-menu panel")
+                        .clicked()
+                        {
+                            self.analysis_panel_open = !self.analysis_panel_open;
+                        }
+                    });
+                });
+
+                if !self.analysis_panel_open {
+                    return;
+                }
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                // Earth-to-Site Environmental Coupling Ribbon
+                Frame::new()
+                    .fill(theme.bg_canvas)
+                    .corner_radius(CornerRadius::same(6))
+                    .stroke(Stroke::new(1.0, theme.border_subtle))
+                    .inner_margin(Margin::symmetric(10, 6))
+                    .show(ui, |ui| {
+                        let banner_w = ui.available_width().max(100.0);
+                        ui.set_width(banner_w);
+                        ui.set_max_width(banner_w);
+                        ui.horizontal_wrapped(|ui| {
+                            icons::icon_label(
+                                ui,
+                                AppIcon::Globe,
+                                12.0,
+                                theme.accent_blue,
+                                format!(
+                                    "Earth Site {}: Elev {:+.1} m • Seismic Ss {:.2}g / S1 {:.2}g • Wind {:.0} m/s • Flood Risk {:.0}% • {}",
+                                    site.site_label,
+                                    site.elevation_m,
+                                    site.seismic_pga_ss_g,
+                                    site.seismic_pga_s1_g,
+                                    site.design_wind_ms,
+                                    site.flood_risk_index * 100.0,
+                                    site.recommended_soil_class
+                                ),
+                                10.5,
+                                theme.text_secondary,
+                                false,
+                            );
+                        });
+                    });
+
+                ui.add_space(10.0);
+
+                match self.active_analysis_subtab {
+                    GeometryAnalysisSubTab::DiagramsAndHeatmap => {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("3D Analytical Diagram:").size(11.0).strong().color(theme.text_primary));
+                            for (rm, icon, lbl, tip) in [
+                                (Render3DMode::CsgSolidBrep, AppIcon::Cube3D, "Off (CSG Model)", "Return to clean 3D CSG structural solid view"),
+                                (Render3DMode::AxialForceNFD, AppIcon::ChartBar, "NFD Axial Force", "Normal / Axial force envelope (Tension red / Compression blue)"),
+                                (Render3DMode::ShearForceSFD, AppIcon::Bolt, "SFD Shear Force", "Shear force diagram envelope"),
+                                (Render3DMode::BendingMomentBMD, AppIcon::ChartLine, "BMD Moment", "Bending moment diagram envelope"),
+                            ] {
+                                let sel = self.render_mode == rm;
+                                if icons::icon_button(
+                                    ui,
+                                    icon,
+                                    lbl,
+                                    10.5,
+                                    if sel { Color32::WHITE } else { theme.text_secondary },
+                                    if sel { theme.accent_blue } else { theme.bg_canvas },
+                                    Stroke::new(1.0, theme.border_subtle),
+                                    CornerRadius::same(6),
+                                    Vec2::new(0.0, 26.0),
+                                )
+                                .on_hover_text(tip)
+                                .clicked()
+                                {
+                                    self.render_mode = rm;
+                                    self.modify_status_msg = Some(format!("3D Viewport overlay switched to {lbl}"));
+                                }
+                            }
+                        });
+
+                        ui.add_space(8.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("FEM Color Heatmap:").size(11.0).strong().color(theme.text_primary));
+                            for (key, lbl, col) in [
+                                ("ARI", "ARI Redundancy", theme.accent_green),
+                                ("DCR_Stress", "DCR Utilization %", theme.accent_orange),
+                                ("Tension_Compression", "Axial ±Force", theme.accent_blue),
+                                ("Criticality", "Fracture Criticality", theme.accent_red),
+                            ] {
+                                let sel = self.color_mode == key;
+                                if icons::icon_button(
+                                    ui,
+                                    AppIcon::Palette,
+                                    lbl,
+                                    10.5,
+                                    if sel { Color32::WHITE } else { theme.text_secondary },
+                                    if sel { col } else { theme.bg_canvas },
+                                    Stroke::new(1.0, theme.border_subtle),
+                                    CornerRadius::same(6),
+                                    Vec2::new(0.0, 26.0),
+                                )
+                                .clicked()
+                                {
+                                    self.color_mode = key.to_string();
+                                    self.modify_status_msg = Some(format!("3D Color Heatmap set to {lbl}"));
+                                }
+                            }
+                        });
+
+                        ui.add_space(8.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.checkbox(&mut self.show_deformed_shape, "Show Deformed Shape Overlay");
+                            if self.show_deformed_shape {
+                                ui.label(RichText::new("Scale:").size(10.5).color(theme.text_secondary));
+                                ui.add(egui::Slider::new(&mut self.deformation_scale, 5.0..=250.0).suffix("x"));
+                            }
+                            ui.checkbox(&mut self.show_rebar_cage, "3D RC Rebar Cages");
+                        });
+                    }
+
+                    GeometryAnalysisSubTab::SolverAndN1 => {
+                        let fem = self.bim_bus.project.to_structural_model();
+                        let ari_res = crate::core::AriEngine::evaluate_redundancy(&fem);
+                        let (sys_ari, intact_pct, status_txt) = match &ari_res {
+                            Ok(rep) => (
+                                rep.min_system_ari,
+                                rep.min_system_ari * 100.0,
+                                format!("{} elements / {} nodes solved", fem.elements.len(), fem.nodes.len()),
+                            ),
+                            Err(err) => {
+                                let avg = if members.is_empty() {
+                                    0.0
+                                } else {
+                                    members.iter().map(|m| m.ari).sum::<f64>() / members.len() as f64
+                                };
+                                (avg, avg * 100.0, err.clone())
+                            }
+                        };
+
+                        ui_kit::responsive_grid_n(ui, 3, 195.0, |ui, idx| {
+                            let (t, v, s, c) = match idx {
+                                0 => (
+                                    "System Redundancy (ARI)",
+                                    format!("{:.3}", sys_ari),
+                                    format!("{:.1}% capacity index", intact_pct),
+                                    if sys_ari >= 0.70 { theme.accent_green } else { theme.accent_orange },
+                                ),
+                                1 => (
+                                    "N-1 Eliminated Members",
+                                    format!("{}", self.simulated_eliminated_ids.len()),
+                                    status_txt.clone(),
+                                    if self.simulated_eliminated_ids.is_empty() { theme.accent_blue } else { theme.accent_red },
+                                ),
+                                _ => (
+                                    "Earth Design Demand",
+                                    format!("Ss {:.2}g / {:.0} m/s", site.seismic_pga_ss_g, site.design_wind_ms),
+                                    site.foundation_advisory.chars().take(54).collect::<String>(),
+                                    theme.accent_blue,
+                                ),
+                            };
+                            ui_kit::stat_card(ui, theme, t, &v, &s, c);
+                        });
+
+                        ui.add_space(10.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Run 3D Solver Action:").size(11.0).strong().color(theme.text_primary));
+                            for (lbl, target_tab, rm) in [
+                                ("Linear Static", crate::views::analyze::AnalyzeSubTab::DisplacementForces, Render3DMode::AxialForceNFD),
+                                ("P-Delta 2nd Order", crate::views::analyze::AnalyzeSubTab::NonlinearPushover, Render3DMode::BendingMomentBMD),
+                                ("Modal Dynamics", crate::views::analyze::AnalyzeSubTab::ModalDynamics, Render3DMode::Wireframe),
+                                ("N-1 Redundancy Audit", crate::views::analyze::AnalyzeSubTab::RedundancySvd, Render3DMode::CsgSolidBrep),
+                            ] {
+                                if icons::icon_button(
+                                    ui,
+                                    AppIcon::Play,
+                                    lbl,
+                                    10.5,
+                                    Color32::WHITE,
+                                    theme.accent_blue,
+                                    Stroke::NONE,
+                                    CornerRadius::same(6),
+                                    Vec2::new(0.0, 26.0),
+                                )
+                                .clicked()
+                                {
+                                    self.render_mode = rm;
+                                    self.active_tool_status = format!("Executed {lbl} check from Geometry Analysis Panel.");
+                                    self.bim_console_logs.push(format!("[Structural Analysis] {lbl} ({status_txt})"));
+                                    self.modify_status_msg = Some(format!("Completed {lbl} overlay — use Critical Check tab to open full solver sheet."));
+                                    let _ = target_tab;
+                                }
+                            }
+                            if !self.simulated_eliminated_ids.is_empty()
+                                && icons::icon_button(
+                                    ui,
+                                    AppIcon::Close,
+                                    "Restore All N-1 Members",
+                                    10.5,
+                                    Color32::WHITE,
+                                    theme.accent_green,
+                                    Stroke::NONE,
+                                    CornerRadius::same(6),
+                                    Vec2::new(0.0, 26.0),
+                                )
+                                .clicked()
+                            {
+                                self.simulated_eliminated_ids.clear();
+                                self.modify_status_msg = Some("Restored all N-1 eliminated members.".to_string());
+                            }
+                        });
+                    }
+
+                    GeometryAnalysisSubTab::CriticalMembersBridge => {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Open Full Analytical Suite in Analysis:").size(11.0).strong().color(theme.text_primary));
+                            for (lbl, tab) in [
+                                ("ARI Redundancy ->", crate::views::analyze::AnalyzeSubTab::RedundancySvd),
+                                ("Modal Seismic ->", crate::views::analyze::AnalyzeSubTab::ModalDynamics),
+                                ("Concrete P-M ->", crate::views::analyze::AnalyzeSubTab::ConcretePmInteraction),
+                                ("Steel Connections ->", crate::views::analyze::AnalyzeSubTab::SteelConnection),
+                            ] {
+                                if icons::icon_button(
+                                    ui,
+                                    AppIcon::LinkChain,
+                                    lbl,
+                                    10.5,
+                                    Color32::WHITE,
+                                    theme.accent_blue,
+                                    Stroke::NONE,
+                                    CornerRadius::same(6),
+                                    Vec2::new(0.0, 25.0),
+                                )
+                                .clicked()
+                                {
+                                    self.requested_analysis_jump = Some((
+                                        tab,
+                                        self.selected_member_id,
+                                        format!(
+                                            "Linked from Geometry 3D (Heatmap: {}, N-{} eliminated)",
+                                            self.color_mode,
+                                            self.simulated_eliminated_ids.len()
+                                        ),
+                                    ));
+                                }
+                            }
+                        });
+
+                        ui.add_space(8.0);
+                        let (_, _, model_members) = self.build_model_geometry(members);
+                        if model_members.is_empty() {
+                            ui.label(
+                                RichText::new("No structural members yet. Author Columns/Beams/Walls in 3D or load a Template to inspect DCR & ARI.")
+                                    .size(11.0)
+                                    .color(theme.text_muted),
+                            );
+                        } else {
+                            let mut sorted = model_members;
+                            sorted.sort_by(|a, b| a.ari.total_cmp(&b.ari));
+                            ScrollArea::horizontal().id_salt("geom_analysis_members_scroll").show(ui, |ui| {
+                                egui::Grid::new("geom_analysis_members_grid")
+                                    .striped(true)
+                                    .spacing(Vec2::new(12.0, 5.0))
+                                    .show(ui, |ui| {
+                                        for h in ["Member", "Section", "Axial Pu", "DCR %", "ARI", "3D Focus / N-1", "Bridge"] {
+                                            ui.label(RichText::new(h).size(10.5).strong().color(theme.accent_blue));
+                                        }
+                                        ui.end_row();
+                                        for m in sorted.iter().take(12) {
+                                            let is_elim = self.simulated_eliminated_ids.contains(&m.id);
+                                            ui.label(RichText::new(format!("#{} {}", m.id, m.name)).size(10.5).color(theme.text_primary));
+                                            ui.label(RichText::new(&m.section).size(10.5).color(theme.text_secondary));
+                                            ui.label(RichText::new(format!("{:.1} kN", m.force_kn)).size(10.5).monospace().color(theme.text_primary));
+                                            let dcr_pct = m.utilization * 100.0;
+                                            let dcr_col = if dcr_pct >= 85.0 { theme.accent_red } else if dcr_pct >= 60.0 { theme.accent_orange } else { theme.accent_green };
+                                            ui.label(RichText::new(format!("{:.1}%", dcr_pct)).size(10.5).strong().color(dcr_col));
+                                            ui.label(RichText::new(format!("{:.3}", m.ari)).size(10.5).monospace().color(theme.accent_blue));
+                                            ui.horizontal(|ui| {
+                                                let sel = self.selected_member_id == Some(m.id);
+                                                if ui.selectable_label(sel, "Focus 3D").clicked() {
+                                                    self.selected_member_id = Some(m.id);
+                                                    self.color_mode = "DCR_Stress".to_string();
+                                                }
+                                                if ui.selectable_label(is_elim, if is_elim { "Restore" } else { "Drop N-1" }).clicked() {
+                                                    if is_elim {
+                                                        self.simulated_eliminated_ids.retain(|&id| id != m.id);
+                                                    } else {
+                                                        self.simulated_eliminated_ids.push(m.id);
+                                                    }
+                                                }
+                                            });
+                                            if ui.small_button("Analyze ->").clicked() {
+                                                self.selected_member_id = Some(m.id);
+                                                self.requested_analysis_jump = Some((
+                                                    crate::views::analyze::AnalyzeSubTab::MemberCriticality,
+                                                    Some(m.id),
+                                                    format!(
+                                                        "Inspected #{} {} (ARI {:.3}, DCR {:.1}%) from Geometry",
+                                                        m.id, m.name, m.ari, dcr_pct
+                                                    ),
+                                                ));
+                                            }
+                                            ui.end_row();
+                                        }
+                                    });
+                            });
+                        }
+                    }
+                }
+            });
     }
 
 }

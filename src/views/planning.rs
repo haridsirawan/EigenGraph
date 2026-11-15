@@ -47,6 +47,8 @@ pub enum PlanningSubTab {
     ResourceLeveling4d,
     EarnedValueEvm,
     ValueEngineeringBid,
+    SiteDailyDiaryFleet,
+    ProcurementContractsClaims,
 }
 
 pub struct PlanningView {
@@ -82,6 +84,19 @@ pub struct PlanningView {
     pub ve_selected_bidder_idx: usize,
     // Phase 42: Reactive BIM 4D/5D auto-sync signature
     pub last_bim_sync_sig: (usize, usize, usize),
+    // Phase 45: Earth Site Hazard Coupling + Site Daily Diary & Fleet + Commercial Procurement/VO
+    pub site_coupling: crate::core::SiteEnvironmentalCoupling,
+    pub procurement: crate::core::ProcurementContractLedger,
+    pub daily_diary: crate::core::SiteDailyDiaryLedger,
+    pub new_po_vendor: String,
+    pub new_po_pkg: String,
+    pub new_po_amount_idr: f64,
+    pub new_vo_desc: String,
+    pub new_vo_cost_idr: f64,
+    pub new_vo_eot_days: i32,
+    pub new_diary_remarks: String,
+    pub new_diary_pour_m3: f32,
+    pub new_diary_crane_pct: f32,
 }
 
 impl Default for PlanningView {
@@ -115,6 +130,18 @@ impl Default for PlanningView {
             ve_ari_floor: 0.90,
             ve_selected_bidder_idx: 1,
             last_bim_sync_sig: (usize::MAX, 0, 0),
+            site_coupling: crate::core::SiteEnvironmentalCoupling::default(),
+            procurement: crate::core::ProcurementContractLedger::default(),
+            daily_diary: crate::core::SiteDailyDiaryLedger::default(),
+            new_po_vendor: "PT Jaya ReadyMix".to_string(),
+            new_po_pkg: "03 Upper Slabs K-350".to_string(),
+            new_po_amount_idr: 1_250_000_000.0,
+            new_vo_desc: "Foundation dewatering & bentonite cutoff extension".to_string(),
+            new_vo_cost_idr: 215_000_000.0,
+            new_vo_eot_days: 4,
+            new_diary_remarks: "Completed formwork inspection & crane lift schedule.".to_string(),
+            new_diary_pour_m3: 84.0,
+            new_diary_crane_pct: 84.0,
         }
     }
 }
@@ -733,6 +760,12 @@ impl PlanningView {
                     PlanningSubTab::ValueEngineeringBid => {
                         self.render_value_engineering_bid(ui, theme, &takeoff, features);
                     }
+                    PlanningSubTab::SiteDailyDiaryFleet => {
+                        self.render_site_daily_diary_fleet(ui, theme);
+                    }
+                    PlanningSubTab::ProcurementContractsClaims => {
+                        self.render_procurement_contracts_claims(ui, theme, &takeoff);
+                    }
                 }
 
                 ui.add_space(48.0);
@@ -754,6 +787,7 @@ impl PlanningView {
                 (PlanningSubTab::StagedErectionSvd, "🏗️ Staged Erection Guard"),
                 (PlanningSubTab::ScheduleRiskMonteCarlo, "🎲 Monte Carlo Risk"),
                 (PlanningSubTab::ResourceLeveling4d, "👷 Crew Leveling"),
+                (PlanningSubTab::SiteDailyDiaryFleet, "📋 Site Daily Diary & Fleet"),
             ];
             ui_kit::subtab_bar(ui, theme, "planning_time_subtab_bar", &mut self.active_subtab, &time_tabs);
         } else {
@@ -764,6 +798,7 @@ impl PlanningView {
                 (PlanningSubTab::CostAriTradeoff, "📈 Cost vs ARI"),
                 (PlanningSubTab::EarnedValueEvm, "📈 Earned Value (EVM)"),
                 (PlanningSubTab::ValueEngineeringBid, "⚖️ VE & Bid Leveling"),
+                (PlanningSubTab::ProcurementContractsClaims, "🧾 Procurement, Claims & VO"),
             ];
             ui_kit::subtab_bar(ui, theme, "planning_cost_subtab_bar", &mut self.active_subtab, &cost_tabs);
         }
@@ -2752,6 +2787,358 @@ impl PlanningView {
         );
     }
 
+    fn render_site_daily_diary_fleet(&mut self, ui: &mut Ui, theme: &MacTheme) {
+        let sum = self.daily_diary.summarize();
+        let site = &self.site_coupling;
+
+        theme.card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                icons::icon_label(
+                    ui,
+                    AppIcon::Clock,
+                    14.0,
+                    theme.accent_blue,
+                    "SITE DAILY DIARY, MANPOWER LOG & HEAVY FLEET TELEMETRY",
+                    12.5,
+                    theme.accent_blue,
+                    true,
+                );
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Globe,
+                    format!(
+                        "Earth Weather Allowance: {:.1}% Rain Risk | Wind {:.0} m/s",
+                        site.climate_rain_delay_pct, site.design_wind_ms
+                    ),
+                    if site.climate_rain_delay_pct >= 18.0 {
+                        theme.accent_orange
+                    } else {
+                        theme.accent_green
+                    },
+                );
+            });
+            ui.add_space(10.0);
+
+            ui_kit::responsive_grid_n(ui, 4, 185.0, |ui, idx| {
+                let (t, v, s, c) = match idx {
+                    0 => (
+                        "Avg Daily Manpower",
+                        format!("{:.1} Workers", sum.avg_headcount),
+                        "Carpentry + Rebar + Concrete + MEP".to_string(),
+                        theme.accent_blue,
+                    ),
+                    1 => (
+                        "Tower Crane Avg Util",
+                        format!("{:.1}%", sum.avg_crane_util_pct),
+                        format!("Design Wind Cap {:.0} m/s", site.design_wind_ms),
+                        if sum.avg_crane_util_pct >= 75.0 {
+                            theme.accent_green
+                        } else {
+                            theme.accent_orange
+                        },
+                    ),
+                    2 => (
+                        "Cumulative Poured Volume",
+                        format!("{:.1} m3", sum.total_concrete_m3),
+                        "Boom Pump Verified Ticket Log".to_string(),
+                        theme.accent_green,
+                    ),
+                    _ => (
+                        "Weather Stand-Down",
+                        format!("{:.1} hrs", sum.total_weather_lost_hrs),
+                        format!("{}/{} Incident-Free Days", sum.zero_incident_days, self.daily_diary.entries.len()),
+                        if sum.total_weather_lost_hrs > 4.0 {
+                            theme.accent_red
+                        } else {
+                            theme.accent_blue
+                        },
+                    ),
+                };
+                ui_kit::stat_card(ui, theme, t, &v, &s, c);
+            });
+
+            ui.add_space(12.0);
+            ui.horizontal_wrapped(|ui| {
+                let w_rem = crate::ui_kit::clamped_row_width(ui, 120.0, 260.0, 220.0);
+                ui.label(RichText::new("New Shift Note:").size(10.5).color(theme.text_secondary));
+                ui.add(egui::TextEdit::singleline(&mut self.new_diary_remarks).desired_width(w_rem));
+                ui.label(RichText::new("Pour m3:").size(10.5).color(theme.text_secondary));
+                ui.add(egui::DragValue::new(&mut self.new_diary_pour_m3).range(0.0..=1500.0).speed(2.0));
+                ui.label(RichText::new("Crane %:").size(10.5).color(theme.text_secondary));
+                ui.add(egui::DragValue::new(&mut self.new_diary_crane_pct).range(0.0..=100.0).speed(1.0));
+                if icons::icon_button(
+                    ui,
+                    AppIcon::Plus,
+                    "Append Daily Log",
+                    10.5,
+                    Color32::WHITE,
+                    theme.accent_green,
+                    Stroke::NONE,
+                    CornerRadius::same(6),
+                    Vec2::new(0.0, 25.0),
+                )
+                .clicked()
+                {
+                    let next_day = 42 + self.daily_diary.entries.len();
+                    let weather = if site.climate_rain_delay_pct > 18.0 {
+                        "Monsoon Showers"
+                    } else {
+                        "Clear / Mild"
+                    };
+                    self.daily_diary.entries.push(crate::core::DailyDiaryEntry {
+                        day_label: format!("Day {next_day}"),
+                        weather: weather.to_string(),
+                        temp_c: 30.0,
+                        workable_hours: if site.climate_rain_delay_pct > 18.0 { 7.5 } else { 8.5 },
+                        carpentry_crew: 20,
+                        rebar_crew: 16,
+                        concrete_crew: 14,
+                        mep_crew: 12,
+                        crane_util_pct: self.new_diary_crane_pct,
+                        pump_m3_poured: self.new_diary_pour_m3,
+                        incident_free: true,
+                        remarks: self.new_diary_remarks.clone(),
+                    });
+                    self.export_status = Some(format!("Logged Field Daily Diary entry for Day {next_day}."));
+                }
+            });
+
+            ui.add_space(10.0);
+            ScrollArea::horizontal().id_salt("daily_diary_table_scroll").show(ui, |ui| {
+                egui::Grid::new("daily_diary_grid")
+                    .striped(true)
+                    .spacing(Vec2::new(12.0, 5.0))
+                    .show(ui, |ui| {
+                        for h in ["Shift", "Weather", "Work Hrs", "Manpower", "Crane %", "Concrete", "HSE", "Field Remarks"] {
+                            ui.label(RichText::new(h).size(10.5).strong().color(theme.accent_blue));
+                        }
+                        ui.end_row();
+                        for e in &self.daily_diary.entries {
+                            ui.label(RichText::new(&e.day_label).size(10.5).strong().color(theme.text_primary));
+                            ui.label(RichText::new(&e.weather).size(10.5).color(theme.text_secondary));
+                            ui.label(RichText::new(format!("{:.1} h", e.workable_hours)).size(10.5).monospace().color(theme.text_primary));
+                            ui.label(RichText::new(format!("{} pax", e.total_headcount())).size(10.5).color(theme.accent_blue));
+                            ui.label(RichText::new(format!("{:.0}%", e.crane_util_pct)).size(10.5).color(theme.accent_orange));
+                            ui.label(RichText::new(format!("{:.1} m3", e.pump_m3_poured)).size(10.5).monospace().color(theme.accent_green));
+                            ui.label(RichText::new(if e.incident_free { "Zero LTI" } else { "Alert" }).size(10.5).color(if e.incident_free { theme.accent_green } else { theme.accent_red }));
+                            ui.label(RichText::new(&e.remarks).size(10.0).color(theme.text_muted));
+                            ui.end_row();
+                        }
+                    });
+            });
+        });
+    }
+
+    fn render_procurement_contracts_claims(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        takeoff: &Parametric5DTakeoff,
+    ) {
+        let pos = self.procurement.evaluate_position(takeoff.grand_total_rab);
+        let curr = self.active_currency;
+        let site = &self.site_coupling;
+
+        theme.card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                icons::icon_label(
+                    ui,
+                    AppIcon::Coins,
+                    14.0,
+                    theme.accent_green,
+                    "COMMERCIAL PROCUREMENT, PROGRESS CLAIMS (IPC) & VARIATION ORDERS (VO)",
+                    12.5,
+                    theme.accent_green,
+                    true,
+                );
+                if icons::icon_button(
+                    ui,
+                    AppIcon::Globe,
+                    format!("Sync Site Logistics x{:.2}", site.remote_logistics_multiplier),
+                    10.5,
+                    Color32::WHITE,
+                    theme.accent_blue,
+                    Stroke::NONE,
+                    CornerRadius::same(6),
+                    Vec2::new(0.0, 24.0),
+                )
+                .on_hover_text("Adjust Contingency % based on Earth elevation & coastal barge/mountain logistics multiplier")
+                .clicked()
+                {
+                    let extra_pct = (site.remote_logistics_multiplier - 1.0) * 100.0;
+                    self.contingency_percent = (5.0 + extra_pct).clamp(5.0, 28.0);
+                    self.export_status = Some(format!(
+                        "Synced contingency to {:.1}% from Earth Site {} (x{:.2} logistics factor).",
+                        self.contingency_percent, site.site_label, site.remote_logistics_multiplier
+                    ));
+                }
+            });
+            ui.add_space(10.0);
+
+            ui_kit::responsive_grid_n(ui, 4, 185.0, |ui, idx| {
+                let (t, v, s, c) = match idx {
+                    0 => (
+                        "PO Committed Total",
+                        curr.format_value(pos.total_committed_po_idr),
+                        format!("{} active subcontract packages", self.procurement.purchase_orders.len()),
+                        theme.accent_blue,
+                    ),
+                    1 => (
+                        "Certified IPC Gross",
+                        curr.format_value(pos.certified_ipc_idr),
+                        format!(
+                            "Net Payable ({:.0}% Ret): {}",
+                            self.procurement.retention_pct,
+                            curr.format_value(pos.net_payable_after_retention_idr)
+                        ),
+                        theme.accent_green,
+                    ),
+                    2 => (
+                        "Approved VOs & EOT",
+                        curr.format_value(pos.approved_vo_idr),
+                        format!(
+                            "+{} days EOT | Pending: {}",
+                            pos.total_eot_days,
+                            curr.format_value(pos.pending_vo_idr)
+                        ),
+                        theme.accent_orange,
+                    ),
+                    _ => (
+                        "Revised Final Forecast",
+                        curr.format_value(pos.revised_forecast_idr),
+                        format!("Baseline BoQ: {}", curr.format_value(pos.baseline_budget_idr)),
+                        theme.accent_blue,
+                    ),
+                };
+                ui_kit::stat_card(ui, theme, t, &v, &s, c);
+            });
+
+            ui.add_space(12.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Retention %:").size(10.5).color(theme.text_secondary));
+                ui.add(egui::DragValue::new(&mut self.procurement.retention_pct).range(0.0..=15.0).speed(0.25));
+                ui.separator();
+                let vw = crate::ui_kit::clamped_row_width(ui, 100.0, 180.0, 210.0);
+                ui.label(RichText::new("Vendor:").size(10.5).color(theme.text_secondary));
+                ui.add(egui::TextEdit::singleline(&mut self.new_po_vendor).desired_width(vw));
+                ui.label(RichText::new("Package:").size(10.5).color(theme.text_secondary));
+                ui.add(egui::TextEdit::singleline(&mut self.new_po_pkg).desired_width(vw));
+                if icons::icon_button(
+                    ui,
+                    AppIcon::Plus,
+                    "Issue PO",
+                    10.5,
+                    Color32::WHITE,
+                    theme.accent_blue,
+                    Stroke::NONE,
+                    CornerRadius::same(6),
+                    Vec2::new(0.0, 24.0),
+                )
+                .clicked()
+                {
+                    let n = self.procurement.purchase_orders.len() + 1;
+                    self.procurement.purchase_orders.push(crate::core::PurchaseOrderRow {
+                        po_no: format!("PO-2026-{n:02}"),
+                        vendor: self.new_po_vendor.clone(),
+                        wbs_package: self.new_po_pkg.clone(),
+                        committed_idr: self.new_po_amount_idr,
+                        certified_pct: 10.0,
+                        lead_time_days: 21,
+                        status: crate::core::ProcurementStatus::AwardedPo,
+                    });
+                }
+            });
+
+            ui.add_space(8.0);
+            ScrollArea::horizontal().id_salt("procurement_po_scroll").show(ui, |ui| {
+                egui::Grid::new("procurement_po_grid")
+                    .striped(true)
+                    .spacing(Vec2::new(12.0, 5.0))
+                    .show(ui, |ui| {
+                        for h in ["PO #", "Subcontractor / Vendor", "WBS Package", "Committed", "IPC %", "Status", "Action"] {
+                            ui.label(RichText::new(h).size(10.5).strong().color(theme.accent_blue));
+                        }
+                        ui.end_row();
+                        for po in &mut self.procurement.purchase_orders {
+                            ui.label(RichText::new(&po.po_no).size(10.5).monospace().color(theme.text_primary));
+                            ui.label(RichText::new(&po.vendor).size(10.5).color(theme.text_secondary));
+                            ui.label(RichText::new(&po.wbs_package).size(10.5).color(theme.text_muted));
+                            ui.label(RichText::new(curr.format_value(po.committed_idr)).size(10.5).monospace().color(theme.text_primary));
+                            ui.label(RichText::new(format!("{:.0}%", po.certified_pct)).size(10.5).strong().color(theme.accent_green));
+                            if ui.small_button(po.status.label()).clicked() {
+                                po.status = po.status.next();
+                            }
+                            if ui.small_button("+10% IPC").clicked() {
+                                po.certified_pct = (po.certified_pct + 10.0).min(100.0);
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+
+            ui.add_space(12.0);
+            ui.label(RichText::new("VARIATION ORDERS (VO / CHANGE CLAIMS)").size(11.0).strong().color(theme.accent_orange));
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                let d_w = crate::ui_kit::clamped_row_width(ui, 120.0, 260.0, 220.0);
+                ui.add(egui::TextEdit::singleline(&mut self.new_vo_desc).desired_width(d_w));
+                ui.label(RichText::new("Impact:").size(10.5).color(theme.text_secondary));
+                ui.add(egui::DragValue::new(&mut self.new_vo_cost_idr).range(0.0..=50_000_000_000.0).speed(5_000_000.0));
+                ui.label(RichText::new("EOT d:").size(10.5).color(theme.text_secondary));
+                ui.add(egui::DragValue::new(&mut self.new_vo_eot_days).range(0..=180));
+                if icons::icon_button(
+                    ui,
+                    AppIcon::Plus,
+                    "Add VO Claim",
+                    10.5,
+                    Color32::WHITE,
+                    theme.accent_orange,
+                    Stroke::NONE,
+                    CornerRadius::same(6),
+                    Vec2::new(0.0, 24.0),
+                )
+                .clicked()
+                {
+                    let n = self.procurement.variation_orders.len() + 1;
+                    self.procurement.variation_orders.push(crate::core::VariationOrderRow {
+                        vo_no: format!("VO-{n:03}"),
+                        description: self.new_vo_desc.clone(),
+                        cost_impact_idr: self.new_vo_cost_idr,
+                        eot_days: self.new_vo_eot_days,
+                        approved: false,
+                    });
+                }
+            });
+            ui.add_space(6.0);
+            ScrollArea::horizontal().id_salt("procurement_vo_scroll").show(ui, |ui| {
+                egui::Grid::new("procurement_vo_grid")
+                    .striped(true)
+                    .spacing(Vec2::new(12.0, 5.0))
+                    .show(ui, |ui| {
+                        for h in ["VO #", "Claim Scope & Justification", "Cost Impact", "EOT", "Approval"] {
+                            ui.label(RichText::new(h).size(10.5).strong().color(theme.accent_blue));
+                        }
+                        ui.end_row();
+                        for vo in &mut self.procurement.variation_orders {
+                            ui.label(RichText::new(&vo.vo_no).size(10.5).monospace().color(theme.text_primary));
+                            ui.label(RichText::new(&vo.description).size(10.5).color(theme.text_secondary));
+                            ui.label(RichText::new(curr.format_value(vo.cost_impact_idr)).size(10.5).monospace().color(theme.accent_orange));
+                            ui.label(RichText::new(format!("+{} d", vo.eot_days)).size(10.5).color(theme.text_muted));
+                            if ui
+                                .selectable_label(vo.approved, if vo.approved { "Approved" } else { "Pending (Approve)" })
+                                .clicked()
+                            {
+                                vo.approved = !vo.approved;
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+        });
+    }
+
     fn metric_card(&self, ui: &mut Ui, theme: &MacTheme, title: &str, value: &str, subtitle: &str, val_color: Color32) {
         theme.card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -2813,5 +3200,58 @@ mod tests {
         let live_takeoff = pv.compute_takeoff_with_bim(&[], Some(&bim), &[]);
         assert!((live_takeoff.concrete_footing_m3 - bim.total_concrete_volume_m3()).abs() < 1e-3);
         assert!(live_takeoff.grand_total_rab > 0.0);
+    }
+
+    #[test]
+    fn test_phase45_diary_fleet_and_procurement_claims_earth_coupling() {
+        let mut pv = PlanningView::default();
+        let bim = crate::core::BimProject::sample_bimcraft_building();
+        pv.site_coupling.climate_rain_delay_pct = 18.0;
+        pv.site_coupling.remote_logistics_multiplier = 1.24;
+
+        let d_sum = pv.daily_diary.summarize();
+        assert!(d_sum.avg_headcount > 0.0);
+        assert!(d_sum.total_concrete_m3 > 0.0);
+        assert!(d_sum.zero_incident_days >= 1);
+
+        let p_sum = pv.procurement.evaluate_position(10_000_000_000.0);
+        assert!(p_sum.certified_ipc_idr > 0.0);
+        assert!(p_sum.net_payable_after_retention_idr < p_sum.certified_ipc_idr);
+        assert!(p_sum.total_eot_days > 0);
+        assert!(p_sum.revised_forecast_idr >= 10_000_000_000.0);
+
+        let theme = MacTheme::default();
+        let mut features = super::FeatureRegistry::default();
+        for tab in [PlanningSubTab::SiteDailyDiaryFleet, PlanningSubTab::ProcurementContractsClaims] {
+            pv.active_subtab = tab;
+            for win_w in [1000.0_f32, 700.0, 390.0] {
+                let ctx = egui::Context::default();
+                let mut inner_max_x = 0.0_f32;
+                let mut panel_max_x = 0.0_f32;
+                for _ in 0..2 {
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(win_w, 900.0))),
+                        ..Default::default()
+                    };
+                    let mut output = ctx.run_ui(input, |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            egui::Frame::new().inner_margin(egui::Margin::symmetric(14, 12)).show(ui, |ui| {
+                                panel_max_x = ui.max_rect().right();
+                                let resp = ui.vertical(|ui| {
+                                    let mut pillar = crate::models::NavigationPillar::TimeScheduling;
+                                    pv.show(ui, &theme, &[], &[], &bim, &mut features, &mut pillar);
+                                });
+                                inner_max_x = resp.response.rect.right();
+                            });
+                        });
+                    });
+                    output.textures_delta.clear();
+                }
+                assert!(
+                    inner_max_x <= panel_max_x + 2.0,
+                    "Planning ({tab:?}) overflow @ {win_w}: inner_max_x={inner_max_x:.1} > panel_max_x={panel_max_x:.1}"
+                );
+            }
+        }
     }
 }

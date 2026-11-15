@@ -360,6 +360,15 @@ pub struct AnalyzeView {
     pub last_bim_sync_label: String,
     pub synced_bim_element_count: usize,
     pub last_modal_bim_sig: (usize, usize, usize),
+    // Phase 45: Earth Site Hazard Coupling + Bidirectional Geometry <-> Analysis & Drafting Bridge
+    pub site_coupling: crate::core::SiteEnvironmentalCoupling,
+    pub linked_from_geometry_note: Option<String>,
+    pub requested_geometry_jump: Option<(
+        Option<usize>,
+        Option<crate::views::build::Render3DMode>,
+        Option<String>,
+    )>,
+    pub requested_drafting_jump: Option<crate::views::parametric::DraftingSubTab>,
 }
 
 impl Default for AnalyzeView {
@@ -560,6 +569,10 @@ impl Default for AnalyzeView {
             last_bim_sync_label: "Auto-sync active".to_string(),
             synced_bim_element_count: 0,
             last_modal_bim_sig: (usize::MAX, 0, 0),
+            site_coupling: crate::core::SiteEnvironmentalCoupling::default(),
+            linked_from_geometry_note: None,
+            requested_geometry_jump: None,
+            requested_drafting_jump: None,
         }
     }
 }

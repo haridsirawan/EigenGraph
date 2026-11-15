@@ -37,8 +37,14 @@ pub enum DraftingViewMode {
     LiveSectionCutPoche,
     SheetLayoutA101,
     VisualNodeGraphDynamo,
-    RebarBbsDetailing,
+}
+
+/// Below-toolbar sub-menu tabs inside Drafting (keeps upper canvas exclusively interactive).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftingSubTab {
+    RebarBbs,
     ElevationsAndMepRiser,
+    MepEngineeringSizing,
 }
 
 /// Paper dimensions for Sheet Composer 2D
@@ -171,6 +177,9 @@ pub struct ParametricView {
     pub elev_facade_idx: usize,
     pub elev_mep_system_idx: usize,
     pub show_structural_heatmap_2d: bool,
+    // Phase 45: Below-toolbar external sub-menu state (Rebar BBS, Elev/MEP Riser, MEP Sizing)
+    pub active_drafting_subtab: DraftingSubTab,
+    pub drafting_submenu_open: bool,
 }
 
 impl Default for ParametricView {
@@ -231,6 +240,8 @@ impl Default for ParametricView {
             elev_facade_idx: 0,
             elev_mep_system_idx: 0,
             show_structural_heatmap_2d: true,
+            active_drafting_subtab: DraftingSubTab::RebarBbs,
+            drafting_submenu_open: true,
         }
     }
 }
@@ -320,6 +331,11 @@ impl ParametricView {
                     sidebar_toggle_inset_px,
                 );
             });
+
+        ui.add_space(10.0);
+
+        // 3. Phase 45: External Below-Toolbar Drafting Sub-Menus (Rebar BBS, Elev/MEP Riser, MEP Sizing)
+        self.render_drafting_below_toolbar_submenu(ui, theme, features, universal_canvas);
 
         if self.show_db_drawer {
             self.render_db_drawer(ui.ctx(), theme, db_components, active_pillar);
@@ -1300,7 +1316,7 @@ mod tests {
                 "Planning width mismatch @ {win_w}: canvas={canvas_w:.1}, planning={plan_w:.1}"
             );
 
-            // Verify all 6 Lean Construction subtabs (including CuttingStock "Cutting Optimization Parameters") match canvas_w without overflowing right edge
+            // Verify all 7 Lean Construction subtabs (including CuttingStock & Phase 45 QA/QC Lab) match canvas_w without overflowing right edge
             for tab in [
                 crate::views::lean::LeanSubTab::CuttingStock,
                 crate::views::lean::LeanSubTab::LastPlanner,
@@ -1308,6 +1324,7 @@ mod tests {
                 crate::views::lean::LeanSubTab::JitDelivery,
                 crate::views::lean::LeanSubTab::TaktConcreteDispatch,
                 crate::views::lean::LeanSubTab::RfiSubmittalTracker,
+                crate::views::lean::LeanSubTab::QaQcLabAndCommissioning,
             ] {
                 let mut lean = crate::views::LeanView::default();
                 lean.active_subtab = tab;
@@ -1343,5 +1360,159 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_phase45_drafting_and_geometry_below_toolbar_submenus() {
+        let drawing_modes = [
+            DraftingViewMode::FloorPlanViewRange,
+            DraftingViewMode::LiveSectionCutPoche,
+            DraftingViewMode::SheetLayoutA101,
+            DraftingViewMode::VisualNodeGraphDynamo,
+        ];
+        assert_eq!(drawing_modes.len(), 4);
+
+        let theme = MacTheme::default();
+        let ws = WorkspaceCanvasSettings {
+            theme_mode: crate::theme::ThemeMode::ProDark,
+            canvas_height_ratio: 0.74,
+            freeze_by_default: true,
+            show_grid: true,
+            snap_to_grid: true,
+            grid_spacing_mm: 500.0,
+            show_bim_base_layer: true,
+            show_domain_overlay: true,
+            sync_all_layers: true,
+            show_floating_inspector: false,
+            show_ai_copilot: true,
+            unit_system: "Metric".to_string(),
+            design_standard: "SNI".to_string(),
+            solver_threads: 4,
+            enable_svd_guard: true,
+            enable_anti_leakage: true,
+        };
+        let mut features = FeatureRegistry::default();
+        let mut db_components = Vec::new();
+        let bim_proj = crate::core::BimProject::sample_bimcraft_building();
+        let fem = bim_proj.to_structural_model();
+        let members: Vec<crate::models::StructuralMember> = fem
+            .elements
+            .iter()
+            .map(|el| crate::models::StructuralMember {
+                id: el.id,
+                name: el.name.clone(),
+                section: el.section.name.clone(),
+                ari: 0.62,
+                utilization: 0.94,
+                ..Default::default()
+            })
+            .collect();
+
+        let mut failures = Vec::new();
+        for win_w in [1000.0_f32, 700.0, 390.0] {
+            for (d_tab, is_open) in [
+                (DraftingSubTab::RebarBbs, true),
+                (DraftingSubTab::ElevationsAndMepRiser, true),
+                (DraftingSubTab::MepEngineeringSizing, true),
+                (DraftingSubTab::MepEngineeringSizing, false),
+            ] {
+                let mut universal = crate::views::universal_canvas::UniversalCanvasState::default();
+                let mut parametric = ParametricView::default();
+                parametric.bim_bus.project = bim_proj.clone();
+                parametric.active_drafting_subtab = d_tab;
+                parametric.drafting_submenu_open = is_open;
+                let mut panel_right = 0.0_f32;
+                let mut outer_right = 0.0_f32;
+                let ctx = egui::Context::default();
+                for _ in 0..2 {
+                    let input = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(win_w, 1000.0))),
+                        ..Default::default()
+                    };
+                    let mut out = ctx.run_ui(input, |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            panel_right = ui.max_rect().right();
+                            Frame::new().inner_margin(Margin::symmetric(14, 12)).show(ui, |ui| {
+                                let r = ui.vertical(|ui| {
+                                    let mut pillar = NavigationPillar::ParametricDED;
+                                    parametric.show(
+                                        ui,
+                                        &theme,
+                                        &mut db_components,
+                                        &mut pillar,
+                                        &mut features,
+                                        &mut universal,
+                                        &members,
+                                        ws.clone(),
+                                        0.0,
+                                    );
+                                });
+                                outer_right = r.response.rect.right();
+                            });
+                        });
+                    });
+                    out.textures_delta.clear();
+                }
+                let canvas_right = parametric.last_canvas_rect.map(|r| r.right()).unwrap_or(0.0);
+                assert!(parametric.last_canvas_rect.is_some(), "Upper 2D canvas disappeared for {d_tab:?}");
+                if !(outer_right <= panel_right + 1.0 && canvas_right <= panel_right - 13.0) {
+                    failures.push(format!(
+                        "Drafting ({d_tab:?}, open={is_open}) @ {win_w}: panel_right={panel_right:.2}, outer_right={outer_right:.2}, canvas_right={canvas_right:.2}"
+                    ));
+                }
+            }
+
+            for (g_tab, is_open) in [
+                (crate::views::build::GeometryAnalysisSubTab::DiagramsAndHeatmap, true),
+                (crate::views::build::GeometryAnalysisSubTab::SolverAndN1, true),
+                (crate::views::build::GeometryAnalysisSubTab::CriticalMembersBridge, true),
+                (crate::views::build::GeometryAnalysisSubTab::DiagramsAndHeatmap, false),
+            ] {
+                let mut universal = crate::views::universal_canvas::UniversalCanvasState::default();
+                let mut build = crate::views::build::BuildView::default();
+                build.bim_bus.project = bim_proj.clone();
+                build.active_analysis_subtab = g_tab;
+                build.analysis_panel_open = is_open;
+                let mut panel_right = 0.0_f32;
+                let mut outer_right = 0.0_f32;
+                let ctx = egui::Context::default();
+                for _ in 0..2 {
+                    let input = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(win_w, 1000.0))),
+                        ..Default::default()
+                    };
+                    let mut out = ctx.run_ui(input, |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            panel_right = ui.max_rect().right();
+                            Frame::new().inner_margin(Margin::symmetric(14, 12)).show(ui, |ui| {
+                                let r = ui.vertical(|ui| {
+                                    build.show(
+                                        ui,
+                                        &theme,
+                                        &members,
+                                        &db_components,
+                                        &mut features,
+                                        &mut universal,
+                                        &[],
+                                        ws.clone(),
+                                        0.0,
+                                    );
+                                });
+                                outer_right = r.response.rect.right();
+                            });
+                        });
+                    });
+                    out.textures_delta.clear();
+                }
+                let vp_right = build.last_viewport_rect.map(|r| r.right()).unwrap_or(0.0);
+                assert!(build.last_viewport_rect.is_some(), "Upper 3D viewport disappeared for {g_tab:?}");
+                if !(outer_right <= panel_right + 1.0 && vp_right <= panel_right - 13.0) {
+                    failures.push(format!(
+                        "Geometry ({g_tab:?}, open={is_open}) @ {win_w}: panel_right={panel_right:.2}, outer_right={outer_right:.2}, vp_right={vp_right:.2}"
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "Phase 45 submenu overflows: {failures:?}");
     }
 }

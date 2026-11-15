@@ -32,7 +32,6 @@ impl BuildView {
                                 BimRibbonTab::Structure,
                                 BimRibbonTab::MepSystems,
                                 BimRibbonTab::CivilInfra,
-                                BimRibbonTab::AnalysisFea,
                                 BimRibbonTab::Time4D,
                                 BimRibbonTab::Cost5D,
                                 BimRibbonTab::Sustainability6D,
@@ -170,30 +169,6 @@ impl BuildView {
                                             .on_hover_text(tip).clicked() {
                                             self.active_tool_status = format!("Active Civil Infrastructure Tool: {}", label);
                                             self.bim_console_logs.push(format!("Civil infrastructure tool activated: {}", label));
-                                        }
-                                    }
-                                }
-                                BimRibbonTab::AnalysisFea => {
-                                    let tools = [
-                                        ("⚡ Run Linear Static", "Execute 3D space frame matrix stiffness solver"),
-                                        ("🔄 P-Delta Second Order", "Compute geometric non-linear stiffness"),
-                                        ("🌊 Modal Dynamics", "Solve natural frequencies & mode shapes (Lanczos)"),
-                                        ("📉 Pushover Analysis", "Perform non-linear static capacity spectrum test"),
-                                        ("💥 N-1 Disruption", "Evaluate progressive collapse redundancy ARI"),
-                                        ("📊 Von Mises Stress", "Display composite stress gradient contour"),
-                                        ("📈 NFD Axial Force", "Render 3D axial force envelope"),
-                                        ("⚡ SFD Shear Force", "Render 3D shear force envelope"),
-                                        ("📐 BMD Moment", "Render 3D bending moment envelope"),
-                                    ];
-                                    for (tool, tip) in tools {
-                                        let label = icons::clean_text(tool);
-                                        if icons::smart_button(ui, tool, 10.0, theme.text_primary, theme.bg_card, Stroke::NONE, CornerRadius::same(5), Vec2::new(0.0, 22.0))
-                                            .on_hover_text(tip).clicked() {
-                                            self.active_tool_status = format!("Executed Solver Command: {}", label);
-                                            self.bim_console_logs.push(format!("Analysis command executed: {}", label));
-                                            if label.contains("NFD") { self.render_mode = Render3DMode::AxialForceNFD; }
-                                            else if label.contains("SFD") { self.render_mode = Render3DMode::ShearForceSFD; }
-                                            else if label.contains("BMD") { self.render_mode = Render3DMode::BendingMomentBMD; }
                                         }
                                     }
                                 }

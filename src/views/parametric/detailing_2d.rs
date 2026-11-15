@@ -551,6 +551,306 @@ impl ParametricView {
             });
         });
     }
+
+    /// Phase 45: External below-toolbar Drafting sub-menu panel (Rebar BBS, Elevations & MEP Riser, MEP Sizing).
+    pub(super) fn render_drafting_below_toolbar_submenu(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        features: &mut FeatureRegistry,
+        universal_canvas: &mut UniversalCanvasState,
+    ) {
+        Frame::new()
+            .fill(theme.bg_card)
+            .corner_radius(CornerRadius::same(10))
+            .stroke(Stroke::new(1.0, theme.border_subtle))
+            .inner_margin(Margin::symmetric(12, 8))
+            .show(ui, |ui| {
+                let inner_w = ui.available_width().max(120.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+
+                ui.horizontal_wrapped(|ui| {
+                    icons::pill_badge(ui, AppIcon::Layers, "Drafting Sub-Menus", theme.accent_blue);
+                    ui.separator();
+
+                    let tabs = [
+                        (DraftingSubTab::RebarBbs, AppIcon::Rebar, "Rebar BBS"),
+                        (DraftingSubTab::ElevationsAndMepRiser, AppIcon::Building, "Elevations & MEP Riser"),
+                        (DraftingSubTab::MepEngineeringSizing, AppIcon::Bolt, "MEP Engineering Sizing"),
+                    ];
+                    for (tab, icon, lbl) in tabs {
+                        let sel = self.active_drafting_subtab == tab;
+                        if icons::icon_button(
+                            ui,
+                            icon,
+                            lbl,
+                            11.0,
+                            if sel { Color32::WHITE } else { theme.text_secondary },
+                            if sel { theme.accent_blue } else { theme.bg_canvas },
+                            Stroke::new(1.0, if sel { theme.accent_blue } else { theme.border_subtle }),
+                            CornerRadius::same(6),
+                            Vec2::new(0.0, 26.0),
+                        )
+                        .clicked()
+                        {
+                            self.active_drafting_subtab = tab;
+                            self.drafting_submenu_open = true;
+                        }
+                    }
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let toggle_lbl = if self.drafting_submenu_open { "Collapse" } else { "Expand" };
+                        let toggle_icon = if self.drafting_submenu_open {
+                            AppIcon::ChevronDown
+                        } else {
+                            AppIcon::ArrowRight
+                        };
+                        if icons::icon_button(
+                            ui,
+                            toggle_icon,
+                            toggle_lbl,
+                            10.0,
+                            theme.text_secondary,
+                            theme.bg_sidebar,
+                            Stroke::new(1.0, theme.border_subtle),
+                            CornerRadius::same(5),
+                            Vec2::new(0.0, 24.0),
+                        )
+                        .on_hover_text("Collapse or expand Drafting detailing sub-menus")
+                        .clicked()
+                        {
+                            self.drafting_submenu_open = !self.drafting_submenu_open;
+                        }
+                    });
+                });
+
+                if self.drafting_submenu_open {
+                    ui.add_space(10.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+                    match self.active_drafting_subtab {
+                        DraftingSubTab::RebarBbs => {
+                            self.render_rebar_bbs_detailing(ui, theme, features);
+                        }
+                        DraftingSubTab::ElevationsAndMepRiser => {
+                            self.render_elevations_mep_riser(ui, theme, features);
+                        }
+                        DraftingSubTab::MepEngineeringSizing => {
+                            self.render_mep_engineering_sizing(ui, theme, universal_canvas);
+                        }
+                    }
+                }
+            });
+    }
+
+    /// Interactive ASHRAE Ductwork, IPC Plumbing Pipe, and IEC 3-Phase Electrical Feeder sizing studio.
+    pub(super) fn render_mep_engineering_sizing(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+    ) {
+        let storeys = self.bim_bus.project.levels.len().max(1);
+        let room_area_m2: f64 = self.bim_bus.project.rooms.iter().map(|r| r.area_m2).sum();
+        let plan_extents = self.bim_bus.project.plan_extents_mm();
+        let active_lvl_id = self
+            .bim_bus
+            .project
+            .levels
+            .get(self.active_level_idx)
+            .map(|l| l.id)
+            .unwrap_or(1);
+        let res = crate::core::compute_mep_engineering_sizing(&universal_canvas.lifecycle_ops.mep_sizing, storeys);
+
+        ui.horizontal_wrapped(|ui| {
+            icons::icon_label(
+                ui,
+                AppIcon::Bolt,
+                14.0,
+                theme.accent_blue,
+                "MEP ENGINEERING SIZING (HVAC DUCT + PLUMBING DN + 3-PHASE FEEDER)",
+                12.0,
+                theme.accent_blue,
+                true,
+            );
+            if icons::icon_button(
+                ui,
+                AppIcon::LinkChain,
+                "Sync Area from BIM",
+                10.5,
+                Color32::WHITE,
+                theme.accent_green,
+                Stroke::NONE,
+                CornerRadius::same(5),
+                Vec2::new(0.0, 24.0),
+            )
+            .on_hover_text("Calculate conditioned floor area & occupancy directly from BIM rooms/extents")
+            .clicked()
+            {
+                let synced_area = if room_area_m2 > 20.0 {
+                    room_area_m2
+                } else if let Some((mn, mx)) = plan_extents {
+                    (((mx[0] - mn[0]).abs() / 1000.0) * ((mx[1] - mn[1]).abs() / 1000.0) * storeys as f64)
+                        .max(180.0)
+                } else {
+                    1200.0
+                };
+                universal_canvas.lifecycle_ops.mep_sizing.floor_area_m2 = synced_area.round();
+                universal_canvas.lifecycle_ops.mep_sizing.occupancy_people =
+                    (synced_area / 10.0).ceil().max(12.0) as usize;
+                universal_canvas.lifecycle_ops.mep_sizing.electrical_connected_kva =
+                    (synced_area * 0.14).max(45.0).round();
+                self.save_notification = Some(format!(
+                    "Synced MEP design basis from BIM project: {:.0} m2 across {} level(s).",
+                    synced_area, storeys
+                ));
+            }
+            if icons::icon_button(
+                ui,
+                AppIcon::Plus,
+                "Add Sized MEP Runs to BIM",
+                10.5,
+                Color32::WHITE,
+                theme.accent_blue,
+                Stroke::NONE,
+                CornerRadius::same(5),
+                Vec2::new(0.0, 24.0),
+            )
+            .on_hover_text("Create dimensioned Plumbing DN pipe & Electrical cable tray runs on the active level")
+            .clicked()
+            {
+                let lvl_id = active_lvl_id;
+                let pipe_res = self.bim_bus.execute(BimCommand::AddBeamRun {
+                    level_id: lvl_id,
+                    category: RunCategory::PlumbingPipe,
+                    start: P2(1200.0, 1200.0),
+                    end: P2(9600.0, 1200.0),
+                    width_mm: res.pipe_dn_mm,
+                    depth_mm: res.pipe_dn_mm,
+                    justify: RunJustify::Bottom,
+                    profile_name: format!("DN{:.0} Supply Main", res.pipe_dn_mm),
+                });
+                let tray_res = self.bim_bus.execute(BimCommand::AddBeamRun {
+                    level_id: lvl_id,
+                    category: RunCategory::ElectricalCableTray,
+                    start: P2(1200.0, 2100.0),
+                    end: P2(9600.0, 2100.0),
+                    width_mm: res.duct_width_mm.clamp(200.0, 600.0),
+                    depth_mm: 100.0,
+                    justify: RunJustify::Centre,
+                    profile_name: format!("{}A ({}mm2) Feeder Tray", res.recommended_breaker_at, res.cable_size_mm2),
+                });
+                let ok_msg = match (pipe_res, tray_res) {
+                    (Ok(_), Ok(_)) => format!(
+                        "Added DN{:.0} Pipe + {}A Electrical Tray runs on Level {}.",
+                        res.pipe_dn_mm, res.recommended_breaker_at, lvl_id
+                    ),
+                    (Err(e), _) | (_, Err(e)) => e,
+                };
+                self.save_notification = Some(ok_msg);
+            }
+        });
+
+        ui.add_space(10.0);
+        let cards = [
+            (
+                "HVAC Cooling & GI Duct",
+                format!("{:.0} x {:.0} mm", res.duct_width_mm, res.duct_height_mm),
+                format!("{:.1} TR ({:.0} CFM) @ {:.1} m/s", res.cooling_tr, res.supply_airflow_cfm, res.duct_velocity_ms),
+                theme.accent_blue,
+            ),
+            (
+                "Plumbing Main Pipe",
+                format!("DN{:.0} Sch40", res.pipe_dn_mm),
+                format!("{:.2} L/s • {:.2} m/s • {:.1} kPa", res.peak_flow_ls, res.pipe_velocity_ms, res.head_loss_kpa),
+                if res.pipe_velocity_ms <= 2.2 { theme.accent_green } else { theme.accent_orange },
+            ),
+            (
+                "3-Phase Feeder & Breaker",
+                format!("{}A MCCB / {} mm2", res.recommended_breaker_at, res.cable_size_mm2),
+                format!("I={:.0}A • dV={:.2}% {}", res.design_current_a, res.voltage_drop_pct, if res.voltage_drop_ok { "PASS" } else { "DROP>3%" }),
+                if res.voltage_drop_ok { theme.accent_green } else { theme.accent_red },
+            ),
+            (
+                "BIM Thermal Basis",
+                format!("{:.0} m2 / {} Flrs", universal_canvas.lifecycle_ops.mep_sizing.floor_area_m2, storeys),
+                format!("{} Occupants • Duct {:.2} Pa/m", universal_canvas.lifecycle_ops.mep_sizing.occupancy_people, res.duct_friction_pa_m),
+                theme.accent_orange,
+            ),
+        ];
+        ui_kit::responsive_grid_n(ui, 4, 185.0, |ui, i| {
+            let (t, v, s, c) = &cards[i];
+            ui_kit::stat_card(ui, theme, t, v, s, *c);
+        });
+
+        ui.add_space(10.0);
+        ui_kit::responsive_grid_n(ui, 3, 250.0, |ui, idx| {
+            let m = &mut universal_canvas.lifecycle_ops.mep_sizing;
+            theme.card_frame().show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                match idx {
+                    0 => {
+                        ui.label(RichText::new("1. HVAC Duct & Thermal Parameters").size(11.0).strong().color(theme.accent_blue));
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Area (m2):").size(10.5).color(theme.text_secondary));
+                            ui.add(egui::DragValue::new(&mut m.floor_area_m2).range(20.0..=250_000.0).speed(25.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Cooling W/m2:").size(10.5).color(theme.text_secondary));
+                            ui.add(egui::DragValue::new(&mut m.cooling_load_w_m2).range(50.0..=350.0).speed(2.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Max Vel (m/s):").size(10.5).color(theme.text_secondary));
+                            ui.add(egui::DragValue::new(&mut m.max_duct_velocity_ms).range(3.0..=14.0).speed(0.2));
+                        });
+                        ui.label(RichText::new(format!(
+                            "Eq Dia: {:.0} mm | Flow: {:.2} m3/s",
+                            res.duct_equiv_dia_mm, res.supply_airflow_m3s
+                        )).size(10.0).color(theme.text_muted));
+                    }
+                    1 => {
+                        ui.label(RichText::new("2. Plumbing & Drainage Specs").size(11.0).strong().color(theme.accent_green));
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Fixture WSFU:").size(10.5).color(theme.text_secondary));
+                            ui.add(egui::DragValue::new(&mut m.fixture_units_wsfu).range(4.0..=2000.0).speed(2.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Run Len (m):").size(10.5).color(theme.text_secondary));
+                            ui.add(egui::DragValue::new(&mut m.pipe_run_length_m).range(5.0..=500.0).speed(1.0));
+                        });
+                        ui.label(RichText::new(format!(
+                            "Drain Slope: {:.1}% | Peak Q: {:.2} L/s",
+                            res.drain_slope_pct, res.peak_flow_ls
+                        )).size(10.0).color(theme.text_muted));
+                    }
+                    _ => {
+                        ui.label(RichText::new("3. 3-Phase Electrical Feeder").size(11.0).strong().color(theme.accent_orange));
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Connected kVA:").size(10.5).color(theme.text_secondary));
+                            ui.add(egui::DragValue::new(&mut m.electrical_connected_kva).range(10.0..=10_000.0).speed(5.0));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Demand Factor:").size(10.5).color(theme.text_secondary));
+                            ui.add(egui::DragValue::new(&mut m.demand_factor).range(0.35..=1.0).speed(0.02));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Feeder (m):").size(10.5).color(theme.text_secondary));
+                            ui.add(egui::DragValue::new(&mut m.feeder_length_m).range(5.0..=400.0).speed(1.0));
+                        });
+                        ui.label(RichText::new(format!(
+                            "Demand: {:.1} kVA @ {:.0}V 3-Ph",
+                            res.demand_kva, m.voltage_ll_v
+                        )).size(10.0).color(theme.text_muted));
+                    }
+                }
+            });
+        });
+    }
 }
 
 #[cfg(test)]
