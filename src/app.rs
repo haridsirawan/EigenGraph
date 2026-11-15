@@ -1916,7 +1916,7 @@ impl EigenGraphApp {
             match self.research_view.import_survey_points_csv_xyz(&payload.content) {
                 Ok(cnt) => {
                     self.universal_canvas.status_message = Some(format!(
-                        "Imported {} survey points from '{}' into Research TIN terrain.",
+                        "Imported {} survey points from '{}' into Planning TIN terrain.",
                         cnt, payload.filename
                     ));
                     self.active_pillar = NavigationPillar::ResearchConcept;

@@ -45,18 +45,18 @@ impl NavigationPillar {
 
     pub fn title(&self) -> &'static str {
         match self {
-            Self::MyLibrary => "MY LIBRARY & VAULT",
-            Self::AiAgent => "AI AGENT & VIRTUAL FIRM",
-            Self::ResearchConcept => "1. RESEARCH & GIS INCEPTION",
-            Self::ParametricDED => "2. PARAMETRIC & FREEFORM STUDIO",
+            Self::MyLibrary => "VAULT & PROJECT RECORDS",
+            Self::AiAgent => "AGENT & VIRTUAL FIRM",
+            Self::ResearchConcept => "1. PLANNING & GIS INCEPTION",
+            Self::ParametricDED => "2. DRAFTING & PARAMETRIC STUDIO",
             Self::GeometryAssembly => "3. GEOMETRY & CLEAN BIM ASSEMBLY",
             Self::AnalysisSimulation => "GEO-STRUCTURAL ANALYSIS & MULTI-HAZARD",
-            Self::TimeScheduling => "4. TIME & 4D PHASED ERECTION",
-            Self::CostBudgeting => "5. COST & 5D HEATMAP BUDGETING",
+            Self::TimeScheduling => "4. SCHEDULING & 4D PHASED ERECTION",
+            Self::CostBudgeting => "5. BUDGETING & 5D HEATMAP COSTING",
             Self::SustainabilityEnergy => "6. SUSTAINABILITY & 6D HELIODON LCA",
             Self::FacilityManagement => "7. FACILITY & 7D DIGITAL TWIN",
             Self::SafetyHealth => "8. SAFETY & 8D CRANE SWEEP RISK",
-            Self::LeanConstruction => "9. LEAN & 9D SITE LOGISTICS",
+            Self::LeanConstruction => "9. CONSTRUCTION & 9D SITE LOGISTICS",
             Self::IndustrializedAutomation => "10. AUTOMATION & 10D DfMA PREFAB",
             Self::Prediction => "PREDICTION & AI STRUCTURAL AGING",
             Self::ReportPublishing => "REPORT PUBLISHING SUITE (DOCS, SHEETS, SLIDES)",
@@ -89,7 +89,7 @@ impl NavigationPillar {
 
     pub fn icon(&self) -> &'static str {
         match self {
-            Self::MyLibrary => "LIB",
+            Self::MyLibrary => "VLT",
             Self::AiAgent => "AI",
             Self::ResearchConcept => "1D",
             Self::ParametricDED => "2D",
@@ -150,19 +150,19 @@ impl NavigationPillar {
 
     pub fn clean_name(&self) -> &'static str {
         match self {
-            Self::MyLibrary => "My Library",
-            Self::AiAgent => "AI Agent",
-            Self::ResearchConcept => "Research",
-            Self::ParametricDED => "Parametric",
+            Self::MyLibrary => "Vault",
+            Self::AiAgent => "Agent",
+            Self::ResearchConcept => "Planning",
+            Self::ParametricDED => "Drafting",
             Self::GeometryAssembly => "Geometry",
             Self::AnalysisSimulation => "Analysis",
-            Self::TimeScheduling => "Time & Scheduling",
-            Self::CostBudgeting => "Cost & Budgeting",
-            Self::SustainabilityEnergy => "Sustainability & Energy",
-            Self::FacilityManagement => "Facility Management",
-            Self::SafetyHealth => "Safety & Health",
-            Self::LeanConstruction => "Lean Construction",
-            Self::IndustrializedAutomation => "Industrialized & Automation",
+            Self::TimeScheduling => "Scheduling",
+            Self::CostBudgeting => "Budgeting",
+            Self::SustainabilityEnergy => "Sustainability",
+            Self::FacilityManagement => "Facility",
+            Self::SafetyHealth => "Safety",
+            Self::LeanConstruction => "Construction",
+            Self::IndustrializedAutomation => "Automation",
             Self::Prediction => "Prediction",
             Self::ReportPublishing => "Report",
         }
@@ -2902,5 +2902,34 @@ mod phase29_tests {
         assert_eq!(graph.nodes.len(), 5);
         assert_eq!(graph.wires.len(), 4);
         assert!(graph.nodes[3].value_display.contains("Struts"));
+    }
+
+    #[test]
+    fn test_phase44_navigation_pillar_concise_english_names() {
+        let names: Vec<&str> = NavigationPillar::all()
+            .iter()
+            .map(NavigationPillar::clean_name)
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "Vault",
+                "Agent",
+                "Planning",
+                "Drafting",
+                "Geometry",
+                "Analysis",
+                "Scheduling",
+                "Budgeting",
+                "Sustainability",
+                "Facility",
+                "Safety",
+                "Construction",
+                "Automation",
+                "Prediction",
+                "Report",
+            ]
+        );
+        assert_eq!(NavigationPillar::MyLibrary.icon(), "VLT");
     }
 }

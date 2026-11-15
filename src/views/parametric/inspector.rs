@@ -270,7 +270,7 @@ impl ParametricView {
         if icons::icon_button(
             ui,
             AppIcon::ChartBar,
-            "Cost & Budgeting (5D BoQ)",
+            "Budgeting (5D BoQ)",
             10.5,
             Color32::WHITE,
             theme.accent_blue,

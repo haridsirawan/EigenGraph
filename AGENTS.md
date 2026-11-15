@@ -26,7 +26,7 @@
 
 ### 2. Core Domain Navigation Pillars (`NavigationPillar`):
 Keep the 15 engineering workflow modules accessible in navigation (sidebar/drawer/quick switcher), while allowing visual presentation, grouping, icons, and responsive controls to evolve freely for web and touch usability:
-`My Library`, `AI Agent`, `Research`, `Parametric`, `Geometry`, `Analysis`, `Time & Scheduling`, `Cost & Budgeting`, `Sustainability & Energy`, `Facility Management`, `Safety & Health`, `Lean Construction`, `Industrialized & Automation`, `Prediction`, and `Report`.
+`Vault`, `Agent`, `Planning`, `Drafting`, `Geometry`, `Analysis`, `Scheduling`, `Budgeting`, `Sustainability`, `Facility`, `Safety`, `Construction`, `Automation`, `Prediction`, and `Report`.
 
 ### 3. 🌐 WebAssembly & Cross-Platform Compatibility:
 - All core mechanics and UI code must compile cleanly on both native targets and `wasm32-unknown-unknown`.

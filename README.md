@@ -23,22 +23,22 @@
 
 ## 🏛️ Overview
 
-**EigenGraph** (`EigenGraph/EigenGraph`) is a client-side **WebAssembly + WebGL2** 10D BIM and structural mechanics workstation compiled cleanly from Rust (`v0.4.3`, Phase 43 Interactive 3D Google Earth Spherical Globe Canvas, Day/Night Solar Terminator & Atmosphere Limb, Planetary Terraforming Brushes (`Uplift`/`Carve`/`Reclaim`/`Forest`/`Solar`/`Lake`/`Seawall`), Great-Circle Megaprojects (`Mega-Bridge`/`Mega-Tower`/`Clean Grid`), Sea-Level Flood Defense & Climate Vitals Game Missions with Undo/Redo & CAD/BIM Spherical Projection) and deployed automatically to **Cloudflare Workers**.
+**EigenGraph** (`EigenGraph/EigenGraph`) is a client-side **WebAssembly + WebGL2** 10D BIM and structural mechanics workstation compiled cleanly from Rust (`v0.4.4`, Phase 44 Streamlined Sidebar Module Nomenclature (`Vault`, `Agent`, `Planning`, `Drafting`, `Geometry`, `Analysis`, `Scheduling`, `Budgeting`, `Sustainability`, `Facility`, `Safety`, `Construction`, `Automation`, `Prediction`, `Report`) & Phase 43 Interactive 3D Google Earth Globe Canvas) and deployed automatically to **Cloudflare Workers**.
 
 ### 15 Engineering Modules
-1. **📁 My Library** — Project records, parametric component catalog, interactive HTML5 3D viewer & Markdown dossier browser downloads.
-2. **🤖 AI Agent** — Virtual engineering firm & multi-agent collaboration board.
-3. **💡 Research** — Interactive Slippy Map (Web Mercator Quadtree), WGS84/UTM geodetic CRS transformations, and DEM topographic TIN mesh.
-4. **📐 Parametric** — 2D vector CAD studio with magnetic snaps, live 3D solid extrusion companion, and PDF/SVG/IFC4 exports.
+1. **📁 Vault** — Project records, parametric component catalog, interactive HTML5 3D viewer & Markdown dossier browser downloads.
+2. **🤖 Agent** — Virtual engineering firm & multi-agent collaboration board.
+3. **💡 Planning** — Interactive 3D Google Earth / Slippy Map, WGS84/UTM geodetic CRS transformations, and DEM topographic TIN mesh.
+4. **📐 Drafting** — 2D vector CAD studio with magnetic snaps, live 3D solid extrusion companion, and PDF/SVG/IFC4 exports.
 5. **🏗️ Geometry** — Clean BIM spatial assembly across multi-level Z-planes and structural grids.
 6. **⚡ Analysis** — 3D FEM solver, Sherman-Morrison $O(N^2)$ linear ARI, Woodbury rank-2 ($N-2$) disruption screening, SVD kinematic mechanism guard, pushover, nonlinear time-history, seismic isolation, geotech/SSI, blast, and fire engineering.
-7. **⏱️ Time & Scheduling** — 4D phased erection timeline, CPM scheduling, and S-Curve tracking.
-8. **💰 Cost & Budgeting** — 5D cost heatmap, Quantity Take-Off (QTO), and parametric BoQ.
-9. **🌱 Sustainability & Energy** — 6D solar heliodon sun-path analysis and cradle-to-gate embodied carbon LCA.
-10. **🏢 Facility Management** — 7D Digital Twin spatial asset tagging and telemetry logs.
-11. **🛡️ Safety & Health** — 8D tower crane sweep envelopes and slab-edge hazard guards.
-12. **♻️ Lean Construction** — 9D material staging, 1D Cutting Stock Optimizer (CSO), and Bar Bending Schedules (BBS).
-13. **🤖 Industrialized & Automation** — 10D DfMA modular prefabrication, OpenBIM IFC 4.3 STEP parser/editor, clash detection, model diff, and IDS validation.
+7. **⏱️ Scheduling** — 4D phased erection timeline, CPM scheduling, and S-Curve tracking.
+8. **💰 Budgeting** — 5D cost heatmap, Quantity Take-Off (QTO), and parametric BoQ.
+9. **🌱 Sustainability** — 6D solar heliodon sun-path analysis and cradle-to-gate embodied carbon LCA.
+10. **🏢 Facility** — 7D Digital Twin spatial asset tagging and telemetry logs.
+11. **🛡️ Safety** — 8D tower crane sweep envelopes and slab-edge hazard guards.
+12. **♻️ Construction** — 9D Lean material staging, 1D Cutting Stock Optimizer (CSO), and Bar Bending Schedules (BBS).
+13. **🤖 Automation** — 10D DfMA modular prefabrication, OpenBIM IFC 4.3 STEP parser/editor, clash detection, model diff, and IDS validation.
 14. **🔮 Prediction** — Structural stress concentration forecasts and aging risk diagnostics.
 15. **📑 Report** — Living publishing suite for engineering docs, spreadsheets, and executive decks.
 

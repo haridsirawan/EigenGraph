@@ -7,6 +7,27 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.4.4] - 2026-11-15 — Phase 44: Streamlined Sidebar Module Nomenclature
+
+### Changed
+- **Standardized Concise English Sidebar Names (`src/models.rs`, `src/app.rs`, `src/views/my_project.rs`, `src/views/parametric/inspector.rs`, `AGENTS.md`, `README.md`)**:
+  - Updated `NavigationPillar::clean_name` (and corresponding titles/navigation labels) across the 15 sidebar modules to crisp single-word English engineering workflow names:
+    - `My Library` ➔ `Vault` (`icon`: `"VLT"`)
+    - `AI Agent` ➔ `Agent`
+    - `Research` ➔ `Planning`
+    - `Parametric` ➔ `Drafting`
+    - `Time & Scheduling` ➔ `Scheduling`
+    - `Cost & Budgeting` ➔ `Budgeting`
+    - `Sustainability & Energy` ➔ `Sustainability`
+    - `Facility Management` ➔ `Facility`
+    - `Safety & Health` ➔ `Safety`
+    - `Lean Construction` ➔ `Construction`
+    - `Industrialized & Automation` ➔ `Automation`
+    - Retained `Geometry`, `Analysis`, `Prediction`, and `Report`.
+  - Updated cross-navigation buttons (`"Open 2D Drafting Canvas"`, `"Budgeting (5D BoQ)"`, `"Planning TIN terrain"`) and added unit test coverage verifying all 15 sidebar labels.
+
+---
+
 ## [v0.4.3] - 2026-11-15 — Phase 43: Interactive 3D Google Earth Globe Canvas, Planetary Terraforming & Megaproject Sandbox Game
 
 ### Added & Changed

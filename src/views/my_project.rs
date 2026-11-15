@@ -821,7 +821,7 @@ impl MyProjectView {
                         if icons::icon_button(
                             ui,
                             AppIcon::Compass,
-                            "Open Parametric Ground Canvas",
+                            "Open 2D Drafting Canvas",
                             11.5,
                             Color32::WHITE,
                             theme.accent_blue,
