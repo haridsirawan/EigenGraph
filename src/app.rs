@@ -889,7 +889,7 @@ impl EigenGraphApp {
         workspace_snapshot: &crate::views::universal_canvas::WorkspaceCanvasSettings,
         is_mobile: bool,
     ) {
-        use crate::views::spatial_workspace::{SpatialCanvasMode, SpatialLens};
+        use crate::views::spatial_workspace::SpatialLens;
 
         if !ctx.egui_wants_keyboard_input() {
             if ctx.input(|i| i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z)) {
@@ -943,34 +943,39 @@ impl EigenGraphApp {
                     .inner_margin(Margin::ZERO),
             )
             .show(ui, |ui| {
-                match self.spatial_workspace.active_canvas_mode {
-                    SpatialCanvasMode::EarthGlobe | SpatialCanvasMode::EarthPlan2D => {
-                        self.universal_canvas.globe_mode =
-                            self.spatial_workspace.active_canvas_mode == SpatialCanvasMode::EarthGlobe;
-                        self.universal_canvas.show_spatial_fullscreen(
-                            ui,
-                            &self.theme,
-                            lens_pillar,
-                            &mut self.build_view.bim_bus.project,
-                            &self.members,
-                            pointer_blocked,
-                        );
-                    }
-                    SpatialCanvasMode::Bim3D => {
-                        self.build_view.show_spatial_fullscreen(
-                            ui,
-                            &self.theme,
-                            &self.members,
-                            &self.db_components,
-                            &mut self.feature_registry,
-                            &mut self.universal_canvas,
-                            &self.parametric_view.variables,
-                            workspace_snapshot.clone(),
-                            pointer_blocked,
-                        );
-                    }
-                }
+                self.spatial_workspace.active_canvas_mode =
+                    crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
+                self.universal_canvas.globe_mode = true;
+                self.universal_canvas.show_spatial_fullscreen(
+                    ui,
+                    &self.theme,
+                    lens_pillar,
+                    &mut self.build_view.bim_bus.project,
+                    &self.members,
+                    pointer_blocked,
+                );
             });
+
+        // Drain any 3D BIM placement commands created directly on Earth 3D
+        let earth_cmds: Vec<_> = self
+            .universal_canvas
+            .pending_earth_bim_commands
+            .drain(..)
+            .collect();
+        if !earth_cmds.is_empty() {
+            let mut changed = false;
+            for cmd in earth_cmds {
+                if let Ok(msg) = self.build_view.bim_bus.execute(cmd) {
+                    changed = true;
+                    self.spatial_workspace.push_trace(msg, true);
+                }
+            }
+            if changed {
+                self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+                self.sync_bim_to_fem();
+                self.sync_earth_maps();
+            }
+        }
 
         self.spatial_workspace
             .sync_pick_events(&mut self.universal_canvas, &mut self.build_view);
@@ -1060,16 +1065,6 @@ impl EigenGraphApp {
         forced_domain: Option<crate::views::spatial_workspace::SpatialUndoDomain>,
         workspace_snapshot: &crate::views::universal_canvas::WorkspaceCanvasSettings,
     ) {
-        if hud_actions.load_sample_building {
-            let proj = crate::core::BimProject::sample_bimcraft_building();
-            self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
-            self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
-            self.universal_canvas.ground_origin_anchored = true;
-            self.sync_bim_to_fem();
-            self.build_view
-                .fit_view_to_project(&mut self.universal_canvas, &self.members);
-            self.sync_earth_maps();
-        }
         if hud_actions.sync_fem_and_earth {
             self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
             self.sync_bim_to_fem();
@@ -1078,6 +1073,21 @@ impl EigenGraphApp {
         if hud_actions.fit_camera {
             self.build_view
                 .fit_view_to_project(&mut self.universal_canvas, &self.members);
+            if self.spatial_workspace.spatial_mode_enabled {
+                let target = if self.universal_canvas.ground_origin_anchored {
+                    self.universal_canvas.ground_origin_lat_lon
+                } else {
+                    self.universal_canvas.world_map.center_lat_lon
+                };
+                self.universal_canvas.globe_mode = true;
+                self.universal_canvas.earth_world.start_fly_to(
+                    &self.universal_canvas.world_map,
+                    target.0,
+                    target.1,
+                    self.universal_canvas.world_map.zoom_level.max(18.0),
+                    "Site Focus",
+                );
+            }
         }
         if hud_actions.export_archive {
             self.sync_lifecycle_to_canvas();
@@ -1360,15 +1370,18 @@ impl EigenGraphApp {
         if let Some((lat, lon)) = hud_actions.anchor_and_build_site {
             self.universal_canvas.ground_origin_lat_lon = (lat, lon);
             self.universal_canvas.ground_origin_anchored = true;
+            self.universal_canvas.globe_mode = true;
+            self.universal_canvas.earth_world.camera.tilt_deg =
+                self.universal_canvas.earth_world.camera.tilt_deg.clamp(12.0, 48.0);
             self.universal_canvas.earth_world.start_fly_to(
                 &self.universal_canvas.world_map,
                 lat,
                 lon,
-                16.5,
+                18.2,
                 "Anchored BIM Site",
             );
             self.spatial_workspace.active_canvas_mode =
-                crate::views::spatial_workspace::SpatialCanvasMode::Bim3D;
+                crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
             self.sync_bim_to_fem();
             self.build_view
                 .fit_view_to_project(&mut self.universal_canvas, &self.members);
@@ -1449,8 +1462,65 @@ impl EigenGraphApp {
     fn open_vault_project_entry(&mut self, entry: crate::core::vault::PersonalVaultProjectEntry) {
         match crate::core::InternalVault::load_personal_vault_raw(&entry) {
             Ok(raw) => {
+                let clean_raw = raw.trim_start_matches('\u{FEFF}');
+                let is_ifc = entry.filename.to_ascii_lowercase().ends_with(".ifc")
+                    || clean_raw.trim_start().to_ascii_uppercase().starts_with("ISO-10303-21;");
+                if is_ifc {
+                    match crate::core::ifc::IfcModel::parse_to_bim_project_with_fallback(
+                        clean_raw,
+                        &entry.filename,
+                    ) {
+                        Ok((proj, site_geo, summary_msg)) => {
+                            self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
+                            self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
+                            self.parametric_view.active_level_idx = 0;
+                            let target_geo = site_geo.unwrap_or_else(|| {
+                                if self.universal_canvas.ground_origin_anchored
+                                    && (self.universal_canvas.ground_origin_lat_lon.0.abs() > 1e-4
+                                        || self.universal_canvas.ground_origin_lat_lon.1.abs() > 1e-4)
+                                {
+                                    self.universal_canvas.ground_origin_lat_lon
+                                } else {
+                                    self.universal_canvas.world_map.center_lat_lon
+                                }
+                            });
+                            self.universal_canvas.ground_origin_lat_lon = target_geo;
+                            self.universal_canvas.ground_origin_anchored = true;
+                            self.universal_canvas.globe_mode = true;
+                            self.universal_canvas.earth_world.camera.tilt_deg = 42.0;
+                            self.universal_canvas.earth_world.start_fly_to(
+                                &self.universal_canvas.world_map,
+                                target_geo.0,
+                                target_geo.1,
+                                18.0,
+                                &entry.name,
+                            );
+                            self.sync_bim_to_fem();
+                            self.build_view
+                                .fit_view_to_project(&mut self.universal_canvas, &self.members);
+                            self.sync_earth_maps();
+                            self.my_project_view.export_success_msg = Some(summary_msg.clone());
+                            self.build_view.modify_status_msg = Some(summary_msg.clone());
+                            self.active_pillar = NavigationPillar::GeometryAssembly;
+                            if self.spatial_workspace.spatial_mode_enabled {
+                                self.spatial_workspace.active_canvas_mode =
+                                    crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
+                                self.spatial_workspace.active_overlay_pillar = None;
+                                self.spatial_workspace.vault_feedback = Some(summary_msg.clone());
+                                self.spatial_workspace.push_trace(summary_msg, true);
+                            }
+                        }
+                        Err(err) => {
+                            let msg = format!("Failed importing IFC '{}': {err}", entry.filename);
+                            self.my_project_view.export_success_msg = Some(msg.clone());
+                            self.spatial_workspace.vault_feedback = Some(msg.clone());
+                            self.spatial_workspace.push_trace(msg, false);
+                        }
+                    }
+                    return;
+                }
                 if let Ok(ws_cfg) = self.universal_canvas.apply_unified_archive(
-                    &raw,
+                    clean_raw,
                     &mut self.build_view.bim_bus.project,
                     &mut self.members,
                     &mut self.parametric_view.variables,
@@ -1461,6 +1531,8 @@ impl EigenGraphApp {
                         &mut self.ai_assistant_view.is_visible,
                     );
                     self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.universal_canvas.globe_mode = true;
                     self.sync_bim_to_fem();
                     self.build_view
                         .fit_view_to_project(&mut self.universal_canvas, &self.members);
@@ -1477,7 +1549,7 @@ impl EigenGraphApp {
                     self.active_pillar = NavigationPillar::GeometryAssembly;
                     if self.spatial_workspace.spatial_mode_enabled {
                         self.spatial_workspace.active_canvas_mode =
-                            crate::views::spatial_workspace::SpatialCanvasMode::Bim3D;
+                            crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
                         self.spatial_workspace.active_overlay_pillar = None;
                         self.spatial_workspace.push_trace(loaded_msg, true);
                     }
@@ -1826,7 +1898,8 @@ impl EigenGraphApp {
                     self.apply_typology_template(kind);
                     if self.spatial_workspace.spatial_mode_enabled {
                         self.spatial_workspace.active_canvas_mode =
-                            crate::views::spatial_workspace::SpatialCanvasMode::Bim3D;
+                            crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
+                        self.universal_canvas.globe_mode = true;
                         self.spatial_workspace.active_overlay_pillar = None;
                     }
                 }
@@ -2006,7 +2079,9 @@ impl EigenGraphApp {
                     self.active_pillar = NavigationPillar::GeometryAssembly;
                     if self.spatial_workspace.spatial_mode_enabled {
                         self.spatial_workspace.active_canvas_mode =
-                            crate::views::spatial_workspace::SpatialCanvasMode::Bim3D;
+                            crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
+                        self.universal_canvas.globe_mode = true;
+                        self.universal_canvas.ground_origin_anchored = true;
                         self.spatial_workspace.active_overlay_pillar = None;
                     }
                 }

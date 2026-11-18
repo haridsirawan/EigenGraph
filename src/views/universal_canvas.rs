@@ -355,6 +355,66 @@ pub struct CadShortcutFeedback {
     pub letter_key: Option<char>,
 }
 
+/// Phase 55: Direct 3D BIM placement tools inside the unified Earth 3D canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EarthBimTool {
+    #[default]
+    None,
+    Column,
+    Beam,
+    Wall,
+    Footing,
+}
+
+/// Phase 55: Structural visualization overlay rendered directly over 3D BIM buildings on Earth 3D.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EarthBimLens {
+    #[default]
+    Clean,
+    DcrHeatmap,
+    AriRedundancy,
+    MomentStress,
+    Erection4D,
+}
+
+/// Synchronized BIM authoring & visualization parameters for direct Earth 3D modeling.
+#[derive(Debug, Clone)]
+pub struct EarthBimAuthorConfig {
+    pub active_tool: EarthBimTool,
+    pub active_lens: EarthBimLens,
+    pub base_level_id: usize,
+    pub top_level_id: usize,
+    pub col_width_mm: f64,
+    pub col_depth_mm: f64,
+    pub beam_width_mm: f64,
+    pub beam_depth_mm: f64,
+    pub wall_thickness_mm: f64,
+    pub footing_size_mm: f64,
+    pub erection_day_limit: usize,
+    pub pending_start_mm: Option<[f64; 2]>,
+    pub hover_snap_mm: Option<[f64; 2]>,
+}
+
+impl Default for EarthBimAuthorConfig {
+    fn default() -> Self {
+        Self {
+            active_tool: EarthBimTool::None,
+            active_lens: EarthBimLens::Clean,
+            base_level_id: 1,
+            top_level_id: 2,
+            col_width_mm: 400.0,
+            col_depth_mm: 400.0,
+            beam_width_mm: 300.0,
+            beam_depth_mm: 600.0,
+            wall_thickness_mm: 200.0,
+            footing_size_mm: 1800.0,
+            erection_day_limit: 999,
+            pending_start_mm: None,
+            hover_snap_mm: None,
+        }
+    }
+}
+
 /// Shared interactive drawing canvas state synchronized across all 15 sidebar navigation modules.
 pub struct UniversalCanvasState {
     pub pan: Vec2,
@@ -420,6 +480,9 @@ pub struct UniversalCanvasState {
     pub last_picked_earth_lat_lon: Option<(f64, f64)>,
     pub highlighted_bim_element: Option<(crate::core::BimElementKind, usize)>,
     pub spatial_pick_seq: u64,
+    // Phase 55: Direct BIM authoring & command emission straight onto Earth 3D
+    pub earth_bim_author: EarthBimAuthorConfig,
+    pub pending_earth_bim_commands: Vec<crate::core::BimCommand>,
 }
 
 impl Default for UniversalCanvasState {
@@ -485,6 +548,8 @@ impl Default for UniversalCanvasState {
             last_picked_earth_lat_lon: None,
             highlighted_bim_element: None,
             spatial_pick_seq: 0,
+            earth_bim_author: EarthBimAuthorConfig::default(),
+            pending_earth_bim_commands: Vec::new(),
         }
     }
 }
@@ -4458,6 +4523,146 @@ impl UniversalCanvasState {
             }
         };
 
+        // Phase 55: Direct 3D BIM Placement (Column / Beam / Wall / Footing) straight onto Earth 3D surface
+        if self.globe_mode && self.earth_bim_author.active_tool != EarthBimTool::None {
+            let bim_snap = |uc: &Self, raw: [f64; 2], anchor_start: Option<[f64; 2]>| -> [f64; 2] {
+                let (mut pt, _) = uc.snap_point_with_osnap(
+                    raw,
+                    anchor_start,
+                    Some(bim_project),
+                    uc.last_osnap_radius_mm.max(450.0),
+                );
+                if let Some(s) = anchor_start {
+                    if uc.ortho_mode {
+                        let dx = (pt[0] - s[0]).abs();
+                        let dy = (pt[1] - s[1]).abs();
+                        if dx >= dy {
+                            pt[1] = s[1];
+                        } else {
+                            pt[0] = s[0];
+                        }
+                    }
+                }
+                pt
+            };
+
+            if let Some(hover) = response.hover_pos() {
+                let snapped = bim_snap(self, to_world(hover), self.earth_bim_author.pending_start_mm);
+                self.earth_bim_author.hover_snap_mm = Some(snapped);
+                self.cursor_world_mm = snapped;
+            } else {
+                self.earth_bim_author.hover_snap_mm = None;
+            }
+
+            if response.secondary_clicked() {
+                self.earth_bim_author.pending_start_mm = None;
+            }
+
+            if response.clicked_by(egui::PointerButton::Primary) {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    let was_anchored = self.ground_origin_anchored;
+                    self.ensure_ground_origin_at_screen(pos, rect);
+                    let active_origin = self.ground_origin_lat_lon;
+                    let raw = if !was_anchored {
+                        if let Some(ref xf) = globe_xform_snapshot {
+                            let (lat, lon, _) = xf.screen_to_lat_lon(pos);
+                            SlippyMapState::lat_lon_to_world_mm(active_origin, lat, lon)
+                        } else {
+                            world_map_snapshot.screen_to_world_mm(active_origin, pos, rect)
+                        }
+                    } else {
+                        to_world(pos)
+                    };
+                    let pt = bim_snap(self, raw, self.earth_bim_author.pending_start_mm);
+                    let base_level_id = self.earth_bim_author.base_level_id.max(1);
+                    let top_level_id = self.earth_bim_author.top_level_id.max(base_level_id);
+                    let p2 = crate::core::P2(pt[0], pt[1]);
+
+                    match self.earth_bim_author.active_tool {
+                        EarthBimTool::Column => {
+                            let w = self.earth_bim_author.col_width_mm.clamp(150.0, 2000.0);
+                            let d = self.earth_bim_author.col_depth_mm.clamp(150.0, 2000.0);
+                            self.pending_earth_bim_commands.push(crate::core::BimCommand::AddColumn {
+                                base_level_id,
+                                top_level_id,
+                                pos: p2,
+                                width_mm: w,
+                                depth_mm: d,
+                                is_round: false,
+                                profile_name: format!("C{:.0}x{:.0}", w, d),
+                            });
+                            self.status_message = Some(format!(
+                                "Placed Column ({w:.0}x{d:.0}mm) on Earth 3D @ ({:.2}m, {:.2}m)",
+                                pt[0] * 0.001,
+                                pt[1] * 0.001
+                            ));
+                        }
+                        EarthBimTool::Footing => {
+                            let fs = self.earth_bim_author.footing_size_mm.clamp(400.0, 6000.0);
+                            self.pending_earth_bim_commands.push(crate::core::BimCommand::AddFooting {
+                                level_id: base_level_id,
+                                pos: p2,
+                                width_mm: fs,
+                                length_mm: fs,
+                                thickness_mm: 450.0,
+                            });
+                            self.status_message = Some(format!(
+                                "Placed Footing ({fs:.0}mm) on Earth 3D @ ({:.2}m, {:.2}m)",
+                                pt[0] * 0.001,
+                                pt[1] * 0.001
+                            ));
+                        }
+                        EarthBimTool::Wall | EarthBimTool::Beam => {
+                            if let Some(s) = self.earth_bim_author.pending_start_mm.take() {
+                                if (s[0] - pt[0]).hypot(s[1] - pt[1]) >= 200.0 {
+                                    if self.earth_bim_author.active_tool == EarthBimTool::Wall {
+                                        let wt = self.earth_bim_author.wall_thickness_mm.clamp(80.0, 1200.0);
+                                        self.pending_earth_bim_commands.push(crate::core::BimCommand::AddWall {
+                                            base_level_id,
+                                            start: crate::core::P2(s[0], s[1]),
+                                            end: p2,
+                                            thickness_mm: wt,
+                                            is_structural: true,
+                                        });
+                                        self.status_message = Some(format!(
+                                            "Placed Wall ({wt:.0}mm) on Earth 3D (L={:.2}m)",
+                                            (s[0] - pt[0]).hypot(s[1] - pt[1]) * 0.001
+                                        ));
+                                    } else {
+                                        let bw = self.earth_bim_author.beam_width_mm.clamp(120.0, 1500.0);
+                                        let bd = self.earth_bim_author.beam_depth_mm.clamp(150.0, 2500.0);
+                                        self.pending_earth_bim_commands.push(crate::core::BimCommand::AddBeamRun {
+                                            level_id: top_level_id,
+                                            category: crate::core::RunCategory::StructuralBeam,
+                                            start: crate::core::P2(s[0], s[1]),
+                                            end: p2,
+                                            width_mm: bw,
+                                            depth_mm: bd,
+                                            justify: crate::core::RunJustify::Top,
+                                            profile_name: format!("B{:.0}x{:.0}", bw, bd),
+                                        });
+                                        self.status_message = Some(format!(
+                                            "Placed Beam ({bw:.0}x{bd:.0}mm) on Earth 3D (L={:.2}m)",
+                                            (s[0] - pt[0]).hypot(s[1] - pt[1]) * 0.001
+                                        ));
+                                    }
+                                }
+                            } else {
+                                self.earth_bim_author.pending_start_mm = Some(pt);
+                            }
+                        }
+                        EarthBimTool::None => {}
+                    }
+                }
+            } else if response.dragged_by(egui::PointerButton::Primary) {
+                let delta = response.drag_delta();
+                self.orbit_globe_by_pixels(rect, delta, alt_held, dt);
+            }
+            return;
+        } else {
+            self.earth_bim_author.hover_snap_mm = None;
+        }
+
         if self.active_tool == UniversalCanvasTool::SelectPan {
             if response.dragged_by(egui::PointerButton::Primary) {
                 let delta = response.drag_delta();
@@ -4874,10 +5079,19 @@ impl UniversalCanvasState {
         let step = self.grid_spacing_mm.max(250.0);
         let top_left_mm = self.screen_to_world(rect, rect.min);
         let bot_right_mm = self.screen_to_world(rect, rect.max);
-        let min_x = (top_left_mm[0].min(bot_right_mm[0]) / step).floor() as i64 - 1;
-        let max_x = (top_left_mm[0].max(bot_right_mm[0]) / step).ceil() as i64 + 1;
-        let min_y = (top_left_mm[1].min(bot_right_mm[1]) / step).floor() as i64 - 1;
-        let max_y = (top_left_mm[1].max(bot_right_mm[1]) / step).ceil() as i64 + 1;
+        let mut min_x = (top_left_mm[0].min(bot_right_mm[0]) / step).floor() as i64 - 1;
+        let mut max_x = (top_left_mm[0].max(bot_right_mm[0]) / step).ceil() as i64 + 1;
+        let mut min_y = (top_left_mm[1].min(bot_right_mm[1]) / step).floor() as i64 - 1;
+        let mut max_y = (top_left_mm[1].max(bot_right_mm[1]) / step).ceil() as i64 + 1;
+
+        if self.globe_mode && ((max_x - min_x).abs() > 120 || (max_y - min_y).abs() > 120) {
+            // When Earth 3D camera is pitched steeply toward horizon, draw a crisp local site grid around origin
+            let half_cells = 30_i64;
+            min_x = -half_cells;
+            max_x = half_cells;
+            min_y = -half_cells;
+            max_y = half_cells;
+        }
 
         let line_col = if theme.is_dark() {
             Color32::from_rgba_premultiplied(70, 90, 125, 28)
@@ -4977,171 +5191,506 @@ impl UniversalCanvasState {
             );
         }
 
-        // 2B. Isolated Pad Footings
-        for ft in &bim_project.footings {
-            let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Footing, ft.id));
-            let ring: Vec<Pos2> = ft
-                .footprint_ring()
-                .into_iter()
-                .map(|p| to_screen([p.0, p.1]))
-                .collect();
-            let fill = if is_sel {
-                theme.accent_blue.gamma_multiply(0.35)
-            } else {
-                theme.accent_orange.gamma_multiply(0.14)
-            };
-            let stroke = if is_sel {
-                Stroke::new(2.2, Color32::from_rgb(56, 189, 248))
-            } else {
-                Stroke::new(1.0, theme.accent_orange.gamma_multiply(0.45))
-            };
-            clip_painter.add(egui::Shape::convex_polygon(ring, fill, stroke));
-        }
-
-        // 3. Structural Beams / Runs
-        for run in &bim_project.runs {
-            let s0 = to_screen([run.start.0, run.start.1]);
-            let s1 = to_screen([run.end.0, run.end.1]);
-            let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Run, run.id));
-            let col = if is_sel {
-                Color32::from_rgb(56, 189, 248)
-            } else if active_pillar == NavigationPillar::AnalysisSimulation {
-                let util = bim_project
-                    .fem_id_for_bim_element(crate::core::BimElementKind::Run, run.id)
-                    .and_then(|fid| members.iter().find(|m| m.id == fid))
-                    .map(|m| m.utilization)
-                    .unwrap_or(0.45);
-                if util >= 0.85 {
-                    theme.accent_red
-                } else if util >= 0.65 {
-                    theme.accent_orange
+        if !self.globe_mode {
+            // 2B. Isolated Pad Footings (Flat 2D Projection)
+            for ft in &bim_project.footings {
+                let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Footing, ft.id));
+                let ring: Vec<Pos2> = ft
+                    .footprint_ring()
+                    .into_iter()
+                    .map(|p| to_screen([p.0, p.1]))
+                    .collect();
+                let fill = if is_sel {
+                    theme.accent_blue.gamma_multiply(0.35)
                 } else {
-                    theme.accent_green
-                }
-            } else {
-                theme.accent_green.gamma_multiply(0.65)
-            };
-            clip_painter.line_segment([s0, s1], Stroke::new(if is_sel { 4.2 } else { 1.8 }, col));
-        }
-
-        // 4. Compound Walls
-        for w in &bim_project.walls {
-            let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Wall, w.id));
-            let ring: Vec<Pos2> = w
-                .footprint_ring()
-                .into_iter()
-                .map(|p| to_screen([p.0, p.1]))
-                .collect();
-            let fill = if is_sel {
-                Color32::from_rgb(56, 189, 248).gamma_multiply(0.65)
-            } else if theme.is_dark() {
-                Color32::from_rgb(65, 80, 102)
-            } else {
-                Color32::from_rgb(148, 163, 184)
-            };
-            clip_painter.add(egui::Shape::convex_polygon(
-                ring,
-                fill.gamma_multiply(0.75),
-                if is_sel {
+                    theme.accent_orange.gamma_multiply(0.14)
+                };
+                let stroke = if is_sel {
                     Stroke::new(2.2, Color32::from_rgb(56, 189, 248))
                 } else {
-                    Stroke::new(1.2, theme.text_secondary.gamma_multiply(0.7))
-                },
-            ));
-        }
+                    Stroke::new(1.0, theme.accent_orange.gamma_multiply(0.45))
+                };
+                clip_painter.add(egui::Shape::convex_polygon(ring, fill, stroke));
+            }
 
-        // 5. Structural Columns
-        for col in &bim_project.columns {
-            let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Column, col.id));
-            let ring: Vec<Pos2> = col
-                .footprint_ring()
-                .into_iter()
-                .map(|p| to_screen([p.0, p.1]))
-                .collect();
-            let fill = if is_sel {
-                Color32::from_rgb(56, 189, 248)
-            } else if active_pillar == NavigationPillar::AnalysisSimulation {
-                let util = bim_project
-                    .fem_id_for_bim_element(crate::core::BimElementKind::Column, col.id)
-                    .and_then(|fid| members.iter().find(|m| m.id == fid))
-                    .map(|m| m.utilization)
-                    .unwrap_or(0.45);
-                if util >= 0.85 {
-                    theme.accent_red.gamma_multiply(0.85)
-                } else if util >= 0.65 {
-                    theme.accent_orange.gamma_multiply(0.85)
+            // 3. Structural Beams / Runs (Flat 2D Projection)
+            for run in &bim_project.runs {
+                let s0 = to_screen([run.start.0, run.start.1]);
+                let s1 = to_screen([run.end.0, run.end.1]);
+                let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Run, run.id));
+                let col = if is_sel {
+                    Color32::from_rgb(56, 189, 248)
+                } else if active_pillar == NavigationPillar::AnalysisSimulation {
+                    let util = bim_project
+                        .fem_id_for_bim_element(crate::core::BimElementKind::Run, run.id)
+                        .and_then(|fid| members.iter().find(|m| m.id == fid))
+                        .map(|m| m.utilization)
+                        .unwrap_or(0.45);
+                    if util >= 0.85 {
+                        theme.accent_red
+                    } else if util >= 0.65 {
+                        theme.accent_orange
+                    } else {
+                        theme.accent_green
+                    }
                 } else {
-                    theme.accent_green.gamma_multiply(0.85)
-                }
-            } else {
-                theme.accent_blue.gamma_multiply(0.75)
-            };
-            clip_painter.add(egui::Shape::convex_polygon(
-                ring,
-                fill,
+                    theme.accent_green.gamma_multiply(0.65)
+                };
+                clip_painter.line_segment([s0, s1], Stroke::new(if is_sel { 4.2 } else { 1.8 }, col));
+            }
+
+            // 4. Compound Walls (Flat 2D Projection)
+            for w in &bim_project.walls {
+                let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Wall, w.id));
+                let ring: Vec<Pos2> = w
+                    .footprint_ring()
+                    .into_iter()
+                    .map(|p| to_screen([p.0, p.1]))
+                    .collect();
+                let fill = if is_sel {
+                    Color32::from_rgb(56, 189, 248).gamma_multiply(0.65)
+                } else if theme.is_dark() {
+                    Color32::from_rgb(65, 80, 102)
+                } else {
+                    Color32::from_rgb(148, 163, 184)
+                };
+                clip_painter.add(egui::Shape::convex_polygon(
+                    ring,
+                    fill.gamma_multiply(0.75),
+                    if is_sel {
+                        Stroke::new(2.2, Color32::from_rgb(56, 189, 248))
+                    } else {
+                        Stroke::new(1.2, theme.text_secondary.gamma_multiply(0.7))
+                    },
+                ));
+            }
+
+            // 5. Structural Columns (Flat 2D Projection)
+            for col in &bim_project.columns {
+                let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Column, col.id));
+                let ring: Vec<Pos2> = col
+                    .footprint_ring()
+                    .into_iter()
+                    .map(|p| to_screen([p.0, p.1]))
+                    .collect();
+                let fill = if is_sel {
+                    Color32::from_rgb(56, 189, 248)
+                } else if active_pillar == NavigationPillar::AnalysisSimulation {
+                    let util = bim_project
+                        .fem_id_for_bim_element(crate::core::BimElementKind::Column, col.id)
+                        .and_then(|fid| members.iter().find(|m| m.id == fid))
+                        .map(|m| m.utilization)
+                        .unwrap_or(0.45);
+                    if util >= 0.85 {
+                        theme.accent_red.gamma_multiply(0.85)
+                    } else if util >= 0.65 {
+                        theme.accent_orange.gamma_multiply(0.85)
+                    } else {
+                        theme.accent_green.gamma_multiply(0.85)
+                    }
+                } else {
+                    theme.accent_blue.gamma_multiply(0.75)
+                };
+                clip_painter.add(egui::Shape::convex_polygon(
+                    ring,
+                    fill,
+                    if is_sel {
+                        Stroke::new(2.2, Color32::WHITE)
+                    } else {
+                        Stroke::new(1.2, theme.text_primary)
+                    },
+                ));
                 if is_sel {
-                    Stroke::new(2.2, Color32::WHITE)
-                } else {
-                    Stroke::new(1.2, theme.text_primary)
-                },
-            ));
-            if is_sel {
-                let cp = to_screen([col.pos.0, col.pos.1]);
-                if rect.expand(12.0).contains(cp) {
-                    clip_painter.circle_stroke(cp, 14.0, Stroke::new(2.0, Color32::from_rgb(56, 189, 248)));
-                    clip_painter.text(
-                        cp + Vec2::new(0.0, -18.0),
-                        Align2::CENTER_BOTTOM,
-                        &col.name,
-                        egui::FontId::monospace(10.0),
-                        Color32::WHITE,
-                    );
+                    let cp = to_screen([col.pos.0, col.pos.1]);
+                    if rect.expand(12.0).contains(cp) {
+                        clip_painter.circle_stroke(cp, 14.0, Stroke::new(2.0, Color32::from_rgb(56, 189, 248)));
+                        clip_painter.text(
+                            cp + Vec2::new(0.0, -18.0),
+                            Align2::CENTER_BOTTOM,
+                            &col.name,
+                            egui::FontId::monospace(10.0),
+                            Color32::WHITE,
+                        );
+                    }
                 }
             }
         }
 
-        // 6. Phase 51: 3D Extruded BIM Building Silhouette directly over Earth Globe Surface
-        if self.globe_mode && self.ground_origin_anchored && !bim_project.is_empty() {
+        // 6. Phase 55: Full 3D Extruded BIM Architecture, Structural Lenses & Ghost Authoring directly on Earth 3D
+        if self.globe_mode
+            && (self.ground_origin_anchored
+                || !bim_project.is_empty()
+                || self.earth_bim_author.active_tool != EarthBimTool::None)
+        {
             if let Some(ref xf) = self.last_globe_xform {
-                let lift_scale = if self.world_map.zoom_level < 15.0 { 12.0 } else { 1.0 };
-                for col in &bim_project.columns {
-                    let base_ll = SlippyMapState::world_mm_to_lat_lon(
-                        self.ground_origin_lat_lon,
-                        [col.pos.0, col.pos.1],
-                    );
-                    let base_m = bim_project.level_elevation(col.base_level_id) * 0.001 * lift_scale;
-                    let top_m = bim_project.level_elevation(col.top_level_id) * 0.001 * lift_scale;
-                    if let (Some((p0, _, v0)), Some((p1, _, v1))) = (
-                        xf.project_lat_lon_elev(base_ll.0, base_ll.1, base_m),
-                        xf.project_lat_lon_elev(base_ll.0, base_ll.1, top_m),
+                let lift_scale = if self.world_map.zoom_level < 14.5 { 8.0 } else { 1.0 };
+                let proj_mm = |x_mm: f64, y_mm: f64, elev_m: f64| -> Option<Pos2> {
+                    let ll = SlippyMapState::world_mm_to_lat_lon(self.ground_origin_lat_lon, [x_mm, y_mm]);
+                    xf.project_lat_lon_elev(ll.0, ll.1, elev_m * lift_scale)
+                        .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
+                };
+                let lens_color = |kind: crate::core::BimElementKind,
+                                  id: usize,
+                                  level_idx: usize,
+                                  default_col: Color32,
+                                  is_sel: bool| -> Color32 {
+                    if is_sel {
+                        return Color32::from_rgb(56, 189, 248);
+                    }
+                    let mem_opt = bim_project
+                        .fem_id_for_bim_element(kind, id)
+                        .and_then(|fid| members.iter().find(|m| m.id == fid));
+                    match self.earth_bim_author.active_lens {
+                        EarthBimLens::Clean => default_col,
+                        EarthBimLens::DcrHeatmap => {
+                            let u = mem_opt.map(|m| m.utilization).unwrap_or(0.40);
+                            if u >= 0.85 || mem_opt.is_some_and(|m| m.is_critical) {
+                                theme.accent_red
+                            } else if u >= 0.65 {
+                                theme.accent_orange
+                            } else {
+                                theme.accent_green
+                            }
+                        }
+                        EarthBimLens::AriRedundancy => {
+                            let ari = mem_opt.map(|m| m.ari).unwrap_or(0.95);
+                            if ari < 0.70 {
+                                theme.accent_red
+                            } else if ari < 0.85 {
+                                theme.accent_orange
+                            } else {
+                                Color32::from_rgb(16, 185, 129)
+                            }
+                        }
+                        EarthBimLens::MomentStress => {
+                            let m_max = mem_opt
+                                .map(|m| m.moment_my_knm.abs().max(m.moment_mz_knm.abs()))
+                                .unwrap_or(15.0);
+                            if m_max > 120.0 {
+                                Color32::from_rgb(244, 63, 94)
+                            } else if m_max > 55.0 {
+                                Color32::from_rgb(217, 70, 239)
+                            } else {
+                                Color32::from_rgb(129, 140, 248)
+                            }
+                        }
+                        EarthBimLens::Erection4D => {
+                            if level_idx == 0 {
+                                Color32::from_rgb(16, 185, 129)
+                            } else if level_idx == 1 {
+                                Color32::from_rgb(56, 189, 248)
+                            } else {
+                                Color32::from_rgb(251, 191, 36)
+                            }
+                        }
+                    }
+                };
+                let level_rank = |lvl_id: usize| -> usize {
+                    bim_project.levels.iter().position(|l| l.id == lvl_id).unwrap_or(0)
+                };
+
+                // 6A. Isolated Footings (Ground Pads)
+                for ft in &bim_project.footings {
+                    let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Footing, ft.id));
+                    let z_m = bim_project.level_elevation(ft.level_id) * 0.001;
+                    let pts: Vec<Pos2> = ft
+                        .footprint_ring()
+                        .into_iter()
+                        .filter_map(|p| proj_mm(p.0, p.1, z_m))
+                        .collect();
+                    if pts.len() >= 3 && pts.iter().any(|p| rect.expand(40.0).contains(*p)) {
+                        let fill = if is_sel {
+                            Color32::from_rgba_unmultiplied(56, 189, 248, 120)
+                        } else {
+                            Color32::from_rgba_unmultiplied(245, 158, 11, 70)
+                        };
+                        let stroke = if is_sel {
+                            Stroke::new(2.2, Color32::from_rgb(56, 189, 248))
+                        } else {
+                            Stroke::new(1.2, Color32::from_rgba_unmultiplied(245, 158, 11, 200))
+                        };
+                        clip_painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+                    }
+                }
+
+                // 6B. Floor & Roof Slabs
+                for sl in &bim_project.slabs {
+                    if sl.boundary.len() < 3 {
+                        continue;
+                    }
+                    let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Slab, sl.id));
+                    let z_m = bim_project.level_elevation(sl.level_id) * 0.001;
+                    let pts: Vec<Pos2> = sl
+                        .boundary
+                        .iter()
+                        .filter_map(|p| proj_mm(p.0, p.1, z_m))
+                        .collect();
+                    if pts.len() >= 3 && pts.iter().any(|p| rect.expand(60.0).contains(*p)) {
+                        let fill = if is_sel {
+                            Color32::from_rgba_unmultiplied(56, 189, 248, 95)
+                        } else if sl.is_roof {
+                            Color32::from_rgba_unmultiplied(234, 88, 12, 55)
+                        } else {
+                            Color32::from_rgba_unmultiplied(148, 163, 184, 52)
+                        };
+                        let stroke = if is_sel {
+                            Stroke::new(2.2, Color32::from_rgb(56, 189, 248))
+                        } else if sl.is_roof {
+                            Stroke::new(1.3, Color32::from_rgba_unmultiplied(251, 146, 60, 210))
+                        } else {
+                            Stroke::new(1.1, Color32::from_rgba_unmultiplied(203, 213, 225, 175))
+                        };
+                        clip_painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+                    }
+                }
+
+                // 6C. Extruded 3D Walls & Door/Window Openings
+                for w in &bim_project.walls {
+                    let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Wall, w.id));
+                    let z0 = bim_project.level_elevation(w.base_level_id) * 0.001;
+                    let z1 = w
+                        .top_level_id
+                        .map(|tid| bim_project.level_elevation(tid))
+                        .unwrap_or_else(|| bim_project.level_elevation(w.base_level_id) + w.unconnected_height_mm)
+                        * 0.001;
+                    if let (Some(b0), Some(b1), Some(t1), Some(t0)) = (
+                        proj_mm(w.start.0, w.start.1, z0),
+                        proj_mm(w.end.0, w.end.1, z0),
+                        proj_mm(w.end.0, w.end.1, z1),
+                        proj_mm(w.start.0, w.start.1, z1),
                     ) {
-                        if v0 && v1 && rect.expand(40.0).contains(p1) {
+                        if [b0, b1, t1, t0].iter().any(|p| rect.expand(60.0).contains(*p)) {
+                            let wall_fill = if is_sel {
+                                Color32::from_rgba_unmultiplied(56, 189, 248, 125)
+                            } else if w.is_structural {
+                                Color32::from_rgba_unmultiplied(100, 116, 139, 130)
+                            } else {
+                                Color32::from_rgba_unmultiplied(148, 163, 184, 95)
+                            };
+                            let wall_stroke = if is_sel {
+                                Stroke::new(2.3, Color32::from_rgb(56, 189, 248))
+                            } else {
+                                Stroke::new(1.3, Color32::from_rgba_unmultiplied(226, 232, 240, 185))
+                            };
+                            clip_painter.add(egui::Shape::convex_polygon(
+                                vec![b0, b1, t1, t0],
+                                wall_fill,
+                                wall_stroke,
+                            ));
+                            // Render CSG Door/Window Openings directly on the 3D wall face
+                            let len_mm = w.length_mm().max(1.0);
+                            for op in &w.openings {
+                                let u0 = (op.offset_along_mm / len_mm).clamp(0.0, 1.0);
+                                let u1 = ((op.offset_along_mm + op.width_mm) / len_mm).clamp(0.0, 1.0);
+                                let oz0 = z0 + op.sill_height_mm * 0.001;
+                                let oz1 = oz0 + op.height_mm * 0.001;
+                                let x0 = w.start.0 + (w.end.0 - w.start.0) * u0;
+                                let y0 = w.start.1 + (w.end.1 - w.start.1) * u0;
+                                let x1 = w.start.0 + (w.end.0 - w.start.0) * u1;
+                                let y1 = w.start.1 + (w.end.1 - w.start.1) * u1;
+                                if let (Some(ob0), Some(ob1), Some(ot1), Some(ot0)) = (
+                                    proj_mm(x0, y0, oz0),
+                                    proj_mm(x1, y1, oz0),
+                                    proj_mm(x1, y1, oz1),
+                                    proj_mm(x0, y0, oz1),
+                                ) {
+                                    let is_door = matches!(
+                                        op.kind,
+                                        crate::core::OpeningKind::SingleDoor
+                                            | crate::core::OpeningKind::DoubleDoor
+                                            | crate::core::OpeningKind::SlidingDoor
+                                    );
+                                    let (ofill, ocol) = if is_door {
+                                        (
+                                            Color32::from_rgba_unmultiplied(245, 158, 11, 115),
+                                            Color32::from_rgb(251, 191, 36),
+                                        )
+                                    } else {
+                                        (
+                                            Color32::from_rgba_unmultiplied(56, 189, 248, 125),
+                                            Color32::from_rgb(125, 211, 252),
+                                        )
+                                    };
+                                    clip_painter.add(egui::Shape::convex_polygon(
+                                        vec![ob0, ob1, ot1, ot0],
+                                        ofill,
+                                        Stroke::new(1.2, ocol),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 6D. Structural Columns (3D Extruded Prisms at Ground Scale, Bold Shafts from Orbit)
+                for col in &bim_project.columns {
+                    let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Column, col.id));
+                    let base_m = bim_project.level_elevation(col.base_level_id) * 0.001;
+                    let top_m = bim_project.level_elevation(col.top_level_id) * 0.001;
+                    let col_color = lens_color(
+                        crate::core::BimElementKind::Column,
+                        col.id,
+                        level_rank(col.base_level_id),
+                        Color32::from_rgba_unmultiplied(56, 189, 248, 235),
+                        is_sel,
+                    );
+                    if self.world_map.zoom_level >= 16.5 {
+                        let ring = col.footprint_ring();
+                        let b_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_mm(p.0, p.1, base_m)).collect();
+                        let t_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_mm(p.0, p.1, top_m)).collect();
+                        if b_pts.len() == 4 && t_pts.len() == 4 && t_pts.iter().any(|p| rect.expand(45.0).contains(*p)) {
+                            let side_fill = col_color.gamma_multiply(0.32);
+                            for i in 0..4 {
+                                let ni = (i + 1) % 4;
+                                clip_painter.add(egui::Shape::convex_polygon(
+                                    vec![b_pts[i], b_pts[ni], t_pts[ni], t_pts[i]],
+                                    side_fill,
+                                    Stroke::new(if is_sel { 1.8 } else { 1.0 }, col_color),
+                                ));
+                            }
+                            clip_painter.add(egui::Shape::convex_polygon(
+                                t_pts,
+                                col_color.gamma_multiply(0.55),
+                                Stroke::new(if is_sel { 2.2 } else { 1.2 }, Color32::WHITE.gamma_multiply(0.7)),
+                            ));
+                        }
+                    }
+                    if let (Some(p0), Some(p1)) = (
+                        proj_mm(col.pos.0, col.pos.1, base_m),
+                        proj_mm(col.pos.0, col.pos.1, top_m),
+                    ) {
+                        if rect.expand(45.0).contains(p0) || rect.expand(45.0).contains(p1) {
                             clip_painter.line_segment(
                                 [p0, p1],
-                                Stroke::new(2.0, Color32::from_rgba_unmultiplied(56, 189, 248, 220)),
+                                Stroke::new(if is_sel { 4.2 } else { 2.4 }, col_color),
+                            );
+                            if is_sel {
+                                clip_painter.circle_stroke(p1, 10.0, Stroke::new(1.8, Color32::WHITE));
+                                clip_painter.text(
+                                    p1 + Vec2::new(0.0, -14.0),
+                                    Align2::CENTER_BOTTOM,
+                                    &col.name,
+                                    egui::FontId::monospace(10.0),
+                                    Color32::WHITE,
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // 6E. Structural Beams / Runs
+                for run in &bim_project.runs {
+                    let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Run, run.id));
+                    let elev_m = bim_project.level_elevation(run.level_id) * 0.001;
+                    if let (Some(p0), Some(p1)) = (
+                        proj_mm(run.start.0, run.start.1, elev_m),
+                        proj_mm(run.end.0, run.end.1, elev_m),
+                    ) {
+                        if rect.expand(45.0).contains(p0) || rect.expand(45.0).contains(p1) {
+                            let beam_col = lens_color(
+                                crate::core::BimElementKind::Run,
+                                run.id,
+                                level_rank(run.level_id),
+                                theme.accent_green.gamma_multiply(0.92),
+                                is_sel,
+                            );
+                            clip_painter.line_segment(
+                                [p0, p1],
+                                Stroke::new(if is_sel { 4.2 } else { 2.3 }, beam_col),
                             );
                         }
                     }
                 }
-                for run in &bim_project.runs {
-                    let s_ll = SlippyMapState::world_mm_to_lat_lon(
-                        self.ground_origin_lat_lon,
-                        [run.start.0, run.start.1],
-                    );
-                    let e_ll = SlippyMapState::world_mm_to_lat_lon(
-                        self.ground_origin_lat_lon,
-                        [run.end.0, run.end.1],
-                    );
-                    let elev_m = bim_project.level_elevation(run.level_id) * 0.001 * lift_scale;
-                    if let (Some((p0, _, v0)), Some((p1, _, v1))) = (
-                        xf.project_lat_lon_elev(s_ll.0, s_ll.1, elev_m),
-                        xf.project_lat_lon_elev(e_ll.0, e_ll.1, elev_m),
-                    ) {
-                        if (v0 || v1) && (rect.expand(40.0).contains(p0) || rect.expand(40.0).contains(p1)) {
-                            clip_painter.line_segment(
-                                [p0, p1],
-                                Stroke::new(1.8, theme.accent_green.gamma_multiply(0.9)),
-                            );
+
+                // 6F. Live 3D Wireframe Ghost Preview on Earth 3D Surface
+                if self.earth_bim_author.active_tool != EarthBimTool::None {
+                    if let Some(snap_pt) = self.earth_bim_author.hover_snap_mm {
+                        let base_m = bim_project.level_elevation(self.earth_bim_author.base_level_id) * 0.001;
+                        let top_m = bim_project.level_elevation(self.earth_bim_author.top_level_id) * 0.001;
+                        let top_z = if (top_m - base_m).abs() < 0.2 { base_m + 3.5 } else { top_m };
+                        let ghost_col = Color32::from_rgb(0, 240, 255);
+                        let ghost_stroke = Stroke::new(1.8, ghost_col);
+
+                        if let Some(sp) = proj_mm(snap_pt[0], snap_pt[1], base_m) {
+                            clip_painter.circle_stroke(sp, 6.5, ghost_stroke);
+                            clip_painter.circle_filled(sp, 2.5, ghost_col);
+                        }
+
+                        match self.earth_bim_author.active_tool {
+                            EarthBimTool::Column => {
+                                let hw = self.earth_bim_author.col_width_mm * 0.5;
+                                let hd = self.earth_bim_author.col_depth_mm * 0.5;
+                                let corners = [
+                                    (snap_pt[0] - hw, snap_pt[1] - hd),
+                                    (snap_pt[0] + hw, snap_pt[1] - hd),
+                                    (snap_pt[0] + hw, snap_pt[1] + hd),
+                                    (snap_pt[0] - hw, snap_pt[1] + hd),
+                                ];
+                                let b_pts: Vec<Pos2> = corners.iter().filter_map(|(x, y)| proj_mm(*x, *y, base_m)).collect();
+                                let t_pts: Vec<Pos2> = corners.iter().filter_map(|(x, y)| proj_mm(*x, *y, top_z)).collect();
+                                if b_pts.len() == 4 && t_pts.len() == 4 {
+                                    for i in 0..4 {
+                                        let ni = (i + 1) % 4;
+                                        clip_painter.line_segment([b_pts[i], b_pts[ni]], ghost_stroke);
+                                        clip_painter.line_segment([t_pts[i], t_pts[ni]], ghost_stroke);
+                                        clip_painter.line_segment([b_pts[i], t_pts[i]], ghost_stroke);
+                                    }
+                                }
+                            }
+                            EarthBimTool::Footing => {
+                                let hs = self.earth_bim_author.footing_size_mm * 0.5;
+                                let corners = [
+                                    (snap_pt[0] - hs, snap_pt[1] - hs),
+                                    (snap_pt[0] + hs, snap_pt[1] - hs),
+                                    (snap_pt[0] + hs, snap_pt[1] + hs),
+                                    (snap_pt[0] - hs, snap_pt[1] + hs),
+                                ];
+                                let pts: Vec<Pos2> = corners.iter().filter_map(|(x, y)| proj_mm(*x, *y, base_m)).collect();
+                                if pts.len() == 4 {
+                                    clip_painter.add(egui::Shape::convex_polygon(
+                                        pts,
+                                        Color32::from_rgba_unmultiplied(0, 240, 255, 40),
+                                        ghost_stroke,
+                                    ));
+                                }
+                            }
+                            EarthBimTool::Wall | EarthBimTool::Beam => {
+                                if let Some(s) = self.earth_bim_author.pending_start_mm {
+                                    let z_draw = if self.earth_bim_author.active_tool == EarthBimTool::Beam {
+                                        top_z
+                                    } else {
+                                        base_m
+                                    };
+                                    if let (Some(p0), Some(p1)) = (
+                                        proj_mm(s[0], s[1], z_draw),
+                                        proj_mm(snap_pt[0], snap_pt[1], z_draw),
+                                    ) {
+                                        clip_painter.line_segment([p0, p1], Stroke::new(2.5, ghost_col));
+                                        if self.earth_bim_author.active_tool == EarthBimTool::Wall {
+                                            if let (Some(t0), Some(t1)) = (
+                                                proj_mm(s[0], s[1], top_z),
+                                                proj_mm(snap_pt[0], snap_pt[1], top_z),
+                                            ) {
+                                                clip_painter.add(egui::Shape::convex_polygon(
+                                                    vec![p0, p1, t1, t0],
+                                                    Color32::from_rgba_unmultiplied(0, 240, 255, 42),
+                                                    ghost_stroke,
+                                                ));
+                                            }
+                                        }
+                                        let len_m = (snap_pt[0] - s[0]).hypot(snap_pt[1] - s[1]) * 0.001;
+                                        let mid = Pos2::new((p0.x + p1.x) * 0.5, (p0.y + p1.y) * 0.5 - 10.0);
+                                        clip_painter.text(
+                                            mid,
+                                            Align2::CENTER_BOTTOM,
+                                            format!("{len_m:.2} m"),
+                                            egui::FontId::monospace(10.5),
+                                            ghost_col,
+                                        );
+                                    }
+                                }
+                            }
+                            EarthBimTool::None => {}
                         }
                     }
                 }
@@ -5149,7 +5698,8 @@ impl UniversalCanvasState {
         }
     }
 
-    /// Screen-space hit-testing against projected BIM Columns, Beams/Runs, Walls, and Footings.
+    /// Screen-space hit-testing against projected BIM Columns, Beams/Runs, Walls, Slabs, and Footings
+    /// across both tilted 3D Earth projections and orthographic ground projections.
     pub fn pick_bim_element_at_screen(
         &self,
         pos: Pos2,
@@ -5168,7 +5718,116 @@ impl UniversalCanvasState {
             let t = ((p - a).dot(ab) / len_sq).clamp(0.0, 1.0);
             p.distance(a + ab * t)
         };
+        let point_in_poly = |pt: Pos2, poly: &[Pos2]| -> bool {
+            if poly.len() < 3 {
+                return false;
+            }
+            let mut inside = false;
+            let mut j = poly.len() - 1;
+            for i in 0..poly.len() {
+                let pi = poly[i];
+                let pj = poly[j];
+                if ((pi.y > pt.y) != (pj.y > pt.y))
+                    && (pt.x < (pj.x - pi.x) * (pt.y - pi.y) / ((pj.y - pi.y) + 1e-6) + pi.x)
+                {
+                    inside = !inside;
+                }
+                j = i;
+            }
+            inside
+        };
 
+        // Height-aware 3D Earth Globe picking when rendering in Earth 3D
+        if self.globe_mode && self.ground_origin_anchored {
+            if let Some(ref xf) = self.last_globe_xform {
+                let lift_scale = if self.world_map.zoom_level < 14.5 { 8.0 } else { 1.0 };
+                let proj_mm = |x_mm: f64, y_mm: f64, elev_m: f64| -> Option<Pos2> {
+                    let ll = SlippyMapState::world_mm_to_lat_lon(self.ground_origin_lat_lon, [x_mm, y_mm]);
+                    xf.project_lat_lon_elev(ll.0, ll.1, elev_m * lift_scale)
+                        .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
+                };
+
+                // 1. Columns (3D vertical shaft)
+                let mut best_col: Option<(f32, usize)> = None;
+                for c in &bim_project.columns {
+                    let z0 = bim_project.level_elevation(c.base_level_id) * 0.001;
+                    let z1 = bim_project.level_elevation(c.top_level_id) * 0.001;
+                    if let (Some(p0), Some(p1)) = (proj_mm(c.pos.0, c.pos.1, z0), proj_mm(c.pos.0, c.pos.1, z1)) {
+                        let d = seg_dist(pos, p0, p1);
+                        if d <= 18.0 && best_col.is_none_or(|(bd, _)| d < bd) {
+                            best_col = Some((d, c.id));
+                        }
+                    }
+                }
+                if let Some((_, id)) = best_col {
+                    return Some((crate::core::BimElementKind::Column, id));
+                }
+
+                // 2. Beams / Runs (at elevated storey height)
+                let mut best_run: Option<(f32, usize)> = None;
+                for r in &bim_project.runs {
+                    let z = bim_project.level_elevation(r.level_id) * 0.001;
+                    if let (Some(p0), Some(p1)) = (proj_mm(r.start.0, r.start.1, z), proj_mm(r.end.0, r.end.1, z)) {
+                        let d = seg_dist(pos, p0, p1);
+                        if d <= 14.0 && best_run.is_none_or(|(bd, _)| d < bd) {
+                            best_run = Some((d, r.id));
+                        }
+                    }
+                }
+                if let Some((_, id)) = best_run {
+                    return Some((crate::core::BimElementKind::Run, id));
+                }
+
+                // 3. Walls (3D extruded face quad or chords)
+                for w in bim_project.walls.iter().rev() {
+                    let z0 = bim_project.level_elevation(w.base_level_id) * 0.001;
+                    let z1 = w
+                        .top_level_id
+                        .map(|tid| bim_project.level_elevation(tid))
+                        .unwrap_or_else(|| bim_project.level_elevation(w.base_level_id) + w.unconnected_height_mm)
+                        * 0.001;
+                    if let (Some(b0), Some(b1), Some(t1), Some(t0)) = (
+                        proj_mm(w.start.0, w.start.1, z0),
+                        proj_mm(w.end.0, w.end.1, z0),
+                        proj_mm(w.end.0, w.end.1, z1),
+                        proj_mm(w.start.0, w.start.1, z1),
+                    ) {
+                        let quad = [b0, b1, t1, t0];
+                        if point_in_poly(pos, &quad)
+                            || seg_dist(pos, b0, b1) <= 10.0
+                            || seg_dist(pos, t0, t1) <= 10.0
+                        {
+                            return Some((crate::core::BimElementKind::Wall, w.id));
+                        }
+                    }
+                }
+
+                // 4. Footings
+                for f in &bim_project.footings {
+                    let z = bim_project.level_elevation(f.level_id) * 0.001;
+                    if let Some(sp) = proj_mm(f.pos.0, f.pos.1, z) {
+                        if pos.distance(sp) <= 18.0 {
+                            return Some((crate::core::BimElementKind::Footing, f.id));
+                        }
+                    }
+                }
+
+                // 5. Slabs / Roofs (elevated 3D polygon)
+                for sl in bim_project.slabs.iter().rev() {
+                    let z = bim_project.level_elevation(sl.level_id) * 0.001;
+                    let pts: Vec<Pos2> = sl
+                        .boundary
+                        .iter()
+                        .filter_map(|p| proj_mm(p.0, p.1, z))
+                        .collect();
+                    if point_in_poly(pos, &pts) {
+                        return Some((crate::core::BimElementKind::Slab, sl.id));
+                    }
+                }
+            }
+        }
+
+        // Orthographic fallback picking
         // 1. Columns (highest priority at grid intersections)
         let mut best_col: Option<(f32, usize)> = None;
         for c in &bim_project.columns {
@@ -5235,7 +5894,7 @@ impl UniversalCanvasState {
             return Some((crate::core::BimElementKind::Footing, id));
         }
 
-        // 5. Floor Slabs / Roofs (reverse order prefers top-most/latest slab in 2D plan)
+        // 5. Floor Slabs / Roofs (reverse order prefers top-most/latest slab)
         for sl in bim_project.slabs.iter().rev() {
             if sl.boundary.len() < 3 {
                 continue;
@@ -5245,19 +5904,7 @@ impl UniversalCanvasState {
                 .iter()
                 .map(|p| self.world_to_screen(rect, [p.0, p.1]))
                 .collect();
-            let mut inside = false;
-            let mut j = pts.len() - 1;
-            for i in 0..pts.len() {
-                let pi = pts[i];
-                let pj = pts[j];
-                if ((pi.y > pos.y) != (pj.y > pos.y))
-                    && (pos.x < (pj.x - pi.x) * (pos.y - pi.y) / ((pj.y - pi.y) + 1e-6) + pi.x)
-                {
-                    inside = !inside;
-                }
-                j = i;
-            }
-            if inside {
+            if point_in_poly(pos, &pts) {
                 return Some((crate::core::BimElementKind::Slab, sl.id));
             }
         }

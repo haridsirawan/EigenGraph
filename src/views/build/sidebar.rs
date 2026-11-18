@@ -335,10 +335,14 @@ impl BuildView {
                 }
             });
         } else {
-            // Global System KPI View + Multi-LOD Convergence & Self-Learning Surrogate
+            // Global System KPI View + Live Self-Learning Surrogate
             let mem = crate::core::InternalVault::load_knowledge_memory();
-            let conv = crate::core::InternalVault::evaluate_nvw_multi_lod_convergence();
             let surrogate_ari = mem.predict_member_ari(62.0, 1.05, 5);
+            let live_min_ari = if members.is_empty() {
+                1.0
+            } else {
+                members.iter().map(|m| m.ari).fold(1.0_f64, f64::min)
+            };
 
             theme.card_frame().show(ui, |ui| {
                 ui.label(RichText::new("GLOBAL REDUNDANCY KPI").size(11.0).strong().color(theme.accent_blue));
@@ -346,9 +350,8 @@ impl BuildView {
 
                 let sys_rows = [
                     ("Selected Model", self.active_model.label().to_string()),
-                    ("Redundancy Index (Global ARI)", "0.892 (Robust)".to_string()),
+                    ("Redundancy Index (Global ARI)", format!("{:.3}", live_min_ari)),
                     ("AI Surrogate Prediction (Memory)", format!("{:.3} ({} Cycles)", surrogate_ari, mem.total_ari_evaluations)),
-                    ("LOD 100 -> 300 Convergence", format!("+{:.1}% ARI ({:.1}x κ)", conv.ari_gain_lod100_to_lod300_pct, conv.kappa_reduction_ratio)),
                     ("Auto-Checkpoints (InternalVault)", format!("{}x Autosaved", mem.total_autosaves_count)),
                     ("Eliminated Members (Disrupted)", format!("N-{}", self.simulated_eliminated_ids.len())),
                 ];

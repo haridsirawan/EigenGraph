@@ -221,7 +221,6 @@ impl InternalVault {
     /// Sets an in-memory runtime vault path override (without saving to persistent config).
     pub fn set_runtime_vault_dir(path: PathBuf) {
         let _ = std::fs::create_dir_all(&path);
-        Self::ensure_vault_notice(&path);
         if let Ok(mut lock) = RUNTIME_VAULT_OVERRIDE.write() {
             *lock = Some(path);
         }
@@ -261,7 +260,6 @@ impl InternalVault {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let _ = std::fs::create_dir_all(&path);
-            Self::ensure_vault_notice(&path);
         }
 
         let mut cfg = Self::load_config();
@@ -410,7 +408,6 @@ impl InternalVault {
             let _ = force_indexeddb;
             std::fs::create_dir_all(&path)
                 .map_err(|e| format!("Failed to create Vault directory {}: {}", path.display(), e))?;
-            Self::ensure_vault_notice(&path);
             let mut cfg = Self::load_config();
             let resolved_name = vault_name
                 .filter(|s| !s.trim().is_empty())
@@ -499,111 +496,181 @@ impl InternalVault {
                 return Vec::new();
             }
             let root = Self::vault_root_dir();
-            let mut out = Vec::new();
-            let scan_dirs: Vec<(PathBuf, &str, bool)> = vec![
-                (root.join("Projects"), "Projects", false),
-                (root.clone(), "Vault Root", true),
-            ];
-            for (dir, cat_label, eigen_only) in scan_dirs {
-                let Ok(entries) = std::fs::read_dir(&dir) else {
+            Self::list_personal_vault_projects_at(&root)
+        }
+    }
+
+    /// Recursively scans a Vault directory root for `.eigen`, `.eigen.json`, project `.json`,
+    /// and OpenBIM `.ifc` models across all nested subfolders.
+    pub fn list_personal_vault_projects_at(root: &Path) -> Vec<PersonalVaultProjectEntry> {
+        let mut out = Vec::new();
+        let shard_dirs = ["Columns", "Beams", "Slabs", "Walls", "Footings", "Rebar"];
+
+        fn walk_dir(
+            root: &Path,
+            dir: &Path,
+            depth: usize,
+            shard_dirs: &[&str],
+            out: &mut Vec<PersonalVaultProjectEntry>,
+        ) {
+            if depth > 6 {
+                return;
+            }
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Some(fname) = path.file_name().and_then(|s| s.to_str()) else {
                     continue;
                 };
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if !path.is_file() {
-                        continue;
-                    }
-                    let Some(fname) = path.file_name().and_then(|s| s.to_str()) else {
-                        continue;
-                    };
-                    if fname.starts_with('.') {
-                        continue;
-                    }
-                    let lower = fname.to_lowercase();
-                    let is_eigen = lower.ends_with(".eigen") || lower.ends_with(".eigen.json");
-                    let is_json = lower.ends_with(".json");
-                    if eigen_only && !is_eigen {
-                        continue;
-                    }
-                    if !is_eigen && !is_json {
-                        continue;
-                    }
-                    let Ok(raw) = std::fs::read_to_string(&path) else {
-                        continue;
-                    };
-                    let size_bytes = raw.len();
-                    let mut display_name = fname
-                        .trim_end_matches(".eigen.json")
-                        .trim_end_matches(".eigen")
-                        .trim_end_matches(".json")
-                        .to_string();
-                    let mut node_count = 0usize;
-                    let mut member_count = 0usize;
+                if fname.starts_with('.') {
+                    continue;
+                }
+                if path.is_dir() {
+                    walk_dir(root, &path, depth + 1, shard_dirs, out);
+                    continue;
+                }
+                if !path.is_file() {
+                    continue;
+                }
+                let lower = fname.to_lowercase();
+                let is_ifc = lower.ends_with(".ifc");
+                let is_eigen = lower.ends_with(".eigen") || lower.ends_with(".eigen.json");
+                let is_json = lower.ends_with(".json");
+                if !is_ifc && !is_eigen && !is_json {
+                    continue;
+                }
+                let rel_path = path
+                    .strip_prefix(root)
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_else(|_| fname.to_string());
+                let top_folder = rel_path.split('/').next().unwrap_or("Vault Root");
+                let in_shard = rel_path.contains('/') && shard_dirs.contains(&top_folder);
+                if is_json && !is_eigen && (in_shard || fname == "active_live_project.json" || top_folder != "Projects") {
+                    continue;
+                }
 
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
-                        if let Some(bim) = val.get("bim_project") {
-                            if let Some(pname) = val.get("project_name").and_then(|v| v.as_str()) {
-                                if !pname.trim().is_empty() {
-                                    display_name = pname.trim().to_string();
-                                }
-                            }
-                            let walls = bim.get("walls").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let cols = bim.get("columns").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let runs = bim.get("runs").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let slabs = bim.get("slabs").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let footings = bim.get("footings").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let levels = bim.get("levels").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let grids = bim.get("grid_lines").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let members_len = val.get("members").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let canvas_len = val.get("canvas_entities").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                            node_count = levels + grids + canvas_len;
-                            member_count = walls + cols + runs + slabs + footings + members_len;
-                        } else if let Ok(model) = EigenProjectArchive::deserialize_from_eigen_json(&raw) {
-                            if !model.name.trim().is_empty() {
-                                display_name = model.name.clone();
-                            }
-                            node_count = model.nodes.len();
-                            member_count = model.elements.len();
-                        } else if let Ok(model) = serde_json::from_str::<StructuralModel>(&raw) {
-                            if !model.name.trim().is_empty() {
-                                display_name = model.name.clone();
-                            }
-                            node_count = model.nodes.len();
-                            member_count = model.elements.len();
-                        } else if is_json && fname != "active_live_project.json" {
-                            if let Some(pname) = val.get("project_name").and_then(|v| v.as_str()) {
-                                if !pname.trim().is_empty() {
-                                    display_name = pname.to_string();
-                                }
-                            }
-                            let cols = val.get("columns").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let runs = val.get("runs").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-                            member_count = cols + runs;
+                let Ok(raw) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let size_bytes = raw.len();
+                let cat_label = if rel_path.contains('/') {
+                    top_folder.to_string()
+                } else {
+                    "Vault Root".to_string()
+                };
+
+                if is_ifc {
+                    let clean_raw = raw.trim_start_matches('\u{FEFF}');
+                    let mut display_name = fname
+                        .trim_end_matches(".ifc")
+                        .trim_end_matches(".IFC")
+                        .to_string();
+                    let mut member_count = 0usize;
+                    // Fast metadata extraction (without stalling UI on very large models)
+                    let upper = clean_raw.to_ascii_uppercase();
+                    let node_count = upper.matches("=IFCBUILDINGSTOREY(").count()
+                        + upper.matches("= IFCBUILDINGSTOREY(").count();
+                    for pat in [
+                        "IFCWALL", "IFCCOLUMN", "IFCBEAM", "IFCSLAB",
+                        "IFCFOOTING", "IFCMEMBER", "IFCROOF", "IFCDOOR", "IFCWINDOW",
+                    ] {
+                        member_count += upper.matches(&format!("={pat}(")).count()
+                            + upper.matches(&format!("= {pat}(")).count();
+                    }
+                    if let Some(pos) = upper.find("IFCPROJECT(") {
+                        let tail = &clean_raw[pos..clean_raw.len().min(pos + 240)];
+                        let quotes: Vec<&str> = tail.split('\'').collect();
+                        if quotes.len() >= 4 && !quotes[3].trim().is_empty() {
+                            display_name = quotes[3].trim().to_string();
                         }
                     }
-
-                    let rel_path = if cat_label == "Projects" {
-                        format!("Projects/{fname}")
-                    } else {
-                        fname.to_string()
-                    };
-
                     out.push(PersonalVaultProjectEntry {
-                        name: display_name,
+                        name: format!("{display_name} [IFC]"),
                         filename: fname.to_string(),
                         rel_path,
                         abs_path: path.to_string_lossy().to_string(),
-                        category: cat_label.to_string(),
+                        category: if cat_label == "Vault Root" {
+                            "IFC Model".to_string()
+                        } else {
+                            cat_label
+                        },
                         node_count,
                         member_count,
                         size_bytes,
-                        updated_label: "Local Disk".to_string(),
+                        updated_label: "Local Disk (IFC)".to_string(),
                     });
+                    continue;
                 }
+
+                let mut display_name = fname
+                    .trim_end_matches(".eigen.json")
+                    .trim_end_matches(".eigen")
+                    .trim_end_matches(".json")
+                    .to_string();
+                let mut node_count = 0usize;
+                let mut member_count = 0usize;
+
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    if let Some(bim) = val.get("bim_project") {
+                        if let Some(pname) = val.get("project_name").and_then(|v| v.as_str()) {
+                            if !pname.trim().is_empty() {
+                                display_name = pname.trim().to_string();
+                            }
+                        }
+                        let walls = bim.get("walls").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                        let cols = bim.get("columns").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                        let runs = bim.get("runs").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                        let slabs = bim.get("slabs").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                        let footings = bim.get("footings").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                        let levels = bim.get("levels").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                        let grids = bim.get("grid_lines").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                        let members_len = val.get("members").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                        let canvas_len = val.get("canvas_entities").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                        node_count = levels + grids + canvas_len;
+                        member_count = walls + cols + runs + slabs + footings + members_len;
+                    } else if let Ok(model) = EigenProjectArchive::deserialize_from_eigen_json(&raw) {
+                        if !model.name.trim().is_empty() {
+                            display_name = model.name.clone();
+                        }
+                        node_count = model.nodes.len();
+                        member_count = model.elements.len();
+                    } else if let Ok(model) = serde_json::from_str::<StructuralModel>(&raw) {
+                        if !model.name.trim().is_empty() {
+                            display_name = model.name.clone();
+                        }
+                        node_count = model.nodes.len();
+                        member_count = model.elements.len();
+                    } else if is_json && fname != "active_live_project.json" {
+                        if let Some(pname) = val.get("project_name").and_then(|v| v.as_str()) {
+                            if !pname.trim().is_empty() {
+                                display_name = pname.to_string();
+                            }
+                        }
+                        let cols = val.get("columns").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                        let runs = val.get("runs").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+                        member_count = cols + runs;
+                    }
+                }
+
+                out.push(PersonalVaultProjectEntry {
+                    name: display_name,
+                    filename: fname.to_string(),
+                    rel_path,
+                    abs_path: path.to_string_lossy().to_string(),
+                    category: cat_label,
+                    node_count,
+                    member_count,
+                    size_bytes,
+                    updated_label: "Local Disk".to_string(),
+                });
             }
-            out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-            out
         }
+
+        walk_dir(root, root, 0, &shard_dirs, &mut out);
+        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        out
     }
 
     /// Loads a `StructuralModel` from a personal Vault project entry.
@@ -676,33 +743,32 @@ impl InternalVault {
             }
             let root = Self::vault_root_dir();
             let mut out = Vec::new();
-            let mut scan_dirs: Vec<(String, PathBuf)> = vec![("Vault Root".to_string(), root.clone())];
-            if let Ok(top_entries) = std::fs::read_dir(&root) {
-                for entry in top_entries.flatten() {
-                    let p = entry.path();
-                    if p.is_dir() {
-                        if let Some(dname) = p.file_name().and_then(|s| s.to_str()) {
-                            if !dname.starts_with('.') {
-                                scan_dirs.push((dname.to_string(), p));
-                            }
-                        }
-                    }
+            fn scan_ctx(root: &Path, dir: &Path, depth: usize, limit: usize, out: &mut Vec<VaultContextFileEntry>) {
+                if depth > 6 || out.len() >= limit {
+                    return;
                 }
-            }
-            for (cat, dir) in scan_dirs {
-                let Ok(entries) = std::fs::read_dir(&dir) else {
-                    continue;
+                let Ok(entries) = std::fs::read_dir(dir) else {
+                    return;
                 };
                 for entry in entries.flatten() {
-                    let p = entry.path();
-                    if !p.is_file() {
-                        continue;
+                    if out.len() >= limit {
+                        break;
                     }
+                    let p = entry.path();
                     let Some(fname) = p.file_name().and_then(|s| s.to_str()) else {
                         continue;
                     };
-                    if fname.starts_with('.')
-                        || fname == "_VAULT_NOTICE.txt"
+                    if fname.starts_with('.') {
+                        continue;
+                    }
+                    if p.is_dir() {
+                        scan_ctx(root, &p, depth + 1, limit, out);
+                        continue;
+                    }
+                    if !p.is_file() {
+                        continue;
+                    }
+                    if fname == "_VAULT_NOTICE.txt"
                         || fname == "BACA_SAYA_JANGAN_HAPUS.txt"
                         || fname == "README_DO_NOT_DELETE.txt"
                         || fname == "active_live_project.json"
@@ -720,25 +786,24 @@ impl InternalVault {
                         continue;
                     }
                     let size_bytes = std::fs::metadata(&p).map(|m| m.len() as usize).unwrap_or(0);
-                    let rel_path = if cat == "Vault Root" {
-                        fname.to_string()
+                    let rel_path = p
+                        .strip_prefix(root)
+                        .map(|rp| rp.to_string_lossy().replace('\\', "/"))
+                        .unwrap_or_else(|_| fname.to_string());
+                    let cat = if rel_path.contains('/') {
+                        rel_path.split('/').next().unwrap_or("Vault").to_string()
                     } else {
-                        format!("{cat}/{fname}")
+                        "Vault Root".to_string()
                     };
                     out.push(VaultContextFileEntry {
                         name: fname.to_string(),
-                        category: cat.to_string(),
+                        category: cat,
                         rel_path,
                         size_bytes,
                     });
-                    if out.len() >= limit {
-                        break;
-                    }
-                }
-                if out.len() >= limit {
-                    break;
                 }
             }
+            scan_ctx(&root, &root, 0, limit.saturating_mul(2).max(limit), &mut out);
             out.sort_by(|a, b| a.rel_path.to_lowercase().cmp(&b.rel_path.to_lowercase()));
             out.truncate(limit);
             out
@@ -864,7 +929,6 @@ impl InternalVault {
             if let Ok(lock) = RUNTIME_VAULT_OVERRIDE.read() {
                 if let Some(ref path) = *lock {
                     let _ = std::fs::create_dir_all(path);
-                    Self::ensure_vault_notice(path);
                     return path.clone();
                 }
             }
@@ -884,7 +948,6 @@ impl InternalVault {
                 if let Some(ref custom_str) = cfg.custom_vault_path {
                     let custom_path = PathBuf::from(custom_str);
                     if std::fs::create_dir_all(&custom_path).is_ok() {
-                        Self::ensure_vault_notice(&custom_path);
                         return custom_path;
                     }
                 }
@@ -892,38 +955,14 @@ impl InternalVault {
                 // 3. User Documents folder
                 let default_dir = Self::default_vault_dir();
                 if std::fs::create_dir_all(&default_dir).is_ok() {
-                    Self::ensure_vault_notice(&default_dir);
                     return default_dir;
                 }
 
                 // 4. Temporary fallback
                 let tmp_vault = PathBuf::from("/tmp/EigenGraph_Vault");
                 let _ = std::fs::create_dir_all(&tmp_vault);
-                Self::ensure_vault_notice(&tmp_vault);
                 tmp_vault
             }
-        }
-    }
-
-    /// Writes `README_DO_NOT_DELETE.txt` at the root of the Vault to prevent accidental deletion.
-    pub fn ensure_vault_notice(root: &Path) {
-        let notice_file = root.join("README_DO_NOT_DELETE.txt");
-        if !notice_file.exists() && !root.join("BACA_SAYA_JANGAN_HAPUS.txt").exists() {
-            let text = r#"======================================================================
-⚛️ EIGENGRAPH ASSET & ENGINEERING KNOWLEDGE VAULT
-======================================================================
-This folder is your Parametric Library Database & Engineering Research Vault.
-All columns, beams, slabs, walls, rebars, materials, hydraulic structures,
-and Adjusted Redundancy Index (ARI) analyses created in EigenGraph are
-automatically stored and organized here.
-
-WARNING:
-DO NOT DELETE THIS FOLDER to prevent loss of your model data and project assets.
-
-This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
-======================================================================
-"#;
-            let _ = std::fs::write(&notice_file, text);
         }
     }
 
@@ -1090,19 +1129,6 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
         let _ = std::fs::create_dir_all(root.join("KnowledgeBase"));
         let _ = std::fs::create_dir_all(root.join("Exports"));
         let _ = std::fs::create_dir_all(root.join("AI_Context"));
-        Self::ensure_vault_notice(&root);
-        let welcome = root.join("KnowledgeBase").join("Welcome.md");
-        if !welcome.exists() {
-            let _ = std::fs::write(
-                &welcome,
-                "# EigenGraph Engineering Vault\n\n\
-                 This Vault follows a clean Obsidian-style layout:\n\
-                 - `Projects/` — Structural BIM & FEM models (`.eigen`)\n\
-                 - `KnowledgeBase/` — Codes, design notes & AI context docs (`.md`, `.csv`)\n\
-                 - `Exports/` — IFC models, engineering schedules & snapshots\n\
-                 - `AI_Context/` — Dynamic Island session transcripts & prompt context\n",
-            );
-        }
         root
     }
 
@@ -1391,7 +1417,6 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
     pub fn restructure_and_organize_vault() -> Result<VaultOrganizeReport, String> {
         let root = Self::vault_root_dir();
         let _ = Self::ensure_subdirectories();
-        Self::ensure_vault_notice(&root);
 
         let mut total_scanned = 0;
         let mut files_reorganized = 0;
@@ -1579,13 +1604,6 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
             std::fs::remove_file(&path).map_err(|e| format!("Failed to delete file {}: {e}", path.display()))?;
         }
         Ok(())
-    }
-
-    pub fn demo_nvw_dir() -> PathBuf {
-        let root = Self::vault_root_dir();
-        let dir = root.join("Imports");
-        let _ = std::fs::create_dir_all(&dir);
-        dir
     }
 
     pub fn projects_dir() -> PathBuf {
@@ -1830,63 +1848,6 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
                 .display()
                 .to_string()
         })
-    }
-
-    /// Evaluates Multi-LOD Redundancy Convergence based on live structural progression.
-    pub fn evaluate_nvw_multi_lod_convergence() -> MultiLodConvergenceReport {
-        let stages = vec![
-            MultiLodStageMetrics {
-                lod_level: "LOD 100 (Conceptual Massing)".to_string(),
-                ifc_filename: "Concept_Massing.ifc".to_string(),
-                nodes_count: 24,
-                elements_count: 36,
-                static_indeterminacy_dsi: 18,
-                condition_number_kappa: 8.42e4,
-                avg_ari: 0.712,
-                min_system_ari: 0.584,
-                critical_members_count: 4,
-            },
-            MultiLodStageMetrics {
-                lod_level: "LOD 200 (Schematic Structural Grid)".to_string(),
-                ifc_filename: "Schematic_Frame.ifc".to_string(),
-                nodes_count: 148,
-                elements_count: 212,
-                static_indeterminacy_dsi: 245,
-                condition_number_kappa: 1.95e4,
-                avg_ari: 0.876,
-                min_system_ari: 0.782,
-                critical_members_count: 1,
-            },
-            MultiLodStageMetrics {
-                lod_level: "LOD 300 (Detailed Structure + Rebar)".to_string(),
-                ifc_filename: "Detailed_Frame_Rebar.ifc".to_string(),
-                nodes_count: 384,
-                elements_count: 620,
-                static_indeterminacy_dsi: 840,
-                condition_number_kappa: 4.18e3,
-                avg_ari: 0.942,
-                min_system_ari: 0.892,
-                critical_members_count: 0,
-            },
-        ];
-
-        let ari_100 = stages[0].min_system_ari;
-        let ari_300 = stages[2].min_system_ari;
-        let ari_gain_pct = ((ari_300 - ari_100) / ari_100) * 100.0;
-        let kappa_ratio = stages[0].condition_number_kappa / stages[2].condition_number_kappa;
-
-        MultiLodConvergenceReport {
-            building_name: "EigenGraph Engineering Knowledge Model".to_string(),
-            stages,
-            ari_gain_lod100_to_lod300_pct: ari_gain_pct,
-            kappa_reduction_ratio: kappa_ratio,
-            convergence_verdict: "STABLE CONVERGENCE: Integration of seismic reinforcement and beam continuity at LOD 300 increases ARI_min by +52.7% and reduces spectral condition ratio.".to_string(),
-        }
-    }
-
-    /// Viewport segment streaming helper for 3D visualization.
-    pub fn stream_nvw_dcr_lod200_viewport_segments() -> Option<Vec<((f32, f32, f32), (f32, f32, f32), String, String)>> {
-        None
     }
 
     /// Persists serialized Dynamic Island conversation archives inside `AI_Context/dynamic_island_sessions.json`
@@ -2298,12 +2259,6 @@ mod tests {
         assert!(saved_comp_path.ends_with("parametric_components.json"));
         assert_eq!(InternalVault::load_or_init_parametric_components().len(), 1);
 
-        // Verify Multi-LOD Convergence Engine
-        let conv = InternalVault::evaluate_nvw_multi_lod_convergence();
-        assert_eq!(conv.stages.len(), 3);
-        assert!(conv.ari_gain_lod100_to_lod300_pct > 40.0);
-        assert!(conv.kappa_reduction_ratio > 10.0);
-
         // Verify Self-Learning Surrogate Predictor & Live Checkpoint
         let mem = InternalVault::load_knowledge_memory();
         let pred_stocky = mem.predict_member_ari(45.0, 1.0, 6);
@@ -2327,16 +2282,10 @@ mod tests {
             .expect("Setting custom vault dir should succeed");
         assert_eq!(root, temp_vault);
 
-        // 1. Verify that README_DO_NOT_DELETE.txt or BACA_SAYA_JANGAN_HAPUS.txt is automatically generated
-        let notice_file = if temp_vault.join("README_DO_NOT_DELETE.txt").exists() {
-            temp_vault.join("README_DO_NOT_DELETE.txt")
-        } else {
-            temp_vault.join("BACA_SAYA_JANGAN_HAPUS.txt")
-        };
-        assert!(notice_file.exists(), "Protection notice file must exist at vault root");
-        let notice_content = std::fs::read_to_string(&notice_file).unwrap();
-        assert!(notice_content.contains("EIGENGRAPH ASSET & ENGINEERING KNOWLEDGE VAULT"));
-        assert!(notice_content.contains("DO NOT DELETE THIS FOLDER") || notice_content.contains("JANGAN MENGHAPUS FOLDER INI"));
+        // 1. Zero built-in demo or notice files are auto-generated inside user Vault folders
+        assert!(!temp_vault.join("README_DO_NOT_DELETE.txt").exists());
+        assert!(!temp_vault.join("_VAULT_NOTICE.txt").exists());
+        assert!(!temp_vault.join("KnowledgeBase/Welcome.md").exists());
 
         // 2. Test saving and dynamic auto-routing for a Column component
         #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

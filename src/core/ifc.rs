@@ -596,12 +596,37 @@ impl IfcModel {
             }
         }
 
-        // 4. Extract Placements
-        let mut axis2_placements: HashMap<usize, (usize, Option<usize>)> = HashMap::new();
+        // 4. Extract Placements & Indexed Point Lists (including full local-to-world basis frames)
+        let mut axis2_placements: HashMap<usize, (usize, Option<usize>, Option<usize>)> = HashMap::new();
         for ent in step_model.get_entities_of_type("IFCAXIS2PLACEMENT3D") {
             if let Some(loc_id) = ent.get_ref(0) {
                 let axis_id = ent.get_ref(1);
-                axis2_placements.insert(ent.id, (loc_id, axis_id));
+                let ref_dir_id = ent.get_ref(2);
+                axis2_placements.insert(ent.id, (loc_id, axis_id, ref_dir_id));
+            }
+        }
+        for ent in step_model.get_entities_of_type("IFCAXIS2PLACEMENT2D") {
+            if let Some(loc_id) = ent.get_ref(0) {
+                let ref_dir_id = ent.get_ref(1);
+                axis2_placements.insert(ent.id, (loc_id, None, ref_dir_id));
+            }
+        }
+
+        let mut point_lists_m: HashMap<usize, Vec<(f64, f64, f64)>> = HashMap::new();
+        for cls in ["IFCCARTESIANPOINTLIST3D", "IFCCARTESIANPOINTLIST2D"] {
+            for ent in step_model.get_entities_of_type(cls) {
+                if let Some(rows) = ent.parameters.first().and_then(|v| v.as_list()) {
+                    let mut pts = Vec::with_capacity(rows.len());
+                    for row in rows {
+                        if let Some(coords) = row.as_list() {
+                            let x = coords.first().and_then(|v| v.as_f64()).unwrap_or(0.0) * unit_scale;
+                            let y = coords.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0) * unit_scale;
+                            let z = coords.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0) * unit_scale;
+                            pts.push((x, y, z));
+                        }
+                    }
+                    point_lists_m.insert(ent.id, pts);
+                }
             }
         }
 
@@ -613,22 +638,45 @@ impl IfcModel {
             }
         }
 
-        // Helper to resolve cumulative global coordinates from an IfcLocalPlacement
-        let resolve_placement = |lp_id: usize| -> (f64, f64, f64) {
-            let mut gx = 0.0;
-            let mut gy = 0.0;
-            let mut gz = 0.0;
+        let cross = |a: (f64, f64, f64), b: (f64, f64, f64)| -> (f64, f64, f64) {
+            (a.1 * b.2 - a.2 * b.1, a.2 * b.0 - a.0 * b.2, a.0 * b.1 - a.1 * b.0)
+        };
+        let norm_v = |v: (f64, f64, f64), fallback: (f64, f64, f64)| -> (f64, f64, f64) {
+            let l = (v.0 * v.0 + v.1 * v.1 + v.2 * v.2).sqrt();
+            if l > 1e-9 { (v.0 / l, v.1 / l, v.2 / l) } else { fallback }
+        };
+        let axis_basis = |axis_id: usize| -> ((f64, f64, f64), (f64, f64, f64), (f64, f64, f64), (f64, f64, f64)) {
+            if let Some(&(pt_id, z_ref, x_ref)) = axis2_placements.get(&axis_id) {
+                let loc = cartesian_points.get(&pt_id).copied().unwrap_or((0.0, 0.0, 0.0));
+                let uz = z_ref
+                    .and_then(|id| directions.get(&id).copied())
+                    .map(|v| norm_v(v, (0.0, 0.0, 1.0)))
+                    .unwrap_or((0.0, 0.0, 1.0));
+                let raw_x = x_ref
+                    .and_then(|id| directions.get(&id).copied())
+                    .unwrap_or_else(|| if uz.2.abs() > 0.99 { (1.0, 0.0, 0.0) } else { (0.0, 0.0, 1.0) });
+                let dot_xz = raw_x.0 * uz.0 + raw_x.1 * uz.1 + raw_x.2 * uz.2;
+                let proj_x = (
+                    raw_x.0 - dot_xz * uz.0,
+                    raw_x.1 - dot_xz * uz.1,
+                    raw_x.2 - dot_xz * uz.2,
+                );
+                let ux = norm_v(proj_x, (1.0, 0.0, 0.0));
+                let uy = norm_v(cross(uz, ux), (0.0, 1.0, 0.0));
+                (loc, ux, uy, uz)
+            } else {
+                ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+            }
+        };
+
+        // Resolve cumulative global placement origin & orthonormal frame from an IfcLocalPlacement chain
+        let resolve_placement_frame = |lp_id: usize| -> ((f64, f64, f64), (f64, f64, f64), (f64, f64, f64), (f64, f64, f64)) {
+            let mut chain = Vec::new();
             let mut cur = Some(lp_id);
             let mut guard = 0;
             while let Some(cid) = cur {
                 if let Some(&(p_opt, axis_id)) = local_placements.get(&cid) {
-                    if let Some(&(pt_id, _)) = axis2_placements.get(&axis_id) {
-                        if let Some(&(px, py, pz)) = cartesian_points.get(&pt_id) {
-                            gx += px;
-                            gy += py;
-                            gz += pz;
-                        }
-                    }
+                    chain.push(axis_id);
                     cur = p_opt;
                 } else {
                     break;
@@ -638,7 +686,29 @@ impl IfcModel {
                     break;
                 }
             }
-            (gx, gy, gz)
+            let mut origin = (0.0_f64, 0.0_f64, 0.0_f64);
+            let mut ux = (1.0_f64, 0.0_f64, 0.0_f64);
+            let mut uy = (0.0_f64, 1.0_f64, 0.0_f64);
+            let mut uz = (0.0_f64, 0.0_f64, 1.0_f64);
+            for axis_id in chain.into_iter().rev() {
+                let (loc, lx, ly, lz) = axis_basis(axis_id);
+                let xform_vec = |bx: (f64, f64, f64), by: (f64, f64, f64), bz: (f64, f64, f64), v: (f64, f64, f64)| -> (f64, f64, f64) {
+                    (
+                        bx.0 * v.0 + by.0 * v.1 + bz.0 * v.2,
+                        bx.1 * v.0 + by.1 * v.1 + bz.1 * v.2,
+                        bx.2 * v.0 + by.2 * v.1 + bz.2 * v.2,
+                    )
+                };
+                let d = xform_vec(ux, uy, uz, loc);
+                origin = (origin.0 + d.0, origin.1 + d.1, origin.2 + d.2);
+                let nx = xform_vec(ux, uy, uz, lx);
+                let ny = xform_vec(ux, uy, uz, ly);
+                let nz = xform_vec(ux, uy, uz, lz);
+                ux = nx;
+                uy = ny;
+                uz = nz;
+            }
+            (origin, ux, uy, uz)
         };
 
         // 5. Parse Property Sets & Element Quantities
@@ -805,19 +875,26 @@ impl IfcModel {
                 let psets = element_psets.get(&ent.id).cloned().unwrap_or_default();
                 let qtos = element_qtos.get(&ent.id).cloned().unwrap_or_default();
 
-                // Compute Placement & Geometry
-                let placement_origin = ent
+                // Compute Placement Frame & Geometry (supports SweptSolid, MappedItem, Booleans, Brep, Polyline, IndexedPolyCurve)
+                let placement_frame = ent
                     .get_ref(5)
-                    .map(|lp_id| resolve_placement(lp_id))
-                    .unwrap_or((0.0, 0.0, 0.0));
+                    .map(|lp_id| resolve_placement_frame(lp_id))
+                    .unwrap_or((
+                        (0.0, 0.0, 0.0),
+                        (1.0, 0.0, 0.0),
+                        (0.0, 1.0, 0.0),
+                        (0.0, 0.0, 1.0),
+                    ));
 
                 let (bbox, lines) = Self::compute_element_geometry(
                     &step_model,
                     ent,
-                    placement_origin,
+                    placement_frame,
                     unit_scale,
                     &cartesian_points,
                     &directions,
+                    &axis2_placements,
+                    &point_lists_m,
                 );
 
                 elements.push(IfcElementSummary {
@@ -854,26 +931,42 @@ impl IfcModel {
     }
 
     fn detect_unit_scale(step_model: &StepModel, content: &str) -> f64 {
-        // Direct scanning of SI units in STEP file
-        if content.contains(".MILLI.") || content.contains(".MILLIMETRE.") || content.contains(".MILLIMETER.") {
-            0.001
-        } else if content.contains(".CENTI.") || content.contains(".CENTIMETRE.") {
-            0.01
-        } else {
-            // Check IfcSIUnit entity parameters
-            for ent in step_model.get_entities_of_type("IFCSIUNIT") {
-                if let Some(unit_type) = ent.get_str(1) {
-                    if unit_type == "LENGTHUNIT" {
-                        if let Some(prefix) = ent.get_str(2) {
-                            if prefix == "MILLI" {
-                                return 0.001;
-                            } else if prefix == "CENTI" {
-                                return 0.01;
-                            }
+        // 1. Authoritative check: explicit IfcSIUnit / IfcConversionBasedUnit for LENGTHUNIT
+        for ent in step_model.get_entities_of_type("IFCSIUNIT") {
+            if let Some(unit_type) = ent.get_str(1) {
+                if unit_type.eq_ignore_ascii_case("LENGTHUNIT") {
+                    if let Some(prefix) = ent.get_str(2) {
+                        if prefix.eq_ignore_ascii_case("MILLI") {
+                            return 0.001;
+                        } else if prefix.eq_ignore_ascii_case("CENTI") {
+                            return 0.01;
+                        } else if prefix.eq_ignore_ascii_case("KILO") {
+                            return 1000.0;
                         }
+                    }
+                    return 1.0;
+                }
+            }
+        }
+        for ent in step_model.get_entities_of_type("IFCCONVERSIONBASEDUNIT") {
+            if let Some(unit_type) = ent.get_str(1) {
+                if unit_type.eq_ignore_ascii_case("LENGTHUNIT") {
+                    let name = ent.get_str(2).unwrap_or("").to_uppercase();
+                    if name.contains("FOOT") || name.contains("FEET") {
+                        return 0.3048;
+                    } else if name.contains("INCH") {
+                        return 0.0254;
                     }
                 }
             }
+        }
+        // 2. Fallback heuristic only when no LENGTHUNIT entity parsed
+        let upper = content.to_uppercase();
+        if upper.contains(".MILLIMETRE.") || upper.contains(".MILLIMETER.") {
+            0.001
+        } else if upper.contains(".CENTIMETRE.") || upper.contains(".CENTIMETER.") {
+            0.01
+        } else {
             1.0
         }
     }
@@ -931,64 +1024,336 @@ impl IfcModel {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compute_element_geometry(
         step_model: &StepModel,
         ent: &StepEntity,
-        origin: (f64, f64, f64),
+        placement_frame: ((f64, f64, f64), (f64, f64, f64), (f64, f64, f64), (f64, f64, f64)),
         unit_scale: f64,
         cartesian_points: &HashMap<usize, (f64, f64, f64)>,
         directions: &HashMap<usize, (f64, f64, f64)>,
+        axis2_placements: &HashMap<usize, (usize, Option<usize>, Option<usize>)>,
+        point_lists_m: &HashMap<usize, Vec<(f64, f64, f64)>>,
     ) -> (IfcBoundingBox, Vec<((f64, f64, f64), (f64, f64, f64))>) {
-        let mut lines = Vec::new();
-        let mut min_pt = (origin.0 - 0.2, origin.1 - 0.2, origin.2);
-        let mut max_pt = (origin.0 + 0.2, origin.1 + 0.2, origin.2 + 0.2);
+        let (origin, ux, uy, uz) = placement_frame;
+        let xform_pt = |p: (f64, f64, f64)| -> (f64, f64, f64) {
+            (
+                origin.0 + ux.0 * p.0 + uy.0 * p.1 + uz.0 * p.2,
+                origin.1 + ux.1 * p.0 + uy.1 * p.1 + uz.1 * p.2,
+                origin.2 + ux.2 * p.0 + uy.2 * p.1 + uz.2 * p.2,
+            )
+        };
+        let xform_dir = |v: (f64, f64, f64)| -> (f64, f64, f64) {
+            (
+                ux.0 * v.0 + uy.0 * v.1 + uz.0 * v.2,
+                ux.1 * v.0 + uy.1 * v.1 + uz.1 * v.2,
+                ux.2 * v.0 + uy.2 * v.1 + uz.2 * v.2,
+            )
+        };
+        let axis_frame = |axis_id_opt: Option<usize>| -> ((f64, f64, f64), (f64, f64, f64), (f64, f64, f64), (f64, f64, f64)) {
+            let norm = |v: (f64, f64, f64), fb: (f64, f64, f64)| -> (f64, f64, f64) {
+                let l = (v.0 * v.0 + v.1 * v.1 + v.2 * v.2).sqrt();
+                if l > 1e-9 { (v.0 / l, v.1 / l, v.2 / l) } else { fb }
+            };
+            let cross = |a: (f64, f64, f64), b: (f64, f64, f64)| -> (f64, f64, f64) {
+                (a.1 * b.2 - a.2 * b.1, a.2 * b.0 - a.0 * b.2, a.0 * b.1 - a.1 * b.0)
+            };
+            if let Some(axis_id) = axis_id_opt {
+                if let Some(&(pt_id, z_ref, x_ref)) = axis2_placements.get(&axis_id) {
+                    let loc = cartesian_points.get(&pt_id).copied().unwrap_or((0.0, 0.0, 0.0));
+                    let az = z_ref
+                        .and_then(|id| directions.get(&id).copied())
+                        .map(|v| norm(v, (0.0, 0.0, 1.0)))
+                        .unwrap_or((0.0, 0.0, 1.0));
+                    let raw_x = x_ref
+                        .and_then(|id| directions.get(&id).copied())
+                        .unwrap_or_else(|| if az.2.abs() > 0.99 { (1.0, 0.0, 0.0) } else { (0.0, 0.0, 1.0) });
+                    let d = raw_x.0 * az.0 + raw_x.1 * az.1 + raw_x.2 * az.2;
+                    let ax = norm((raw_x.0 - d * az.0, raw_x.1 - d * az.1, raw_x.2 - d * az.2), (1.0, 0.0, 0.0));
+                    let ay = norm(cross(az, ax), (0.0, 1.0, 0.0));
+                    return (loc, ax, ay, az);
+                }
+            }
+            ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+        };
 
-        // Check for direct swept solid representation or polyline
-        if let Some(shape_rep_id) = ent.get_ref(6) {
-            if let Some(prod_shape) = step_model.entities.get(&shape_rep_id) {
-                for rep_id in prod_shape.get_ref_list(2) {
-                    if let Some(shape_rep) = step_model.entities.get(&rep_id) {
-                        for item_id in shape_rep.get_ref_list(3) {
-                            if let Some(item_ent) = step_model.entities.get(&item_id) {
-                                // Swept Solid: IFCEXTRUDEDAREASOLID
-                                if item_ent.type_name == "IFCEXTRUDEDAREASOLID" {
-                                    let depth = item_ent.get_f64(3).unwrap_or(3.0) * unit_scale;
-                                    let dir = item_ent
-                                        .get_ref(2)
-                                        .and_then(|did| directions.get(&did))
-                                        .copied()
-                                        .unwrap_or((0.0, 0.0, 1.0));
-                                    let p2 = (origin.0 + dir.0 * depth, origin.1 + dir.1 * depth, origin.2 + dir.2 * depth);
-                                    lines.push((origin, p2));
-                                    min_pt = (min_pt.0.min(p2.0), min_pt.1.min(p2.1), min_pt.2.min(p2.2));
-                                    max_pt = (max_pt.0.max(p2.0), max_pt.1.max(p2.1), max_pt.2.max(p2.2));
-                                }
-                                // Polyline: IFCPOLYLINE
-                                else if item_ent.type_name == "IFCPOLYLINE" {
-                                    let pts = item_ent.get_ref_list(0);
-                                    for i in 0..pts.len().saturating_sub(1) {
-                                        if let (Some(&p1), Some(&p2)) = (cartesian_points.get(&pts[i]), cartesian_points.get(&pts[i + 1])) {
-                                            lines.push((p1, p2));
-                                            min_pt = (min_pt.0.min(p1.0).min(p2.0), min_pt.1.min(p1.1).min(p2.1), min_pt.2.min(p1.2).min(p2.2));
-                                            max_pt = (max_pt.0.max(p1.0).max(p2.0), max_pt.1.max(p1.1).max(p2.1), max_pt.2.max(p1.2).max(p2.2));
-                                        }
+        let mut lines = Vec::new();
+        let mut min_pt = (f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut max_pt = (f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let mut push_pt = |pt: (f64, f64, f64)| {
+            min_pt.0 = min_pt.0.min(pt.0);
+            min_pt.1 = min_pt.1.min(pt.1);
+            min_pt.2 = min_pt.2.min(pt.2);
+            max_pt.0 = max_pt.0.max(pt.0);
+            max_pt.1 = max_pt.1.max(pt.1);
+            max_pt.2 = max_pt.2.max(pt.2);
+        };
+
+        #[allow(clippy::too_many_arguments)]
+        fn extract_item(
+            step_model: &StepModel,
+            item_id: usize,
+            is_axis_rep: bool,
+            depth_guard: usize,
+            origin: (f64, f64, f64),
+            xform_pt: &dyn Fn((f64, f64, f64)) -> (f64, f64, f64),
+            xform_dir: &dyn Fn((f64, f64, f64)) -> (f64, f64, f64),
+            axis_frame: &dyn Fn(Option<usize>) -> ((f64, f64, f64), (f64, f64, f64), (f64, f64, f64), (f64, f64, f64)),
+            unit_scale: f64,
+            cartesian_points: &HashMap<usize, (f64, f64, f64)>,
+            directions: &HashMap<usize, (f64, f64, f64)>,
+            point_lists_m: &HashMap<usize, Vec<(f64, f64, f64)>>,
+            lines: &mut Vec<((f64, f64, f64), (f64, f64, f64))>,
+            push_pt: &mut dyn FnMut((f64, f64, f64)),
+        ) {
+            if depth_guard > 8 {
+                return;
+            }
+            let Some(item_ent) = step_model.entities.get(&item_id) else {
+                return;
+            };
+            match item_ent.type_name.as_str() {
+                "IFCMAPPEDITEM" => {
+                    let map_offset = if let Some(tgt_id) = item_ent.get_ref(1) {
+                        step_model
+                            .entities
+                            .get(&tgt_id)
+                            .and_then(|t| t.get_ref(2))
+                            .and_then(|pid| cartesian_points.get(&pid).copied())
+                            .unwrap_or((0.0, 0.0, 0.0))
+                    } else {
+                        (0.0, 0.0, 0.0)
+                    };
+                    let shifted_xform = |p: (f64, f64, f64)| -> (f64, f64, f64) {
+                        xform_pt((p.0 + map_offset.0, p.1 + map_offset.1, p.2 + map_offset.2))
+                    };
+                    if let Some(src_id) = item_ent.get_ref(0) {
+                        if let Some(rep_map) = step_model.entities.get(&src_id) {
+                            if let Some(mapped_rep_id) = rep_map.get_ref(1) {
+                                if let Some(mapped_rep) = step_model.entities.get(&mapped_rep_id) {
+                                    for sub_id in mapped_rep.get_ref_list(3) {
+                                        extract_item(
+                                            step_model,
+                                            sub_id,
+                                            false,
+                                            depth_guard + 1,
+                                            origin,
+                                            &shifted_xform,
+                                            xform_dir,
+                                            axis_frame,
+                                            unit_scale,
+                                            cartesian_points,
+                                            directions,
+                                            point_lists_m,
+                                            lines,
+                                            push_pt,
+                                        );
                                     }
                                 }
                             }
                         }
                     }
                 }
+                "IFCBOOLEANCLIPPINGRESULT" | "IFCBOOLEANRESULT" => {
+                    if let Some(first_op_id) = item_ent.get_ref(1).or_else(|| item_ent.get_ref(0)) {
+                        extract_item(
+                            step_model,
+                            first_op_id,
+                            false,
+                            depth_guard + 1,
+                            origin,
+                            xform_pt,
+                            xform_dir,
+                            axis_frame,
+                            unit_scale,
+                            cartesian_points,
+                            directions,
+                            point_lists_m,
+                            lines,
+                            push_pt,
+                        );
+                    }
+                }
+                "IFCEXTRUDEDAREASOLID" => {
+                    let depth = item_ent.get_f64(3).unwrap_or(3.0) * unit_scale;
+                    let (pos_loc, px, py, pz) = axis_frame(item_ent.get_ref(1));
+                    let local_to_world = |lp: (f64, f64, f64)| -> (f64, f64, f64) {
+                        xform_pt((
+                            pos_loc.0 + px.0 * lp.0 + py.0 * lp.1 + pz.0 * lp.2,
+                            pos_loc.1 + px.1 * lp.0 + py.1 * lp.1 + pz.1 * lp.2,
+                            pos_loc.2 + px.2 * lp.0 + py.2 * lp.1 + pz.2 * lp.2,
+                        ))
+                    };
+                    let raw_dir = item_ent
+                        .get_ref(2)
+                        .and_then(|did| directions.get(&did))
+                        .copied()
+                        .unwrap_or((0.0, 0.0, 1.0));
+                    let ext_local = (
+                        (px.0 * raw_dir.0 + py.0 * raw_dir.1 + pz.0 * raw_dir.2) * depth,
+                        (px.1 * raw_dir.0 + py.1 * raw_dir.1 + pz.1 * raw_dir.2) * depth,
+                        (px.2 * raw_dir.0 + py.2 * raw_dir.1 + pz.2 * raw_dir.2) * depth,
+                    );
+                    let p_start = xform_pt(pos_loc);
+                    let ext_world = xform_dir(ext_local);
+                    let p_end = (
+                        p_start.0 + ext_world.0,
+                        p_start.1 + ext_world.1,
+                        p_start.2 + ext_world.2,
+                    );
+                    lines.push((p_start, p_end));
+                    push_pt(p_start);
+                    push_pt(p_end);
+
+                    // Expand 3D bounds using swept profile footprint corners
+                    let mut profile_pts: Vec<(f64, f64)> = Vec::new();
+                    if let Some(prof_id) = item_ent.get_ref(0) {
+                        if let Some(prof) = step_model.entities.get(&prof_id) {
+                            match prof.type_name.as_str() {
+                                "IFCRECTANGLEPROFILEDEF" | "IFCRECTANGLEHOLLOWPROFILEDEF" => {
+                                    let hx = prof.get_f64(3).unwrap_or(400.0) * unit_scale * 0.5;
+                                    let hy = prof.get_f64(4).unwrap_or(400.0) * unit_scale * 0.5;
+                                    profile_pts = vec![(-hx, -hy), (hx, -hy), (hx, hy), (-hx, hy)];
+                                }
+                                "IFCCIRCLEPROFILEDEF" | "IFCCIRCLEHOLLOWPROFILEDEF" => {
+                                    let r = prof.get_f64(3).unwrap_or(200.0) * unit_scale;
+                                    profile_pts = vec![(-r, -r), (r, -r), (r, r), (-r, r)];
+                                }
+                                "IFCARBITRARYCLOSEDPROFILEDEF" | "IFCARBITRARYPROFILEDEFWITHVOIDS" => {
+                                    if let Some(curve_id) = prof.get_ref(2) {
+                                        if let Some(curve) = step_model.entities.get(&curve_id) {
+                                            if curve.type_name == "IFCPOLYLINE" {
+                                                for cid in curve.get_ref_list(0) {
+                                                    if let Some(&(cx, cy, _)) = cartesian_points.get(&cid) {
+                                                        profile_pts.push((cx, cy));
+                                                    }
+                                                }
+                                            } else if curve.type_name == "IFCINDEXEDPOLYCURVE" {
+                                                if let Some(pl_id) = curve.get_ref(0) {
+                                                    if let Some(pts) = point_lists_m.get(&pl_id) {
+                                                        for &(cx, cy, _) in pts {
+                                                            profile_pts.push((cx, cy));
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    for (u, v) in profile_pts {
+                        let base_w = local_to_world((u, v, 0.0));
+                        let top_w = (base_w.0 + ext_world.0, base_w.1 + ext_world.1, base_w.2 + ext_world.2);
+                        push_pt(base_w);
+                        push_pt(top_w);
+                    }
+                }
+                "IFCPOLYLINE" => {
+                    let pt_ids = item_ent.get_ref_list(0);
+                    let mut pts = Vec::with_capacity(pt_ids.len());
+                    for pid in pt_ids {
+                        if let Some(&raw_p) = cartesian_points.get(&pid) {
+                            let wp = if is_axis_rep && (raw_p.2 - origin.2).abs() < 0.05 && origin.2.abs() > 0.1 {
+                                // Reference axis polylines authored in absolute elevation need XY alignment only
+                                (origin.0 + raw_p.0, origin.1 + raw_p.1, raw_p.2)
+                            } else {
+                                xform_pt(raw_p)
+                            };
+                            push_pt(wp);
+                            pts.push(wp);
+                        }
+                    }
+                    for pair in pts.windows(2) {
+                        lines.push((pair[0], pair[1]));
+                    }
+                }
+                "IFCINDEXEDPOLYCURVE" => {
+                    if let Some(pl_id) = item_ent.get_ref(0) {
+                        if let Some(raw_pts) = point_lists_m.get(&pl_id) {
+                            let pts: Vec<(f64, f64, f64)> = raw_pts.iter().map(|&p| {
+                                let wp = xform_pt(p);
+                                push_pt(wp);
+                                wp
+                            }).collect();
+                            for pair in pts.windows(2) {
+                                lines.push((pair[0], pair[1]));
+                            }
+                        }
+                    }
+                }
+                "IFCTRIANGULATEDFACESET" | "IFCPOLYGONALFACESET" => {
+                    if let Some(pl_id) = item_ent.get_ref(0) {
+                        if let Some(raw_pts) = point_lists_m.get(&pl_id) {
+                            for &p in raw_pts {
+                                push_pt(xform_pt(p));
+                            }
+                            if let (Some(&first), Some(&last)) = (raw_pts.first(), raw_pts.last()) {
+                                lines.push((xform_pt(first), xform_pt(last)));
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
-        // Fallback default bounding box around origin if no representations parsed
-        if lines.is_empty() {
+        if let Some(shape_rep_id) = ent.get_ref(6) {
+            if let Some(prod_shape) = step_model.entities.get(&shape_rep_id) {
+                for rep_id in prod_shape.get_ref_list(2) {
+                    if let Some(shape_rep) = step_model.entities.get(&rep_id) {
+                        let is_axis_rep = shape_rep
+                            .get_str(1)
+                            .is_some_and(|s| s.eq_ignore_ascii_case("Axis"));
+                        for item_id in shape_rep.get_ref_list(3) {
+                            extract_item(
+                                step_model,
+                                item_id,
+                                is_axis_rep,
+                                0,
+                                origin,
+                                &xform_pt,
+                                &xform_dir,
+                                &axis_frame,
+                                unit_scale,
+                                cartesian_points,
+                                directions,
+                                point_lists_m,
+                                &mut lines,
+                                &mut push_pt,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if !min_pt.0.is_finite() || !max_pt.0.is_finite() {
             let half = 0.25;
             lines.push(((origin.0 - half, origin.1, origin.2), (origin.0 + half, origin.1, origin.2)));
             lines.push(((origin.0, origin.1 - half, origin.2), (origin.0, origin.1 + half, origin.2)));
             lines.push(((origin.0, origin.1, origin.2), (origin.0, origin.1, origin.2 + 0.5)));
             min_pt = (origin.0 - half, origin.1 - half, origin.2);
             max_pt = (origin.0 + half, origin.1 + half, origin.2 + 0.5);
+        } else {
+            // Ensure 1D axis curves (IFCPOLYLINE / IFCINDEXEDPOLYCURVE) retain a minimum nominal 0.40m section envelope
+            if (max_pt.0 - min_pt.0) < 0.05 {
+                min_pt.0 -= 0.2;
+                max_pt.0 += 0.2;
+            }
+            if (max_pt.1 - min_pt.1) < 0.05 {
+                min_pt.1 -= 0.2;
+                max_pt.1 += 0.2;
+            }
+            if (max_pt.2 - min_pt.2) < 0.05 {
+                min_pt.2 -= 0.2;
+                max_pt.2 += 0.2;
+            }
+            if lines.is_empty() {
+                lines.push((min_pt, max_pt));
+            }
         }
 
         (IfcBoundingBox::new(min_pt, max_pt), lines)
@@ -1260,6 +1625,23 @@ impl IfcModel {
         let mut storey_pairs = Vec::new();
         collect_storeys(&self.spatial_root, &mut storey_pairs);
         if storey_pairs.is_empty() {
+            // Direct fallback scan of IFCBUILDINGSTOREY entities when IFCRELAGGREGATES hierarchy is incomplete
+            for st in self.raw_step.get_entities_of_type("IFCBUILDINGSTOREY") {
+                let sname = st
+                    .get_str(2)
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("Storey")
+                    .to_string();
+                let raw_elev = st.get_f64(9).or_else(|| st.get_f64(8)).unwrap_or(0.0);
+                let elev_mm = if raw_elev.abs() <= 200.0 && (self.unit_scale - 1.0).abs() < 1e-6 {
+                    raw_elev * 1000.0
+                } else {
+                    raw_elev * self.unit_scale * 1000.0
+                };
+                storey_pairs.push((sname, elev_mm));
+            }
+        }
+        if storey_pairs.is_empty() {
             storey_pairs.push(("Level 1 (+0.00m)".to_string(), 0.0));
             storey_pairs.push(("Level 2 (+3.50m)".to_string(), 3500.0));
         } else if storey_pairs.len() == 1 {
@@ -1514,7 +1896,196 @@ impl IfcModel {
         })
     }
 
-    /// Generates a pristine reference IFC4 2-Storey Concrete Villa STEP file for instant testing.
+    /// Extracts WGS84 geographic latitude/longitude from `IFCSITE` `RefLatitude`/`RefLongitude` DMS tuples when present.
+    pub fn site_lat_lon(&self) -> Option<(f64, f64)> {
+        let parse_dms = |val: Option<&StepValue>| -> Option<f64> {
+            let list = val?.as_list()?;
+            if list.len() < 2 {
+                return None;
+            }
+            let d = list.first()?.as_f64().unwrap_or(0.0);
+            let m = list.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let s = list.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let millionths = list.get(3).and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let sign = if d < 0.0 || m < 0.0 || s < 0.0 { -1.0 } else { 1.0 };
+            let deg = d.abs() + m.abs() / 60.0 + (s.abs() + millionths.abs() * 1e-6) / 3600.0;
+            Some(sign * deg)
+        };
+        for site in self.raw_step.get_entities_of_type("IFCSITE") {
+            let lat = parse_dms(site.parameters.get(9));
+            let lon = parse_dms(site.parameters.get(10));
+            if let (Some(la), Some(lo)) = (lat, lon) {
+                if (la.abs() > 1e-4 || lo.abs() > 1e-4) && (-90.0..=90.0).contains(&la) && (-180.0..=180.0).contains(&lo) {
+                    return Some((la, lo));
+                }
+            }
+        }
+        None
+    }
+
+    /// Parses any IFC STEP file (`IFC2x3`, `IFC4`, `IFC4.3`) into an editable `BimProject`,
+    /// optional site `(lat, lon)`, and diagnostic summary, falling back to `InteropEngine::import_from_ifc`
+    /// when a model only defines analytical wireframes.
+    pub fn parse_to_bim_project_with_fallback(
+        raw_content: &str,
+        fallback_name: &str,
+    ) -> Result<(crate::core::bim::BimProject, Option<(f64, f64)>, String), String> {
+        let cleaned = raw_content.trim_start_matches('\u{FEFF}');
+        match Self::parse(cleaned) {
+            Ok(model) => {
+                let site_geo = model.site_lat_lon();
+                match model.to_bim_project() {
+                    Ok(mut bim) => {
+                        let clean_stem = fallback_name.trim_end_matches(".ifc").trim_end_matches(".IFC");
+                        if bim.project_name == "Converted IFC Project" && !clean_stem.is_empty() {
+                            bim.project_name = clean_stem.to_string();
+                        }
+                        let msg = format!(
+                            "Imported IFC '{}' ({}: {} elements, {} levels)",
+                            bim.project_name,
+                            model.schema.display_label(),
+                            bim.element_count(),
+                            bim.levels.len()
+                        );
+                        return Ok((bim, site_geo, msg));
+                    }
+                    Err(bim_err) => {
+                        if let Ok(fem) = crate::core::interop::IfcImporter::import_from_ifc(cleaned, fallback_name) {
+                            if !fem.elements.is_empty() {
+                                let bim = Self::bim_project_from_structural_model(&fem);
+                                let msg = format!(
+                                    "Imported analytical IFC '{}' ({} elements converted to BIM)",
+                                    fem.name,
+                                    bim.element_count()
+                                );
+                                return Ok((bim, site_geo, msg));
+                            }
+                        }
+                        Err(bim_err)
+                    }
+                }
+            }
+            Err(step_err) => {
+                if let Ok(fem) = crate::core::interop::IfcImporter::import_from_ifc(cleaned, fallback_name) {
+                    if !fem.elements.is_empty() {
+                        let bim = Self::bim_project_from_structural_model(&fem);
+                        let msg = format!(
+                            "Imported analytical IFC '{}' ({} elements converted to BIM)",
+                            fem.name,
+                            bim.element_count()
+                        );
+                        return Ok((bim, None, msg));
+                    }
+                }
+                Err(step_err)
+            }
+        }
+    }
+
+    fn bim_project_from_structural_model(
+        fem: &StructuralModel,
+    ) -> crate::core::bim::BimProject {
+        use crate::core::P2;
+        use crate::core::bim::{
+            BimColumn, BimLevel, BimProject, BimRun, RunCategory, RunJustify, ViewRange,
+        };
+        let mut z_levels_mm: Vec<f64> = fem
+            .nodes
+            .iter()
+            .map(|n| (n.y * 1000.0 / 250.0).round() * 250.0)
+            .collect();
+        z_levels_mm.sort_by(|a, b| a.total_cmp(b));
+        z_levels_mm.dedup_by(|a, b| (*a - *b).abs() < 400.0);
+        if z_levels_mm.is_empty() {
+            z_levels_mm.push(0.0);
+        }
+        if z_levels_mm.len() == 1 {
+            z_levels_mm.push(z_levels_mm[0] + 3500.0);
+        }
+        let levels: Vec<BimLevel> = z_levels_mm
+            .iter()
+            .enumerate()
+            .map(|(idx, &z)| BimLevel {
+                id: idx + 1,
+                name: format!("Level {} ({:+.2}m)", idx + 1, z * 0.001),
+                elevation_mm: z,
+            })
+            .collect();
+        let match_lvl = |y_m: f64| -> usize {
+            let ym = y_m * 1000.0;
+            levels
+                .iter()
+                .min_by(|a, b| (a.elevation_mm - ym).abs().total_cmp(&(b.elevation_mm - ym).abs()))
+                .map(|l| l.id)
+                .unwrap_or(1)
+        };
+        let mut columns = Vec::new();
+        let mut runs = Vec::new();
+        let mut next_id = levels.len() + 1;
+        for el in &fem.elements {
+            let (Some(n1), Some(n2)) = (fem.nodes.iter().find(|n| n.id == el.start_node), fem.nodes.iter().find(|n| n.id == el.end_node)) else {
+                continue;
+            };
+            let dz = (n2.y - n1.y).abs();
+            let horiz = (n2.x - n1.x).hypot(n2.z - n1.z);
+            let id = next_id;
+            next_id += 1;
+            if dz > horiz * 1.5 {
+                let low_y = n1.y.min(n2.y);
+                let high_y = n1.y.max(n2.y);
+                columns.push(BimColumn {
+                    id,
+                    name: el.name.clone(),
+                    base_level_id: match_lvl(low_y),
+                    top_level_id: match_lvl(high_y),
+                    pos: P2(((n1.x + n2.x) * 0.5) * 1000.0, ((n1.z + n2.z) * 0.5) * 1000.0),
+                    width_mm: 400.0,
+                    depth_mm: 400.0,
+                    rotation_deg: 0.0,
+                    is_round: false,
+                    is_wf_profile: false,
+                    profile_name: el.section.name.clone(),
+                });
+            } else {
+                runs.push(BimRun {
+                    id,
+                    name: el.name.clone(),
+                    category: RunCategory::StructuralBeam,
+                    level_id: match_lvl(n1.y.max(n2.y)),
+                    start: P2(n1.x * 1000.0, n1.z * 1000.0),
+                    end: P2(n2.x * 1000.0, n2.z * 1000.0),
+                    start_offset_mm: 0.0,
+                    end_offset_mm: 0.0,
+                    justify: RunJustify::Top,
+                    profile_name: el.section.name.clone(),
+                    width_mm: 300.0,
+                    depth_mm: 600.0,
+                    is_round: false,
+                    is_wf_profile: false,
+                    system_name: "IFC Analytical".to_string(),
+                });
+            }
+        }
+        BimProject {
+            project_name: fem.name.clone(),
+            next_id,
+            levels,
+            grids: Vec::new(),
+            walls: Vec::new(),
+            runs,
+            columns,
+            footings: Vec::new(),
+            slabs: Vec::new(),
+            rooms: Vec::new(),
+            dimensions: Vec::new(),
+            rebars: Vec::new(),
+            view_range: ViewRange::default(),
+            section_line: (P2(-1000.0, 0.0), P2(12000.0, 0.0)),
+        }
+    }
+
+    /// Generates a pristine reference IFC4 2-Storey Concrete Villa STEP file for unit testing.
+    #[cfg(test)]
     pub fn sample_villa_ifc4() -> String {
         r#"ISO-10303-21;
 HEADER;
@@ -1587,7 +2158,8 @@ END-ISO-10303-21;
 "#.to_string()
     }
 
-    /// Generates a reference industrial steel portal frame warehouse IFC4 STEP file.
+    /// Generates a reference industrial steel portal frame warehouse IFC4 STEP file for unit testing.
+    #[cfg(test)]
     pub fn sample_portal_frame_ifc4() -> String {
         r#"ISO-10303-21;
 HEADER;
@@ -1643,7 +2215,8 @@ END-ISO-10303-21;
 "#.to_string()
     }
 
-    /// Generates a reference high-rise diagrid tower frame IFC2x3 STEP file.
+    /// Generates a reference high-rise diagrid tower frame IFC2x3 STEP file for unit testing.
+    #[cfg(test)]
     pub fn sample_diagrid_tower_ifc2x3() -> String {
         r#"ISO-10303-21;
 HEADER;
@@ -2487,8 +3060,13 @@ END-ISO-10303-21;
         let max_x = p1.0.max(p2.0) + spec.profile_dims.0 * 0.5;
         let min_y = p1.1.min(p2.1) - spec.profile_dims.1 * 0.5;
         let max_y = p1.1.max(p2.1) + spec.profile_dims.1 * 0.5;
-        let min_z = p1.2.min(p2.2);
-        let max_z = p1.2.max(p2.2);
+        let mut min_z = p1.2.min(p2.2);
+        let mut max_z = p1.2.max(p2.2);
+        if (max_z - min_z).abs() < 1e-4 {
+            // Horizontal members require vertical cross-section envelope for 3D clash intersection.
+            min_z -= spec.profile_dims.1 * 0.5;
+            max_z += spec.profile_dims.1 * 0.5;
+        }
         let bbox = IfcBoundingBox::new((min_x, min_y, min_z), (max_x, max_y, max_z));
 
         let mut qtos = HashMap::new();
@@ -3496,11 +4074,12 @@ pub struct StepParser;
 impl StepParser {
     pub fn parse_step(raw_content: &str) -> Result<StepModel, String> {
         let mut model = StepModel::default();
+        let no_bom = raw_content.trim_start_matches('\u{FEFF}');
 
         // 1. Strip comments /* ... */
-        let cleaned = Self::strip_step_comments(raw_content);
+        let cleaned = Self::strip_step_comments(no_bom);
 
-        // 2. Identify HEADER and DATA sections
+        // 2. Identify HEADER and DATA sections (case-insensitive STEP tags)
         let header_str = Self::extract_section(&cleaned, "HEADER", "ENDSEC");
         let data_str = Self::extract_section(&cleaned, "DATA", "ENDSEC");
 
@@ -3525,8 +4104,12 @@ impl StepParser {
     fn strip_step_comments(s: &str) -> String {
         let mut out = String::with_capacity(s.len());
         let mut chars = s.chars().peekable();
+        let mut in_quote = false;
         while let Some(c) = chars.next() {
-            if c == '/' && chars.peek() == Some(&'*') {
+            if c == '\'' {
+                in_quote = !in_quote;
+                out.push(c);
+            } else if !in_quote && c == '/' && chars.peek() == Some(&'*') {
                 chars.next(); // consume '*'
                 while let Some(nc) = chars.next() {
                     if nc == '*' && chars.peek() == Some(&'/') {
@@ -3542,20 +4125,48 @@ impl StepParser {
     }
 
     fn extract_section(s: &str, start_tag: &str, end_tag: &str) -> Option<String> {
-        if let Some(start_idx) = s.find(start_tag) {
+        let upper = s.to_ascii_uppercase();
+        if let Some(start_idx) = upper.find(start_tag) {
             let sub = &s[start_idx + start_tag.len()..];
-            if let Some(end_idx) = sub.find(end_tag) {
+            let sub_upper = &upper[start_idx + start_tag.len()..];
+            if let Some(end_idx) = sub_upper.find(end_tag) {
                 return Some(sub[..end_idx].to_string());
             }
         }
         None
     }
 
+    fn split_step_statements(s: &str) -> Vec<&str> {
+        let mut stmts = Vec::new();
+        let bytes = s.as_bytes();
+        let mut start = 0usize;
+        let mut in_quote = false;
+        let mut i = 0usize;
+        while i < bytes.len() {
+            if bytes[i] == b'\'' {
+                if in_quote && i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                    i += 2;
+                    continue;
+                }
+                in_quote = !in_quote;
+            } else if !in_quote && bytes[i] == b';' {
+                stmts.push(&s[start..i]);
+                start = i + 1;
+            }
+            i += 1;
+        }
+        if start < s.len() {
+            stmts.push(&s[start..]);
+        }
+        stmts
+    }
+
     fn parse_header(header_content: &str) -> StepHeader {
         let mut header = StepHeader::default();
-        for stmt in header_content.split(';') {
+        for stmt in Self::split_step_statements(header_content) {
             let trimmed = stmt.trim();
-            if trimmed.starts_with("FILE_SCHEMA") {
+            let upper = trimmed.to_ascii_uppercase();
+            if upper.starts_with("FILE_SCHEMA") {
                 if let Some(p1) = trimmed.find("((") {
                     if let Some(p2) = trimmed[p1..].find("))") {
                         let inner = &trimmed[p1 + 2..p1 + p2];
@@ -3567,7 +4178,7 @@ impl StepParser {
                         header.file_schema = schemas;
                     }
                 }
-            } else if trimmed.starts_with("FILE_NAME") {
+            } else if upper.starts_with("FILE_NAME") {
                 if let Some(p1) = trimmed.find('(') {
                     if let Some(p2) = trimmed.rfind(')') {
                         let inner = &trimmed[p1 + 1..p2];
@@ -3589,8 +4200,7 @@ impl StepParser {
     }
 
     fn parse_data_section(data_content: &str, model: &mut StepModel) -> Result<(), String> {
-        // Split by semicolon ';' representing end of STEP statements
-        for stmt in data_content.split(';') {
+        for stmt in Self::split_step_statements(data_content) {
             let trimmed = stmt.trim();
             if !trimmed.starts_with('#') {
                 continue;

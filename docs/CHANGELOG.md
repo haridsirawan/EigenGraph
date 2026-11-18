@@ -7,6 +7,23 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.5.5] - 2026-11-18 — Phase 55: Vault Recursive OpenBIM IFC Reader, Zero Built-In Demo Files & Unified Earth 3D BIM/CAD Canvas (`BIM 3D` & `Plan 2D` Removed)
+
+### Added & Changed
+- **Fixed End-to-End `.ifc` File Reading Inside Obsidian Vault (`index.html`, `src/core/vault.rs`, `src/core/ifc.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Replaced hardcoded 9-folder shallow scanning in `index.html` (`scanDirectoryIntoCache`) and Native `InternalVault` (`list_personal_vault_projects_at`, `list_vault_context_files`) with **recursive subfolder scanning** (`depth <= 6`), case-insensitive `.ifc` / `.IFC` recognition across any Vault directory, and an expanded 64 MB import limit.
+  - Added `.ifc` project metadata extraction (`extractProjectMeta` in `index.html` and `list_personal_vault_projects_at` in `src/core/vault.rs`) so OpenBIM `.ifc` models appear immediately as loadable projects (`[IFC]`) inside the Vault drawer.
+  - Upgraded `StepParser` and `IfcModel` (`src/core/ifc.rs`) with UTF-8 BOM stripping, case-insensitive `HEADER`/`DATA`/`ENDSEC` parsing, quote-aware STEP statement splitting, accurate `LENGTHUNIT` detection (`IFCSIUNIT` / `IFCCONVERSIONBASEDUNIT`), rotated cumulative `IFCLOCALPLACEMENT` basis transforms, `IFCMAPPEDITEM` / `IFCBOOLEANCLIPPINGRESULT` / `IFCEXTRUDEDAREASOLID` / `IFCINDEXEDPOLYCURVE` geometry extraction, direct `IFCBUILDINGSTOREY` fallback discovery, `IFCSITE` geographic `RefLatitude` / `RefLongitude` decoding (`site_lat_lon`), and analytical `IfcImporter` fallback (`parse_to_bim_project_with_fallback`).
+  - Wired Vault project and file clicks (`open_vault_project_entry` in `src/app.rs` and `render_vault_workspace_bar` in `src/views/spatial_workspace.rs`) to convert `.ifc` files directly into editable `BimProject` + FEM models positioned cleanly onto the Earth 3D surface.
+- **Complete Removal of Built-In Demo & Sample Files (`index.html`, `src/core/vault.rs`, `src/core/bim.rs`, `src/core/ifc.rs`, `src/views/build/sidebar.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Removed automatic generation of `KnowledgeBase/Welcome.md`, `_VAULT_NOTICE.txt`, and `README_DO_NOT_DELETE.txt` from Vault initialization on both Browser (FS Access / IndexedDB) and Native desktop targets.
+  - Removed `/sample` slash commands, `"Load BIMCraft Sample"` buttons, runtime `load_sample_building` actions, and legacy demo LOD strings (`Concept_Massing.ifc`, `Schematic_Frame.ifc`, `Detailed_Frame_Rebar.ifc`, `demo_nvw_dir`, `evaluate_nvw_multi_lod_convergence`). Gated test-only fixture helpers cleanly behind `#[cfg(test)]`.
+- **Migrated All BIM/CAD Tools Directly to Earth 3D & Removed `BIM 3D` and `Plan 2D` Workspaces (`src/views/universal_canvas.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`, `docs/UI_ARCHITECTURE.md`)**:
+  - Added `EarthBimTool`, `EarthBimLens`, and direct 3D BIM placement (`Column`, `Beam`, `Wall`, `Footing` with magnetic OSNAP/grid snap, Ortho lock, and undoable `BimCommand` emission via `pending_earth_bim_commands`) plus full 3D extruded BIM + CSG door/window opening rendering, 3D surface grid fallback, structural lenses (`Clean`, `DCR%`, `ARI`, `Moment`, `4D`), live 3D wireframe ghost previews, and height-aware 3D BIM picking directly on the Earth 3D globe.
+  - Migrated camera presets (`Iso 42°`, `Top 0°`, `Elev 64°`), Story controls (`Story`, `+ Story`, `+ Slab`), `Ortho`, `Grid`, `Promote -> BIM`, and extended drafting brushes directly into **Earth 3D**, removing the separate `BIM 3D` and `Plan 2D` workspace modes (`SpatialCanvasMode::EarthGlobe` unified canvas).
+
+---
+
 ## [v0.5.4] - 2026-11-18 — Phase 54: Essential Restructured Dynamic Island, Structural Health Triage, Enriched Gemini BIM IDs, Wall Openings, 2D Slab Picking & Vault Multi-Folder Notes
 
 ### Added & Changed

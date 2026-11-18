@@ -816,6 +816,7 @@ impl BimProject {
     }
 
     /// Creates a multi-storey structural & architectural BIM test fixture for geometry/CSG verification.
+    #[cfg(test)]
     pub fn sample_bimcraft_building() -> Self {
         let mut proj = Self {
             project_name: "EigenGraph × BIMCraft Integrated Building (LOD 350)".to_string(),

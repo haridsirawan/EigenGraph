@@ -21,29 +21,23 @@ use crate::views::build::{Ground3DAuthorTool, Render3DMode};
 use crate::views::universal_canvas::UniversalCanvasTool;
 use crate::views::{AiAssistantView, BuildView, UniversalCanvasState};
 
-/// Active spatial viewport projection rendered across the full screen.
+/// Active spatial viewport projection rendered across the full screen (100% Unified Earth 3D Canvas).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpatialCanvasMode {
     #[default]
     EarthGlobe,
-    EarthPlan2D,
-    Bim3D,
 }
 
 impl SpatialCanvasMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::EarthGlobe => "Earth 3D",
-            Self::EarthPlan2D => "Plan 2D",
-            Self::Bim3D => "BIM 3D",
         }
     }
 
     pub fn icon(self) -> AppIcon {
         match self {
             Self::EarthGlobe => AppIcon::Globe,
-            Self::EarthPlan2D => AppIcon::Compass,
-            Self::Bim3D => AppIcon::Cube3D,
         }
     }
 }
@@ -541,37 +535,31 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/earth",
         category: "Canvas",
-        description: "Switch full viewport to 3D Google Earth Globe",
+        description: "Reset focus on 3D Google Earth Globe",
         icon: AppIcon::Globe,
     },
     SlashCommandSpec {
-        cmd: "/3d",
+        cmd: "/iso",
         category: "Canvas",
-        description: "Switch full viewport to 3D Structural BIM on Earth",
+        description: "Set Earth 3D camera to Isometric site tilt (42°)",
         icon: AppIcon::Cube3D,
     },
     SlashCommandSpec {
-        cmd: "/2d",
+        cmd: "/top",
         category: "Canvas",
-        description: "Switch full viewport to 2D Ground Plan & Geodetic Map",
+        description: "Set Earth 3D camera to Nadir top-down plan view (0°)",
         icon: AppIcon::Compass,
     },
     SlashCommandSpec {
         cmd: "/fit",
         category: "Canvas",
-        description: "Fit camera to active BIM building or Earth site",
+        description: "Fit Earth 3D camera to active BIM building or site",
         icon: AppIcon::ZoomFit,
-    },
-    SlashCommandSpec {
-        cmd: "/sample",
-        category: "Model",
-        description: "Load integrated 3D BIMCraft building onto active site",
-        icon: AppIcon::Building,
     },
     SlashCommandSpec {
         cmd: "/portal 3x2 @6m 2floors",
         category: "Model",
-        description: "Synthesize parametric multi-storey structural portal",
+        description: "Synthesize parametric multi-storey structural portal on Earth 3D",
         icon: AppIcon::Grid,
     },
     SlashCommandSpec {
@@ -821,7 +809,6 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
 pub struct SpatialHudActions {
     pub sync_fem_and_earth: bool,
     pub fit_camera: bool,
-    pub load_sample_building: bool,
     pub export_archive: bool,
     pub export_ifc4: bool,
     pub save_audit_note: bool,
@@ -916,38 +903,40 @@ impl SpatialManualTool {
 
     pub fn is_active(
         self,
-        canvas_mode: SpatialCanvasMode,
+        _canvas_mode: SpatialCanvasMode,
         universal_canvas: &UniversalCanvasState,
         build_view: &BuildView,
     ) -> bool {
+        use crate::views::universal_canvas::EarthBimTool;
         match self {
             Self::OrbitPan => {
                 !universal_canvas.measure_active
+                    && universal_canvas.earth_bim_author.active_tool == EarthBimTool::None
                     && build_view.ground_author_tool == Ground3DAuthorTool::Orbit
                     && universal_canvas.active_tool == UniversalCanvasTool::SelectPan
             }
             Self::Column => {
-                canvas_mode == SpatialCanvasMode::Bim3D
-                    && build_view.ground_author_tool == Ground3DAuthorTool::Column
+                universal_canvas.earth_bim_author.active_tool == EarthBimTool::Column
+                    || build_view.ground_author_tool == Ground3DAuthorTool::Column
             }
             Self::Beam => {
-                canvas_mode == SpatialCanvasMode::Bim3D
-                    && build_view.ground_author_tool == Ground3DAuthorTool::Beam
+                universal_canvas.earth_bim_author.active_tool == EarthBimTool::Beam
+                    || build_view.ground_author_tool == Ground3DAuthorTool::Beam
             }
             Self::Wall => {
-                canvas_mode == SpatialCanvasMode::Bim3D
-                    && build_view.ground_author_tool == Ground3DAuthorTool::Wall
+                universal_canvas.earth_bim_author.active_tool == EarthBimTool::Wall
+                    || build_view.ground_author_tool == Ground3DAuthorTool::Wall
             }
             Self::Footing => {
-                canvas_mode == SpatialCanvasMode::Bim3D
-                    && build_view.ground_author_tool == Ground3DAuthorTool::Footing
+                universal_canvas.earth_bim_author.active_tool == EarthBimTool::Footing
+                    || build_view.ground_author_tool == Ground3DAuthorTool::Footing
             }
             Self::Line2D => {
-                canvas_mode != SpatialCanvasMode::Bim3D
+                universal_canvas.earth_bim_author.active_tool == EarthBimTool::None
                     && universal_canvas.active_tool == UniversalCanvasTool::Line
             }
             Self::Rect2D => {
-                canvas_mode != SpatialCanvasMode::Bim3D
+                universal_canvas.earth_bim_author.active_tool == EarthBimTool::None
                     && universal_canvas.active_tool == UniversalCanvasTool::Rectangle
             }
             Self::Measure => universal_canvas.measure_active,
@@ -961,70 +950,92 @@ impl SpatialManualTool {
         universal_canvas: &mut UniversalCanvasState,
         build_view: &mut BuildView,
     ) -> SpatialHudActions {
-        let mut actions = SpatialHudActions::default();
+        use crate::views::universal_canvas::EarthBimTool;
+        let actions = SpatialHudActions::default();
+        spatial.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+        universal_canvas.globe_mode = true;
         universal_canvas.measure_active = false;
+        let zoom_in_if_high_altitude = |uc: &mut UniversalCanvasState| {
+            if uc.world_map.zoom_level < 17.0 {
+                let target = if uc.ground_origin_anchored {
+                    uc.ground_origin_lat_lon
+                } else {
+                    uc.world_map.center_lat_lon
+                };
+                uc.ground_origin_lat_lon = target;
+                uc.ground_origin_anchored = true;
+                uc.earth_world.camera.tilt_deg = uc.earth_world.camera.tilt_deg.clamp(12.0, 48.0);
+                uc.earth_world.start_fly_to(&uc.world_map, target.0, target.1, 18.2, "Earth 3D Draw");
+            }
+        };
         match self {
             Self::OrbitPan => {
                 build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::None;
+                universal_canvas.earth_bim_author.pending_start_mm = None;
                 universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
-                spatial.push_trace("Navigation & Select mode", true);
+                spatial.push_trace("Earth 3D Orbit & Select mode", true);
             }
             Self::Column => {
-                spatial.active_canvas_mode = SpatialCanvasMode::Bim3D;
                 build_view.ground_author_tool = Ground3DAuthorTool::Column;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::Column;
+                universal_canvas.earth_bim_author.pending_start_mm = None;
+                universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
                 universal_canvas.ground_origin_anchored = true;
-                actions.fit_camera = true;
-                spatial.push_trace("Manual Draw: Column (click canvas)", true);
+                zoom_in_if_high_altitude(universal_canvas);
+                spatial.push_trace("Draw Column directly on Earth 3D (click point)", true);
             }
             Self::Beam => {
-                spatial.active_canvas_mode = SpatialCanvasMode::Bim3D;
                 build_view.ground_author_tool = Ground3DAuthorTool::Beam;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::Beam;
+                universal_canvas.earth_bim_author.pending_start_mm = None;
+                universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
                 universal_canvas.ground_origin_anchored = true;
-                actions.fit_camera = true;
-                spatial.push_trace("Manual Draw: Beam (click 2 pts)", true);
+                zoom_in_if_high_altitude(universal_canvas);
+                spatial.push_trace("Draw Beam directly on Earth 3D (click 2 pts)", true);
             }
             Self::Wall => {
-                spatial.active_canvas_mode = SpatialCanvasMode::Bim3D;
                 build_view.ground_author_tool = Ground3DAuthorTool::Wall;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::Wall;
+                universal_canvas.earth_bim_author.pending_start_mm = None;
+                universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
                 universal_canvas.ground_origin_anchored = true;
-                actions.fit_camera = true;
-                spatial.push_trace("Manual Draw: Wall (click 2 pts)", true);
+                zoom_in_if_high_altitude(universal_canvas);
+                spatial.push_trace("Draw Wall directly on Earth 3D (click 2 pts)", true);
             }
             Self::Footing => {
-                spatial.active_canvas_mode = SpatialCanvasMode::Bim3D;
                 build_view.ground_author_tool = Ground3DAuthorTool::Footing;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::Footing;
+                universal_canvas.earth_bim_author.pending_start_mm = None;
+                universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
                 universal_canvas.ground_origin_anchored = true;
-                actions.fit_camera = true;
-                spatial.push_trace("Manual Draw: Footing (click canvas)", true);
+                zoom_in_if_high_altitude(universal_canvas);
+                spatial.push_trace("Draw Footing directly on Earth 3D (click point)", true);
             }
             Self::Line2D => {
-                if spatial.active_canvas_mode == SpatialCanvasMode::Bim3D {
-                    spatial.active_canvas_mode = SpatialCanvasMode::EarthPlan2D;
-                    universal_canvas.globe_mode = false;
-                }
                 build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::None;
                 universal_canvas.active_tool = UniversalCanvasTool::Line;
-                spatial.push_trace("Manual Draw: 2D Line segment", true);
+                zoom_in_if_high_altitude(universal_canvas);
+                spatial.push_trace("Draw Vector Line directly on Earth 3D", true);
             }
             Self::Rect2D => {
-                if spatial.active_canvas_mode == SpatialCanvasMode::Bim3D {
-                    spatial.active_canvas_mode = SpatialCanvasMode::EarthPlan2D;
-                    universal_canvas.globe_mode = false;
-                }
                 build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::None;
                 universal_canvas.active_tool = UniversalCanvasTool::Rectangle;
-                spatial.push_trace("Manual Draw: 2D Rectangle boundary", true);
+                zoom_in_if_high_altitude(universal_canvas);
+                spatial.push_trace("Draw Rectangle boundary directly on Earth 3D", true);
             }
             Self::Measure => {
                 universal_canvas.measure_active = true;
                 build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::None;
                 universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
-                spatial.push_trace("Geodesic Measure active (click points)", true);
+                spatial.push_trace("Geodesic Measure active on Earth 3D (click points)", true);
             }
             Self::Terraform => {
-                spatial.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
-                universal_canvas.globe_mode = true;
                 build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::None;
                 let next_tool = match universal_canvas.active_tool {
                     UniversalCanvasTool::EarthUplift => UniversalCanvasTool::EarthCarve,
                     UniversalCanvasTool::EarthCarve => UniversalCanvasTool::EarthSeawall,
@@ -1480,32 +1491,71 @@ impl SpatialWorkspaceState {
             is_roof: false,
             roof_slope_deg: 0.0,
         })?;
-        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+        self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
         self.push_trace(msg.clone(), true);
         Ok(msg)
     }
 
-    /// Applies an instant 3D BIM camera orientation preset (`iso`, `top`, `front`).
-    pub fn apply_camera_preset(&mut self, build_view: &mut BuildView, preset: &str) {
-        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+    /// Applies an instant Earth 3D architectural camera orientation preset (`iso`, `top`, `front`).
+    pub fn apply_camera_preset(
+        &mut self,
+        build_view: &mut BuildView,
+        universal_canvas: &mut UniversalCanvasState,
+        preset: &str,
+    ) {
+        self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+        universal_canvas.globe_mode = true;
+        let target = if universal_canvas.ground_origin_anchored {
+            universal_canvas.ground_origin_lat_lon
+        } else {
+            universal_canvas.world_map.center_lat_lon
+        };
+        let zoom_tgt = universal_canvas.world_map.zoom_level.max(18.2);
         match preset {
             "top" => {
+                universal_canvas.earth_world.camera.tilt_deg = 0.0;
+                universal_canvas.earth_world.camera.heading_deg = 0.0;
                 build_view.cam_yaw = 0.0;
                 build_view.cam_pitch = 1.48;
                 build_view.perspective = false;
-                self.push_trace("Camera Preset: Plan Top", true);
+                universal_canvas.earth_world.start_fly_to(
+                    &universal_canvas.world_map,
+                    target.0,
+                    target.1,
+                    zoom_tgt,
+                    "Earth Top View",
+                );
+                self.push_trace("Earth 3D Camera: Top Plan (0°)", true);
             }
             "front" => {
+                universal_canvas.earth_world.camera.tilt_deg = 64.0;
+                universal_canvas.earth_world.camera.heading_deg = 0.0;
                 build_view.cam_yaw = 0.0;
                 build_view.cam_pitch = 0.04;
                 build_view.perspective = false;
-                self.push_trace("Camera Preset: Front Elevation", true);
+                universal_canvas.earth_world.start_fly_to(
+                    &universal_canvas.world_map,
+                    target.0,
+                    target.1,
+                    zoom_tgt,
+                    "Earth Elevation View",
+                );
+                self.push_trace("Earth 3D Camera: Low Elevation", true);
             }
             _ => {
+                universal_canvas.earth_world.camera.tilt_deg = 42.0;
+                universal_canvas.earth_world.camera.heading_deg = 28.0;
                 build_view.cam_yaw = 0.68;
                 build_view.cam_pitch = 0.44;
                 build_view.perspective = true;
-                self.push_trace("Camera Preset: Isometric 3D", true);
+                universal_canvas.earth_world.start_fly_to(
+                    &universal_canvas.world_map,
+                    target.0,
+                    target.1,
+                    zoom_tgt,
+                    "Earth Isometric 3D",
+                );
+                self.push_trace("Earth 3D Camera: Isometric (42°)", true);
             }
         }
     }
@@ -1516,8 +1566,10 @@ impl SpatialWorkspaceState {
         build_view: &BuildView,
         universal_canvas: &UniversalCanvasState,
     ) -> bool {
-        build_view.ground_author_tool != Ground3DAuthorTool::Orbit
+        universal_canvas.earth_bim_author.active_tool != crate::views::universal_canvas::EarthBimTool::None
+            || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
             || build_view.pending_3d_start_mm.is_some()
+            || universal_canvas.earth_bim_author.pending_start_mm.is_some()
             || universal_canvas.active_tool != UniversalCanvasTool::SelectPan
             || universal_canvas.measure_active
     }
@@ -1530,9 +1582,12 @@ impl SpatialWorkspaceState {
     ) {
         build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
         build_view.pending_3d_start_mm = None;
+        universal_canvas.earth_bim_author.active_tool =
+            crate::views::universal_canvas::EarthBimTool::None;
+        universal_canvas.earth_bim_author.pending_start_mm = None;
         universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
         universal_canvas.measure_active = false;
-        self.push_trace("Returned to pointer Orbit / Select", true);
+        self.push_trace("Returned to Earth 3D Orbit / Select", true);
     }
 
     /// Attaches a context source into the AI composer strip without duplicates.
@@ -1674,7 +1729,8 @@ impl SpatialWorkspaceState {
             match item {
                 PlannedProposalAction::ExecuteBimNl(cmd) => {
                     if let Ok(msg) = build_view.bim_bus.execute_natural_language(cmd) {
-                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                        self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                        universal_canvas.globe_mode = true;
                         universal_canvas.ground_origin_anchored = true;
                         out.sync_fem_and_earth = true;
                         out.fit_camera = true;
@@ -1714,14 +1770,15 @@ impl SpatialWorkspaceState {
                     self.push_trace(format!("Anchored BIM Site @ {lat:.3}°, {lon:.3}°"), true);
                 }
                 PlannedProposalAction::ApplyAriLens => {
-                    self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                    self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                    universal_canvas.globe_mode = true;
                     self.apply_lens_to_views(
                         SpatialLens::AriRedundancy,
                         build_view,
                         universal_canvas,
                     );
                     out.sync_fem_and_earth = true;
-                    self.push_trace("Applied ARI Redundancy Heatmap Lens", true);
+                    self.push_trace("Applied ARI Redundancy Heatmap Lens on Earth 3D", true);
                 }
                 PlannedProposalAction::ResizeColumn {
                     column_id,
@@ -1743,7 +1800,7 @@ impl SpatialWorkspaceState {
                         rotation_deg: rot,
                         profile_name: format!("RC {:.0}x{:.0}", width_mm, depth_mm),
                     }) {
-                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                        self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
                         out.sync_fem_and_earth = true;
                         self.push_trace(msg.clone(), true);
                         ai_assistant.chat_history.push(crate::models::ChatMessage {
@@ -1764,7 +1821,7 @@ impl SpatialWorkspaceState {
                         depth_mm: *depth_mm,
                         profile_name: format!("RC {:.0}x{:.0}", width_mm, depth_mm),
                     }) {
-                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                        self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
                         out.sync_fem_and_earth = true;
                         self.push_trace(msg.clone(), true);
                         ai_assistant.chat_history.push(crate::models::ChatMessage {
@@ -1793,7 +1850,8 @@ impl SpatialWorkspaceState {
                         is_round: false,
                         profile_name: format!("C{:.0}x{:.0}", width_mm, depth_mm),
                     }) {
-                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                        self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                        universal_canvas.globe_mode = true;
                         universal_canvas.ground_origin_anchored = true;
                         out.sync_fem_and_earth = true;
                         out.fit_camera = true;
@@ -2248,42 +2306,50 @@ impl SpatialWorkspaceState {
         build_view: &mut BuildView,
         universal_canvas: &mut UniversalCanvasState,
     ) {
+        use crate::views::universal_canvas::EarthBimLens;
         self.active_lens = lens;
         match lens {
             SpatialLens::Clean => {
                 build_view.render_mode = Render3DMode::CsgSolidBrep;
                 build_view.highlight_4d_erection = false;
                 universal_canvas.show_domain_overlay = false;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::Clean;
             }
             SpatialLens::DcrHeatmap => {
                 build_view.render_mode = Render3DMode::SolidShaded;
                 build_view.color_mode = "DCR%".to_string();
                 build_view.highlight_4d_erection = false;
                 universal_canvas.show_domain_overlay = true;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::DcrHeatmap;
             }
             SpatialLens::AriRedundancy => {
                 build_view.render_mode = Render3DMode::SolidShaded;
                 build_view.color_mode = "ARI".to_string();
                 build_view.highlight_4d_erection = false;
                 universal_canvas.show_domain_overlay = true;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::AriRedundancy;
             }
             SpatialLens::AxialForce => {
                 build_view.render_mode = Render3DMode::AxialForceNFD;
                 build_view.highlight_4d_erection = false;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::MomentStress;
             }
             SpatialLens::ShearForce => {
                 build_view.render_mode = Render3DMode::ShearForceSFD;
                 build_view.highlight_4d_erection = false;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::MomentStress;
             }
             SpatialLens::BendingMoment => {
                 build_view.render_mode = Render3DMode::BendingMomentBMD;
                 build_view.highlight_4d_erection = false;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::MomentStress;
             }
             SpatialLens::Erection4D => {
                 build_view.render_mode = Render3DMode::CsgSolidBrep;
                 build_view.highlight_4d_erection = true;
                 build_view.simulation_4d_day = self.active_4d_day as usize;
                 universal_canvas.show_domain_overlay = true;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::Erection4D;
             }
         }
     }
@@ -2322,33 +2388,25 @@ impl SpatialWorkspaceState {
                     self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
                     universal_canvas.globe_mode = true;
                     universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
-                    self.push_trace("Switched to 3D Earth Globe", true);
+                    universal_canvas.earth_bim_author.active_tool =
+                        crate::views::universal_canvas::EarthBimTool::None;
+                    self.push_trace("Focused 3D Earth Globe", true);
                 }
-                "/2d" | "/plan" | "/map" => {
-                    self.active_canvas_mode = SpatialCanvasMode::EarthPlan2D;
-                    universal_canvas.globe_mode = false;
-                    universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
+                "/iso" | "/3d" | "/bim" => {
+                    self.apply_camera_preset(build_view, universal_canvas, "iso");
                     actions.fit_camera = true;
-                    self.push_trace("Switched to 2D Plan & Earth Map", true);
                 }
-                "/3d" | "/bim" => {
-                    self.active_canvas_mode = SpatialCanvasMode::Bim3D;
-                    build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                "/top" | "/2d" | "/plan" => {
+                    self.apply_camera_preset(build_view, universal_canvas, "top");
                     actions.fit_camera = true;
-                    self.push_trace("Switched to 3D Structural BIM", true);
                 }
                 "/fit" | "/zoom" => {
                     actions.fit_camera = true;
-                    self.push_trace("Fitted camera to active model", true);
+                    self.push_trace("Fitted Earth 3D camera to active model", true);
                 }
                 "/classic" | "/sidebar" => {
                     actions.switch_to_classic_ui = true;
                     self.push_trace("Switched to Classic 15-Pillar UI", true);
-                }
-                "/sample" | "/demo" => {
-                    actions.load_sample_building = true;
-                    self.active_canvas_mode = SpatialCanvasMode::Bim3D;
-                    self.push_trace("Loaded BIMCraft 3D Building on Earth", true);
                 }
                 "/portal" | "/frame" | "/box" | "/grid" | "/col" | "/rebar" | "/clear" => {
                     let nl_cmd = trimmed.trim_start_matches('/');
@@ -2358,7 +2416,8 @@ impl SpatialWorkspaceState {
                                 self.selected_target = None;
                                 universal_canvas.highlighted_bim_element = None;
                             } else {
-                                self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                                self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                                universal_canvas.globe_mode = true;
                                 universal_canvas.ground_origin_anchored = true;
                             }
                             actions.sync_fem_and_earth = true;
@@ -2376,32 +2435,19 @@ impl SpatialWorkspaceState {
                     }
                 }
                 "/column" => {
-                    self.active_canvas_mode = SpatialCanvasMode::Bim3D;
-                    build_view.ground_author_tool = Ground3DAuthorTool::Column;
-                    self.push_trace("Column placement tool active (click ground)", true);
+                    let _ = SpatialManualTool::Column.apply(self, universal_canvas, build_view);
                 }
                 "/beam" => {
-                    self.active_canvas_mode = SpatialCanvasMode::Bim3D;
-                    build_view.ground_author_tool = Ground3DAuthorTool::Beam;
-                    self.push_trace("Beam placement tool active (click 2 pts)", true);
+                    let _ = SpatialManualTool::Beam.apply(self, universal_canvas, build_view);
                 }
                 "/wall" => {
-                    self.active_canvas_mode = SpatialCanvasMode::Bim3D;
-                    build_view.ground_author_tool = Ground3DAuthorTool::Wall;
-                    self.push_trace("Wall placement tool active (click 2 pts)", true);
+                    let _ = SpatialManualTool::Wall.apply(self, universal_canvas, build_view);
                 }
                 "/footing" => {
-                    self.active_canvas_mode = SpatialCanvasMode::Bim3D;
-                    build_view.ground_author_tool = Ground3DAuthorTool::Footing;
-                    self.push_trace("Footing placement tool active (click ground)", true);
+                    let _ = SpatialManualTool::Footing.apply(self, universal_canvas, build_view);
                 }
                 "/line" => {
-                    if self.active_canvas_mode == SpatialCanvasMode::Bim3D {
-                        self.active_canvas_mode = SpatialCanvasMode::EarthPlan2D;
-                        universal_canvas.globe_mode = false;
-                    }
-                    universal_canvas.active_tool = UniversalCanvasTool::Line;
-                    self.push_trace("2D CAD Line tool active", true);
+                    let _ = SpatialManualTool::Line2D.apply(self, universal_canvas, build_view);
                 }
                 "/measure" => {
                     universal_canvas.measure_active = !universal_canvas.measure_active;
@@ -2435,10 +2481,7 @@ impl SpatialWorkspaceState {
                         SpatialLens::Clean
                     };
                     self.apply_lens_to_views(next_lens, build_view, universal_canvas);
-                    if next_lens != SpatialLens::Clean && self.active_canvas_mode == SpatialCanvasMode::EarthGlobe {
-                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
-                    }
-                    self.push_trace(format!("Lens: {}", next_lens.label()), true);
+                    self.push_trace(format!("Earth 3D Lens: {}", next_lens.label()), true);
                 }
                 "/fly" | "/go" | "/loc" => {
                     if let Some((label, lat, lon, zoom)) =
@@ -2558,21 +2601,22 @@ impl SpatialWorkspaceState {
         } else if lower == "redo" {
             actions.redo = true;
             return actions;
-        } else if lower == "focus 3d" || lower == "open 3d" || lower == "bim 3d" {
-            self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+        } else if lower == "focus 3d" || lower == "open 3d" || lower == "bim 3d" || lower == "earth 3d" {
+            self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+            universal_canvas.globe_mode = true;
             actions.fit_camera = true;
-            self.push_trace("Switched to 3D BIM Viewport", true);
+            self.push_trace("Focused Earth 3D Canvas", true);
             return actions;
         } else if lower == "iso view" || lower == "isometric view" {
-            self.apply_camera_preset(build_view, "iso");
+            self.apply_camera_preset(build_view, universal_canvas, "iso");
             actions.fit_camera = true;
             return actions;
         } else if lower == "top view" || lower == "plan view" {
-            self.apply_camera_preset(build_view, "top");
+            self.apply_camera_preset(build_view, universal_canvas, "top");
             actions.fit_camera = true;
             return actions;
         } else if lower == "front view" || lower == "elevation view" {
-            self.apply_camera_preset(build_view, "front");
+            self.apply_camera_preset(build_view, universal_canvas, "front");
             actions.fit_camera = true;
             return actions;
         } else if lower == "add story" || lower == "add level" || lower == "new story" {
@@ -2685,7 +2729,8 @@ impl SpatialWorkspaceState {
             }
             match build_view.bim_bus.execute_natural_language(&norm) {
                 Ok(msg) => {
-                    self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                    self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                    universal_canvas.globe_mode = true;
                     universal_canvas.ground_origin_anchored = true;
                     actions.sync_fem_and_earth = true;
                     actions.fit_camera = true;
@@ -2893,7 +2938,9 @@ impl SpatialWorkspaceState {
                     vec![PlannedProposalAction::ExecuteBimNl(cmd)],
                 );
             } else if let Ok(msg) = build_view.bim_bus.execute_natural_language(&cmd) {
-                self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                universal_canvas.globe_mode = true;
+                universal_canvas.ground_origin_anchored = true;
                 actions.sync_fem_and_earth = true;
                 actions.fit_camera = true;
                 self.push_trace(msg, true);
@@ -3040,6 +3087,34 @@ impl SpatialWorkspaceState {
     ) -> SpatialHudActions {
         let mut actions = SpatialHudActions::default();
         self.hud_rects.clear();
+        self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+        universal_canvas.globe_mode = true;
+
+        // Keep Earth 3D BIM Authoring Config synchronized with active Story & Element Dimensions
+        let (sync_base_id, sync_top_id, _, _) =
+            self.active_base_and_top_levels(&build_view.bim_bus.project);
+        universal_canvas.earth_bim_author.base_level_id = sync_base_id;
+        universal_canvas.earth_bim_author.top_level_id = sync_top_id;
+        universal_canvas.earth_bim_author.col_width_mm = build_view.author_col_width_mm;
+        universal_canvas.earth_bim_author.col_depth_mm = build_view.author_col_depth_mm;
+        universal_canvas.earth_bim_author.beam_width_mm = build_view.author_beam_width_mm;
+        universal_canvas.earth_bim_author.beam_depth_mm = build_view.author_beam_depth_mm;
+        universal_canvas.earth_bim_author.wall_thickness_mm = build_view.author_wall_thickness_mm;
+        universal_canvas.earth_bim_author.footing_size_mm = build_view.author_footing_size_mm;
+        universal_canvas.earth_bim_author.erection_day_limit = self.active_4d_day as usize;
+        universal_canvas.earth_bim_author.active_tool = match build_view.ground_author_tool {
+            Ground3DAuthorTool::Orbit => crate::views::universal_canvas::EarthBimTool::None,
+            Ground3DAuthorTool::Column => crate::views::universal_canvas::EarthBimTool::Column,
+            Ground3DAuthorTool::Beam => crate::views::universal_canvas::EarthBimTool::Beam,
+            Ground3DAuthorTool::Wall => crate::views::universal_canvas::EarthBimTool::Wall,
+            Ground3DAuthorTool::Footing => crate::views::universal_canvas::EarthBimTool::Footing,
+        };
+        if let Some(earth_snap) = universal_canvas.earth_bim_author.hover_snap_mm {
+            build_view.hover_3d_ground_snap_mm = Some(earth_snap);
+        }
+        if let Some(earth_start) = universal_canvas.earth_bim_author.pending_start_mm {
+            build_view.pending_3d_start_mm = Some(earth_start);
+        }
 
         let vp = MacTheme::viewport_size(ctx);
         let is_mobile = vp.x < MacTheme::MOBILE_BREAKPOINT;
@@ -3464,9 +3539,7 @@ impl SpatialWorkspaceState {
                                     build_view,
                                     universal_canvas,
                                 );
-                                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
-                                universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
-                                universal_canvas.measure_active = false;
+                                self.reset_manual_tools_to_orbit(build_view, universal_canvas);
                             }
                         });
                     });
@@ -3951,7 +4024,7 @@ impl SpatialWorkspaceState {
                     if icons::icon_button(
                         ui,
                         AppIcon::Column,
-                        "Anchor & Build Here",
+                        "Build Here (Earth 3D)",
                         9.8,
                         Color32::WHITE,
                         theme.accent_green,
@@ -3963,12 +4036,9 @@ impl SpatialWorkspaceState {
                     {
                         universal_canvas.ground_origin_lat_lon = (lat, lon);
                         universal_canvas.ground_origin_anchored = true;
-                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
-                        if build_view.bim_bus.project.is_empty() {
-                            build_view.ground_author_tool = Ground3DAuthorTool::Column;
-                        }
+                        let _ = SpatialManualTool::Column.apply(self, universal_canvas, build_view);
                         actions.anchor_and_build_site = Some((lat, lon));
-                        self.push_trace(format!("Anchored & Opened 3D BIM @ {lat:.3}°, {lon:.3}°"), true);
+                        self.push_trace(format!("Anchored & Ready on Earth 3D @ {lat:.3}°, {lon:.3}°"), true);
                     }
                     if icons::icon_button(
                         ui,
@@ -3989,35 +4059,26 @@ impl SpatialWorkspaceState {
                             .bim_bus
                             .execute_natural_language("portal 3x2 @6m 2floors")
                         {
-                            self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                            self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                            universal_canvas.globe_mode = true;
+                            universal_canvas.earth_world.camera.tilt_deg = 42.0;
+                            universal_canvas.earth_world.start_fly_to(
+                                &universal_canvas.world_map,
+                                lat,
+                                lon,
+                                18.2,
+                                "Earth 3D Portal",
+                            );
                             actions.sync_fem_and_earth = true;
                             actions.fit_camera = true;
                             self.push_trace(msg, true);
                         }
                     }
-                    if icons::icon_button(
-                        ui,
-                        AppIcon::Building,
-                        "Load BIMCraft Sample",
-                        9.8,
-                        theme.text_primary,
-                        theme.bg_card,
-                        Stroke::new(0.9, theme.border_subtle),
-                        CornerRadius::same(7),
-                        Vec2::new(0.0, 22.0),
-                    )
-                    .clicked()
-                    {
-                        universal_canvas.ground_origin_lat_lon = (lat, lon);
-                        universal_canvas.ground_origin_anchored = true;
-                        actions.load_sample_building = true;
-                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
-                    }
                     if !build_view.bim_bus.project.is_empty()
                         && icons::icon_button(
                             ui,
-                            AppIcon::Building,
-                            "Focus 3D BIM",
+                            AppIcon::ZoomFit,
+                            "Focus Building",
                             9.8,
                             Color32::WHITE,
                             theme.accent_blue,
@@ -4027,9 +4088,16 @@ impl SpatialWorkspaceState {
                         )
                         .clicked()
                     {
-                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                        universal_canvas.earth_world.camera.tilt_deg = 42.0;
+                        universal_canvas.earth_world.start_fly_to(
+                            &universal_canvas.world_map,
+                            universal_canvas.ground_origin_lat_lon.0,
+                            universal_canvas.ground_origin_lat_lon.1,
+                            18.2,
+                            "Site Focus",
+                        );
                         actions.fit_camera = true;
-                        self.push_trace("Focused 3D BIM Viewport", true);
+                        self.push_trace("Focused Earth 3D Building Site", true);
                     }
                     if icons::icon_button(
                         ui,
@@ -4150,7 +4218,7 @@ impl SpatialWorkspaceState {
                     if icons::icon_button(
                         ui,
                         AppIcon::Column,
-                        "Anchor & Build Here",
+                        "Build Here (Earth 3D)",
                         10.5,
                         Color32::WHITE,
                         theme.accent_green,
@@ -4158,18 +4226,15 @@ impl SpatialWorkspaceState {
                         CornerRadius::same(7),
                         Vec2::new(0.0, 26.0),
                     )
-                    .on_hover_text("Anchor BIM Origin at this Earth site and open 3D Structural Modeling")
+                    .on_hover_text("Anchor BIM Origin at this Earth site and build directly on Earth 3D")
                     .clicked()
                     {
                         universal_canvas.ground_origin_lat_lon = (lat, lon);
                         universal_canvas.ground_origin_anchored = true;
-                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
-                        if build_view.bim_bus.project.is_empty() {
-                            build_view.ground_author_tool = Ground3DAuthorTool::Column;
-                        }
+                        let _ = SpatialManualTool::Column.apply(self, universal_canvas, build_view);
                         actions.anchor_and_build_site = Some((lat, lon));
                         self.push_trace(
-                            format!("Anchored & Opened 3D BIM @ {lat:.3}°, {lon:.3}°"),
+                            format!("Anchored & Ready on Earth 3D @ {lat:.3}°, {lon:.3}°"),
                             true,
                         );
                     }
@@ -4192,35 +4257,26 @@ impl SpatialWorkspaceState {
                             .bim_bus
                             .execute_natural_language("portal 3x2 @6m 2floors")
                         {
-                            self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                            self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                            universal_canvas.globe_mode = true;
+                            universal_canvas.earth_world.camera.tilt_deg = 42.0;
+                            universal_canvas.earth_world.start_fly_to(
+                                &universal_canvas.world_map,
+                                lat,
+                                lon,
+                                18.2,
+                                "Earth 3D Portal",
+                            );
                             actions.sync_fem_and_earth = true;
                             actions.fit_camera = true;
                             self.push_trace(msg, true);
                         }
                     }
-                    if icons::icon_button(
-                        ui,
-                        AppIcon::Building,
-                        "Load BIMCraft Sample",
-                        10.5,
-                        theme.text_primary,
-                        theme.bg_card,
-                        Stroke::new(1.0, theme.border_subtle),
-                        CornerRadius::same(7),
-                        Vec2::new(0.0, 26.0),
-                    )
-                    .clicked()
-                    {
-                        universal_canvas.ground_origin_lat_lon = (lat, lon);
-                        universal_canvas.ground_origin_anchored = true;
-                        actions.load_sample_building = true;
-                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
-                    }
                     if !build_view.bim_bus.project.is_empty()
                         && icons::icon_button(
                             ui,
-                            AppIcon::Building,
-                            "Focus 3D BIM",
+                            AppIcon::ZoomFit,
+                            "Focus Building",
                             10.5,
                             Color32::WHITE,
                             theme.accent_blue,
@@ -4228,12 +4284,19 @@ impl SpatialWorkspaceState {
                             CornerRadius::same(7),
                             Vec2::new(0.0, 26.0),
                         )
-                        .on_hover_text("Switch directly to interactive 3D BIM viewport centered on active model")
+                        .on_hover_text("Focus Earth 3D camera onto active structural model")
                         .clicked()
                     {
-                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                        universal_canvas.earth_world.camera.tilt_deg = 42.0;
+                        universal_canvas.earth_world.start_fly_to(
+                            &universal_canvas.world_map,
+                            universal_canvas.ground_origin_lat_lon.0,
+                            universal_canvas.ground_origin_lat_lon.1,
+                            18.2,
+                            "Site Focus",
+                        );
                         actions.fit_camera = true;
-                        self.push_trace("Focused 3D BIM Viewport", true);
+                        self.push_trace("Focused Earth 3D Building Site", true);
                     }
                     if icons::icon_button(
                         ui,
@@ -5446,7 +5509,7 @@ impl SpatialWorkspaceState {
     ) -> SpatialHudActions {
         let mut actions = SpatialHudActions::default();
         let status = crate::core::InternalVault::connection_status();
-        let vault_files = crate::core::InternalVault::list_vault_context_files(18);
+        let vault_files = crate::core::InternalVault::list_vault_context_files(128);
 
         Frame::new()
             .fill(Color32::TRANSPARENT)
@@ -5932,7 +5995,7 @@ impl SpatialWorkspaceState {
                                     }
                                 });
                             }
-                            for vf in vault_files.iter().take(16) {
+                            for vf in vault_files.iter().take(64) {
                                 if vault_projects.iter().any(|p| p.rel_path == vf.rel_path) {
                                     continue;
                                 }
@@ -5942,6 +6005,7 @@ impl SpatialWorkspaceState {
                                 {
                                     continue;
                                 }
+                                let is_ifc = vf.name.to_ascii_lowercase().ends_with(".ifc");
                                 ui.horizontal(|ui| {
                                     if ui
                                         .small_button("+@")
@@ -5961,16 +6025,39 @@ impl SpatialWorkspaceState {
                                                 .size(10.0)
                                                 .color(theme.text_secondary),
                                         )
-                                        .on_hover_text("Click to preview Obsidian Vault note / file")
+                                        .on_hover_text(if is_ifc {
+                                            "Load this OpenBIM IFC file directly onto Earth 3D"
+                                        } else {
+                                            "Click to preview Obsidian Vault note / file"
+                                        })
                                         .clicked()
                                     {
-                                        let preview =
-                                            crate::core::InternalVault::read_vault_context_snippet(
-                                                &vf.rel_path,
-                                                600,
-                                            )
-                                            .unwrap_or_else(|| "(Binary or empty file)".to_string());
-                                        self.previewed_vault_note = Some((vf.rel_path.clone(), preview));
+                                        if is_ifc {
+                                            actions.open_vault_project = Some(
+                                                crate::core::vault::PersonalVaultProjectEntry {
+                                                    name: vf.name.clone(),
+                                                    filename: vf.name.clone(),
+                                                    rel_path: vf.rel_path.clone(),
+                                                    abs_path: crate::core::InternalVault::vault_root_dir()
+                                                        .join(&vf.rel_path)
+                                                        .to_string_lossy()
+                                                        .to_string(),
+                                                    category: vf.category.clone(),
+                                                    node_count: 0,
+                                                    member_count: 0,
+                                                    size_bytes: vf.size_bytes,
+                                                    updated_label: "IFC".to_string(),
+                                                },
+                                            );
+                                        } else {
+                                            let preview =
+                                                crate::core::InternalVault::read_vault_context_snippet(
+                                                    &vf.rel_path,
+                                                    600,
+                                                )
+                                                .unwrap_or_else(|| "(Binary or empty file)".to_string());
+                                            self.previewed_vault_note = Some((vf.rel_path.clone(), preview));
+                                        }
                                     }
                                     if ui.small_button("Ren").on_hover_text("Rename Vault file").clicked() {
                                         self.vault_rename_target = Some((vf.rel_path.clone(), vf.name.clone()));
@@ -6958,10 +7045,11 @@ impl SpatialWorkspaceState {
                                     if let Some(target) = worst_target {
                                         if ui
                                             .small_button("Inspect Worst")
-                                            .on_hover_text("Select critical / highest-DCR structural element")
+                                            .on_hover_text("Select critical / highest-DCR structural element on Earth 3D")
                                             .clicked()
                                         {
-                                            self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                                            self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                                            universal_canvas.globe_mode = true;
                                             self.selected_target = Some(target);
                                             self.popup_tab = SmartPopupTab::Calculations;
                                             actions.fit_camera = true;
@@ -7030,38 +7118,7 @@ impl SpatialWorkspaceState {
                                     actions.redo = true;
                                 }
 
-                                let view_lbl = self.active_canvas_mode.label();
-                                if icons::icon_button(
-                                    ui,
-                                    self.active_canvas_mode.icon(),
-                                    view_lbl,
-                                    9.8,
-                                    theme.accent_blue,
-                                    theme.accent_blue.gamma_multiply(0.14),
-                                    Stroke::new(0.8, theme.accent_blue.gamma_multiply(0.4)),
-                                    CornerRadius::same(7),
-                                    Vec2::new(0.0, 21.0),
-                                )
-                                .on_hover_text("Switch Canvas View: Earth 3D -> BIM 3D -> Plan 2D")
-                                .clicked()
-                                {
-                                    self.active_canvas_mode = match self.active_canvas_mode {
-                                        SpatialCanvasMode::EarthGlobe => SpatialCanvasMode::Bim3D,
-                                        SpatialCanvasMode::Bim3D => SpatialCanvasMode::EarthPlan2D,
-                                        SpatialCanvasMode::EarthPlan2D => SpatialCanvasMode::EarthGlobe,
-                                    };
-                                    universal_canvas.globe_mode =
-                                        self.active_canvas_mode == SpatialCanvasMode::EarthGlobe;
-                                    if self.active_canvas_mode != SpatialCanvasMode::EarthGlobe {
-                                        actions.fit_camera = true;
-                                    }
-                                    self.push_trace(
-                                        format!("View: {}", self.active_canvas_mode.label()),
-                                        true,
-                                    );
-                                }
-
-                                if ui.small_button("Fit").on_hover_text("Fit viewport to model").clicked() {
+                                if ui.small_button("Fit").on_hover_text("Fit Earth 3D viewport to model").clicked() {
                                     actions.fit_camera = true;
                                 }
                                 if ui.small_button("Export").on_hover_text("Export .eigen.json workspace").clicked() {
@@ -7125,7 +7182,7 @@ impl SpatialWorkspaceState {
                                     } else {
                                         "More Tools ▼"
                                     })
-                                    .on_hover_text("Show/hide secondary 2D/3D/Earth drafting brushes")
+                                    .on_hover_text("Show/hide secondary 2D vector, Promote-to-BIM & Earth sculpting brushes")
                                     .clicked()
                                 {
                                     self.hover_more_tools_open = !self.hover_more_tools_open;
@@ -7134,189 +7191,100 @@ impl SpatialWorkspaceState {
 
                             ui.add_space(4.0);
 
-                            // 3. Context-Aware Studio Bar (adapts calmly to Earth 3D, BIM 3D, or Plan 2D)
-                            match self.active_canvas_mode {
-                                SpatialCanvasMode::Bim3D => {
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label(
-                                            RichText::new("3D Studio:")
-                                                .size(9.5)
-                                                .strong()
-                                                .color(theme.text_muted),
-                                        );
-                                        if ui.small_button("Iso").on_hover_text("3D Isometric Camera").clicked() {
-                                            self.apply_camera_preset(build_view, "iso");
-                                            actions.fit_camera = true;
-                                        }
-                                        if ui.small_button("Top").on_hover_text("3D Plan Top Camera").clicked() {
-                                            self.apply_camera_preset(build_view, "top");
-                                            actions.fit_camera = true;
-                                        }
-                                        if ui.small_button("Front").on_hover_text("3D Elevation Camera").clicked() {
-                                            self.apply_camera_preset(build_view, "front");
-                                            actions.fit_camera = true;
-                                        }
-                                        let (_, _, story_lbl, lvl_cnt) =
-                                            self.active_base_and_top_levels(&build_view.bim_bus.project);
-                                        if ui
-                                            .small_button(format!("Story: {story_lbl}"))
-                                            .on_hover_text("Cycle active placement floor level")
-                                            .clicked()
-                                        {
-                                            self.active_story_idx = (self.active_story_idx + 1) % lvl_cnt.max(1);
-                                        }
-                                        if ui
-                                            .small_button("+ Story")
-                                            .on_hover_text("Add upper floor story (+3.5m)")
-                                            .clicked()
-                                            && self.add_story_above_top(build_view).is_ok()
-                                        {
-                                            actions.sync_fem_and_earth = true;
-                                            actions.fit_camera = true;
-                                        }
-                                        if ui
-                                            .small_button("+ Slab")
-                                            .on_hover_text("Add structural concrete floor slab")
-                                            .clicked()
-                                            && self.add_slab_at_active_story(build_view).is_ok()
-                                        {
-                                            actions.sync_fem_and_earth = true;
-                                        }
-                                        for (lens, lbl) in [
-                                            (SpatialLens::Clean, "Clean"),
-                                            (SpatialLens::DcrHeatmap, "DCR%"),
-                                            (SpatialLens::AriRedundancy, "ARI"),
-                                            (SpatialLens::BendingMoment, "Moment"),
-                                            (SpatialLens::Erection4D, "4D"),
-                                        ] {
-                                            let active_l = self.active_lens == lens;
-                                            if ui
-                                                .add(
-                                                    egui::Button::new(
-                                                        RichText::new(lbl).size(9.5).color(if active_l {
-                                                            Color32::WHITE
-                                                        } else {
-                                                            theme.text_secondary
-                                                        }),
-                                                    )
-                                                    .min_size(Vec2::new(0.0, 20.0))
-                                                    .fill(if active_l {
-                                                        theme.accent_blue
-                                                    } else {
-                                                        theme.bg_card
-                                                    })
-                                                    .stroke(Stroke::new(0.8, theme.border_subtle))
-                                                    .corner_radius(CornerRadius::same(7)),
-                                                )
-                                                .clicked()
-                                            {
-                                                self.apply_lens_to_views(lens, build_view, universal_canvas);
-                                            }
-                                        }
-                                    });
+                            // 3. Unified Earth 3D Studio Bar (all migrated 3D BIM + Plan + Earth controls directly on Earth 3D)
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(
+                                    RichText::new("Earth 3D:")
+                                        .size(9.5)
+                                        .strong()
+                                        .color(theme.text_muted),
+                                );
+                                if ui.small_button("Iso").on_hover_text("Earth 3D Isometric Camera (42° tilt)").clicked() {
+                                    self.apply_camera_preset(build_view, universal_canvas, "iso");
+                                    actions.fit_camera = true;
                                 }
-                                SpatialCanvasMode::EarthPlan2D => {
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label(
-                                            RichText::new("Plan 2D:")
-                                                .size(9.5)
-                                                .strong()
-                                                .color(theme.text_muted),
-                                        );
-                                        if ui
-                                            .small_button(if universal_canvas.ortho_mode { "Ortho ON" } else { "Ortho" })
-                                            .clicked()
-                                        {
-                                            universal_canvas.ortho_mode = !universal_canvas.ortho_mode;
-                                        }
-                                        if ui
-                                            .small_button(if build_view.show_grid { "Grid ON" } else { "Grid OFF" })
-                                            .clicked()
-                                        {
-                                            let next_grid = !build_view.show_grid;
-                                            build_view.show_grid = next_grid;
-                                            universal_canvas.show_grid = next_grid;
-                                        }
-                                        for ext_tool in [
-                                            UniversalCanvasTool::Freehand,
-                                            UniversalCanvasTool::Circle,
-                                            UniversalCanvasTool::Dimension,
-                                            UniversalCanvasTool::Callout,
-                                            UniversalCanvasTool::BoxSelect,
-                                            UniversalCanvasTool::Eraser,
-                                        ] {
-                                            let is_act = build_view.ground_author_tool == Ground3DAuthorTool::Orbit
-                                                && universal_canvas.active_tool == ext_tool;
-                                            if icons::icon_button(
-                                                ui,
-                                                ext_tool.app_icon(),
-                                                ext_tool.short_label(),
-                                                9.5,
-                                                if is_act { Color32::WHITE } else { theme.text_secondary },
-                                                if is_act { theme.accent_orange } else { theme.bg_card },
-                                                Stroke::new(0.7, theme.border_subtle),
-                                                CornerRadius::same(7),
-                                                Vec2::new(0.0, 20.0),
+                                if ui.small_button("Top").on_hover_text("Earth 3D Nadir Top-Down Plan View (0° tilt)").clicked() {
+                                    self.apply_camera_preset(build_view, universal_canvas, "top");
+                                    actions.fit_camera = true;
+                                }
+                                if ui.small_button("Elev").on_hover_text("Earth 3D Low-Horizon Elevation Camera (64° tilt)").clicked() {
+                                    self.apply_camera_preset(build_view, universal_canvas, "front");
+                                    actions.fit_camera = true;
+                                }
+                                let (_, _, story_lbl, lvl_cnt) =
+                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
+                                if ui
+                                    .small_button(format!("Story: {story_lbl}"))
+                                    .on_hover_text("Cycle active placement floor level")
+                                    .clicked()
+                                {
+                                    self.active_story_idx = (self.active_story_idx + 1) % lvl_cnt.max(1);
+                                }
+                                if ui
+                                    .small_button("+ Story")
+                                    .on_hover_text("Add upper floor story (+3.5m) on Earth 3D")
+                                    .clicked()
+                                    && self.add_story_above_top(build_view).is_ok()
+                                {
+                                    actions.sync_fem_and_earth = true;
+                                    actions.fit_camera = true;
+                                }
+                                if ui
+                                    .small_button("+ Slab")
+                                    .on_hover_text("Add structural concrete floor slab on Earth 3D")
+                                    .clicked()
+                                    && self.add_slab_at_active_story(build_view).is_ok()
+                                {
+                                    actions.sync_fem_and_earth = true;
+                                }
+                                for (lens, lbl) in [
+                                    (SpatialLens::Clean, "Clean"),
+                                    (SpatialLens::DcrHeatmap, "DCR%"),
+                                    (SpatialLens::AriRedundancy, "ARI"),
+                                    (SpatialLens::BendingMoment, "Moment"),
+                                    (SpatialLens::Erection4D, "4D"),
+                                ] {
+                                    let active_l = self.active_lens == lens;
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                RichText::new(lbl).size(9.5).color(if active_l {
+                                                    Color32::WHITE
+                                                } else {
+                                                    theme.text_secondary
+                                                }),
                                             )
-                                            .on_hover_text(ext_tool.tooltip())
-                                            .clicked()
-                                            {
-                                                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
-                                                universal_canvas.active_tool = ext_tool;
-                                            }
-                                        }
-                                    });
+                                            .min_size(Vec2::new(0.0, 20.0))
+                                            .fill(if active_l {
+                                                theme.accent_blue
+                                            } else {
+                                                theme.bg_card
+                                            })
+                                            .stroke(Stroke::new(0.8, theme.border_subtle))
+                                            .corner_radius(CornerRadius::same(7)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.apply_lens_to_views(lens, build_view, universal_canvas);
+                                    }
                                 }
-                                SpatialCanvasMode::EarthGlobe => {
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label(
-                                            RichText::new("Earth:")
-                                                .size(9.5)
-                                                .strong()
-                                                .color(theme.text_muted),
-                                        );
-                                        if ui
-                                            .small_button(if build_view.show_3d_map_backdrop { "Map BG ON" } else { "Map BG OFF" })
-                                            .clicked()
-                                        {
-                                            build_view.show_3d_map_backdrop = !build_view.show_3d_map_backdrop;
-                                        }
-                                        if ui
-                                            .small_button(if build_view.show_grid { "Grid ON" } else { "Grid OFF" })
-                                            .clicked()
-                                        {
-                                            let next_grid = !build_view.show_grid;
-                                            build_view.show_grid = next_grid;
-                                            universal_canvas.show_grid = next_grid;
-                                        }
-                                        for earth_tool in [
-                                            UniversalCanvasTool::EarthUplift,
-                                            UniversalCanvasTool::EarthCarve,
-                                            UniversalCanvasTool::EarthSeawall,
-                                        ] {
-                                            let is_act = build_view.ground_author_tool == Ground3DAuthorTool::Orbit
-                                                && universal_canvas.active_tool == earth_tool;
-                                            if icons::icon_button(
-                                                ui,
-                                                earth_tool.app_icon(),
-                                                earth_tool.short_label(),
-                                                9.5,
-                                                if is_act { Color32::WHITE } else { theme.text_secondary },
-                                                if is_act { theme.accent_orange } else { theme.bg_card },
-                                                Stroke::new(0.7, theme.border_subtle),
-                                                CornerRadius::same(7),
-                                                Vec2::new(0.0, 20.0),
-                                            )
-                                            .on_hover_text(earth_tool.tooltip())
-                                            .clicked()
-                                            {
-                                                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
-                                                universal_canvas.active_tool = earth_tool;
-                                            }
-                                        }
-                                    });
+                                if ui
+                                    .small_button(if universal_canvas.ortho_mode { "Ortho ON" } else { "Ortho" })
+                                    .on_hover_text("Toggle orthogonal 90° snap when drawing Beams/Walls/Lines on Earth 3D")
+                                    .clicked()
+                                {
+                                    universal_canvas.ortho_mode = !universal_canvas.ortho_mode;
                                 }
-                            }
+                                if ui
+                                    .small_button(if build_view.show_grid { "Grid ON" } else { "Grid OFF" })
+                                    .on_hover_text("Show/hide engineering grid on Earth 3D surface")
+                                    .clicked()
+                                {
+                                    let next_grid = !build_view.show_grid;
+                                    build_view.show_grid = next_grid;
+                                    universal_canvas.show_grid = next_grid;
+                                }
+                            });
 
                             // 4. Secondary Extended Tools (cleanly collapsed unless user clicks `More Tools`)
                             if self.hover_more_tools_open {
@@ -7357,19 +7325,29 @@ impl SpatialWorkspaceState {
                                         .on_hover_text(ext_tool.tooltip())
                                         .clicked()
                                         {
-                                            if ext_tool.is_earth_tool() {
-                                                self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
-                                                universal_canvas.globe_mode = true;
-                                            } else if self.active_canvas_mode == SpatialCanvasMode::Bim3D {
-                                                self.active_canvas_mode = SpatialCanvasMode::EarthPlan2D;
-                                                universal_canvas.globe_mode = false;
-                                            }
+                                            self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                                            universal_canvas.globe_mode = true;
                                             build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                                            universal_canvas.earth_bim_author.active_tool =
+                                                crate::views::universal_canvas::EarthBimTool::None;
                                             universal_canvas.active_tool = ext_tool;
                                             self.push_trace(
-                                                format!("Tool: {}", ext_tool.short_label()),
+                                                format!("Earth 3D Tool: {}", ext_tool.short_label()),
                                                 true,
                                             );
+                                        }
+                                    }
+                                    if !universal_canvas.entities.is_empty()
+                                        && ui
+                                            .small_button("Promote -> BIM")
+                                            .on_hover_text("Promote selected vector Lines/Rects on Earth 3D into 3D BIM Walls, Beams & Slabs")
+                                            .clicked()
+                                    {
+                                        let (w, r, s) =
+                                            universal_canvas.promote_selection_to_bim(&mut build_view.bim_bus.project);
+                                        if w + r + s > 0 {
+                                            actions.sync_fem_and_earth = true;
+                                            self.push_trace(format!("Promoted +{w}W +{r}B +{s}S on Earth 3D"), true);
                                         }
                                     }
                                 });
@@ -7802,7 +7780,6 @@ impl SpatialHudActions {
     pub fn merge(&mut self, other: Self) {
         self.sync_fem_and_earth |= other.sync_fem_and_earth;
         self.fit_camera |= other.fit_camera;
-        self.load_sample_building |= other.load_sample_building;
         self.export_archive |= other.export_archive;
         self.export_ifc4 |= other.export_ifc4;
         self.save_audit_note |= other.save_audit_note;
@@ -7847,9 +7824,8 @@ mod tests {
     fn test_phase46_slash_commands_cover_all_15_pillars_and_spatial_lenses() {
         let required = [
             "/earth",
-            "/3d",
-            "/2d",
-            "/sample",
+            "/iso",
+            "/top",
             "/lens dcr",
             "/lens ari",
             "/lens moment",
@@ -8015,7 +7991,7 @@ mod tests {
             Some(SmartSelectionTarget::EarthSite { .. })
         ));
 
-        // 2. /lens dcr switches to Bim3D with DCR% heatmap mode
+        // 2. /lens dcr keeps Earth 3D active with DCR% heatmap mode
         let _ = spatial.execute_spatial_input(
             "/lens dcr",
             &mut canvas,
@@ -8026,8 +8002,13 @@ mod tests {
             &mut db_components,
         );
         assert_eq!(spatial.active_lens, SpatialLens::DcrHeatmap);
-        assert_eq!(spatial.active_canvas_mode, SpatialCanvasMode::Bim3D);
+        assert_eq!(spatial.active_canvas_mode, SpatialCanvasMode::EarthGlobe);
+        assert!(canvas.globe_mode);
         assert_eq!(build.color_mode, "DCR%");
+        assert_eq!(
+            canvas.earth_bim_author.active_lens,
+            crate::views::universal_canvas::EarthBimLens::DcrHeatmap
+        );
 
         // 3. /cost summons CostBudgeting as an on-demand overlay sheet
         let _ = spatial.execute_spatial_input(
@@ -8236,8 +8217,13 @@ mod tests {
         let mut build = BuildView::default();
 
         let _ = SpatialManualTool::Column.apply(&mut spatial, &mut canvas, &mut build);
-        assert_eq!(spatial.active_canvas_mode, SpatialCanvasMode::Bim3D);
+        assert_eq!(spatial.active_canvas_mode, SpatialCanvasMode::EarthGlobe);
+        assert!(canvas.globe_mode);
         assert_eq!(build.ground_author_tool, Ground3DAuthorTool::Column);
+        assert_eq!(
+            canvas.earth_bim_author.active_tool,
+            crate::views::universal_canvas::EarthBimTool::Column
+        );
         assert!(SpatialManualTool::Column.is_active(
             spatial.active_canvas_mode,
             &canvas,
@@ -8245,9 +8231,9 @@ mod tests {
         ));
 
         let _ = SpatialManualTool::Line2D.apply(&mut spatial, &mut canvas, &mut build);
-        assert_eq!(spatial.active_canvas_mode, SpatialCanvasMode::EarthPlan2D);
+        assert_eq!(spatial.active_canvas_mode, SpatialCanvasMode::EarthGlobe);
         assert_eq!(canvas.active_tool, UniversalCanvasTool::Line);
-        assert!(!canvas.globe_mode);
+        assert!(canvas.globe_mode);
 
         let _ = SpatialManualTool::Measure.apply(&mut spatial, &mut canvas, &mut build);
         assert!(canvas.measure_active);
@@ -8890,10 +8876,12 @@ mod tests {
             .unwrap()
             .contains("Slab"));
 
-        spatial.apply_camera_preset(&mut build, "top");
+        spatial.apply_camera_preset(&mut build, &mut canvas, "top");
         assert!(!build.perspective);
-        spatial.apply_camera_preset(&mut build, "iso");
+        assert!((canvas.earth_world.camera.tilt_deg - 0.0).abs() < 1e-3);
+        spatial.apply_camera_preset(&mut build, &mut canvas, "iso");
         assert!(build.perspective);
+        assert!((canvas.earth_world.camera.tilt_deg - 42.0).abs() < 1e-3);
 
         // 3. Geodesic measure summary & local action routing
         canvas.measure_active = true;
@@ -8996,43 +8984,37 @@ mod tests {
         let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
         spatial.mobile_deck_pinned = true;
 
-        for mode in [
-            SpatialCanvasMode::EarthGlobe,
-            SpatialCanvasMode::Bim3D,
-            SpatialCanvasMode::EarthPlan2D,
-        ] {
-            spatial.active_canvas_mode = mode;
-            for win_w in [1100.0_f32, 390.0] {
-                let ctx = egui::Context::default();
-                for _ in 0..4 {
-                    let input = egui::RawInput {
-                        screen_rect: Some(Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            Vec2::new(win_w, 820.0),
-                        )),
-                        ..Default::default()
-                    };
-                    let mut out = ctx.run_ui(input, |ui| {
-                        let _ = spatial.render_hud_overlays(
-                            ui.ctx(),
-                            &theme,
-                            &mut canvas,
-                            &mut build,
-                            &mut ai,
-                            &members,
-                            &projects,
-                            &mut db_components,
-                        );
-                    });
-                    out.textures_delta.clear();
-                }
-                assert_eq!(spatial.hud_rects.len(), 1);
-                let r = spatial.hud_rects[0];
-                assert!(
-                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
-                    "Restructured Dynamic Island {r:?} overflowed viewport {win_w} in mode {mode:?}"
-                );
+        spatial.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+        for win_w in [1100.0_f32, 390.0] {
+            let ctx = egui::Context::default();
+            for _ in 0..4 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(win_w, 820.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
             }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Restructured Dynamic Island {r:?} overflowed viewport {win_w}"
+            );
         }
 
         spatial.hover_more_tools_open = true;
@@ -9198,5 +9180,197 @@ mod tests {
 
         crate::core::InternalVault::reset_runtime_vault_dir();
         let _ = std::fs::remove_dir_all(&temp_vault);
+    }
+
+    #[test]
+    fn test_phase55_vault_recursive_ifc_discovery_and_zero_demo_files() {
+        let _guard = crate::core::vault::TEST_VAULT_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let temp_vault = std::env::temp_dir().join(format!(
+            "eigengraph_phase55_ifc_vault_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp_vault);
+        crate::core::InternalVault::set_custom_vault_dir(temp_vault.clone())
+            .expect("Setting custom Vault dir should succeed");
+        let _ = crate::core::InternalVault::ensure_subdirectories();
+
+        // 1. Verify zero built-in demo/notice/Welcome files were auto-seeded
+        assert!(!temp_vault.join("KnowledgeBase/Welcome.md").exists());
+        assert!(!temp_vault.join("_VAULT_NOTICE.txt").exists());
+        assert!(!temp_vault.join("README_DO_NOT_DELETE.txt").exists());
+
+        // 2. Place a nested uppercase .IFC file with UTF-8 BOM, quoted semicolon, mapped item & IFCSITE lat/lon
+        let nested_dir = temp_vault.join("Imports").join("Client_A");
+        std::fs::create_dir_all(&nested_dir).unwrap();
+        let ifc_path = nested_dir.join("Jakarta_Tower.IFC");
+        let ifc_content = "\u{FEFF}ISO-10303-21;\r\n\
+HEADER;\r\n\
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');\r\n\
+FILE_NAME('Jakarta_Tower.IFC','2026-11-18T12:00:00',('Engineer'),('Firm'),'Tool','Exporter','');\r\n\
+FILE_SCHEMA(('IFC4'));\r\n\
+ENDSEC;\r\n\
+DATA;\r\n\
+#1=IFCPROJECT('0Proj001',$,'Jakarta Tower; Phase 1',$,$,$,$,$,#2);\r\n\
+#2=IFCUNITASSIGNMENT((#3));\r\n\
+#3=IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);\r\n\
+#4=IFCSITE('0Site001',$,'Site A',$,$,#10,$,$,.ELEMENT.,(-6,-12,0),(106,50,0),12.,$,$);\r\n\
+#5=IFCBUILDINGSTOREY('0Lvl1',$,'Level 1',$,$,#10,$,$,.ELEMENT.,0.0);\r\n\
+#6=IFCBUILDINGSTOREY('0Lvl2',$,'Level 2',$,$,#12,$,$,.ELEMENT.,4000.0);\r\n\
+#10=IFCLOCALPLACEMENT($,#11);\r\n\
+#11=IFCAXIS2PLACEMENT3D(#20,#21,#22);\r\n\
+#12=IFCLOCALPLACEMENT(#10,#13);\r\n\
+#13=IFCAXIS2PLACEMENT3D(#23,#21,#22);\r\n\
+#20=IFCCARTESIANPOINT((0.,0.,0.));\r\n\
+#21=IFCDIRECTION((0.,0.,1.));\r\n\
+#22=IFCDIRECTION((1.,0.,0.));\r\n\
+#23=IFCCARTESIANPOINT((0.,0.,4000.));\r\n\
+#30=IFCCOLUMN('0Col001',$,'C1; Main','500x500',$,#10,#40,.COLUMN.);\r\n\
+#31=IFCBEAM('0Bm001',$,'B1_Span','300x600',$,#12,#41,.BEAM.);\r\n\
+#40=IFCPRODUCTDEFINITIONSHAPE($,$,(#50));\r\n\
+#41=IFCPRODUCTDEFINITIONSHAPE($,$,(#51));\r\n\
+#50=IFCSHAPEREPRESENTATION(#1,'Body','MappedRepresentation',(#60));\r\n\
+#51=IFCSHAPEREPRESENTATION(#1,'Axis','Curve3D',(#70));\r\n\
+#60=IFCMAPPEDITEM(#61,#62);\r\n\
+#61=IFCREPRESENTATIONMAP(#11,#63);\r\n\
+#62=IFCCARTESIANTRANSFORMATIONOPERATOR3D($,$,#20,1.,$);\r\n\
+#63=IFCSHAPEREPRESENTATION(#1,'Body','SweptSolid',(#64));\r\n\
+#64=IFCEXTRUDEDAREASOLID(#65,#11,#21,4000.);\r\n\
+#65=IFCRECTANGLEPROFILEDEF(.AREA.,'P500',#11,500.,500.);\r\n\
+#70=IFCPOLYLINE((#71,#72));\r\n\
+#71=IFCCARTESIANPOINT((0.,0.,4000.));\r\n\
+#72=IFCCARTESIANPOINT((6000.,0.,4000.));\r\n\
+ENDSEC;\r\n\
+END-ISO-10303-21;\r\n";
+        std::fs::write(&ifc_path, ifc_content).unwrap();
+
+        let projs = crate::core::InternalVault::list_personal_vault_projects();
+        let ifc_entry = projs
+            .iter()
+            .find(|p| p.filename == "Jakarta_Tower.IFC")
+            .expect("Nested .IFC file must be discovered in Vault projects");
+        assert_eq!(ifc_entry.rel_path, "Imports/Client_A/Jakarta_Tower.IFC");
+        assert!(ifc_entry.name.contains("[IFC]"));
+        assert!(ifc_entry.member_count >= 2);
+
+        let ctx_files = crate::core::InternalVault::list_vault_context_files(64);
+        assert!(ctx_files.iter().any(|f| f.rel_path == "Imports/Client_A/Jakarta_Tower.IFC"));
+
+        let raw = crate::core::InternalVault::load_personal_vault_raw(ifc_entry)
+            .expect("Loading Vault .IFC content should succeed");
+        let (bim, site_geo, summary) =
+            crate::core::ifc::IfcModel::parse_to_bim_project_with_fallback(&raw, &ifc_entry.filename)
+                .expect("IFC STEP file should convert cleanly into editable BimProject");
+        assert_eq!(bim.columns.len(), 1);
+        assert_eq!(bim.runs.len(), 1);
+        assert_eq!(bim.levels.len(), 2);
+        assert!(summary.contains("Imported IFC"));
+        let (lat, lon) = site_geo.expect("IFCSITE lat/lon should parse cleanly");
+        assert!((lat - (-6.2)).abs() < 1e-4);
+        assert!((lon - 106.833333).abs() < 1e-3);
+
+        crate::core::InternalVault::reset_runtime_vault_dir();
+        let _ = std::fs::remove_dir_all(&temp_vault);
+    }
+
+    #[test]
+    fn test_phase55_earth3d_direct_bim_authoring_picking_and_camera_presets() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        canvas.is_frozen = false;
+        canvas.globe_mode = true;
+
+        // Selecting all BIM & Vector draw tools operates directly inside Earth 3D (no Bim3D/Plan2D workspace)
+        for tool in [
+            SpatialManualTool::Column,
+            SpatialManualTool::Beam,
+            SpatialManualTool::Wall,
+            SpatialManualTool::Footing,
+            SpatialManualTool::Line2D,
+            SpatialManualTool::Rect2D,
+        ] {
+            let _ = tool.apply(&mut spatial, &mut canvas, &mut build);
+            assert_eq!(spatial.active_canvas_mode, SpatialCanvasMode::EarthGlobe);
+            assert!(canvas.globe_mode);
+        }
+
+        // Camera presets adjust tilted/nadir Earth 3D camera directly
+        spatial.apply_camera_preset(&mut build, &mut canvas, "top");
+        assert!((canvas.earth_world.camera.tilt_deg - 0.0).abs() < 1e-3);
+        spatial.apply_camera_preset(&mut build, &mut canvas, "front");
+        assert!((canvas.earth_world.camera.tilt_deg - 64.0).abs() < 1e-3);
+        spatial.apply_camera_preset(&mut build, &mut canvas, "iso");
+        assert!((canvas.earth_world.camera.tilt_deg - 42.0).abs() < 1e-3);
+
+        // Place a column & test 3D height-aware picking directly on tilted Earth 3D
+        let _ = build.bim_bus.execute_natural_language("portal 2x1 @6m 1floors").unwrap();
+        let col = &build.bim_bus.project.columns[0];
+        canvas.ground_origin_lat_lon = (-6.2088, 106.8456);
+        canvas.ground_origin_anchored = true;
+        canvas.world_map.center_lat_lon = (-6.2088, 106.8456);
+        canvas.world_map.zoom_level = 19.0;
+        let rect = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+        let xf = crate::core::gis::GlobeScreenTransform::from_view(
+            rect,
+            canvas.world_map.center_lat_lon.0,
+            canvas.world_map.center_lat_lon.1,
+            canvas.world_map.zoom_level,
+            &canvas.earth_world.camera,
+        );
+        let top_ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+            canvas.ground_origin_lat_lon,
+            [col.pos.0, col.pos.1],
+        );
+        let top_m = build.bim_bus.project.level_elevation(col.top_level_id) * 0.001;
+        let (top_px, _, _) = xf.project_lat_lon_elev(top_ll.0, top_ll.1, top_m).unwrap();
+        canvas.last_globe_xform = Some(xf);
+
+        let picked = canvas.pick_bim_element_at_screen(top_px, rect, &build.bim_bus.project);
+        assert_eq!(picked, Some((crate::core::BimElementKind::Column, col.id)));
+    }
+
+    #[test]
+    fn test_phase55_no_sample_slash_commands_and_zero_hud_overflow() {
+        assert!(!SLASH_COMMANDS.iter().any(|s| s.cmd == "/sample" || s.cmd == "/3d" || s.cmd == "/2d"));
+        assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == "/iso"));
+        assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == "/top"));
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        spatial.mobile_deck_pinned = true;
+
+        for win_w in [1100.0_f32, 390.0] {
+            let ctx = egui::Context::default();
+            for _ in 0..4 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 820.0))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(r.right() <= win_w + 1.0 && r.left() >= -1.0);
+        }
     }
 }

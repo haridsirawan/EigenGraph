@@ -33,16 +33,6 @@
       const VAULT_FOLDERS = [
         "Projects", "KnowledgeBase", "Exports", "AI_Context"
       ];
-      const NOTICE_TEXT =
-        "======================================================================\n" +
-        "                      EIGENGRAPH DATA VAULT\n" +
-        "======================================================================\n" +
-        "Obsidian-style personal Engineering Vault for EigenGraph.\n" +
-        "Subfolders:\n" +
-        "  - Projects/       Structural BIM & FEM projects (.eigen)\n" +
-        "  - KnowledgeBase/  Codes, notes & AI context docs (.md, .csv)\n" +
-        "  - Exports/        IFC models, schedules & vault backups\n" +
-        "  - AI_Context/     Dynamic Island session history & prompts\n";
 
       let state = {
         connected: false,
@@ -166,14 +156,45 @@
         const norm = relPath.replace(/\\/g, "/");
         const base = norm.split("/").pop() || norm;
         const lower = base.toLowerCase();
+        const folderPart = norm.includes("/") ? norm.slice(0, norm.lastIndexOf("/")) : "";
         const isProjFolder = norm.startsWith("Projects/");
+        const isIfc = lower.endsWith(".ifc");
         const isEigenExt = lower.endsWith(".eigen") || lower.endsWith(".eigen.json");
-        const isProjJson = isProjFolder && lower.endsWith(".json");
-        if (!isEigenExt && !isProjJson) return null;
+        const isProjJson = isProjFolder && lower.endsWith(".json") && base !== "active_live_project.json";
+        if (!isIfc && !isEigenExt && !isProjJson) return null;
 
-        let displayName = base.replace(/\.eigen\.json$/i, "").replace(/\.eigen$/i, "").replace(/\.json$/i, "");
+        let displayName = base
+          .replace(/\.eigen\.json$/i, "")
+          .replace(/\.eigen$/i, "")
+          .replace(/\.ifc$/i, "")
+          .replace(/\.json$/i, "");
         let nodeCount = 0;
         let memberCount = 0;
+        if (isIfc) {
+          try {
+            const head = content.slice(0, 65536);
+            const projMatch = head.match(/IFCPROJECT\s*\([^,]*,[^,]*,\s*'([^']+)'/i);
+            if (projMatch && projMatch[1] && projMatch[1].trim()) {
+              displayName = projMatch[1].trim();
+            }
+            const elemMatches = content.match(/=\s*IFC(?:WALL|WALLSTANDARDCASE|COLUMN|BEAM|SLAB|FOOTING|MEMBER|ROOF|STAIR|DOOR|WINDOW)\s*\(/gi);
+            const storeyMatches = content.match(/=\s*IFCBUILDINGSTOREY\s*\(/gi);
+            nodeCount = storeyMatches ? storeyMatches.length : 0;
+            memberCount = elemMatches ? elemMatches.length : 0;
+          } catch (_) {}
+          const dt = modifiedMs ? new Date(modifiedMs) : new Date();
+          const updatedAt = isNaN(dt.getTime()) ? "Indexed" : dt.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+          return {
+            name: `${displayName} [IFC]`,
+            filename: base,
+            rel_path: norm,
+            category: folderPart || "IFC Model",
+            node_count: nodeCount,
+            member_count: memberCount,
+            size_bytes: content.length,
+            updated_at: updatedAt
+          };
+        }
         try {
           const parsed = JSON.parse(content);
           if (parsed && typeof parsed === "object" && (parsed.bim_project || typeof parsed.project_name === "string")) {
@@ -243,14 +264,6 @@
         await writable.close();
       }
 
-      const WELCOME_MD =
-        "# EigenGraph Engineering Vault\n\n" +
-        "This workspace follows the clean Obsidian-style folder layout:\n\n" +
-        "- `Projects/` — Structural BIM & FEM models (`.eigen`)\n" +
-        "- `KnowledgeBase/` — Design codes, references, and engineering Markdown notes (`.md`, `.csv`)\n" +
-        "- `Exports/` — IFC exports, engineering schedules, and `.eigen-vault.json` snapshots\n" +
-        "- `AI_Context/` — Dynamic Island session transcripts and prompt presets\n";
-
       function hideDirPickerOverlay() {
         if (dirOverlayEl && dirOverlayEl.parentNode) {
           dirOverlayEl.parentNode.removeChild(dirOverlayEl);
@@ -292,20 +305,14 @@
             ) {
               continue;
             }
-            if (file.size <= 12 * 1024 * 1024) {
+            if (file.size <= 64 * 1024 * 1024) {
               const text = await file.text();
               fileCache.set(rel, { content: text, updated_at: file.lastModified || now });
-              await idbPut("files", { path: rel, content: text, updated_at: file.lastModified || now }).catch(() => {});
+              if (file.size <= 12 * 1024 * 1024) {
+                await idbPut("files", { path: rel, content: text, updated_at: file.lastModified || now }).catch(() => {});
+              }
               importedCount++;
             }
-          }
-          if (!fileCache.has("_VAULT_NOTICE.txt")) {
-            fileCache.set("_VAULT_NOTICE.txt", { content: NOTICE_TEXT, updated_at: now });
-            await idbPut("files", { path: "_VAULT_NOTICE.txt", content: NOTICE_TEXT, updated_at: now }).catch(() => {});
-          }
-          if (!fileCache.has("KnowledgeBase/Welcome.md")) {
-            fileCache.set("KnowledgeBase/Welcome.md", { content: WELCOME_MD, updated_at: now });
-            await idbPut("files", { path: "KnowledgeBase/Welcome.md", content: WELCOME_MD, updated_at: now }).catch(() => {});
           }
           rebuildProjectsFromCache();
           const finalName = rootFolder || "Local Browser Vault";
@@ -485,31 +492,44 @@
 
       async function scanDirectoryIntoCache(dirHandle) {
         fileCache.clear();
-        const foldersToCheck = [""].concat(["Projects", "KnowledgeBase", "Exports", "AI_Context", "ParametricLibrary", "Columns", "Beams", "Slabs", "Walls"]);
-        for (const folder of foldersToCheck) {
+        const shardDirs = new Set(["Columns", "Beams", "Slabs", "Walls", "Footings", "Rebar"]);
+        async function traverse(handle, prefix, depth) {
+          if (depth > 6) return;
           try {
-            const sub = folder ? await dirHandle.getDirectoryHandle(folder, { create: false }) : dirHandle;
-            for await (const [name, handle] of sub.entries()) {
-              if (
-                handle.kind === "file"
-                && (name.endsWith(".eigen")
-                  || name.endsWith(".json")
-                  || name.endsWith(".txt")
-                  || name.endsWith(".md")
-                  || name.endsWith(".csv")
-                  || name.endsWith(".ifc"))
-              ) {
-                const f = await handle.getFile();
-                if (f.size <= 8 * 1024 * 1024) {
-                  const text = await f.text();
-                  const rel = folder ? `${folder}/${name}` : name;
-                  fileCache.set(rel, { content: text, updated_at: f.lastModified });
-                  await idbPut("files", { path: rel, content: text, updated_at: f.lastModified }).catch(() => {});
+            for await (const [name, entry] of handle.entries()) {
+              if (!name || name.startsWith(".")) continue;
+              const rel = prefix ? `${prefix}/${name}` : name;
+              if (entry.kind === "directory") {
+                await traverse(entry, rel, depth + 1);
+              } else if (entry.kind === "file") {
+                const lower = name.toLowerCase();
+                if (
+                  lower.endsWith(".eigen") ||
+                  lower.endsWith(".json") ||
+                  lower.endsWith(".txt") ||
+                  lower.endsWith(".md") ||
+                  lower.endsWith(".csv") ||
+                  lower.endsWith(".ifc") ||
+                  lower.endsWith(".xyz") ||
+                  lower.endsWith(".e2k")
+                ) {
+                  if (lower.endsWith(".json") && shardDirs.has(prefix) && name !== "active_live_project.json") {
+                    continue;
+                  }
+                  const f = await entry.getFile();
+                  if (f.size <= 64 * 1024 * 1024) {
+                    const text = await f.text();
+                    fileCache.set(rel, { content: text, updated_at: f.lastModified });
+                    if (f.size <= 12 * 1024 * 1024) {
+                      await idbPut("files", { path: rel, content: text, updated_at: f.lastModified }).catch(() => {});
+                    }
+                  }
                 }
               }
             }
           } catch (_) {}
         }
+        await traverse(dirHandle, "", 0);
         rebuildProjectsFromCache();
       }
 
@@ -527,17 +547,6 @@
       async function ensureVaultStructureInHandle(dirHandle) {
         for (const f of VAULT_FOLDERS) {
           await dirHandle.getDirectoryHandle(f, { create: true });
-        }
-        try {
-          await dirHandle.getFileHandle("_VAULT_NOTICE.txt", { create: false });
-        } catch (_) {
-          await writeHandleFile(dirHandle, "_VAULT_NOTICE.txt", NOTICE_TEXT);
-        }
-        try {
-          const kb = await dirHandle.getDirectoryHandle("KnowledgeBase", { create: true });
-          await kb.getFileHandle("Welcome.md", { create: false });
-        } catch (_) {
-          await writeHandleFile(dirHandle, "KnowledgeBase/Welcome.md", WELCOME_MD);
         }
       }
 
@@ -592,15 +601,6 @@
             fileCache.clear();
           } else {
             await loadIdbFilesIntoCache();
-          }
-          const now = Date.now();
-          if (!fileCache.has("_VAULT_NOTICE.txt")) {
-            fileCache.set("_VAULT_NOTICE.txt", { content: NOTICE_TEXT, updated_at: now });
-            await idbPut("files", { path: "_VAULT_NOTICE.txt", content: NOTICE_TEXT, updated_at: now });
-          }
-          if (!fileCache.has("KnowledgeBase/Welcome.md")) {
-            fileCache.set("KnowledgeBase/Welcome.md", { content: WELCOME_MD, updated_at: now });
-            await idbPut("files", { path: "KnowledgeBase/Welcome.md", content: WELCOME_MD, updated_at: now });
           }
           rebuildProjectsFromCache();
           activeDirHandle = null;
@@ -892,7 +892,7 @@
               try {
                 const file = activeFileInput.files && activeFileInput.files[0];
                 if (!file) return;
-                if (file.size <= 32 * 1024 * 1024) {
+                if (file.size <= 64 * 1024 * 1024) {
                   const text = await file.text();
                   if (!(await tryImportVaultBundle(file.name, text))) {
                     pendingPickedFileJson = JSON.stringify({ filename: file.name, content: text });
@@ -900,7 +900,7 @@
                     persistSnapshot();
                   }
                 } else {
-                  state.error_msg = `File '${file.name}' exceeds 32 MB import limit.`;
+                  state.error_msg = `File '${file.name}' exceeds 64 MB import limit.`;
                   persistSnapshot();
                 }
               } catch (err) {
@@ -966,7 +966,7 @@
         e.preventDefault();
         try {
           const file = e.dataTransfer.files[0];
-          if (file && file.size <= 32 * 1024 * 1024) {
+          if (file && file.size <= 64 * 1024 * 1024) {
             const text = await file.text();
             if (!(await tryImportVaultBundle(file.name, text))) {
               pendingPickedFileJson = JSON.stringify({ filename: file.name, content: text });
