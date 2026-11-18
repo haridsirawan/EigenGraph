@@ -184,7 +184,7 @@ impl UrbanVectorLayerCache {
                         "--max-time",
                         "12",
                         "-A",
-                        "EigenGraph-BIM/0.6.1 (https://eigengraph.net)",
+                        "EigenGraph-BIM/0.6.2 (https://eigengraph.net)",
                         &url,
                     ])
                     .output()

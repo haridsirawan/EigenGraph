@@ -7,6 +7,22 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.6.2] - 2026-11-18 — Phase 62: Coastal Marine Teal Frosted Glass Palette, Unified Dynamic Island Active Lens & Manual Tool Strip, 1-Click Story Cloning, Subsurface 3D Pile Caps & Full Smart Pop-Up Engineering Diagrams
+
+### Added & Changed
+- **Coastal Marine Teal Palette & Higher-Opacity Frosted Liquid Glass (`src/theme.rs`, `src/views/spatial_workspace.rs`)**:
+  - Updated `MacTheme::for_mode` (`ProDark` and `EngineeringLight`) and `apply_to_ctx` to the four-tier Coastal Marine Teal engineering palette (`#0B1427` Deep Abyssal Navy, `#2B4963` Ocean Steel Blue, `#5B92A5` Coastal Cyan-Teal, `#D0EBE1` Seafoam Mint).
+  - Increased Dynamic Island frosted glass density (`glass_capsule_frame` alpha `222` in dark mode / `228` in light mode, `glass_subpill_frame` frosted marine fill) alongside matching Coastal Teal prompt composer styling.
+- **Unified Active Lens & Manual Tool Controls Inside Dynamic Island (`src/views/spatial_workspace.rs`)**:
+  - Removed the separate floating top-center pill (`antigravity_active_lens_pill`) and integrated active structural lens badges, 4D Erection Day slider, precision 3D column/beam/wall/footing numeric placement (`W / D / X / Y / L / ∠`), 2D drafting inputs, geodesic measure summary, and reset control directly into a Liquid Glass sub-pill (`render_active_lens_and_manual_tool_strip`) inside the single Dynamic Island.
+  - Added a Utility Bar `Pin` toggle (`mobile_deck_pinned`) so the Segmented Studio Deck can remain open during continuous Earth 3D modeling, plus `Alt+1..4` keyboard tab shortcuts.
+- **1-Click Multi-Story Cloning, Subsurface 3D Pile Caps & Complete 2D Pop-Up Engineering Diagrams (`src/views/spatial_workspace.rs`, `src/views/universal_canvas.rs`)**:
+  - Added `clone_active_story_upward` (`Clone ↑` / `/clonestory`) to duplicate columns, beams, walls, and slabs upward (`+3500 mm`), and `auto_generate_missing_footings` (`+ Footings` / `/footings`) inside `BIM & Story`.
+  - Upgraded `render_earth_3d_bim_buildings` section `6A` to extrude 3D subsurface pile caps (`z_bot .. z_top`) with four deep foundation pile shafts beneath each footing.
+  - Added 2D engineering previews (`render_wall_sbe_section_preview`, `render_footing_punching_and_pile_preview`, `render_slab_twoway_preview`) and 1-click `auto_size_selected_element` inside the Smart Element Pop-Up.
+
+---
+
 ## [v0.6.1] - 2026-11-18 — Phase 61: Liquid Glass UI System (Frosted Translucency & Specular Rim), 4-Tab Segmented Dynamic Island Studio Deck, Exclusive Drawer Policy & Grouped Quick-Draw Strip
 
 ### Added & Changed

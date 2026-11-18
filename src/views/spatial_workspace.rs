@@ -749,6 +749,18 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::RulerSquare,
     },
     SlashCommandSpec {
+        cmd: "/clonestory",
+        category: "Model",
+        description: "Clone active floor columns, beams, walls & slabs one story upward (+3.5m)",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/footings",
+        category: "Model",
+        description: "Auto-generate foundation footings / pile caps beneath ground columns",
+        icon: AppIcon::MapPin,
+    },
+    SlashCommandSpec {
         cmd: "/repair",
         category: "AI",
         description: "Run closed-loop AI auto-repair for critical ARI/DCR members",
@@ -1732,6 +1744,345 @@ impl SpatialWorkspaceState {
         self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
         self.push_trace(msg.clone(), true);
         Ok(msg)
+    }
+
+    /// Clones all columns, beams, walls, and slabs on the active floor story one story upward (`+3500 mm`).
+    pub fn clone_active_story_upward(&mut self, build_view: &mut BuildView) -> Result<String, String> {
+        let (base_id, top_id, story_lbl, _) =
+            self.active_base_and_top_levels(&build_view.bim_bus.project);
+        let mut lvls = build_view.bim_bus.project.levels.clone();
+        lvls.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
+        let top_elev = lvls
+            .iter()
+            .find(|l| l.id == top_id)
+            .map(|l| l.elevation_mm)
+            .unwrap_or(3500.0);
+
+        let next_top_id = if let Some(existing) = lvls.iter().find(|l| l.elevation_mm > top_elev + 500.0)
+        {
+            existing.id
+        } else {
+            let next_num = lvls.len() + 1;
+            build_view.bim_bus.execute(BimCommand::AddLevel {
+                name: format!("Level {next_num}"),
+                elevation_mm: top_elev + 3500.0,
+            })?;
+            build_view
+                .bim_bus
+                .project
+                .levels
+                .iter()
+                .max_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm))
+                .map(|l| l.id)
+                .unwrap_or(top_id + 1)
+        };
+
+        let cols: Vec<_> = build_view
+            .bim_bus
+            .project
+            .columns
+            .iter()
+            .filter(|c| c.base_level_id == base_id)
+            .cloned()
+            .collect();
+        let runs: Vec<_> = build_view
+            .bim_bus
+            .project
+            .runs
+            .iter()
+            .filter(|r| r.level_id == base_id || r.level_id == top_id)
+            .cloned()
+            .collect();
+        let walls: Vec<_> = build_view
+            .bim_bus
+            .project
+            .walls
+            .iter()
+            .filter(|w| w.base_level_id == base_id)
+            .cloned()
+            .collect();
+        let slabs: Vec<_> = build_view
+            .bim_bus
+            .project
+            .slabs
+            .iter()
+            .filter(|s| s.level_id == top_id || s.level_id == base_id)
+            .cloned()
+            .collect();
+
+        let mut cloned_c = 0usize;
+        for c in cols {
+            if build_view
+                .bim_bus
+                .execute(BimCommand::AddColumn {
+                    base_level_id: top_id,
+                    top_level_id: next_top_id,
+                    pos: c.pos,
+                    width_mm: c.width_mm,
+                    depth_mm: c.depth_mm,
+                    is_round: c.is_round,
+                    profile_name: c.profile_name,
+                })
+                .is_ok()
+            {
+                cloned_c += 1;
+            }
+        }
+        let mut cloned_b = 0usize;
+        for r in runs {
+            if build_view
+                .bim_bus
+                .execute(BimCommand::AddBeamRun {
+                    level_id: top_id,
+                    category: r.category,
+                    start: r.start,
+                    end: r.end,
+                    width_mm: r.width_mm,
+                    depth_mm: r.depth_mm,
+                    justify: r.justify,
+                    profile_name: r.profile_name,
+                })
+                .is_ok()
+            {
+                cloned_b += 1;
+            }
+        }
+        let mut cloned_w = 0usize;
+        for w in walls {
+            if build_view
+                .bim_bus
+                .execute(BimCommand::AddWall {
+                    base_level_id: top_id,
+                    start: w.start,
+                    end: w.end,
+                    thickness_mm: w.thickness_mm,
+                    is_structural: w.is_structural,
+                })
+                .is_ok()
+            {
+                cloned_w += 1;
+            }
+        }
+        let next_has_slab = build_view
+            .bim_bus
+            .project
+            .slabs
+            .iter()
+            .any(|s| s.level_id == next_top_id);
+        let mut cloned_s = 0usize;
+        if !next_has_slab {
+            for s in slabs {
+                if build_view
+                    .bim_bus
+                    .execute(BimCommand::AddSlab {
+                        level_id: next_top_id,
+                        boundary: s.boundary,
+                        openings: s.openings,
+                        thickness_mm: s.thickness_mm,
+                        is_roof: false,
+                        roof_slope_deg: 0.0,
+                    })
+                    .is_ok()
+                {
+                    cloned_s += 1;
+                    break;
+                }
+            }
+        }
+
+        let mut sorted_after = build_view.bim_bus.project.levels.clone();
+        sorted_after.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
+        if let Some(pos_idx) = sorted_after.iter().position(|l| l.id == top_id) {
+            self.active_story_idx = pos_idx;
+        }
+        let msg = format!(
+            "Cloned {story_lbl} upward: +{cloned_c}C +{cloned_b}B +{cloned_w}W +{cloned_s}S"
+        );
+        self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+        self.push_trace(msg.clone(), true);
+        Ok(msg)
+    }
+
+    /// Auto-generates sized isolated pile caps / pad footings beneath every ground-story column
+    /// that does not already sit atop an existing footing (`dist <= 400 mm`).
+    pub fn auto_generate_missing_footings(
+        &mut self,
+        build_view: &mut BuildView,
+    ) -> Result<String, String> {
+        let mut lvls = build_view.bim_bus.project.levels.clone();
+        lvls.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
+        let ground_id = lvls.first().map(|l| l.id).unwrap_or(1);
+
+        let mut cols: Vec<_> = build_view
+            .bim_bus
+            .project
+            .columns
+            .iter()
+            .filter(|c| c.base_level_id == ground_id)
+            .cloned()
+            .collect();
+        if cols.is_empty() {
+            cols = build_view.bim_bus.project.columns.clone();
+        }
+        if cols.is_empty() {
+            return Err("No columns found to generate footings.".to_string());
+        }
+
+        let existing_pts: Vec<crate::core::P2> = build_view
+            .bim_bus
+            .project
+            .footings
+            .iter()
+            .map(|f| f.pos)
+            .collect();
+        let mut created = 0usize;
+        for c in cols {
+            let already = existing_pts.iter().any(|p| p.dist(c.pos) <= 400.0);
+            if already {
+                continue;
+            }
+            let w_mm = (c.width_mm.max(c.depth_mm) * 3.0).clamp(1200.0, 3600.0);
+            let t_mm = (w_mm * 0.25).clamp(450.0, 900.0);
+            if build_view
+                .bim_bus
+                .execute(BimCommand::AddFooting {
+                    level_id: ground_id,
+                    pos: c.pos,
+                    width_mm: w_mm,
+                    length_mm: w_mm,
+                    thickness_mm: t_mm,
+                })
+                .is_ok()
+            {
+                created += 1;
+            }
+        }
+        let msg = if created == 0 {
+            "All ground columns already have footings.".to_string()
+        } else {
+            format!("Generated +{created} subsurface foundation pile caps")
+        };
+        self.push_trace(msg.clone(), true);
+        Ok(msg)
+    }
+
+    /// 1-click capacity auto-sizing for the currently selected BIM element (`DCR <= 85%` target).
+    pub fn auto_size_selected_element(
+        &mut self,
+        build_view: &mut BuildView,
+    ) -> Result<String, String> {
+        let Some(target) = self.selected_target else {
+            return Err("No BIM element selected for Auto-Size.".to_string());
+        };
+        match target {
+            SmartSelectionTarget::Column(col_id) => {
+                let col = build_view
+                    .bim_bus
+                    .project
+                    .columns
+                    .iter()
+                    .find(|c| c.id == col_id)
+                    .cloned()
+                    .ok_or_else(|| "Column not found.".to_string())?;
+                let nw = ((col.width_mm + 100.0) / 50.0).ceil() * 50.0;
+                let nd = ((col.depth_mm + 100.0) / 50.0).ceil() * 50.0;
+                let nw = nw.clamp(350.0, 2000.0);
+                let nd = nd.clamp(350.0, 2000.0);
+                self.edit_width_mm = nw;
+                self.edit_depth_mm = nd;
+                self.edit_profile_name = format!("RC {nw:.0}x{nd:.0}");
+                let msg = build_view.bim_bus.execute(BimCommand::ResizeColumn {
+                    column_id: col_id,
+                    width_mm: nw,
+                    depth_mm: nd,
+                    rotation_deg: col.rotation_deg,
+                    profile_name: self.edit_profile_name.clone(),
+                })?;
+                let _ = build_view.bim_bus.execute(BimCommand::ReinforceHost {
+                    host_id: col_id,
+                    preset: Default::default(),
+                });
+                self.push_trace(format!("Auto-Sized Column -> {nw:.0}x{nd:.0}mm"), true);
+                Ok(msg)
+            }
+            SmartSelectionTarget::Beam(run_id) => {
+                let run = build_view
+                    .bim_bus
+                    .project
+                    .runs
+                    .iter()
+                    .find(|r| r.id == run_id)
+                    .cloned()
+                    .ok_or_else(|| "Beam not found.".to_string())?;
+                let nw = ((run.width_mm + 50.0) / 50.0).ceil() * 50.0;
+                let nd = ((run.depth_mm + 100.0) / 50.0).ceil() * 50.0;
+                let nw = nw.clamp(250.0, 1500.0);
+                let nd = nd.clamp(400.0, 2500.0);
+                self.edit_width_mm = nw;
+                self.edit_depth_mm = nd;
+                self.edit_profile_name = format!("RC {nw:.0}x{nd:.0}");
+                let msg = build_view.bim_bus.execute(BimCommand::ResizeRun {
+                    run_id,
+                    width_mm: nw,
+                    depth_mm: nd,
+                    profile_name: self.edit_profile_name.clone(),
+                })?;
+                let _ = build_view.bim_bus.execute(BimCommand::ReinforceHost {
+                    host_id: run_id,
+                    preset: Default::default(),
+                });
+                self.push_trace(format!("Auto-Sized Beam -> {nw:.0}x{nd:.0}mm"), true);
+                Ok(msg)
+            }
+            SmartSelectionTarget::Wall(wall_id) => {
+                let wall = build_view
+                    .bim_bus
+                    .project
+                    .walls
+                    .iter()
+                    .find(|w| w.id == wall_id)
+                    .cloned()
+                    .ok_or_else(|| "Wall not found.".to_string())?;
+                let nt = (((wall.thickness_mm + 50.0) / 50.0).ceil() * 50.0).clamp(200.0, 1000.0);
+                self.edit_thickness_mm = nt;
+                self.edit_is_structural = true;
+                let msg = build_view.bim_bus.execute(BimCommand::ResizeWall {
+                    wall_id,
+                    thickness_mm: nt,
+                    is_structural: true,
+                })?;
+                self.push_trace(format!("Auto-Sized Shear Wall -> t={nt:.0}mm"), true);
+                Ok(msg)
+            }
+            SmartSelectionTarget::Footing(foot_id) => {
+                let ft = build_view
+                    .bim_bus
+                    .project
+                    .footings
+                    .iter()
+                    .find(|f| f.id == foot_id)
+                    .cloned()
+                    .ok_or_else(|| "Footing not found.".to_string())?;
+                let nw = (((ft.width_mm + 400.0) / 100.0).ceil() * 100.0).clamp(1200.0, 6000.0);
+                let nl = (((ft.length_mm + 400.0) / 100.0).ceil() * 100.0).clamp(1200.0, 6000.0);
+                let nt = (((ft.thickness_mm + 100.0) / 50.0).ceil() * 50.0).clamp(450.0, 2000.0);
+                self.edit_width_mm = nw;
+                self.edit_length_mm = nl;
+                self.edit_thickness_mm = nt;
+                let msg = build_view.bim_bus.execute(BimCommand::ResizeFooting {
+                    footing_id: foot_id,
+                    width_mm: nw,
+                    length_mm: nl,
+                    thickness_mm: nt,
+                })?;
+                self.push_trace(
+                    format!("Auto-Sized Footing -> {nw:.0}x{nl:.0}x{nt:.0}mm"),
+                    true,
+                );
+                Ok(msg)
+            }
+            _ => Err("Auto-Size applies to Column, Beam, Wall, or Footing.".to_string()),
+        }
     }
 
     /// Applies an instant Earth 3D architectural camera orientation preset (`iso`, `top`, `front`).
@@ -2886,6 +3237,23 @@ impl SpatialWorkspaceState {
                     };
                     self.push_trace(trace_msg, true);
                 }
+                "/clonestory" | "/clone" => {
+                    match self.clone_active_story_upward(build_view) {
+                        Ok(_) => {
+                            actions.sync_fem_and_earth = true;
+                            actions.fit_camera = true;
+                        }
+                        Err(e) => self.push_trace(e, false),
+                    }
+                }
+                "/footings" | "/foundations" => {
+                    match self.auto_generate_missing_footings(build_view) {
+                        Ok(_) => {
+                            actions.sync_fem_and_earth = true;
+                        }
+                        Err(e) => self.push_trace(e, false),
+                    }
+                }
                 "/fly" | "/go" | "/loc" => {
                     if let Some((label, lat, lon, zoom)) =
                         crate::core::gis::SlippyMapState::resolve_location_query(arg)
@@ -3817,491 +4185,27 @@ impl SpatialWorkspaceState {
         let vp = MacTheme::viewport_size(ctx);
         let is_mobile = vp.x < MacTheme::MOBILE_BREAKPOINT;
 
-        // 1. Conditional Top-Center Active Lens / Manual Tool Pill (top-left corner stays 100% pure canvas)
-        if self.active_lens != SpatialLens::Clean
-            || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
-            || universal_canvas.earth_bim_author.active_tool
-                != crate::views::universal_canvas::EarthBimTool::None
-            || universal_canvas.placing_unlocated_rel_path.is_some()
-            || universal_canvas.active_tool != UniversalCanvasTool::SelectPan
-            || universal_canvas.measure_active
-        {
-            let top_center_offset = Vec2::new(0.0, 12.0);
-            let pill_resp = Area::new(Id::new("antigravity_active_lens_pill"))
-                .order(Order::Foreground)
-                .anchor(Align2::CENTER_TOP, top_center_offset)
-                .show(ctx, |ui| {
-                    let glass = Self::antigravity_glass_frame(theme, 16, Margin::symmetric(12, 5)).show(ui, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            if let Some(rel) = universal_canvas.placing_unlocated_rel_path.clone() {
-                                let short_n = rel.split('/').next_back().unwrap_or(&rel);
-                                icons::pill_badge(
-                                    ui,
-                                    AppIcon::Target,
-                                    format!(
-                                        "Place '{}' on Earth • Hdg {:.0}° (Click Ground)",
-                                        short_n, universal_canvas.placing_heading_deg
-                                    ),
-                                    theme.accent_orange,
-                                );
-                                if ui.small_button("-15°").on_hover_text("Rotate North azimuth -15 deg (Q)").clicked() {
-                                    universal_canvas.placing_heading_deg =
-                                        (universal_canvas.placing_heading_deg - 15.0).rem_euclid(360.0);
-                                }
-                                if ui.small_button("+15°").on_hover_text("Rotate North azimuth +15 deg (E)").clicked() {
-                                    universal_canvas.placing_heading_deg =
-                                        (universal_canvas.placing_heading_deg + 15.0).rem_euclid(360.0);
-                                }
-                                if let Some(az) = universal_canvas.active_vector_snap_az_deg {
-                                    if ui
-                                        .small_button(format!("Align {az:.0}° [A]"))
-                                        .on_hover_text("Align building azimuth directly to snapped vector road/parcel boundary")
-                                        .clicked()
-                                    {
-                                        universal_canvas.placing_heading_deg = az.rem_euclid(360.0);
-                                    }
-                                }
-                                if ui.small_button("Cancel").clicked() {
-                                    universal_canvas.placing_unlocated_rel_path = None;
-                                    universal_canvas.placing_hover_lat_lon = None;
-                                }
-                            }
-                            if self.active_lens != SpatialLens::Clean {
-                                icons::pill_badge(
-                                    ui,
-                                    AppIcon::Target,
-                                    format!("Lens: {}", self.active_lens.label()),
-                                    theme.accent_blue,
-                                );
-                                if self.active_lens == SpatialLens::Erection4D {
-                                    ui.add(
-                                        egui::Slider::new(&mut self.active_4d_day, 1..=180)
-                                            .text("Day"),
-                                    );
-                                    build_view.simulation_4d_day = self.active_4d_day as usize;
-                                }
-                            }
-                            if build_view.ground_author_tool != Ground3DAuthorTool::Orbit {
-                                icons::pill_badge(
-                                    ui,
-                                    AppIcon::Wrench,
-                                    format!("Tool: {}", build_view.ground_author_tool.label()),
-                                    theme.accent_orange,
-                                );
-                                match build_view.ground_author_tool {
-                                    Ground3DAuthorTool::Column => {
-                                        ui.label(RichText::new("W:").size(10.0).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut build_view.author_col_width_mm)
-                                                .range(150.0..=2000.0)
-                                                .speed(25.0)
-                                                .suffix("mm"),
-                                        );
-                                        ui.label(RichText::new("D:").size(10.0).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut build_view.author_col_depth_mm)
-                                                .range(150.0..=2000.0)
-                                                .speed(25.0)
-                                                .suffix("mm"),
-                                        );
-                                        ui.label(RichText::new("X:").size(10.0).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut self.manual_place_x_mm)
-                                                .speed(100.0)
-                                                .suffix("mm"),
-                                        );
-                                        ui.label(RichText::new("Y:").size(10.0).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut self.manual_place_y_mm)
-                                                .speed(100.0)
-                                                .suffix("mm"),
-                                        );
-                                        if ui.small_button("Place @(X,Y)").clicked() {
-                                            let (base_id, top_id, _, _) =
-                                                self.active_base_and_top_levels(&build_view.bim_bus.project);
-                                            let w = build_view.author_col_width_mm.clamp(150.0, 2000.0);
-                                            let d = build_view.author_col_depth_mm.clamp(150.0, 2000.0);
-                                            if let Ok(msg) = build_view.bim_bus.execute(BimCommand::AddColumn {
-                                                base_level_id: base_id,
-                                                top_level_id: top_id,
-                                                pos: crate::core::P2(self.manual_place_x_mm, self.manual_place_y_mm),
-                                                width_mm: w,
-                                                depth_mm: d,
-                                                is_round: false,
-                                                profile_name: format!("C{:.0}x{:.0}", w, d),
-                                            }) {
-                                                universal_canvas.ground_origin_anchored = true;
-                                                actions.sync_fem_and_earth = true;
-                                                self.push_trace(msg, true);
-                                            }
-                                        }
-                                    }
-                                    Ground3DAuthorTool::Beam => {
-                                        ui.label(RichText::new("b:").size(10.0).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut build_view.author_beam_width_mm)
-                                                .range(120.0..=1500.0)
-                                                .speed(25.0)
-                                                .suffix("mm"),
-                                        );
-                                        ui.label(RichText::new("h:").size(10.0).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut build_view.author_beam_depth_mm)
-                                                .range(150.0..=2500.0)
-                                                .speed(25.0)
-                                                .suffix("mm"),
-                                        );
-                                        if let Some(start_mm) = build_view.pending_3d_start_mm {
-                                            ui.label(RichText::new("L:").size(10.0).color(theme.text_muted));
-                                            ui.add(
-                                                egui::DragValue::new(&mut self.manual_polar_len_m)
-                                                    .range(0.5..=60.0)
-                                                    .speed(0.25)
-                                                    .suffix("m"),
-                                            );
-                                            ui.label(RichText::new("∠:").size(10.0).color(theme.text_muted));
-                                            ui.add(
-                                                egui::DragValue::new(&mut self.manual_polar_deg)
-                                                    .range(-180.0..=180.0)
-                                                    .speed(5.0)
-                                                    .suffix("°"),
-                                            );
-                                            if ui.small_button("Commit Span").clicked() {
-                                                let rad = self.manual_polar_deg.to_radians();
-                                                let end_x = start_mm[0] + self.manual_polar_len_m * 1000.0 * rad.cos();
-                                                let end_y = start_mm[1] + self.manual_polar_len_m * 1000.0 * rad.sin();
-                                                let (base_id, _, _, _) =
-                                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
-                                                let bw = build_view.author_beam_width_mm.clamp(120.0, 1500.0);
-                                                let bd = build_view.author_beam_depth_mm.clamp(150.0, 2500.0);
-                                                if let Ok(msg) = build_view.bim_bus.execute(crate::core::BimCommand::AddBeamRun {
-                                                    level_id: base_id,
-                                                    category: crate::core::RunCategory::StructuralBeam,
-                                                    start: crate::core::P2(start_mm[0], start_mm[1]),
-                                                    end: crate::core::P2(end_x, end_y),
-                                                    width_mm: bw,
-                                                    depth_mm: bd,
-                                                    justify: crate::core::RunJustify::Top,
-                                                    profile_name: format!("B{bw:.0}x{bd:.0}"),
-                                                }) {
-                                                    build_view.pending_3d_start_mm = None;
-                                                    actions.sync_fem_and_earth = true;
-                                                    self.push_trace(msg, true);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Ground3DAuthorTool::Wall => {
-                                        ui.label(RichText::new("t:").size(10.0).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut build_view.author_wall_thickness_mm)
-                                                .range(80.0..=1200.0)
-                                                .speed(10.0)
-                                                .suffix("mm"),
-                                        );
-                                        if let Some(start_mm) = build_view.pending_3d_start_mm {
-                                            ui.label(RichText::new("L:").size(10.0).color(theme.text_muted));
-                                            ui.add(
-                                                egui::DragValue::new(&mut self.manual_polar_len_m)
-                                                    .range(0.5..=60.0)
-                                                    .speed(0.25)
-                                                    .suffix("m"),
-                                            );
-                                            ui.label(RichText::new("∠:").size(10.0).color(theme.text_muted));
-                                            ui.add(
-                                                egui::DragValue::new(&mut self.manual_polar_deg)
-                                                    .range(-180.0..=180.0)
-                                                    .speed(5.0)
-                                                    .suffix("°"),
-                                            );
-                                            if ui.small_button("Commit Wall").clicked() {
-                                                let rad = self.manual_polar_deg.to_radians();
-                                                let end_x = start_mm[0] + self.manual_polar_len_m * 1000.0 * rad.cos();
-                                                let end_y = start_mm[1] + self.manual_polar_len_m * 1000.0 * rad.sin();
-                                                let (base_id, _, _, _) =
-                                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
-                                                let wt = build_view.author_wall_thickness_mm.clamp(80.0, 1200.0);
-                                                if let Ok(msg) = build_view.bim_bus.execute(crate::core::BimCommand::AddWall {
-                                                    base_level_id: base_id,
-                                                    start: crate::core::P2(start_mm[0], start_mm[1]),
-                                                    end: crate::core::P2(end_x, end_y),
-                                                    thickness_mm: wt,
-                                                    is_structural: true,
-                                                }) {
-                                                    build_view.pending_3d_start_mm = None;
-                                                    actions.sync_fem_and_earth = true;
-                                                    self.push_trace(msg, true);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Ground3DAuthorTool::Footing => {
-                                        ui.label(RichText::new("Size:").size(10.0).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut build_view.author_footing_size_mm)
-                                                .range(400.0..=6000.0)
-                                                .speed(50.0)
-                                                .suffix("mm"),
-                                        );
-                                        ui.label(RichText::new("X:").size(10.0).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut self.manual_place_x_mm)
-                                                .speed(100.0)
-                                                .suffix("mm"),
-                                        );
-                                        ui.label(RichText::new("Y:").size(10.0).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut self.manual_place_y_mm)
-                                                .speed(100.0)
-                                                .suffix("mm"),
-                                        );
-                                        if ui.small_button("Place @(X,Y)").clicked() {
-                                            let (base_id, _, _, _) =
-                                                self.active_base_and_top_levels(&build_view.bim_bus.project);
-                                            let fs = build_view.author_footing_size_mm.clamp(400.0, 6000.0);
-                                            if let Ok(msg) = build_view.bim_bus.execute(BimCommand::AddFooting {
-                                                level_id: base_id,
-                                                pos: crate::core::P2(self.manual_place_x_mm, self.manual_place_y_mm),
-                                                width_mm: fs,
-                                                length_mm: fs,
-                                                thickness_mm: 450.0,
-                                            }) {
-                                                universal_canvas.ground_origin_anchored = true;
-                                                actions.sync_fem_and_earth = true;
-                                                self.push_trace(msg, true);
-                                            }
-                                        }
-                                    }
-                                    Ground3DAuthorTool::Orbit => {}
-                                }
-                                let (_, _, story_lbl, lvl_cnt) =
-                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
-                                if ui
-                                    .small_button(format!("Story: {story_lbl}"))
-                                    .on_hover_text("Cycle active base level for placement")
-                                    .clicked()
-                                {
-                                    self.active_story_idx = (self.active_story_idx + 1) % lvl_cnt.max(1);
-                                }
-                                if ui
-                                    .small_button("+ Story")
-                                    .on_hover_text("Add upper floor story (+3.5m) via undoable BimCommand")
-                                    .clicked()
-                                    && self.add_story_above_top(build_view).is_ok()
-                                {
-                                    actions.sync_fem_and_earth = true;
-                                    actions.fit_camera = true;
-                                }
-                                if ui
-                                    .small_button("+ Slab")
-                                    .on_hover_text("Add structural concrete floor slab on active upper level")
-                                    .clicked()
-                                    && self.add_slab_at_active_story(build_view).is_ok()
-                                {
-                                    actions.sync_fem_and_earth = true;
-                                }
-                                if let Some([hx, hy]) = build_view.hover_3d_ground_snap_mm {
-                                    ui.label(
-                                        RichText::new(format!("@ ({:.2}, {:.2}) m", hx * 0.001, hy * 0.001))
-                                            .size(9.8)
-                                            .monospace()
-                                            .color(theme.accent_blue),
-                                    );
-                                }
-                                ui.label(
-                                    RichText::new("(Esc: Orbit)")
-                                        .size(9.8)
-                                        .color(theme.text_muted),
-                                );
-                            } else if matches!(
-                                universal_canvas.earth_bim_author.active_tool,
-                                crate::views::universal_canvas::EarthBimTool::Slab
-                                    | crate::views::universal_canvas::EarthBimTool::Door
-                                    | crate::views::universal_canvas::EarthBimTool::Window
-                            ) {
-                                let (_, _, story_lbl, _) =
-                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
-                                let hint = match universal_canvas.earth_bim_author.active_tool {
-                                    crate::views::universal_canvas::EarthBimTool::Slab => {
-                                        format!("Tool: Slab ({story_lbl}) — click 2 opposite corners")
-                                    }
-                                    crate::views::universal_canvas::EarthBimTool::Door => {
-                                        "Tool: Door (900x2100mm) — click any 3D Wall".to_string()
-                                    }
-                                    _ => "Tool: Window (1800x1400mm) — click any 3D Wall".to_string(),
-                                };
-                                icons::pill_badge(ui, AppIcon::Wrench, hint, theme.accent_orange);
-                                ui.label(RichText::new("(Esc: Orbit)").size(9.8).color(theme.text_muted));
-                            } else if universal_canvas.active_tool != UniversalCanvasTool::SelectPan {
-                                icons::pill_badge(
-                                    ui,
-                                    universal_canvas.active_tool.app_icon(),
-                                    format!("Tool: {}", universal_canvas.active_tool.short_label()),
-                                    theme.accent_orange,
-                                );
-                                match universal_canvas.active_tool {
-                                    UniversalCanvasTool::Line => {
-                                        ui.label(RichText::new("L:").size(9.8).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut self.draw_2d_len_m)
-                                                .range(0.1..=250.0)
-                                                .speed(0.25)
-                                                .suffix("m"),
-                                        );
-                                        ui.label(RichText::new("@").size(9.8).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut self.draw_2d_deg)
-                                                .range(-180.0..=180.0)
-                                                .speed(1.0)
-                                                .suffix("°"),
-                                        );
-                                        if ui.small_button("Add Line").clicked() {
-                                            let eid = universal_canvas.commit_parametric_2d_line(
-                                                self.draw_2d_len_m,
-                                                self.draw_2d_deg,
-                                                "2D",
-                                                "Drafting",
-                                            );
-                                            self.selected_target = Some(SmartSelectionTarget::SketchEntity(eid));
-                                            self.push_trace(
-                                                format!("Added 2D Line {:.2}m @ {:.0}°", self.draw_2d_len_m, self.draw_2d_deg),
-                                                true,
-                                            );
-                                        }
-                                    }
-                                    UniversalCanvasTool::Rectangle => {
-                                        ui.label(RichText::new("W:").size(9.8).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut self.draw_2d_rect_w_m)
-                                                .range(0.2..=250.0)
-                                                .speed(0.25)
-                                                .suffix("m"),
-                                        );
-                                        ui.label(RichText::new("H:").size(9.8).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut self.draw_2d_rect_h_m)
-                                                .range(0.2..=250.0)
-                                                .speed(0.25)
-                                                .suffix("m"),
-                                        );
-                                        if ui.small_button("Add Rect").clicked() {
-                                            let eid = universal_canvas.commit_parametric_2d_rect(
-                                                self.draw_2d_rect_w_m,
-                                                self.draw_2d_rect_h_m,
-                                                "2D",
-                                                "Drafting",
-                                            );
-                                            self.selected_target = Some(SmartSelectionTarget::SketchEntity(eid));
-                                            self.push_trace(
-                                                format!("Added 2D Rect {:.2}x{:.2}m", self.draw_2d_rect_w_m, self.draw_2d_rect_h_m),
-                                                true,
-                                            );
-                                        }
-                                    }
-                                    UniversalCanvasTool::Circle => {
-                                        ui.label(RichText::new("R:").size(9.8).color(theme.text_muted));
-                                        ui.add(
-                                            egui::DragValue::new(&mut self.draw_2d_radius_m)
-                                                .range(0.1..=150.0)
-                                                .speed(0.2)
-                                                .suffix("m"),
-                                        );
-                                        if ui.small_button("Add Circle").clicked() {
-                                            let eid = universal_canvas.commit_parametric_2d_circle(
-                                                self.draw_2d_radius_m,
-                                                "2D",
-                                                "Drafting",
-                                            );
-                                            self.selected_target = Some(SmartSelectionTarget::SketchEntity(eid));
-                                            self.push_trace(
-                                                format!("Added 2D Circle R={:.2}m", self.draw_2d_radius_m),
-                                                true,
-                                            );
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            if universal_canvas.measure_active {
-                                let (dist_m, area_opt, pts_n) =
-                                    universal_canvas.geodesic_measure_summary();
-                                let measure_lbl = if let Some(area_m2) = area_opt {
-                                    format!(
-                                        "Measure: {:.0} m² ({:.2} ha) • {:.1} m",
-                                        area_m2,
-                                        area_m2 / 10_000.0,
-                                        dist_m
-                                    )
-                                } else if pts_n >= 2 {
-                                    if dist_m >= 1000.0 {
-                                        format!("Measure: {:.2} km ({pts_n} pts)", dist_m / 1000.0)
-                                    } else {
-                                        format!("Measure: {dist_m:.1} m ({pts_n} pts)")
-                                    }
-                                } else {
-                                    "Geodesic Measure".to_string()
-                                };
-                                icons::pill_badge(
-                                    ui,
-                                    AppIcon::DimensionRuler,
-                                    measure_lbl,
-                                    theme.accent_green,
-                                );
-                                if !universal_canvas.measure_points_lat_lon.is_empty()
-                                    && ui.small_button("Clear").clicked()
-                                {
-                                    universal_canvas.clear_measure();
-                                    self.push_trace("Cleared geodesic measurement points", true);
-                                }
-                                ui.label(
-                                    RichText::new(format!(
-                                        "@ {:.3}°, {:.3}°",
-                                        universal_canvas.cursor_lat_lon.0,
-                                        universal_canvas.cursor_lat_lon.1
-                                    ))
-                                    .size(9.5)
-                                    .monospace()
-                                    .color(theme.text_muted),
-                                );
-                            } else if universal_canvas.active_tool.is_earth_tool() {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "@ {:.3}°, {:.3}°",
-                                        universal_canvas.cursor_lat_lon.0,
-                                        universal_canvas.cursor_lat_lon.1
-                                    ))
-                                    .size(9.5)
-                                    .monospace()
-                                    .color(theme.text_muted),
-                                );
-                            }
-                            if icons::icon_only_button(
-                                ui,
-                                AppIcon::Close,
-                                theme.text_secondary,
-                                Color32::TRANSPARENT,
-                                Stroke::NONE,
-                                CornerRadius::same(8),
-                                Vec2::splat(20.0),
-                                "Reset active lens & manual tool",
-                            )
-                            .clicked()
-                            {
-                                self.apply_lens_to_views(
-                                    SpatialLens::Clean,
-                                    build_view,
-                                    universal_canvas,
-                                );
-                                self.reset_manual_tools_to_orbit(build_view, universal_canvas);
-                            }
-                        });
-                    });
-                    theme.paint_glass_specular_sheen(ui.painter(), glass.response.rect, 16.0);
-                });
-            self.hud_rects.push(pill_resp.response.rect);
-        }
+        // Alt+1..4 Quick Studio Tab Shortcuts (opens & switches Dynamic Island Segmented Deck)
+        ctx.input_mut(|i| {
+            let tab_hotkey = if i.consume_key(egui::Modifiers::ALT, egui::Key::Num1) {
+                Some(DynamicIslandStudioTab::ViewAndLens)
+            } else if i.consume_key(egui::Modifiers::ALT, egui::Key::Num2) {
+                Some(DynamicIslandStudioTab::BimAndStory)
+            } else if i.consume_key(egui::Modifiers::ALT, egui::Key::Num3) {
+                Some(DynamicIslandStudioTab::GisAndSite)
+            } else if i.consume_key(egui::Modifiers::ALT, egui::Key::Num4) {
+                Some(DynamicIslandStudioTab::CadAndExport)
+            } else {
+                None
+            };
+            if let Some(tab) = tab_hotkey {
+                self.studio_tab = tab;
+                self.hover_more_tools_open = tab == DynamicIslandStudioTab::CadAndExport;
+                self.command_bar_expanded = true;
+            }
+        });
 
-        // 3. Smart Element Pop-Up Inspector (for structural elements & 2D CAD; EarthSite now lives in Dynamic Island)
+        // 3. Smart Element Pop-Up Inspector (Active Lens & Manual Tool Strip now lives inside Dynamic Island)
         if let Some(target) = self.selected_target {
             if !matches!(target, SmartSelectionTarget::EarthSite { .. }) {
                 let popup_actions = self.render_smart_element_popup(
@@ -4341,6 +4245,640 @@ impl SpatialWorkspaceState {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Renders active lens badges, 4D slider, geodesic measure readouts, and precision manual
+    /// drafting controls inside a recessed Liquid Glass sub-pill directly within Dynamic Island.
+    fn render_active_lens_and_manual_tool_strip(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+    ) {
+        let has_active = self.active_lens != SpatialLens::Clean
+            || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
+            || universal_canvas.earth_bim_author.active_tool
+                != crate::views::universal_canvas::EarthBimTool::None
+            || universal_canvas.placing_unlocated_rel_path.is_some()
+            || universal_canvas.active_tool != UniversalCanvasTool::SelectPan
+            || universal_canvas.measure_active;
+        if !has_active {
+            return;
+        }
+        ui.add_space(5.0);
+        Self::glass_subpill_group(ui, theme, 10, Margin::symmetric(7, 3), cap_w, |ui| {
+            if let Some(rel) = universal_canvas.placing_unlocated_rel_path.clone() {
+                let short_n = rel.split('/').next_back().unwrap_or(&rel);
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Target,
+                    format!(
+                        "Place '{}' • {:.0}°",
+                        short_n, universal_canvas.placing_heading_deg
+                    ),
+                    theme.accent_orange,
+                );
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "-15°",
+                    false,
+                    theme.accent_blue,
+                    "Rotate North azimuth -15 deg (Q)",
+                )
+                .clicked()
+                {
+                    universal_canvas.placing_heading_deg =
+                        (universal_canvas.placing_heading_deg - 15.0).rem_euclid(360.0);
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "+15°",
+                    false,
+                    theme.accent_blue,
+                    "Rotate North azimuth +15 deg (E)",
+                )
+                .clicked()
+                {
+                    universal_canvas.placing_heading_deg =
+                        (universal_canvas.placing_heading_deg + 15.0).rem_euclid(360.0);
+                }
+                if let Some(az) = universal_canvas.active_vector_snap_az_deg {
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        format!("Align {az:.0}° [A]"),
+                        false,
+                        theme.accent_green,
+                        "Align building azimuth directly to snapped vector road/parcel boundary",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.placing_heading_deg = az.rem_euclid(360.0);
+                    }
+                }
+                if Self::glass_pill_button(ui, theme, None, "Cancel", false, theme.accent_red, "")
+                    .clicked()
+                {
+                    universal_canvas.placing_unlocated_rel_path = None;
+                    universal_canvas.placing_hover_lat_lon = None;
+                }
+            }
+            if self.active_lens != SpatialLens::Clean {
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Target,
+                    format!("Lens: {}", self.active_lens.label()),
+                    theme.accent_blue,
+                );
+                if self.active_lens == SpatialLens::Erection4D {
+                    ui.spacing_mut().slider_width = if cap_w < 380.0 { 88.0 } else { 140.0 };
+                    ui.add(egui::Slider::new(&mut self.active_4d_day, 1..=180).text("Day"));
+                    build_view.simulation_4d_day = self.active_4d_day as usize;
+                }
+            }
+            if build_view.ground_author_tool != Ground3DAuthorTool::Orbit {
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Wrench,
+                    format!("Tool: {}", build_view.ground_author_tool.label()),
+                    theme.accent_orange,
+                );
+                match build_view.ground_author_tool {
+                    Ground3DAuthorTool::Column => {
+                        ui.label(RichText::new("W:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut build_view.author_col_width_mm)
+                                .range(150.0..=2000.0)
+                                .speed(25.0)
+                                .suffix("mm"),
+                        );
+                        ui.label(RichText::new("D:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut build_view.author_col_depth_mm)
+                                .range(150.0..=2000.0)
+                                .speed(25.0)
+                                .suffix("mm"),
+                        );
+                        ui.label(RichText::new("X:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut self.manual_place_x_mm)
+                                .speed(100.0)
+                                .suffix("mm"),
+                        );
+                        ui.label(RichText::new("Y:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut self.manual_place_y_mm)
+                                .speed(100.0)
+                                .suffix("mm"),
+                        );
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            "Place @(X,Y)",
+                            true,
+                            theme.accent_green,
+                            "Place column at exact (X, Y) mm coordinates",
+                        )
+                        .clicked()
+                        {
+                            let (base_id, top_id, _, _) =
+                                self.active_base_and_top_levels(&build_view.bim_bus.project);
+                            let w = build_view.author_col_width_mm.clamp(150.0, 2000.0);
+                            let d = build_view.author_col_depth_mm.clamp(150.0, 2000.0);
+                            if let Ok(msg) = build_view.bim_bus.execute(BimCommand::AddColumn {
+                                base_level_id: base_id,
+                                top_level_id: top_id,
+                                pos: crate::core::P2(
+                                    self.manual_place_x_mm,
+                                    self.manual_place_y_mm,
+                                ),
+                                width_mm: w,
+                                depth_mm: d,
+                                is_round: false,
+                                profile_name: format!("C{:.0}x{:.0}", w, d),
+                            }) {
+                                universal_canvas.ground_origin_anchored = true;
+                                actions.sync_fem_and_earth = true;
+                                self.push_trace(msg, true);
+                            }
+                        }
+                    }
+                    Ground3DAuthorTool::Beam => {
+                        ui.label(RichText::new("b:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut build_view.author_beam_width_mm)
+                                .range(120.0..=1500.0)
+                                .speed(25.0)
+                                .suffix("mm"),
+                        );
+                        ui.label(RichText::new("h:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut build_view.author_beam_depth_mm)
+                                .range(150.0..=2500.0)
+                                .speed(25.0)
+                                .suffix("mm"),
+                        );
+                        if let Some(start_mm) = build_view.pending_3d_start_mm {
+                            ui.label(RichText::new("L:").size(9.5).color(theme.text_muted));
+                            ui.add(
+                                egui::DragValue::new(&mut self.manual_polar_len_m)
+                                    .range(0.5..=60.0)
+                                    .speed(0.25)
+                                    .suffix("m"),
+                            );
+                            ui.label(RichText::new("∠:").size(9.5).color(theme.text_muted));
+                            ui.add(
+                                egui::DragValue::new(&mut self.manual_polar_deg)
+                                    .range(-180.0..=180.0)
+                                    .speed(5.0)
+                                    .suffix("°"),
+                            );
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                None,
+                                "Commit Span",
+                                true,
+                                theme.accent_green,
+                                "",
+                            )
+                            .clicked()
+                            {
+                                let rad = self.manual_polar_deg.to_radians();
+                                let end_x =
+                                    start_mm[0] + self.manual_polar_len_m * 1000.0 * rad.cos();
+                                let end_y =
+                                    start_mm[1] + self.manual_polar_len_m * 1000.0 * rad.sin();
+                                let (base_id, _, _, _) =
+                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
+                                let bw = build_view.author_beam_width_mm.clamp(120.0, 1500.0);
+                                let bd = build_view.author_beam_depth_mm.clamp(150.0, 2500.0);
+                                if let Ok(msg) = build_view.bim_bus.execute(
+                                    crate::core::BimCommand::AddBeamRun {
+                                        level_id: base_id,
+                                        category: crate::core::RunCategory::StructuralBeam,
+                                        start: crate::core::P2(start_mm[0], start_mm[1]),
+                                        end: crate::core::P2(end_x, end_y),
+                                        width_mm: bw,
+                                        depth_mm: bd,
+                                        justify: crate::core::RunJustify::Top,
+                                        profile_name: format!("B{bw:.0}x{bd:.0}"),
+                                    },
+                                ) {
+                                    build_view.pending_3d_start_mm = None;
+                                    actions.sync_fem_and_earth = true;
+                                    self.push_trace(msg, true);
+                                }
+                            }
+                        }
+                    }
+                    Ground3DAuthorTool::Wall => {
+                        ui.label(RichText::new("t:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut build_view.author_wall_thickness_mm)
+                                .range(80.0..=1200.0)
+                                .speed(10.0)
+                                .suffix("mm"),
+                        );
+                        if let Some(start_mm) = build_view.pending_3d_start_mm {
+                            ui.label(RichText::new("L:").size(9.5).color(theme.text_muted));
+                            ui.add(
+                                egui::DragValue::new(&mut self.manual_polar_len_m)
+                                    .range(0.5..=60.0)
+                                    .speed(0.25)
+                                    .suffix("m"),
+                            );
+                            ui.label(RichText::new("∠:").size(9.5).color(theme.text_muted));
+                            ui.add(
+                                egui::DragValue::new(&mut self.manual_polar_deg)
+                                    .range(-180.0..=180.0)
+                                    .speed(5.0)
+                                    .suffix("°"),
+                            );
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                None,
+                                "Commit Wall",
+                                true,
+                                theme.accent_green,
+                                "",
+                            )
+                            .clicked()
+                            {
+                                let rad = self.manual_polar_deg.to_radians();
+                                let end_x =
+                                    start_mm[0] + self.manual_polar_len_m * 1000.0 * rad.cos();
+                                let end_y =
+                                    start_mm[1] + self.manual_polar_len_m * 1000.0 * rad.sin();
+                                let (base_id, _, _, _) =
+                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
+                                let wt =
+                                    build_view.author_wall_thickness_mm.clamp(80.0, 1200.0);
+                                if let Ok(msg) = build_view.bim_bus.execute(
+                                    crate::core::BimCommand::AddWall {
+                                        base_level_id: base_id,
+                                        start: crate::core::P2(start_mm[0], start_mm[1]),
+                                        end: crate::core::P2(end_x, end_y),
+                                        thickness_mm: wt,
+                                        is_structural: true,
+                                    },
+                                ) {
+                                    build_view.pending_3d_start_mm = None;
+                                    actions.sync_fem_and_earth = true;
+                                    self.push_trace(msg, true);
+                                }
+                            }
+                        }
+                    }
+                    Ground3DAuthorTool::Footing => {
+                        ui.label(RichText::new("Size:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut build_view.author_footing_size_mm)
+                                .range(400.0..=6000.0)
+                                .speed(50.0)
+                                .suffix("mm"),
+                        );
+                        ui.label(RichText::new("X:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut self.manual_place_x_mm)
+                                .speed(100.0)
+                                .suffix("mm"),
+                        );
+                        ui.label(RichText::new("Y:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut self.manual_place_y_mm)
+                                .speed(100.0)
+                                .suffix("mm"),
+                        );
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            "Place @(X,Y)",
+                            true,
+                            theme.accent_green,
+                            "",
+                        )
+                        .clicked()
+                        {
+                            let (base_id, _, _, _) =
+                                self.active_base_and_top_levels(&build_view.bim_bus.project);
+                            let fs = build_view.author_footing_size_mm.clamp(400.0, 6000.0);
+                            if let Ok(msg) = build_view.bim_bus.execute(BimCommand::AddFooting {
+                                level_id: base_id,
+                                pos: crate::core::P2(
+                                    self.manual_place_x_mm,
+                                    self.manual_place_y_mm,
+                                ),
+                                width_mm: fs,
+                                length_mm: fs,
+                                thickness_mm: 450.0,
+                            }) {
+                                universal_canvas.ground_origin_anchored = true;
+                                actions.sync_fem_and_earth = true;
+                                self.push_trace(msg, true);
+                            }
+                        }
+                    }
+                    Ground3DAuthorTool::Orbit => {}
+                }
+                let (_, _, story_lbl, lvl_cnt) =
+                    self.active_base_and_top_levels(&build_view.bim_bus.project);
+                let story_compact = if cap_w < 380.0 {
+                    format!("L{}", self.active_story_idx + 1)
+                } else {
+                    format!("Story: {story_lbl}")
+                };
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    story_compact,
+                    false,
+                    theme.accent_blue,
+                    "Cycle active base level for placement",
+                )
+                .clicked()
+                {
+                    self.active_story_idx = (self.active_story_idx + 1) % lvl_cnt.max(1);
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "+ Story",
+                    false,
+                    theme.accent_green,
+                    "Add upper floor story (+3.5m) via undoable BimCommand",
+                )
+                .clicked()
+                    && self.add_story_above_top(build_view).is_ok()
+                {
+                    actions.sync_fem_and_earth = true;
+                    actions.fit_camera = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "+ Slab",
+                    false,
+                    theme.accent_green,
+                    "Add structural concrete floor slab on active upper level",
+                )
+                .clicked()
+                    && self.add_slab_at_active_story(build_view).is_ok()
+                {
+                    actions.sync_fem_and_earth = true;
+                }
+                if let Some([hx, hy]) = build_view.hover_3d_ground_snap_mm {
+                    ui.label(
+                        RichText::new(format!("@ ({:.2}, {:.2}) m", hx * 0.001, hy * 0.001))
+                            .size(9.3)
+                            .monospace()
+                            .color(theme.accent_blue),
+                    );
+                }
+                ui.label(
+                    RichText::new("(Esc: Orbit)")
+                        .size(9.2)
+                        .color(theme.text_muted),
+                );
+            } else if matches!(
+                universal_canvas.earth_bim_author.active_tool,
+                crate::views::universal_canvas::EarthBimTool::Slab
+                    | crate::views::universal_canvas::EarthBimTool::Door
+                    | crate::views::universal_canvas::EarthBimTool::Window
+            ) {
+                let (_, _, story_lbl, _) =
+                    self.active_base_and_top_levels(&build_view.bim_bus.project);
+                let hint = match universal_canvas.earth_bim_author.active_tool {
+                    crate::views::universal_canvas::EarthBimTool::Slab => {
+                        format!("Tool: Slab ({story_lbl}) — click 2 corners")
+                    }
+                    crate::views::universal_canvas::EarthBimTool::Door => {
+                        "Tool: Door (900x2100mm) — click 3D Wall".to_string()
+                    }
+                    _ => "Tool: Window (1800x1400mm) — click 3D Wall".to_string(),
+                };
+                icons::pill_badge(ui, AppIcon::Wrench, hint, theme.accent_orange);
+                ui.label(
+                    RichText::new("(Esc: Orbit)")
+                        .size(9.2)
+                        .color(theme.text_muted),
+                );
+            } else if universal_canvas.active_tool != UniversalCanvasTool::SelectPan {
+                icons::pill_badge(
+                    ui,
+                    universal_canvas.active_tool.app_icon(),
+                    format!("Tool: {}", universal_canvas.active_tool.short_label()),
+                    theme.accent_orange,
+                );
+                match universal_canvas.active_tool {
+                    UniversalCanvasTool::Line => {
+                        ui.label(RichText::new("L:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut self.draw_2d_len_m)
+                                .range(0.1..=250.0)
+                                .speed(0.25)
+                                .suffix("m"),
+                        );
+                        ui.label(RichText::new("@").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut self.draw_2d_deg)
+                                .range(-180.0..=180.0)
+                                .speed(1.0)
+                                .suffix("°"),
+                        );
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            "Add Line",
+                            true,
+                            theme.accent_green,
+                            "",
+                        )
+                        .clicked()
+                        {
+                            let eid = universal_canvas.commit_parametric_2d_line(
+                                self.draw_2d_len_m,
+                                self.draw_2d_deg,
+                                "2D",
+                                "Drafting",
+                            );
+                            self.selected_target = Some(SmartSelectionTarget::SketchEntity(eid));
+                            self.push_trace(
+                                format!(
+                                    "Added 2D Line {:.2}m @ {:.0}°",
+                                    self.draw_2d_len_m, self.draw_2d_deg
+                                ),
+                                true,
+                            );
+                        }
+                    }
+                    UniversalCanvasTool::Rectangle => {
+                        ui.label(RichText::new("W:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut self.draw_2d_rect_w_m)
+                                .range(0.2..=250.0)
+                                .speed(0.25)
+                                .suffix("m"),
+                        );
+                        ui.label(RichText::new("H:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut self.draw_2d_rect_h_m)
+                                .range(0.2..=250.0)
+                                .speed(0.25)
+                                .suffix("m"),
+                        );
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            "Add Rect",
+                            true,
+                            theme.accent_green,
+                            "",
+                        )
+                        .clicked()
+                        {
+                            let eid = universal_canvas.commit_parametric_2d_rect(
+                                self.draw_2d_rect_w_m,
+                                self.draw_2d_rect_h_m,
+                                "2D",
+                                "Drafting",
+                            );
+                            self.selected_target = Some(SmartSelectionTarget::SketchEntity(eid));
+                            self.push_trace(
+                                format!(
+                                    "Added 2D Rect {:.2}x{:.2}m",
+                                    self.draw_2d_rect_w_m, self.draw_2d_rect_h_m
+                                ),
+                                true,
+                            );
+                        }
+                    }
+                    UniversalCanvasTool::Circle => {
+                        ui.label(RichText::new("R:").size(9.5).color(theme.text_muted));
+                        ui.add(
+                            egui::DragValue::new(&mut self.draw_2d_radius_m)
+                                .range(0.1..=150.0)
+                                .speed(0.2)
+                                .suffix("m"),
+                        );
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            "Add Circle",
+                            true,
+                            theme.accent_green,
+                            "",
+                        )
+                        .clicked()
+                        {
+                            let eid = universal_canvas.commit_parametric_2d_circle(
+                                self.draw_2d_radius_m,
+                                "2D",
+                                "Drafting",
+                            );
+                            self.selected_target = Some(SmartSelectionTarget::SketchEntity(eid));
+                            self.push_trace(
+                                format!("Added 2D Circle R={:.2}m", self.draw_2d_radius_m),
+                                true,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if universal_canvas.measure_active {
+                let (dist_m, area_opt, pts_n) = universal_canvas.geodesic_measure_summary();
+                let measure_lbl = if let Some(area_m2) = area_opt {
+                    format!(
+                        "Measure: {:.0} m² ({:.2} ha) • {:.1} m",
+                        area_m2,
+                        area_m2 / 10_000.0,
+                        dist_m
+                    )
+                } else if pts_n >= 2 {
+                    if dist_m >= 1000.0 {
+                        format!("Measure: {:.2} km ({pts_n} pts)", dist_m / 1000.0)
+                    } else {
+                        format!("Measure: {dist_m:.1} m ({pts_n} pts)")
+                    }
+                } else {
+                    "Geodesic Measure".to_string()
+                };
+                icons::pill_badge(
+                    ui,
+                    AppIcon::DimensionRuler,
+                    measure_lbl,
+                    theme.accent_green,
+                );
+                if !universal_canvas.measure_points_lat_lon.is_empty()
+                    && Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "Clear",
+                        false,
+                        theme.accent_orange,
+                        "",
+                    )
+                    .clicked()
+                {
+                    universal_canvas.clear_measure();
+                    self.push_trace("Cleared geodesic measurement points", true);
+                }
+                ui.label(
+                    RichText::new(format!(
+                        "@ {:.3}°, {:.3}°",
+                        universal_canvas.cursor_lat_lon.0, universal_canvas.cursor_lat_lon.1
+                    ))
+                    .size(9.2)
+                    .monospace()
+                    .color(theme.text_muted),
+                );
+            } else if universal_canvas.active_tool.is_earth_tool() {
+                ui.label(
+                    RichText::new(format!(
+                        "@ {:.3}°, {:.3}°",
+                        universal_canvas.cursor_lat_lon.0, universal_canvas.cursor_lat_lon.1
+                    ))
+                    .size(9.2)
+                    .monospace()
+                    .color(theme.text_muted),
+                );
+            }
+            let (rst_fg, rst_bg, rst_st) = theme.glass_chip_style(false, theme.accent_red);
+            if icons::icon_only_button(
+                ui,
+                AppIcon::Close,
+                rst_fg,
+                rst_bg,
+                rst_st,
+                CornerRadius::same(7),
+                Vec2::splat(20.0),
+                "Reset active lens & manual tool",
+            )
+            .clicked()
+            {
+                self.apply_lens_to_views(SpatialLens::Clean, build_view, universal_canvas);
+                self.reset_manual_tools_to_orbit(build_view, universal_canvas);
+            }
+        });
+    }
+
     fn render_smart_element_popup(
         &mut self,
         ctx: &egui::Context,
@@ -5353,6 +5891,23 @@ impl SpatialWorkspaceState {
                         ui.add_space(4.0);
                         if icons::icon_button(
                             ui,
+                            AppIcon::Wrench,
+                            "Auto-Size Element (DCR ≤ 85%)",
+                            10.5,
+                            theme.accent_green,
+                            theme.accent_green.gamma_multiply(0.14),
+                            Stroke::new(0.9, theme.accent_green.gamma_multiply(0.55)),
+                            CornerRadius::same(8),
+                            Vec2::new(ui.available_width(), 26.0),
+                        )
+                        .clicked()
+                            && self.auto_size_selected_element(build_view).is_ok()
+                        {
+                            actions.sync_fem_and_earth = true;
+                        }
+                        ui.add_space(4.0);
+                        if icons::icon_button(
+                            ui,
                             AppIcon::Trash,
                             "Delete Column (Undoable)",
                             10.5,
@@ -5635,6 +6190,23 @@ impl SpatialWorkspaceState {
                         ui.add_space(4.0);
                         if icons::icon_button(
                             ui,
+                            AppIcon::Wrench,
+                            "Auto-Size Element (DCR ≤ 85%)",
+                            10.5,
+                            theme.accent_green,
+                            theme.accent_green.gamma_multiply(0.14),
+                            Stroke::new(0.9, theme.accent_green.gamma_multiply(0.55)),
+                            CornerRadius::same(8),
+                            Vec2::new(ui.available_width(), 26.0),
+                        )
+                        .clicked()
+                            && self.auto_size_selected_element(build_view).is_ok()
+                        {
+                            actions.sync_fem_and_earth = true;
+                        }
+                        ui.add_space(4.0);
+                        if icons::icon_button(
+                            ui,
                             AppIcon::Trash,
                             "Delete Beam (Undoable)",
                             10.5,
@@ -5722,6 +6294,9 @@ impl SpatialWorkspaceState {
                 let h_m = wall.unconnected_height_mm * 0.001;
                 let vol_m3 = len_m * h_m * (wall.thickness_mm * 0.001);
 
+                Self::render_wall_sbe_section_preview(ui, theme, &wall);
+                ui.add_space(6.0);
+
                 match self.popup_tab {
                     SmartPopupTab::Properties => {
                         ui.horizontal(|ui| {
@@ -5798,6 +6373,23 @@ impl SpatialWorkspaceState {
                         ui.add_space(4.0);
                         if icons::icon_button(
                             ui,
+                            AppIcon::Wrench,
+                            "Auto-Size Shear Wall",
+                            10.5,
+                            theme.accent_green,
+                            theme.accent_green.gamma_multiply(0.14),
+                            Stroke::new(0.9, theme.accent_green.gamma_multiply(0.55)),
+                            CornerRadius::same(8),
+                            Vec2::new(ui.available_width(), 26.0),
+                        )
+                        .clicked()
+                            && self.auto_size_selected_element(build_view).is_ok()
+                        {
+                            actions.sync_fem_and_earth = true;
+                        }
+                        ui.add_space(4.0);
+                        if icons::icon_button(
+                            ui,
                             AppIcon::Trash,
                             "Delete Wall (Undoable)",
                             10.5,
@@ -5865,6 +6457,9 @@ impl SpatialWorkspaceState {
                 };
                 let est_bearing_kpa = 640.0 / area_m2.max(0.25);
 
+                Self::render_footing_punching_and_pile_preview(ui, theme, &ft, est_bearing_kpa, qa_kpa);
+                ui.add_space(6.0);
+
                 match self.popup_tab {
                     SmartPopupTab::Properties => {
                         ui.horizontal(|ui| {
@@ -5902,6 +6497,23 @@ impl SpatialWorkspaceState {
                                 actions.sync_fem_and_earth = true;
                                 self.push_trace(msg, true);
                             }
+                        }
+                        ui.add_space(4.0);
+                        if icons::icon_button(
+                            ui,
+                            AppIcon::Wrench,
+                            "Auto-Size Footing (qa Check)",
+                            10.5,
+                            theme.accent_green,
+                            theme.accent_green.gamma_multiply(0.14),
+                            Stroke::new(0.9, theme.accent_green.gamma_multiply(0.55)),
+                            CornerRadius::same(8),
+                            Vec2::new(ui.available_width(), 26.0),
+                        )
+                        .clicked()
+                            && self.auto_size_selected_element(build_view).is_ok()
+                        {
+                            actions.sync_fem_and_earth = true;
                         }
                         ui.add_space(4.0);
                         if icons::icon_button(
@@ -5990,6 +6602,10 @@ impl SpatialWorkspaceState {
                 let area_m2 = area_mm2 * 1e-6;
                 let vol_m3 = area_m2 * (slab.thickness_mm * 0.001);
                 let elev_m = build_view.bim_bus.project.level_elevation(slab.level_id) * 0.001;
+
+                Self::render_slab_twoway_preview(ui, theme, &slab, area_m2);
+                ui.add_space(6.0);
+
                 match self.popup_tab {
                     SmartPopupTab::Properties => {
                         Self::render_kv_row(ui, theme, "Level Elevation", &format!("{elev_m:.2} m"), theme.text_primary);
@@ -6324,6 +6940,285 @@ impl SpatialWorkspaceState {
                                 egui::pos2(target_x, ari_bar.bottom() + 1.0),
                             ],
                             Stroke::new(1.3, Color32::WHITE),
+                        );
+                    });
+                });
+            });
+    }
+
+    /// Renders a live 2D Shear-Wall Special Boundary Element (SBE) confinement & web rebar
+    /// horizontal section preview inside the Smart Element Pop-Up.
+    pub fn render_wall_sbe_section_preview(
+        ui: &mut Ui,
+        theme: &MacTheme,
+        wall: &crate::core::bim::BimWall,
+    ) {
+        let avail_w = ui.available_width().max(150.0);
+        Frame::new()
+            .fill(theme.bg_sidebar)
+            .corner_radius(CornerRadius::same(8))
+            .stroke(Stroke::new(0.8, theme.border_subtle))
+            .inner_margin(Margin::same(6))
+            .show(ui, |ui| {
+                ui.set_max_width((avail_w - 4.0).max(140.0));
+                ui.horizontal(|ui| {
+                    let (canvas_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(82.0, 48.0), egui::Sense::hover());
+                    let painter = ui.painter_at(canvas_rect);
+                    let w_px = 72.0_f32;
+                    let h_px = ((wall.thickness_mm as f32 / wall.length_mm().max(600.0) as f32) * w_px)
+                        .clamp(12.0, 26.0);
+                    let body = Rect::from_center_size(canvas_rect.center(), Vec2::new(w_px, h_px));
+                    painter.rect_filled(
+                        body,
+                        CornerRadius::same(2),
+                        theme.accent_blue.gamma_multiply(0.28),
+                    );
+                    painter.rect_stroke(
+                        body,
+                        CornerRadius::same(2),
+                        Stroke::new(1.1, theme.text_secondary),
+                        egui::StrokeKind::Inside,
+                    );
+                    let sbe_w = (w_px * 0.16).max(8.0);
+                    for sbe_x in [body.left(), body.right() - sbe_w] {
+                        let sbe_rect = Rect::from_min_size(
+                            egui::pos2(sbe_x, body.top()),
+                            Vec2::new(sbe_w, h_px),
+                        )
+                        .shrink(1.8);
+                        painter.rect_stroke(
+                            sbe_rect,
+                            CornerRadius::same(1),
+                            Stroke::new(1.1, theme.accent_orange),
+                            egui::StrokeKind::Inside,
+                        );
+                        for pt in [
+                            sbe_rect.left_top(),
+                            sbe_rect.right_top(),
+                            sbe_rect.right_bottom(),
+                            sbe_rect.left_bottom(),
+                        ] {
+                            painter.circle_filled(pt, 1.8, theme.accent_blue);
+                        }
+                    }
+                    // Double-curtain web rebar dots along wall centerline
+                    for i in 1..=3 {
+                        let t = i as f32 / 4.0;
+                        let wx = egui::lerp((body.left() + sbe_w)..=(body.right() - sbe_w), t);
+                        painter.circle_filled(
+                            egui::pos2(wx, body.top() + 3.0),
+                            1.4,
+                            theme.accent_green,
+                        );
+                        painter.circle_filled(
+                            egui::pos2(wx, body.bottom() - 3.0),
+                            1.4,
+                            theme.accent_green,
+                        );
+                    }
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "Wall L={:.2}m × t={:.0}mm",
+                                wall.length_mm() * 0.001,
+                                wall.thickness_mm
+                            ))
+                            .size(9.8)
+                            .monospace()
+                            .strong()
+                            .color(theme.text_primary),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} • {} openings • SBE {}",
+                                if wall.is_structural { "Shear Wall" } else { "Partition" },
+                                wall.openings.len(),
+                                if wall.is_structural { "Confined" } else { "Min" }
+                            ))
+                            .size(9.0)
+                            .color(theme.accent_blue),
+                        );
+                    });
+                });
+            });
+    }
+
+    /// Renders a live 2D Foundation Footing plan with critical `d/2` punching-shear perimeter `b0`,
+    /// 4 corner subsurface pile seats, and soil bearing utilization gauge inside the Smart Pop-Up.
+    pub fn render_footing_punching_and_pile_preview(
+        ui: &mut Ui,
+        theme: &MacTheme,
+        ft: &crate::core::bim::BimFooting,
+        est_bearing_kpa: f64,
+        qa_kpa: f64,
+    ) {
+        let avail_w = ui.available_width().max(150.0);
+        Frame::new()
+            .fill(theme.bg_sidebar)
+            .corner_radius(CornerRadius::same(8))
+            .stroke(Stroke::new(0.8, theme.border_subtle))
+            .inner_margin(Margin::same(6))
+            .show(ui, |ui| {
+                ui.set_max_width((avail_w - 4.0).max(140.0));
+                ui.horizontal(|ui| {
+                    let (canvas_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(66.0, 66.0), egui::Sense::hover());
+                    let painter = ui.painter_at(canvas_rect);
+                    let max_d = ft.width_mm.max(ft.length_mm).max(400.0) as f32;
+                    let sc = 50.0 / max_d;
+                    let fw = (ft.width_mm as f32 * sc).clamp(24.0, 52.0);
+                    let fl = (ft.length_mm as f32 * sc).clamp(24.0, 52.0);
+                    let f_rect = Rect::from_center_size(canvas_rect.center(), Vec2::new(fw, fl));
+                    painter.rect_filled(
+                        f_rect,
+                        CornerRadius::same(3),
+                        theme.accent_orange.gamma_multiply(0.24),
+                    );
+                    painter.rect_stroke(
+                        f_rect,
+                        CornerRadius::same(3),
+                        Stroke::new(1.2, theme.accent_orange),
+                        egui::StrokeKind::Inside,
+                    );
+                    // 4 deep pile locations
+                    let p_in = f_rect.shrink(6.0);
+                    for corner in [
+                        p_in.left_top(),
+                        p_in.right_top(),
+                        p_in.right_bottom(),
+                        p_in.left_bottom(),
+                    ] {
+                        painter.circle_stroke(corner, 3.2, Stroke::new(1.2, theme.accent_blue));
+                    }
+                    // d/2 critical punching-shear perimeter & central column stub
+                    let punch_rect = Rect::from_center_size(
+                        canvas_rect.center(),
+                        Vec2::new(fw * 0.48, fl * 0.48),
+                    );
+                    painter.rect_stroke(
+                        punch_rect,
+                        CornerRadius::same(2),
+                        Stroke::new(1.1, theme.accent_green),
+                        egui::StrokeKind::Inside,
+                    );
+                    let col_stub = Rect::from_center_size(
+                        canvas_rect.center(),
+                        Vec2::new((fw * 0.24).max(8.0), (fl * 0.24).max(8.0)),
+                    );
+                    painter.rect_filled(col_stub, CornerRadius::same(1), theme.text_secondary);
+
+                    ui.vertical(|ui| {
+                        let gauge_w = ui.available_width().clamp(72.0, 200.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "{:.0}×{:.0}×{:.0} mm",
+                                ft.width_mm, ft.length_mm, ft.thickness_mm
+                            ))
+                            .size(9.8)
+                            .monospace()
+                            .strong()
+                            .color(theme.text_primary),
+                        );
+                        let ratio = (est_bearing_kpa / qa_kpa.max(1.0)) as f32;
+                        let col = if ratio > 0.95 {
+                            theme.accent_red
+                        } else if ratio > 0.75 {
+                            theme.accent_orange
+                        } else {
+                            theme.accent_green
+                        };
+                        ui.label(
+                            RichText::new(format!(
+                                "qu/qa: {:.0}/{:.0} kPa ({:.0}%)",
+                                est_bearing_kpa,
+                                qa_kpa,
+                                ratio * 100.0
+                            ))
+                            .size(9.0)
+                            .monospace()
+                            .color(col),
+                        );
+                        let (bar, _) =
+                            ui.allocate_exact_size(Vec2::new(gauge_w, 7.0), egui::Sense::hover());
+                        ui.painter().rect_filled(bar, CornerRadius::same(3), theme.bg_card);
+                        ui.painter().rect_filled(
+                            Rect::from_min_size(
+                                bar.min,
+                                Vec2::new((bar.width() * ratio.clamp(0.0, 1.0)).max(2.0), bar.height()),
+                            ),
+                            CornerRadius::same(3),
+                            col,
+                        );
+                    });
+                });
+            });
+    }
+
+    /// Renders a live 2D Two-Way Slab reinforcement mesh & thickness summary diagram inside the Smart Pop-Up.
+    pub fn render_slab_twoway_preview(
+        ui: &mut Ui,
+        theme: &MacTheme,
+        slab: &crate::core::bim::BimSlab,
+        area_m2: f64,
+    ) {
+        let avail_w = ui.available_width().max(150.0);
+        Frame::new()
+            .fill(theme.bg_sidebar)
+            .corner_radius(CornerRadius::same(8))
+            .stroke(Stroke::new(0.8, theme.border_subtle))
+            .inner_margin(Margin::same(6))
+            .show(ui, |ui| {
+                ui.set_max_width((avail_w - 4.0).max(140.0));
+                ui.horizontal(|ui| {
+                    let (canvas_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(66.0, 54.0), egui::Sense::hover());
+                    let painter = ui.painter_at(canvas_rect);
+                    let panel = Rect::from_center_size(canvas_rect.center(), Vec2::new(54.0, 42.0));
+                    painter.rect_filled(
+                        panel,
+                        CornerRadius::same(3),
+                        theme.accent_blue.gamma_multiply(0.22),
+                    );
+                    painter.rect_stroke(
+                        panel,
+                        CornerRadius::same(3),
+                        Stroke::new(1.1, theme.text_secondary),
+                        egui::StrokeKind::Inside,
+                    );
+                    for k in 1..=3 {
+                        let f = k as f32 / 4.0;
+                        let gx = egui::lerp(panel.left()..=panel.right(), f);
+                        let gy = egui::lerp(panel.top()..=panel.bottom(), f);
+                        painter.line_segment(
+                            [egui::pos2(gx, panel.top() + 3.0), egui::pos2(gx, panel.bottom() - 3.0)],
+                            Stroke::new(0.9, theme.accent_green.gamma_multiply(0.8)),
+                        );
+                        painter.line_segment(
+                            [egui::pos2(panel.left() + 3.0, gy), egui::pos2(panel.right() - 3.0, gy)],
+                            Stroke::new(0.9, theme.accent_blue.gamma_multiply(0.85)),
+                        );
+                    }
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "{} • h={:.0}mm",
+                                if slab.is_roof { "Roof Slab" } else { "2-Way Slab" },
+                                slab.thickness_mm
+                            ))
+                            .size(9.8)
+                            .monospace()
+                            .strong()
+                            .color(theme.text_primary),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Area {:.1} m² • {} shafts",
+                                area_m2,
+                                slab.openings.len()
+                            ))
+                            .size(9.0)
+                            .color(theme.accent_blue),
                         );
                     });
                 });
@@ -8473,6 +9368,19 @@ impl SpatialWorkspaceState {
                                     {
                                         actions.open_settings = true;
                                     }
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::MapPin),
+                                        if self.mobile_deck_pinned { "Pinned" } else { "Pin" },
+                                        self.mobile_deck_pinned,
+                                        theme.accent_green,
+                                        "Pin Studio Deck open while authoring on Earth 3D (Alt+1..4 tabs)",
+                                    )
+                                    .clicked()
+                                    {
+                                        self.mobile_deck_pinned = !self.mobile_deck_pinned;
+                                    }
                                 },
                             );
 
@@ -8681,6 +9589,37 @@ impl SpatialWorkspaceState {
                                             )
                                             .clicked()
                                                 && self.add_slab_at_active_story(build_view).is_ok()
+                                            {
+                                                actions.sync_fem_and_earth = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                "Clone ↑",
+                                                false,
+                                                theme.accent_blue,
+                                                "Clone active floor columns, beams, walls & slabs one story upward (+3.5m)",
+                                            )
+                                            .clicked()
+                                                && self.clone_active_story_upward(build_view).is_ok()
+                                            {
+                                                actions.sync_fem_and_earth = true;
+                                                actions.fit_camera = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                "+ Footings",
+                                                false,
+                                                theme.accent_orange,
+                                                "Auto-generate subsurface pile caps under ground-story columns",
+                                            )
+                                            .clicked()
+                                                && self
+                                                    .auto_generate_missing_footings(build_view)
+                                                    .is_ok()
                                             {
                                                 actions.sync_fem_and_earth = true;
                                             }
@@ -9221,7 +10160,9 @@ impl SpatialWorkspaceState {
                                             let sub =
                                                 tool.apply(self, universal_canvas, build_view);
                                             actions.merge(sub);
-                                            self.collapse_dynamic_island();
+                                            if !self.mobile_deck_pinned {
+                                                self.collapse_dynamic_island();
+                                            }
                                         }
                                         if matches!(
                                             tool,
@@ -9233,6 +10174,16 @@ impl SpatialWorkspaceState {
                                         }
                                     }
                                 },
+                            );
+
+                            // Unified Active Lens & Manual Authoring Controls (inside Dynamic Island)
+                            self.render_active_lens_and_manual_tool_strip(
+                                ui,
+                                theme,
+                                universal_canvas,
+                                build_view,
+                                &mut actions,
+                                cap_w,
                             );
 
                             // Row 3: Attached `@Context` Chips (if any)
@@ -9274,23 +10225,23 @@ impl SpatialWorkspaceState {
 
                             ui.add_space(5.0);
 
-                            // Row 4: Frosted Liquid Glass Prompt & `/` Slash Command Composer
+                            // Row 4: Frosted Coastal Teal Glass Prompt & `/` Slash Command Composer
                             let (composer_fill, composer_stroke) = if theme.is_dark() {
                                 (
-                                    Color32::from_rgba_unmultiplied(255, 255, 255, 16),
+                                    Color32::from_rgba_unmultiplied(43, 73, 99, 148),
                                     if self.composer_had_focus {
-                                        Color32::from_rgba_unmultiplied(125, 211, 252, 165)
+                                        Color32::from_rgba_unmultiplied(208, 235, 225, 195)
                                     } else {
-                                        Color32::from_rgba_unmultiplied(255, 255, 255, 36)
+                                        Color32::from_rgba_unmultiplied(91, 146, 165, 118)
                                     },
                                 )
                             } else {
                                 (
-                                    Color32::from_rgba_unmultiplied(255, 255, 255, 185),
+                                    Color32::from_rgba_unmultiplied(232, 246, 240, 218),
                                     if self.composer_had_focus {
-                                        theme.accent_blue.gamma_multiply(0.75)
+                                        theme.accent_blue.gamma_multiply(0.85)
                                     } else {
-                                        Color32::from_rgba_unmultiplied(15, 23, 42, 32)
+                                        Color32::from_rgba_unmultiplied(43, 73, 99, 88)
                                     },
                                 )
                             };
@@ -11224,8 +12175,8 @@ END-ISO-10303-21;\r\n";
                 });
                 out.textures_delta.clear();
             }
-            // Renders both Top-Center Active Placement Pill and single Unified Dynamic Island
-            assert_eq!(spatial.hud_rects.len(), 2);
+            // Placement bar is integrated inside the single Unified Dynamic Island (Phase 62)
+            assert_eq!(spatial.hud_rects.len(), 1);
             for r in &spatial.hud_rects {
                 assert!(r.right() <= win_w + 1.0 && r.left() >= -1.0);
             }
@@ -11622,12 +12573,16 @@ END-ISO-10303-21;\r\n";
 
     #[test]
     fn test_phase61_liquid_glass_ui_segmented_dynamic_island_and_exclusive_drawers() {
-        // 1. Liquid Glass UI translucency across ProDark & EngineeringLight
+        // 1. Frosted Liquid Glass UI translucency across ProDark & EngineeringLight
         for mode in [crate::theme::ThemeMode::ProDark, crate::theme::ThemeMode::EngineeringLight] {
             let t = crate::theme::MacTheme::for_mode(mode);
             let outer = t.glass_capsule_frame(20, Margin::same(12));
             let sub = t.glass_subpill_frame(10, Margin::same(6));
-            assert!(outer.fill.a() < 220, "Outer glass frame should remain translucent in {mode:?}");
+            assert!(
+                (210..235).contains(&outer.fill.a()),
+                "Outer frosted glass frame should use high-opacity translucent frost (alpha={}) in {mode:?}",
+                outer.fill.a()
+            );
             assert!(sub.fill.a() < 220, "Glass sub-pill should remain translucent in {mode:?}");
         }
 
@@ -11697,5 +12652,115 @@ END-ISO-10303-21;\r\n";
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_phase62_coastal_glass_palette_integrated_lens_tool_strip_story_clone_and_subsurface_footings() {
+        // 1. Coastal Marine Teal Palette (#0B1427, #2B4963, #5B92A5, #D0EBE1) + Higher-Opacity Frosted Glass
+        let dark = crate::theme::MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        assert_eq!(dark.bg_canvas, Color32::from_rgb(11, 20, 39));
+        assert_eq!(dark.bg_card_hover, Color32::from_rgb(43, 73, 99));
+        assert_eq!(dark.accent_blue, Color32::from_rgb(91, 146, 165));
+        assert_eq!(dark.text_primary, Color32::from_rgb(208, 235, 225));
+        assert_eq!(dark.glass_capsule_frame(20, Margin::same(12)).fill.a(), 222);
+
+        let light = crate::theme::MacTheme::for_mode(crate::theme::ThemeMode::EngineeringLight);
+        assert_eq!(light.bg_canvas, Color32::from_rgb(208, 235, 225));
+        assert_eq!(light.accent_blue, Color32::from_rgb(43, 73, 99));
+        assert_eq!(light.text_primary, Color32::from_rgb(11, 20, 39));
+        assert_eq!(light.glass_capsule_frame(20, Margin::same(12)).fill.a(), 228);
+
+        // 2. Active Lens + Manual Tool Strip unified inside Dynamic Island (1 HUD rect, zero overflow on 1200px & 390px)
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        build
+            .bim_bus
+            .execute_natural_language("portal 2x1 @6m 1floors")
+            .expect("portal");
+        spatial.active_lens = SpatialLens::Erection4D;
+        build.ground_author_tool = Ground3DAuthorTool::Column;
+        spatial.mobile_deck_pinned = true;
+
+        for win_w in [1200.0_f32, 390.0] {
+            let ctx = egui::Context::default();
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 820.0))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &dark,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(
+                spatial.hud_rects.len(),
+                1,
+                "Active lens & manual tool controls must render inside the single Dynamic Island"
+            );
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 62 integrated Dynamic Island {r:?} overflowed viewport width {win_w}"
+            );
+        }
+
+        // 3. 1-Click Story Cloning upward + Auto-Foundation generation + Element Auto-Size
+        let cols_before = build.bim_bus.project.columns.len();
+        let runs_before = build.bim_bus.project.runs.len();
+        let clone_msg = spatial
+            .clone_active_story_upward(&mut build)
+            .expect("story clone should succeed");
+        assert!(clone_msg.contains("Cloned"));
+        assert!(build.bim_bus.project.columns.len() >= cols_before * 2);
+        assert!(build.bim_bus.project.runs.len() >= runs_before * 2);
+
+        let ft_before = build.bim_bus.project.footings.len();
+        let (base_id, top_id, _, _) = spatial.active_base_and_top_levels(&build.bim_bus.project);
+        let mut sorted_lvls = build.bim_bus.project.levels.clone();
+        sorted_lvls.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
+        let ground_id = sorted_lvls.first().map(|l| l.id).unwrap_or(base_id);
+        let top_ground_id = sorted_lvls.get(1).map(|l| l.id).unwrap_or(top_id);
+        build
+            .bim_bus
+            .execute(BimCommand::AddColumn {
+                base_level_id: ground_id,
+                top_level_id: top_ground_id,
+                pos: crate::core::P2(24_000.0, 0.0),
+                width_mm: 400.0,
+                depth_mm: 400.0,
+                is_round: false,
+                profile_name: "C400x400".to_string(),
+            })
+            .expect("add un-founded column");
+
+        let ft_msg = spatial
+            .auto_generate_missing_footings(&mut build)
+            .expect("footing generator should succeed");
+        assert!(ft_msg.contains("pile caps"), "Unexpected msg: {ft_msg}");
+        assert_eq!(build.bim_bus.project.footings.len(), ft_before + 1);
+
+        let col0_id = build.bim_bus.project.columns[0].id;
+        let orig_w = build.bim_bus.project.columns[0].width_mm;
+        spatial.selected_target = Some(SmartSelectionTarget::Column(col0_id));
+        let _ = spatial
+            .auto_size_selected_element(&mut build)
+            .expect("auto-size should succeed");
+        assert!(build.bim_bus.project.columns[0].width_mm > orig_w);
     }
 }

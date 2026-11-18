@@ -57,45 +57,45 @@ impl MacTheme {
         match mode {
             ThemeMode::ProDark => Self {
                 mode,
-                // Deep obsidian & elevated slate glassmorphic surfaces
-                bg_canvas: Color32::from_rgb(15, 17, 23),
-                bg_sidebar: Color32::from_rgb(20, 23, 31),
-                bg_card: Color32::from_rgb(26, 30, 40),
-                bg_card_hover: Color32::from_rgb(35, 41, 56),
-                bg_hero: Color32::from_rgb(22, 34, 58),
-                // High-clarity engineering semantic accents
-                accent_blue: Color32::from_rgb(45, 140, 255),
-                accent_green: Color32::from_rgb(16, 185, 129),
-                accent_orange: Color32::from_rgb(245, 158, 11),
-                accent_red: Color32::from_rgb(239, 68, 68),
-                // Crisp typographic hierarchy
-                text_primary: Color32::from_rgb(248, 250, 252),
-                text_secondary: Color32::from_rgb(165, 180, 202),
-                text_muted: Color32::from_rgb(108, 122, 145),
-                // Subtle architectural hairline borders
-                border_subtle: Color32::from_rgb(38, 44, 58),
-                border_card: Color32::from_rgb(48, 56, 74),
+                // Coastal Marine Teal & Abyssal Navy palette (#0B1427 -> #2B4963 -> #5B92A5 -> #D0EBE1)
+                bg_canvas: Color32::from_rgb(11, 20, 39),
+                bg_sidebar: Color32::from_rgb(16, 29, 51),
+                bg_card: Color32::from_rgb(24, 43, 68),
+                bg_card_hover: Color32::from_rgb(43, 73, 99),
+                bg_hero: Color32::from_rgb(32, 58, 82),
+                // Coastal marine cyan-teal accents & high-legibility engineering semantics
+                accent_blue: Color32::from_rgb(91, 146, 165),
+                accent_green: Color32::from_rgb(96, 198, 168),
+                accent_orange: Color32::from_rgb(238, 168, 72),
+                accent_red: Color32::from_rgb(232, 92, 92),
+                // Seafoam-mint typographic hierarchy
+                text_primary: Color32::from_rgb(208, 235, 225),
+                text_secondary: Color32::from_rgb(160, 200, 198),
+                text_muted: Color32::from_rgb(91, 146, 165),
+                // Deep steel-teal architectural hairline borders
+                border_subtle: Color32::from_rgb(43, 73, 99),
+                border_card: Color32::from_rgb(66, 108, 132),
             },
             ThemeMode::EngineeringLight => Self {
                 mode,
-                // Crisp CAD paper & elevated slate daylight surfaces
-                bg_canvas: Color32::from_rgb(244, 246, 250),
-                bg_sidebar: Color32::from_rgb(233, 238, 246),
-                bg_card: Color32::from_rgb(255, 255, 255),
-                bg_card_hover: Color32::from_rgb(226, 233, 245),
-                bg_hero: Color32::from_rgb(228, 239, 255),
-                // High-contrast engineering accents on light surfaces
-                accent_blue: Color32::from_rgb(24, 108, 224),
-                accent_green: Color32::from_rgb(10, 146, 100),
-                accent_orange: Color32::from_rgb(206, 120, 6),
-                accent_red: Color32::from_rgb(212, 42, 42),
-                // Deep ink typography
-                text_primary: Color32::from_rgb(15, 23, 42),
-                text_secondary: Color32::from_rgb(51, 65, 85),
-                text_muted: Color32::from_rgb(100, 116, 139),
-                // Clean technical drafting hairlines
-                border_subtle: Color32::from_rgb(203, 213, 225),
-                border_card: Color32::from_rgb(184, 196, 212),
+                // Seafoam daylight drafting paper & Coastal Marine Teal palette (#D0EBE1 -> #5B92A5 -> #2B4963 -> #0B1427)
+                bg_canvas: Color32::from_rgb(208, 235, 225),
+                bg_sidebar: Color32::from_rgb(192, 223, 213),
+                bg_card: Color32::from_rgb(232, 246, 240),
+                bg_card_hover: Color32::from_rgb(172, 210, 203),
+                bg_hero: Color32::from_rgb(182, 218, 214),
+                // Deep steel-blue & teal engineering accents on daylight seafoam surfaces
+                accent_blue: Color32::from_rgb(43, 73, 99),
+                accent_green: Color32::from_rgb(28, 132, 108),
+                accent_orange: Color32::from_rgb(196, 114, 18),
+                accent_red: Color32::from_rgb(198, 52, 52),
+                // Abyssal navy ink typography
+                text_primary: Color32::from_rgb(11, 20, 39),
+                text_secondary: Color32::from_rgb(43, 73, 99),
+                text_muted: Color32::from_rgb(72, 116, 135),
+                // Clean steel-teal drafting hairlines
+                border_subtle: Color32::from_rgb(91, 146, 165),
+                border_card: Color32::from_rgb(43, 73, 99),
             },
         }
     }
@@ -171,29 +171,29 @@ impl MacTheme {
         self.glass_capsule_frame(16, Margin::same(14))
     }
 
-    /// Frosted Liquid Glass outer capsule with translucent backdrop, specular ice-cyan rim,
-    /// and soft ambient drop shadow.
+    /// Frosted Liquid Glass outer capsule with higher-opacity translucent backdrop,
+    /// Coastal Marine Teal specular rim, and soft ambient drop shadow.
     pub fn glass_capsule_frame(&self, corner_r: u8, pad: Margin) -> Frame {
         let (fill, rim_col, shadow) = if self.is_dark() {
             (
-                Color32::from_rgba_unmultiplied(14, 20, 32, 188),
-                Color32::from_rgba_unmultiplied(135, 206, 255, 112),
+                Color32::from_rgba_unmultiplied(11, 20, 39, 222),
+                Color32::from_rgba_unmultiplied(91, 146, 165, 160),
                 egui::epaint::Shadow {
                     offset: [0, 8],
                     blur: 22,
                     spread: 1,
-                    color: Color32::from_black_alpha(110),
+                    color: Color32::from_black_alpha(125),
                 },
             )
         } else {
             (
-                Color32::from_rgba_unmultiplied(246, 250, 255, 198),
-                Color32::from_rgba_unmultiplied(56, 138, 240, 108),
+                Color32::from_rgba_unmultiplied(208, 235, 225, 228),
+                Color32::from_rgba_unmultiplied(43, 73, 99, 145),
                 egui::epaint::Shadow {
                     offset: [0, 6],
                     blur: 18,
                     spread: 0,
-                    color: Color32::from_black_alpha(36),
+                    color: Color32::from_rgba_unmultiplied(11, 20, 39, 44),
                 },
             )
         };
@@ -209,13 +209,13 @@ impl MacTheme {
     pub fn glass_subpill_frame(&self, corner_r: u8, pad: Margin) -> Frame {
         let (fill, rim) = if self.is_dark() {
             (
-                Color32::from_rgba_unmultiplied(255, 255, 255, 14),
-                Color32::from_rgba_unmultiplied(255, 255, 255, 28),
+                Color32::from_rgba_unmultiplied(43, 73, 99, 132),
+                Color32::from_rgba_unmultiplied(91, 146, 165, 105),
             )
         } else {
             (
-                Color32::from_rgba_unmultiplied(15, 23, 42, 11),
-                Color32::from_rgba_unmultiplied(15, 23, 42, 24),
+                Color32::from_rgba_unmultiplied(91, 146, 165, 56),
+                Color32::from_rgba_unmultiplied(43, 73, 99, 84),
             )
         };
         Frame::new()
@@ -228,22 +228,30 @@ impl MacTheme {
     /// Returns `(text_color, bg_fill, border_stroke)` for pill chips rendered inside Liquid Glass containers.
     pub fn glass_chip_style(&self, active: bool, active_accent: Color32) -> (Color32, Color32, Stroke) {
         if active {
-            (
-                Color32::WHITE,
-                active_accent.gamma_multiply(0.84),
-                Stroke::new(1.1, Color32::from_rgba_unmultiplied(255, 255, 255, 195)),
-            )
+            if self.is_dark() {
+                (
+                    Color32::from_rgb(208, 235, 225),
+                    active_accent.gamma_multiply(0.90),
+                    Stroke::new(1.1, Color32::from_rgba_unmultiplied(208, 235, 225, 210)),
+                )
+            } else {
+                (
+                    Color32::WHITE,
+                    active_accent.gamma_multiply(0.90),
+                    Stroke::new(1.1, Color32::from_rgba_unmultiplied(255, 255, 255, 200)),
+                )
+            }
         } else if self.is_dark() {
             (
-                self.text_secondary,
-                Color32::from_rgba_unmultiplied(255, 255, 255, 15),
-                Stroke::new(0.8, Color32::from_rgba_unmultiplied(255, 255, 255, 32)),
+                self.text_primary,
+                Color32::from_rgba_unmultiplied(43, 73, 99, 140),
+                Stroke::new(0.85, Color32::from_rgba_unmultiplied(91, 146, 165, 95)),
             )
         } else {
             (
-                self.text_secondary,
-                Color32::from_rgba_unmultiplied(255, 255, 255, 165),
-                Stroke::new(0.8, Color32::from_rgba_unmultiplied(15, 23, 42, 28)),
+                self.text_primary,
+                Color32::from_rgba_unmultiplied(232, 246, 240, 195),
+                Stroke::new(0.85, Color32::from_rgba_unmultiplied(43, 73, 99, 70)),
             )
         }
     }
@@ -258,12 +266,11 @@ impl MacTheme {
         if !rect.is_positive() || rect.width() <= corner_r * 2.0 + 4.0 {
             return;
         }
-        let sheen_col = Color32::from_rgba_unmultiplied(
-            255,
-            255,
-            255,
-            if self.is_dark() { 82 } else { 190 },
-        );
+        let sheen_col = if self.is_dark() {
+            Color32::from_rgba_unmultiplied(208, 235, 225, 115)
+        } else {
+            Color32::from_rgba_unmultiplied(255, 255, 255, 210)
+        };
         let y = rect.top() + 1.2;
         painter.line_segment(
             [
@@ -285,17 +292,17 @@ impl MacTheme {
         visuals.panel_fill = self.bg_canvas;
         visuals.window_fill = self.bg_card;
         visuals.extreme_bg_color = if is_dark {
-            Color32::from_rgb(11, 13, 18)
+            Color32::from_rgb(8, 15, 30)
         } else {
-            Color32::from_rgb(232, 236, 244)
+            Color32::from_rgb(192, 223, 213)
         };
         visuals.faint_bg_color = if is_dark {
-            Color32::from_rgb(22, 26, 35)
+            Color32::from_rgb(18, 33, 55)
         } else {
-            Color32::from_rgb(238, 242, 248)
+            Color32::from_rgb(220, 241, 233)
         };
 
-        visuals.selection.bg_fill = self.accent_blue.gamma_multiply(0.30);
+        visuals.selection.bg_fill = self.accent_blue.gamma_multiply(0.32);
         visuals.selection.stroke = Stroke::new(1.0, self.accent_blue);
 
         visuals.widgets.noninteractive.bg_fill = self.bg_card;
@@ -305,14 +312,14 @@ impl MacTheme {
         visuals.widgets.noninteractive.corner_radius = CornerRadius::same(8);
 
         visuals.widgets.inactive.bg_fill = if is_dark {
-            Color32::from_rgb(32, 38, 52)
+            Color32::from_rgb(31, 54, 77)
         } else {
-            Color32::from_rgb(226, 232, 240)
+            Color32::from_rgb(184, 219, 210)
         };
         visuals.widgets.inactive.weak_bg_fill = if is_dark {
-            Color32::from_rgb(28, 33, 45)
+            Color32::from_rgb(24, 43, 68)
         } else {
-            Color32::from_rgb(234, 239, 246)
+            Color32::from_rgb(198, 228, 219)
         };
         visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, self.border_card);
         visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, self.text_primary);

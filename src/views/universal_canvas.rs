@@ -5814,33 +5814,86 @@ impl UniversalCanvasState {
                 let sec_active = self.earth_bim_author.section_cut_active;
                 let sec_elev = self.earth_bim_author.section_cut_elev_m;
 
-                // 6A. Isolated Footings (Ground Pads)
+                // 6A. Subsurface 3D Foundation Pads / Pile Caps & Deep Foundation Pile Shafts
                 for ft in &bim_project.footings {
                     if !show_on_story(ft.level_id) && !(isolate && active_lvl_id <= 1) {
                         continue;
                     }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Footing, ft.id));
-                    let z_m = bim_project.level_elevation(ft.level_id) * 0.001;
-                    if sec_active && z_m > sec_elev + 0.05 {
+                    let z_top_m = bim_project.level_elevation(ft.level_id) * 0.001;
+                    if sec_active && z_top_m > sec_elev + 0.05 {
                         continue;
                     }
-                    let pts: Vec<Pos2> = ft
-                        .footprint_ring()
-                        .into_iter()
-                        .filter_map(|p| proj_mm(p.0, p.1, z_m))
-                        .collect();
-                    if pts.len() >= 3 && pts.iter().any(|p| rect.expand(40.0).contains(*p)) {
-                        let fill = if is_sel {
-                            Color32::from_rgba_unmultiplied(56, 189, 248, 120)
+                    let cap_h_m = (ft.thickness_mm * 0.001).max(0.45);
+                    let z_bot_m = z_top_m - cap_h_m;
+                    let ring = ft.footprint_ring();
+
+                    // Subsurface 4-pile drilled shafts below pile cap at ground/zoomed scale or when selected
+                    if is_sel || self.world_map.zoom_level >= 15.8 {
+                        let z_pile_tip_m = z_bot_m - 3.8;
+                        let ox = ft.width_mm * 0.32;
+                        let oy = ft.length_mm * 0.32;
+                        let pile_col = if is_sel {
+                            Color32::from_rgba_unmultiplied(91, 146, 165, 220)
                         } else {
-                            Color32::from_rgba_unmultiplied(245, 158, 11, 70)
+                            Color32::from_rgba_unmultiplied(91, 146, 165, 130)
+                        };
+                        let pile_stroke_w = if self.world_map.zoom_level >= 17.5 { 3.2 } else { 2.0 };
+                        for [sx, sy] in [[-ox, -oy], [ox, -oy], [ox, oy], [-ox, oy]] {
+                            if let (Some(p_top), Some(p_tip)) = (
+                                proj_mm(ft.pos.0 + sx, ft.pos.1 + sy, z_bot_m),
+                                proj_mm(ft.pos.0 + sx, ft.pos.1 + sy, z_pile_tip_m),
+                            ) {
+                                if rect.expand(60.0).contains(p_top) || rect.expand(60.0).contains(p_tip) {
+                                    clip_painter.line_segment(
+                                        [p_top, p_tip],
+                                        Stroke::new(pile_stroke_w, pile_col),
+                                    );
+                                    clip_painter.circle_filled(p_tip, 2.2, pile_col);
+                                }
+                            }
+                        }
+                    }
+
+                    // 3D Extruded Pile Cap Block (Subsurface X-Ray side quads + top cap)
+                    let top_pts: Vec<Pos2> = ring
+                        .iter()
+                        .filter_map(|p| proj_mm(p.0, p.1, z_top_m))
+                        .collect();
+                    let bot_pts: Vec<Pos2> = ring
+                        .iter()
+                        .filter_map(|p| proj_mm(p.0, p.1, z_bot_m))
+                        .collect();
+                    if top_pts.len() == 4 && top_pts.iter().any(|p| rect.expand(40.0).contains(*p)) {
+                        if bot_pts.len() == 4 {
+                            let side_base = if is_sel {
+                                Color32::from_rgb(91, 146, 165)
+                            } else {
+                                Color32::from_rgb(206, 134, 42)
+                            };
+                            for k in 0..4 {
+                                let nk = (k + 1) % 4;
+                                let face = vec![bot_pts[k], bot_pts[nk], top_pts[nk], top_pts[k]];
+                                let side_fill = Self::directional_face_shade(side_base, bot_pts[k], bot_pts[nk], false)
+                                    .gamma_multiply(0.55);
+                                clip_painter.add(egui::Shape::convex_polygon(
+                                    face,
+                                    side_fill,
+                                    Stroke::new(0.8, side_base.gamma_multiply(0.65)),
+                                ));
+                            }
+                        }
+                        let fill = if is_sel {
+                            Color32::from_rgba_unmultiplied(91, 146, 165, 135)
+                        } else {
+                            Color32::from_rgba_unmultiplied(238, 168, 72, 85)
                         };
                         let stroke = if is_sel {
-                            Stroke::new(2.2, Color32::from_rgb(56, 189, 248))
+                            Stroke::new(2.2, Color32::from_rgb(208, 235, 225))
                         } else {
-                            Stroke::new(1.2, Color32::from_rgba_unmultiplied(245, 158, 11, 200))
+                            Stroke::new(1.2, Color32::from_rgba_unmultiplied(238, 168, 72, 200))
                         };
-                        clip_painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+                        clip_painter.add(egui::Shape::convex_polygon(top_pts, fill, stroke));
                     }
                 }
 
