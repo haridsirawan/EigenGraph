@@ -714,9 +714,42 @@ pub enum BimCommand {
     DeleteElement {
         element_id: usize,
     },
+    ResizeColumn {
+        column_id: usize,
+        width_mm: f64,
+        depth_mm: f64,
+        rotation_deg: f64,
+        profile_name: String,
+    },
+    ResizeRun {
+        run_id: usize,
+        width_mm: f64,
+        depth_mm: f64,
+        profile_name: String,
+    },
+    ResizeFooting {
+        footing_id: usize,
+        width_mm: f64,
+        length_mm: f64,
+        thickness_mm: f64,
+    },
+    ResizeWall {
+        wall_id: usize,
+        thickness_mm: f64,
+        is_structural: bool,
+    },
     AutoDetectRooms {
         level_id: usize,
     },
+}
+
+/// Physical BIM element classification used for bidirectional spatial picking and FEM linkage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BimElementKind {
+    Column,
+    Run,
+    Wall,
+    Footing,
 }
 
 /// Complete Relational BIM Project Model with Transactional Undo/Redo History.
@@ -1841,8 +1874,11 @@ impl BimProject {
 
     /// Dual Physical–Analytical Synchronization: converts the physical BIM building into a 3D
     /// Finite Element `StructuralModel` (coordinates in metres) for immediate `FemSolver` & `AriEngine` audit.
-    pub fn to_structural_model(&self) -> StructuralModel {
+    /// Converts physical BIM elements into a 3D FEM `StructuralModel` alongside deterministic
+    /// `(fem_element_id, BimElementKind, bim_element_id)` linkage records.
+    pub fn to_structural_model_with_map(&self) -> (StructuralModel, Vec<(usize, BimElementKind, usize)>) {
         let mut model = StructuralModel::new(self.project_name.clone());
+        let mut fem_map: Vec<(usize, BimElementKind, usize)> = Vec::new();
         let tol_m = 0.05; // 50 mm node merging tolerance
 
         let find_or_add_node = |m: &mut StructuralModel, x_m: f64, y_m: f64, z_m: f64| -> usize {
@@ -1901,6 +1937,7 @@ impl BimProject {
                     .with_section(sec)
                     .with_material(steel.clone());
                 model.add_element(elem);
+                fem_map.push((elem_id, BimElementKind::Column, c.id));
                 elem_id += 1;
             }
         }
@@ -1930,6 +1967,7 @@ impl BimProject {
                         .with_section(sec)
                         .with_material(steel.clone());
                     model.add_element(elem);
+                    fem_map.push((elem_id, BimElementKind::Run, r.id));
                     elem_id += 1;
                 }
             }
@@ -1959,6 +1997,7 @@ impl BimProject {
                     .with_section(CrossSection::box_200x200x8())
                     .with_material(steel.clone());
                     model.add_element(strut);
+                    fem_map.push((elem_id, BimElementKind::Wall, w.id));
                     elem_id += 1;
                 }
                 if n_br != n_tl {
@@ -1972,6 +2011,7 @@ impl BimProject {
                     .with_section(CrossSection::box_200x200x8())
                     .with_material(steel.clone());
                     model.add_element(strut2);
+                    fem_map.push((elem_id, BimElementKind::Wall, w.id));
                     elem_id += 1;
                 }
             }
@@ -1996,7 +2036,27 @@ impl BimProject {
             });
         }
 
-        model
+        (model, fem_map)
+    }
+
+    pub fn to_structural_model(&self) -> StructuralModel {
+        self.to_structural_model_with_map().0
+    }
+
+    /// Resolves the analytical FEM element ID corresponding to a physical BIM element.
+    pub fn fem_id_for_bim_element(&self, kind: BimElementKind, bim_id: usize) -> Option<usize> {
+        let (_, map) = self.to_structural_model_with_map();
+        map.into_iter()
+            .find(|(_, k, bid)| *k == kind && *bid == bim_id)
+            .map(|(fid, _, _)| fid)
+    }
+
+    /// Resolves the physical BIM element `(BimElementKind, bim_id)` corresponding to an analytical FEM ID.
+    pub fn bim_ref_for_fem_id(&self, fem_elem_id: usize) -> Option<(BimElementKind, usize)> {
+        let (_, map) = self.to_structural_model_with_map();
+        map.into_iter()
+            .find(|(fid, _, _)| *fid == fem_elem_id)
+            .map(|(_, k, bid)| (k, bid))
     }
 
     /// Evaluates live Adjusted Redundancy Index (ARI) and SVD Kinematic Guard on the BIM building.
@@ -3598,6 +3658,91 @@ impl BimCommandBus {
                 self.project.rebars.retain(|rb| rb.host_id != element_id);
                 Ok(format!(
                     "Deleted Element #{element_id} and its hosted openings/rebars"
+                ))
+            }
+            BimCommand::ResizeColumn {
+                column_id,
+                width_mm,
+                depth_mm,
+                rotation_deg,
+                profile_name,
+            } => {
+                let col = self
+                    .project
+                    .columns
+                    .iter_mut()
+                    .find(|c| c.id == column_id)
+                    .ok_or_else(|| format!("Column #{column_id} not found"))?;
+                col.width_mm = width_mm.clamp(150.0, 2500.0);
+                col.depth_mm = depth_mm.clamp(150.0, 2500.0);
+                col.rotation_deg = rotation_deg % 360.0;
+                if !profile_name.trim().is_empty() {
+                    col.profile_name = profile_name;
+                }
+                Ok(format!(
+                    "Resized Column {} to {:.0}x{:.0} mm ({})",
+                    col.name, col.width_mm, col.depth_mm, col.profile_name
+                ))
+            }
+            BimCommand::ResizeRun {
+                run_id,
+                width_mm,
+                depth_mm,
+                profile_name,
+            } => {
+                let run = self
+                    .project
+                    .runs
+                    .iter_mut()
+                    .find(|r| r.id == run_id)
+                    .ok_or_else(|| format!("Run #{run_id} not found"))?;
+                run.width_mm = width_mm.clamp(100.0, 2000.0);
+                run.depth_mm = depth_mm.clamp(150.0, 3000.0);
+                if !profile_name.trim().is_empty() {
+                    run.profile_name = profile_name;
+                }
+                Ok(format!(
+                    "Resized {} to {:.0}x{:.0} mm ({})",
+                    run.name, run.width_mm, run.depth_mm, run.profile_name
+                ))
+            }
+            BimCommand::ResizeFooting {
+                footing_id,
+                width_mm,
+                length_mm,
+                thickness_mm,
+            } => {
+                let ft = self
+                    .project
+                    .footings
+                    .iter_mut()
+                    .find(|f| f.id == footing_id)
+                    .ok_or_else(|| format!("Footing #{footing_id} not found"))?;
+                ft.width_mm = width_mm.clamp(600.0, 8000.0);
+                ft.length_mm = length_mm.clamp(600.0, 8000.0);
+                ft.thickness_mm = thickness_mm.clamp(250.0, 2500.0);
+                Ok(format!(
+                    "Resized Footing {} to {:.0}x{:.0}x{:.0} mm",
+                    ft.name, ft.width_mm, ft.length_mm, ft.thickness_mm
+                ))
+            }
+            BimCommand::ResizeWall {
+                wall_id,
+                thickness_mm,
+                is_structural,
+            } => {
+                let wall = self
+                    .project
+                    .walls
+                    .iter_mut()
+                    .find(|w| w.id == wall_id)
+                    .ok_or_else(|| format!("Wall #{wall_id} not found"))?;
+                wall.thickness_mm = thickness_mm.clamp(80.0, 1200.0);
+                wall.is_structural = is_structural;
+                wall.layers = BimWall::default_compound_layers(wall.thickness_mm);
+                Ok(format!(
+                    "Updated Wall {} (t={:.0} mm, structural={})",
+                    wall.name, wall.thickness_mm, wall.is_structural
                 ))
             }
             BimCommand::AutoDetectRooms { level_id } => {

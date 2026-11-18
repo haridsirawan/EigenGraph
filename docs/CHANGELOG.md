@@ -7,6 +7,20 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.4.6] - 2026-11-18 — Phase 46: Antigravity Spatial Canvas Mode, Unified Slash Command Palette (`/`) & Smart Context Pop-Up Inspector
+
+### Added & Changed
+- **Zero-Chrome Full-Viewport Spatial Workspace (`src/views/spatial_workspace.rs`, `src/app.rs`, `src/views/universal_canvas.rs`, `src/views/build/viewport_3d.rs`)**:
+  - Introduced `SpatialWorkspaceState` (`spatial_mode_enabled: true` default on startup) rendering an unobstructed, edge-to-edge full-viewport **3D Google Earth Globe**, **2D Ground Plan**, or **3D Structural BIM** canvas (`UniversalCanvasState::show_spatial_fullscreen`, `BuildView::show_spatial_fullscreen`) with live canvas interaction unlocked immediately and a clean `/classic` fallback (with `"Antigravity Spatial Mode"` return toggle in the classic sidebar).
+  - Eliminated permanent left sidebars, below-viewport toolbars, and startup blocking modals from the spatial canvas, replacing them with a minimal frosted top-left capsule (`EigenGraph` + mode switcher + `/` launcher), contextual top-center active lens/tool pill, and on-demand translucent overlay sheets for all 15 engineering modules.
+- **Unified Antigravity AI Assistant & `/` Command Palette (`src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Unified `Cmd/Ctrl+K` command focus, slash command autocomplete (`/earth`, `/3d`, `/2d`, `/sample`, `/portal`, `/lens dcr|ari|moment|axial|4d`, `/repair`, `/svd`, `/vault`, `/analysis`, `/schedule`, `/cost`, `/sustainability`, `/facility`, `/safety`, `/construction`, `/automation`, `/prediction`, `/report`, `/settings`, `/classic`), `@Element` context mentions, geodetic city fly-to navigation, and natural-language BIM synthesis with execution trace chips.
+- **Smart Element Pop-Up Inspector & Transactional BIM Resize (`src/core/bim.rs`, `src/views/universal_canvas.rs`, `src/views/build/viewport_3d.rs`)**:
+  - Added deterministic BIM-to-FEM element mapping (`BimProject::to_structural_model_with_map`, `fem_id_for_bim_element`, `bim_ref_for_fem_id`) and live FEM utilization/ARI fusion inside `BuildView::build_model_geometry`.
+  - Added screen-space BIM picking on both the Earth/2D canvas (`pick_bim_element_at_screen`) and 3D BIM viewport (`Column`, `Beam/Run`, `Wall`, `Footing`, `SketchEntity`, and open `EarthSite` coordinates) triggering a frosted, responsive **Smart Element Pop-Up** (`Props` with transactional `ResizeColumn`/`ResizeRun`/`ResizeFooting`/`ResizeWall` undoable edits, `Calc` with live `DCR%`, `ARI`, `Pu`, `P-M-V`, `SVD margin` & `Simulate N-1`, `5D/6D` volume/cost/carbon, and `Ask AI` contextual actions).
+
+---
+
 ## [v0.4.5] - 2026-11-15 — Phase 45: External Below-Toolbar Detailing & Structural Sub-Menus, Earth-Coupled Lifecycle Ops & Cross-Pillar Bridge
 
 ### Added & Changed

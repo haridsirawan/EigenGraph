@@ -415,6 +415,11 @@ pub struct UniversalCanvasState {
     pub pending_earth_arc_start: Option<(f64, f64)>,
     // Phase 45: Persisted MEP sizing, Commercial Procurement/VO, Site Diary, QA/QC & Earth Site Coupling
     pub lifecycle_ops: LifecycleOpsState,
+    // Phase 46: Spatial Canvas Smart Picking & Highlight Sync
+    pub last_picked_bim_element: Option<(crate::core::BimElementKind, usize)>,
+    pub last_picked_earth_lat_lon: Option<(f64, f64)>,
+    pub highlighted_bim_element: Option<(crate::core::BimElementKind, usize)>,
+    pub spatial_pick_seq: u64,
 }
 
 impl Default for UniversalCanvasState {
@@ -476,6 +481,10 @@ impl Default for UniversalCanvasState {
             last_globe_xform: None,
             pending_earth_arc_start: None,
             lifecycle_ops: LifecycleOpsState::default(),
+            last_picked_bim_element: None,
+            last_picked_earth_lat_lon: None,
+            highlighted_bim_element: None,
+            spatial_pick_seq: 0,
         }
     }
 }
@@ -2007,194 +2016,17 @@ impl UniversalCanvasState {
                 ui.set_width(outer_w);
                 ui.set_max_width(outer_w);
 
-                // Apply CAD Keyboard Shortcuts (Space freeze, Esc, Del, Ctrl+Z/Y, F8 Ortho, F3 Snap, single keys, G Globe, [ / ] Tilt)
-                self.handle_universal_shortcuts(ui.ctx(), bim_project);
-
-                // Step Earth animations (smooth auto-spin, inertia, Google Earth fly-to, planetary sim years)
-                if self.globe_mode && !self.is_frozen {
-                    self.earth_world.step_animations(ui.ctx(), &mut self.world_map);
-                }
-
-                // 1. Main Interactive Drawing Viewport (Top — clean, only Freeze pill inside)
-                let avail_w = ui.available_width().max(200.0);
-                let (response, painter) =
-                    ui.allocate_painter(Vec2::new(avail_w, canvas_h), Sense::click_and_drag());
-                let rect = response.rect;
-                self.last_canvas_rect = Some(rect);
-                self.last_inspector_rect = None;
-
-                if self.globe_mode {
-                    self.last_globe_xform = Some(GlobeScreenTransform::from_view(
-                        rect,
-                        self.world_map.center_lat_lon.0,
-                        self.world_map.center_lat_lon.1,
-                        self.world_map.zoom_level,
-                        &self.earth_world.camera,
-                    ));
-                } else {
-                    self.last_globe_xform = None;
-                }
-
-                painter.rect_filled(rect, CornerRadius::same(10), Self::canvas_bg(theme));
-
-                // Top-left Floating Freeze / Live Toggle inside Viewport (interact BEFORE pan/draw handlers)
-                let (freeze_pill_rect, pointer_in_freeze_pill, freeze_pill_hovered) =
-                    Self::interact_floating_freeze_pill(
-                        ui,
-                        rect,
-                        "universal",
-                        &mut self.is_frozen,
-                        sidebar_toggle_inset_px,
-                    );
-
-                // Handle Pan / Zoom / Drawing Interaction (respecting Freeze Canvas & Floating Freeze Pill)
-                self.handle_canvas_interaction(
+                self.render_viewport_core(
                     ui,
-                    &response,
-                    rect,
+                    theme,
                     active_pillar,
                     bim_project,
-                    pointer_in_freeze_pill,
-                );
-
-                // 1a. Phase 43 / Phase 35: 3D Google Earth Globe (default) or 2D Slippy World Map
-                let active_globe_xform = if self.globe_mode {
-                    let xform = self.earth_world.render_3d_globe(
-                        ui,
-                        &painter,
-                        rect,
-                        theme,
-                        &self.world_map,
-                        self.ground_origin_lat_lon,
-                        self.ground_origin_anchored,
-                        self.show_grid,
-                        self.active_tool.earth_brush_action(),
-                        self.cursor_lat_lon,
-                        self.is_frozen,
-                    );
-                    self.last_globe_xform = Some(xform.clone());
-                    Some(xform)
-                } else {
-                    self.last_globe_xform = None;
-                    self.world_map.render_world_background(
-                        ui,
-                        &painter,
-                        rect,
-                        theme,
-                        self.ground_origin_lat_lon,
-                        self.show_grid,
-                        false,
-                    );
-                    None
-                };
-
-                // 1b. Render Fine Millimeter Engineering Grid (site scale), BIM Base Layer, Domain Overlay, Entities & Preview
-                let world_to_screen = |w: [f64; 2]| self.world_to_screen(rect, w);
-                if self.show_grid && self.world_map.zoom_level >= 15.5 {
-                    self.paint_grid(&painter, rect, theme, &world_to_screen);
-                }
-                if self.show_bim_base_layer {
-                    self.paint_bim_base_layer(
-                        &painter,
-                        rect,
-                        theme,
-                        bim_project,
-                        members,
-                        active_pillar,
-                        &world_to_screen,
-                    );
-                }
-                if self.show_domain_overlay {
-                    self.paint_domain_overlay(
-                        &painter,
-                        rect,
-                        theme,
-                        active_pillar,
-                        bim_project,
-                        members,
-                        &world_to_screen,
-                    );
-                }
-                self.paint_entities(&painter, rect, theme, active_pillar, &world_to_screen);
-                self.paint_live_preview(&painter, rect, theme, &world_to_screen);
-
-                // Live Great-Circle Bridge / Corridor arc preview while dragging Earth megastructures
-                if let (Some(start_ll), Some(kind)) = (
-                    self.pending_earth_arc_start,
-                    self.active_tool.earth_megastructure_kind(),
-                ) {
-                    let arc_pts = crate::core::gis::great_circle_arc(start_ll, self.cursor_lat_lon, 20);
-                    let arc_color = kind.accent_color();
-                    let clip_arc = painter.with_clip_rect(rect);
-                    let proj_ll = |ll: (f64, f64)| -> Option<Pos2> {
-                        if let Some(ref xf) = active_globe_xform {
-                            xf.project_lat_lon_elev(ll.0, ll.1, 0.0)
-                                .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
-                        } else {
-                            Some(self.world_map.lat_lon_to_screen(ll.0, ll.1, rect))
-                        }
-                    };
-                    for pair in arc_pts.windows(2) {
-                        if let (Some(p0), Some(p1)) = (proj_ll(pair[0]), proj_ll(pair[1])) {
-                            clip_arc.line_segment([p0, p1], Stroke::new(2.6, arc_color));
-                        }
-                    }
-                    if let Some(p_end) = proj_ll(self.cursor_lat_lon) {
-                        clip_arc.circle_filled(p_end, 4.5, arc_color);
-                    }
-                }
-
-                let geo_to_screen = |lat: f64, lon: f64| -> Pos2 {
-                    if let Some(ref xf) = active_globe_xform {
-                        if let Some((pos, _, vis)) = xf.project_lat_lon_elev(lat, lon, 0.0) {
-                            if vis {
-                                return pos;
-                            }
-                        }
-                        Pos2::new(-1e6, -1e6)
-                    } else {
-                        self.world_map.lat_lon_to_screen(lat, lon, rect)
-                    }
-                };
-                self.render_geodetic_measure_overlay(&painter, rect, theme, &geo_to_screen);
-
-                // Highlight geodetic site anchor when zoomed out on World Map / 3D Globe
-                if !self.globe_mode
-                    && self.world_map.zoom_level < 12.5
-                    && (self.ground_origin_anchored || !self.entities.is_empty() || !bim_project.is_empty())
-                {
-                    let site_pos = world_to_screen([0.0, 0.0]);
-                    if rect.expand(16.0).contains(site_pos) {
-                        painter.circle_filled(site_pos, 6.0, theme.accent_blue);
-                        painter.circle_stroke(site_pos, 11.0, Stroke::new(1.6, theme.accent_blue));
-                        painter.text(
-                            site_pos + Vec2::new(12.0, -6.0),
-                            Align2::LEFT_BOTTOM,
-                            format!(
-                                "Site Origin ({:.3}°, {:.3}°)",
-                                self.ground_origin_lat_lon.0, self.ground_origin_lat_lon.1
-                            ),
-                            egui::FontId::monospace(10.0),
-                            theme.text_primary,
-                        );
-                    }
-                }
-
-                // Floating Top-Left Freeze / Unfreeze Pill inside Viewport
-                Self::paint_floating_freeze_pill(
-                    &painter,
-                    freeze_pill_rect,
-                    theme,
-                    self.is_frozen,
-                    freeze_pill_hovered,
-                );
-
-                Self::paint_rounded_viewport_border(
-                    &painter,
-                    rect,
+                    members,
+                    Vec2::new(outer_w.max(200.0), canvas_h),
+                    sidebar_toggle_inset_px,
+                    false,
+                    true,
                     10.0,
-                    theme.bg_sidebar,
-                    theme.border_subtle,
                 );
 
                 ui.add_space(6.0);
@@ -2234,6 +2066,259 @@ impl UniversalCanvasState {
                     );
                 }
             });
+    }
+
+    /// Phase 46: Renders the zero-chrome, edge-to-edge full-viewport Earth & BIM/CAD spatial canvas
+    /// without below-viewport toolbars or scroll-locking frames.
+    #[allow(clippy::too_many_arguments)]
+    pub fn show_spatial_fullscreen(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        active_pillar: NavigationPillar,
+        bim_project: &mut BimProject,
+        members: &[StructuralMember],
+        pointer_blocked_by_hud: bool,
+    ) -> Rect {
+        ui_kit::set_canvas_frozen(ui.ctx(), self.is_frozen);
+        let avail = ui.available_size().max(Vec2::new(240.0, 240.0));
+        self.render_viewport_core(
+            ui,
+            theme,
+            active_pillar,
+            bim_project,
+            members,
+            avail,
+            0.0,
+            pointer_blocked_by_hud,
+            false,
+            0.0,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_viewport_core(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        active_pillar: NavigationPillar,
+        bim_project: &mut BimProject,
+        members: &[StructuralMember],
+        viewport_size: Vec2,
+        sidebar_toggle_inset_px: f32,
+        pointer_blocked_by_hud: bool,
+        show_freeze_pill: bool,
+        corner_radius: f32,
+    ) -> Rect {
+        // Apply CAD Keyboard Shortcuts (Space freeze, Esc, Del, Ctrl+Z/Y, F8 Ortho, F3 Snap, single keys, G Globe, [ / ] Tilt)
+        self.handle_universal_shortcuts(ui.ctx(), bim_project);
+
+        // Step Earth animations (smooth auto-spin, inertia, Google Earth fly-to, planetary sim years)
+        if self.globe_mode && !self.is_frozen {
+            self.earth_world.step_animations(ui.ctx(), &mut self.world_map);
+        }
+
+        // 1. Main Interactive Drawing Viewport
+        let (response, painter) = ui.allocate_painter(viewport_size, Sense::click_and_drag());
+        let rect = response.rect;
+        self.last_canvas_rect = Some(rect);
+        self.last_inspector_rect = None;
+
+        if self.globe_mode {
+            self.last_globe_xform = Some(GlobeScreenTransform::from_view(
+                rect,
+                self.world_map.center_lat_lon.0,
+                self.world_map.center_lat_lon.1,
+                self.world_map.zoom_level,
+                &self.earth_world.camera,
+            ));
+        } else {
+            self.last_globe_xform = None;
+        }
+
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(corner_radius.round() as u8),
+            Self::canvas_bg(theme),
+        );
+
+        let (freeze_pill_rect, pointer_in_freeze_pill, freeze_pill_hovered) = if show_freeze_pill {
+            Self::interact_floating_freeze_pill(
+                ui,
+                rect,
+                "universal",
+                &mut self.is_frozen,
+                sidebar_toggle_inset_px,
+            )
+        } else {
+            (Rect::NOTHING, false, false)
+        };
+
+        // Handle Pan / Zoom / Drawing / Smart Element Picking (respecting Freeze Canvas & Floating Overlays)
+        self.handle_canvas_interaction(
+            ui,
+            &response,
+            rect,
+            active_pillar,
+            bim_project,
+            pointer_in_freeze_pill || pointer_blocked_by_hud,
+        );
+
+        // 1a. Phase 43 / Phase 35: 3D Google Earth Globe (default) or 2D Slippy World Map
+        let active_globe_xform = if self.globe_mode {
+            let xform = self.earth_world.render_3d_globe(
+                ui,
+                &painter,
+                rect,
+                theme,
+                &self.world_map,
+                self.ground_origin_lat_lon,
+                self.ground_origin_anchored,
+                self.show_grid,
+                self.active_tool.earth_brush_action(),
+                self.cursor_lat_lon,
+                self.is_frozen,
+            );
+            self.last_globe_xform = Some(xform.clone());
+            Some(xform)
+        } else {
+            self.last_globe_xform = None;
+            self.world_map.render_world_background(
+                ui,
+                &painter,
+                rect,
+                theme,
+                self.ground_origin_lat_lon,
+                self.show_grid,
+                false,
+            );
+            None
+        };
+
+        // 1b. Render Fine Millimeter Engineering Grid (site scale), BIM Base Layer, Domain Overlay, Entities & Preview
+        let world_to_screen = |w: [f64; 2]| self.world_to_screen(rect, w);
+        if self.show_grid && self.world_map.zoom_level >= 15.5 {
+            self.paint_grid(&painter, rect, theme, &world_to_screen);
+        }
+        if self.show_bim_base_layer {
+            self.paint_bim_base_layer(
+                &painter,
+                rect,
+                theme,
+                bim_project,
+                members,
+                active_pillar,
+                &world_to_screen,
+            );
+        }
+        if self.show_domain_overlay {
+            self.paint_domain_overlay(
+                &painter,
+                rect,
+                theme,
+                active_pillar,
+                bim_project,
+                members,
+                &world_to_screen,
+            );
+        }
+        self.paint_entities(&painter, rect, theme, active_pillar, &world_to_screen);
+        self.paint_live_preview(&painter, rect, theme, &world_to_screen);
+
+        // Live Great-Circle Bridge / Corridor arc preview while dragging Earth megastructures
+        if let (Some(start_ll), Some(kind)) = (
+            self.pending_earth_arc_start,
+            self.active_tool.earth_megastructure_kind(),
+        ) {
+            let arc_pts = crate::core::gis::great_circle_arc(start_ll, self.cursor_lat_lon, 20);
+            let arc_color = kind.accent_color();
+            let clip_arc = painter.with_clip_rect(rect);
+            let proj_ll = |ll: (f64, f64)| -> Option<Pos2> {
+                if let Some(ref xf) = active_globe_xform {
+                    xf.project_lat_lon_elev(ll.0, ll.1, 0.0)
+                        .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
+                } else {
+                    Some(self.world_map.lat_lon_to_screen(ll.0, ll.1, rect))
+                }
+            };
+            for pair in arc_pts.windows(2) {
+                if let (Some(p0), Some(p1)) = (proj_ll(pair[0]), proj_ll(pair[1])) {
+                    clip_arc.line_segment([p0, p1], Stroke::new(2.6, arc_color));
+                }
+            }
+            if let Some(p_end) = proj_ll(self.cursor_lat_lon) {
+                clip_arc.circle_filled(p_end, 4.5, arc_color);
+            }
+        }
+
+        let geo_to_screen = |lat: f64, lon: f64| -> Pos2 {
+            if let Some(ref xf) = active_globe_xform {
+                if let Some((pos, _, vis)) = xf.project_lat_lon_elev(lat, lon, 0.0) {
+                    if vis {
+                        return pos;
+                    }
+                }
+                Pos2::new(-1e6, -1e6)
+            } else {
+                self.world_map.lat_lon_to_screen(lat, lon, rect)
+            }
+        };
+        self.render_geodetic_measure_overlay(&painter, rect, theme, &geo_to_screen);
+
+        // Highlight clicked Earth target pin when an open Earth location is inspected
+        if let Some((plat, plon)) = self.last_picked_earth_lat_lon {
+            let pin_pos = geo_to_screen(plat, plon);
+            if rect.expand(8.0).contains(pin_pos) {
+                let clip = painter.with_clip_rect(rect);
+                clip.circle_stroke(pin_pos, 13.0, Stroke::new(1.8, theme.accent_blue.gamma_multiply(0.85)));
+                clip.circle_stroke(pin_pos, 6.5, Stroke::new(2.0, Color32::WHITE));
+                clip.circle_filled(pin_pos, 3.8, theme.accent_blue);
+            }
+        }
+
+        // Highlight geodetic site anchor when zoomed out on World Map / 3D Globe
+        if !self.globe_mode
+            && self.world_map.zoom_level < 12.5
+            && (self.ground_origin_anchored || !self.entities.is_empty() || !bim_project.is_empty())
+        {
+            let site_pos = world_to_screen([0.0, 0.0]);
+            if rect.expand(16.0).contains(site_pos) {
+                painter.circle_filled(site_pos, 6.0, theme.accent_blue);
+                painter.circle_stroke(site_pos, 11.0, Stroke::new(1.6, theme.accent_blue));
+                painter.text(
+                    site_pos + Vec2::new(12.0, -6.0),
+                    Align2::LEFT_BOTTOM,
+                    format!(
+                        "Site Origin ({:.3}°, {:.3}°)",
+                        self.ground_origin_lat_lon.0, self.ground_origin_lat_lon.1
+                    ),
+                    egui::FontId::monospace(10.0),
+                    theme.text_primary,
+                );
+            }
+        }
+
+        if show_freeze_pill {
+            Self::paint_floating_freeze_pill(
+                &painter,
+                freeze_pill_rect,
+                theme,
+                self.is_frozen,
+                freeze_pill_hovered,
+            );
+        }
+
+        if corner_radius > 0.0 {
+            Self::paint_rounded_viewport_border(
+                &painter,
+                rect,
+                corner_radius,
+                theme.bg_sidebar,
+                theme.border_subtle,
+            );
+        }
+
+        rect
     }
 
     fn handle_universal_shortcuts(&mut self, ctx: &egui::Context, bim_project: &BimProject) {
@@ -4085,11 +4170,28 @@ impl UniversalCanvasState {
                 }
             } else if response.clicked_by(egui::PointerButton::Primary) {
                 if let Some(pos) = response.interact_pointer_pos() {
-                    let w = to_world(pos);
-                    let picked = self
-                        .find_nearest_entity_idx(w, hit_radius_mm)
-                        .and_then(|i| self.entities.get(i).map(|e| e.id));
-                    self.set_single_selection(picked);
+                    if let Some((kind, id)) = self.pick_bim_element_at_screen(pos, rect, bim_project) {
+                        self.last_picked_bim_element = Some((kind, id));
+                        self.highlighted_bim_element = Some((kind, id));
+                        self.last_picked_earth_lat_lon = None;
+                        self.set_single_selection(None);
+                        self.spatial_pick_seq = self.spatial_pick_seq.wrapping_add(1);
+                    } else {
+                        let w = to_world(pos);
+                        let picked = self
+                            .find_nearest_entity_idx(w, hit_radius_mm)
+                            .and_then(|i| self.entities.get(i).map(|e| e.id));
+                        self.set_single_selection(picked);
+                        self.last_picked_bim_element = None;
+                        self.highlighted_bim_element = None;
+                        if picked.is_none() {
+                            let (lat, lon, hit) = self.screen_to_lat_lon_with_hit(pos, rect);
+                            self.last_picked_earth_lat_lon = if hit { Some((lat, lon)) } else { None };
+                        } else {
+                            self.last_picked_earth_lat_lon = None;
+                        }
+                        self.spatial_pick_seq = self.spatial_pick_seq.wrapping_add(1);
+                    }
                 }
             }
             return;
@@ -4577,12 +4679,40 @@ impl UniversalCanvasState {
             );
         }
 
+        // 2B. Isolated Pad Footings
+        for ft in &bim_project.footings {
+            let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Footing, ft.id));
+            let ring: Vec<Pos2> = ft
+                .footprint_ring()
+                .into_iter()
+                .map(|p| to_screen([p.0, p.1]))
+                .collect();
+            let fill = if is_sel {
+                theme.accent_blue.gamma_multiply(0.35)
+            } else {
+                theme.accent_orange.gamma_multiply(0.14)
+            };
+            let stroke = if is_sel {
+                Stroke::new(2.2, Color32::from_rgb(56, 189, 248))
+            } else {
+                Stroke::new(1.0, theme.accent_orange.gamma_multiply(0.45))
+            };
+            clip_painter.add(egui::Shape::convex_polygon(ring, fill, stroke));
+        }
+
         // 3. Structural Beams / Runs
-        for (idx, run) in bim_project.runs.iter().enumerate() {
+        for run in &bim_project.runs {
             let s0 = to_screen([run.start.0, run.start.1]);
             let s1 = to_screen([run.end.0, run.end.1]);
-            let col = if active_pillar == NavigationPillar::AnalysisSimulation {
-                let util = members.get(idx).map(|m| m.utilization).unwrap_or(0.45);
+            let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Run, run.id));
+            let col = if is_sel {
+                Color32::from_rgb(56, 189, 248)
+            } else if active_pillar == NavigationPillar::AnalysisSimulation {
+                let util = bim_project
+                    .fem_id_for_bim_element(crate::core::BimElementKind::Run, run.id)
+                    .and_then(|fid| members.iter().find(|m| m.id == fid))
+                    .map(|m| m.utilization)
+                    .unwrap_or(0.45);
                 if util >= 0.85 {
                     theme.accent_red
                 } else if util >= 0.65 {
@@ -4593,17 +4723,20 @@ impl UniversalCanvasState {
             } else {
                 theme.accent_green.gamma_multiply(0.65)
             };
-            clip_painter.line_segment([s0, s1], Stroke::new(1.8, col));
+            clip_painter.line_segment([s0, s1], Stroke::new(if is_sel { 4.2 } else { 1.8 }, col));
         }
 
         // 4. Compound Walls
         for w in &bim_project.walls {
+            let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Wall, w.id));
             let ring: Vec<Pos2> = w
                 .footprint_ring()
                 .into_iter()
                 .map(|p| to_screen([p.0, p.1]))
                 .collect();
-            let fill = if theme.is_dark() {
+            let fill = if is_sel {
+                Color32::from_rgb(56, 189, 248).gamma_multiply(0.65)
+            } else if theme.is_dark() {
                 Color32::from_rgb(65, 80, 102)
             } else {
                 Color32::from_rgb(148, 163, 184)
@@ -4611,23 +4744,148 @@ impl UniversalCanvasState {
             clip_painter.add(egui::Shape::convex_polygon(
                 ring,
                 fill.gamma_multiply(0.75),
-                Stroke::new(1.2, theme.text_secondary.gamma_multiply(0.7)),
+                if is_sel {
+                    Stroke::new(2.2, Color32::from_rgb(56, 189, 248))
+                } else {
+                    Stroke::new(1.2, theme.text_secondary.gamma_multiply(0.7))
+                },
             ));
         }
 
         // 5. Structural Columns
         for col in &bim_project.columns {
+            let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Column, col.id));
             let ring: Vec<Pos2> = col
                 .footprint_ring()
                 .into_iter()
                 .map(|p| to_screen([p.0, p.1]))
                 .collect();
+            let fill = if is_sel {
+                Color32::from_rgb(56, 189, 248)
+            } else if active_pillar == NavigationPillar::AnalysisSimulation {
+                let util = bim_project
+                    .fem_id_for_bim_element(crate::core::BimElementKind::Column, col.id)
+                    .and_then(|fid| members.iter().find(|m| m.id == fid))
+                    .map(|m| m.utilization)
+                    .unwrap_or(0.45);
+                if util >= 0.85 {
+                    theme.accent_red.gamma_multiply(0.85)
+                } else if util >= 0.65 {
+                    theme.accent_orange.gamma_multiply(0.85)
+                } else {
+                    theme.accent_green.gamma_multiply(0.85)
+                }
+            } else {
+                theme.accent_blue.gamma_multiply(0.75)
+            };
             clip_painter.add(egui::Shape::convex_polygon(
                 ring,
-                theme.accent_blue.gamma_multiply(0.75),
-                Stroke::new(1.2, theme.text_primary),
+                fill,
+                if is_sel {
+                    Stroke::new(2.2, Color32::WHITE)
+                } else {
+                    Stroke::new(1.2, theme.text_primary)
+                },
             ));
+            if is_sel {
+                let cp = to_screen([col.pos.0, col.pos.1]);
+                if rect.expand(12.0).contains(cp) {
+                    clip_painter.circle_stroke(cp, 14.0, Stroke::new(2.0, Color32::from_rgb(56, 189, 248)));
+                    clip_painter.text(
+                        cp + Vec2::new(0.0, -18.0),
+                        Align2::CENTER_BOTTOM,
+                        &col.name,
+                        egui::FontId::monospace(10.0),
+                        Color32::WHITE,
+                    );
+                }
+            }
         }
+    }
+
+    /// Screen-space hit-testing against projected BIM Columns, Beams/Runs, Walls, and Footings.
+    pub fn pick_bim_element_at_screen(
+        &self,
+        pos: Pos2,
+        rect: Rect,
+        bim_project: &BimProject,
+    ) -> Option<(crate::core::BimElementKind, usize)> {
+        if bim_project.is_empty() || !rect.contains(pos) {
+            return None;
+        }
+        let seg_dist = |p: Pos2, a: Pos2, b: Pos2| -> f32 {
+            let ab = b - a;
+            let len_sq = ab.length_sq();
+            if len_sq <= 1e-4 {
+                return p.distance(a);
+            }
+            let t = ((p - a).dot(ab) / len_sq).clamp(0.0, 1.0);
+            p.distance(a + ab * t)
+        };
+
+        // 1. Columns (highest priority at grid intersections)
+        let mut best_col: Option<(f32, usize)> = None;
+        for c in &bim_project.columns {
+            let sp = self.world_to_screen(rect, [c.pos.0, c.pos.1]);
+            if !rect.expand(24.0).contains(sp) {
+                continue;
+            }
+            let d = pos.distance(sp);
+            if d <= 16.0 && best_col.is_none_or(|(bd, _)| d < bd) {
+                best_col = Some((d, c.id));
+            }
+        }
+        if let Some((_, id)) = best_col {
+            return Some((crate::core::BimElementKind::Column, id));
+        }
+
+        // 2. Beams / Structural Runs
+        let mut best_run: Option<(f32, usize)> = None;
+        for r in &bim_project.runs {
+            let s0 = self.world_to_screen(rect, [r.start.0, r.start.1]);
+            let s1 = self.world_to_screen(rect, [r.end.0, r.end.1]);
+            if !rect.expand(30.0).contains(s0) && !rect.expand(30.0).contains(s1) {
+                continue;
+            }
+            let d = seg_dist(pos, s0, s1);
+            if d <= 11.0 && best_run.is_none_or(|(bd, _)| d < bd) {
+                best_run = Some((d, r.id));
+            }
+        }
+        if let Some((_, id)) = best_run {
+            return Some((crate::core::BimElementKind::Run, id));
+        }
+
+        // 3. Walls
+        let mut best_wall: Option<(f32, usize)> = None;
+        for w in &bim_project.walls {
+            let s0 = self.world_to_screen(rect, [w.start.0, w.start.1]);
+            let s1 = self.world_to_screen(rect, [w.end.0, w.end.1]);
+            if !rect.expand(30.0).contains(s0) && !rect.expand(30.0).contains(s1) {
+                continue;
+            }
+            let d = seg_dist(pos, s0, s1);
+            if d <= 12.0 && best_wall.is_none_or(|(bd, _)| d < bd) {
+                best_wall = Some((d, w.id));
+            }
+        }
+        if let Some((_, id)) = best_wall {
+            return Some((crate::core::BimElementKind::Wall, id));
+        }
+
+        // 4. Isolated Footings
+        let mut best_ft: Option<(f32, usize)> = None;
+        for f in &bim_project.footings {
+            let sp = self.world_to_screen(rect, [f.pos.0, f.pos.1]);
+            if !rect.expand(24.0).contains(sp) {
+                continue;
+            }
+            let d = pos.distance(sp);
+            if d <= 16.0 && best_ft.is_none_or(|(bd, _)| d < bd) {
+                best_ft = Some((d, f.id));
+            }
+        }
+        best_ft.map(|(_, id)| (crate::core::BimElementKind::Footing, id))
     }
 
     #[allow(clippy::too_many_arguments)]

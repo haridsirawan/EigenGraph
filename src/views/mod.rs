@@ -17,6 +17,7 @@ pub mod lean;
 pub mod industrialized;
 pub mod prediction;
 pub mod results;
+pub mod spatial_workspace;
 
 pub use my_project::MyProjectView;
 pub use ai_firm::AiFirmView;
@@ -35,3 +36,4 @@ pub use lean::LeanView;
 pub use industrialized::IndustrializedView;
 pub use prediction::PredictionView;
 pub use results::ResultsView;
+pub use spatial_workspace::SpatialWorkspaceState;

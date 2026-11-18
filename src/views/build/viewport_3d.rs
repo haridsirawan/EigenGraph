@@ -283,6 +283,38 @@ impl BuildView {
         }
     }
 
+    /// Phase 46: Renders the zero-chrome, edge-to-edge full-viewport 3D BIM + Earth Ground canvas
+    /// without below-viewport toolbars or sub-menus.
+    #[allow(clippy::too_many_arguments)]
+    pub fn show_spatial_fullscreen(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        members: &[StructuralMember],
+        db_components: &[DatabaseComponent],
+        features: &mut FeatureRegistry,
+        universal_canvas: &mut UniversalCanvasState,
+        parametric_variables: &[ParametricVariable],
+        workspace_settings: WorkspaceCanvasSettings,
+        pointer_blocked_by_hud: bool,
+    ) -> Rect {
+        ui_kit::set_canvas_frozen(ui.ctx(), universal_canvas.is_frozen);
+        self.render_canvas_inner(
+            ui,
+            theme,
+            members,
+            db_components,
+            features,
+            universal_canvas,
+            parametric_variables,
+            workspace_settings,
+            0.0,
+            true,
+            pointer_blocked_by_hud,
+        );
+        self.last_viewport_rect.unwrap_or(ui.max_rect())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_canvas(
         &mut self,
@@ -296,33 +328,70 @@ impl BuildView {
         workspace_settings: WorkspaceCanvasSettings,
         sidebar_toggle_inset_px: f32,
     ) {
+        self.render_canvas_inner(
+            ui,
+            theme,
+            members,
+            db_components,
+            features,
+            universal_canvas,
+            parametric_variables,
+            workspace_settings,
+            sidebar_toggle_inset_px,
+            false,
+            false,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_canvas_inner(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        members: &[StructuralMember],
+        db_components: &[DatabaseComponent],
+        features: &mut FeatureRegistry,
+        universal_canvas: &mut UniversalCanvasState,
+        parametric_variables: &[ParametricVariable],
+        workspace_settings: WorkspaceCanvasSettings,
+        sidebar_toggle_inset_px: f32,
+        spatial_fullscreen: bool,
+        pointer_blocked_by_hud: bool,
+    ) {
         self.handle_3d_shortcuts(ui.ctx(), universal_canvas, members);
         let avail_w = ui.available_width().max(200.0);
         let is_wide = avail_w >= 980.0;
         let has_floating_room = avail_w >= 720.0;
 
         // 1. Full-Width 3D Earth Ground Viewport FIRST (at top of canvas container)
-        let canvas_height = universal_canvas.preferred_canvas_height(ui.ctx());
-        let (response, painter) =
-            ui.allocate_painter(Vec2::new(avail_w, canvas_height), Sense::click_and_drag());
+        let canvas_size = if spatial_fullscreen {
+            ui.available_size().max(Vec2::new(240.0, 240.0))
+        } else {
+            Vec2::new(avail_w, universal_canvas.preferred_canvas_height(ui.ctx()))
+        };
+        let (response, painter) = ui.allocate_painter(canvas_size, Sense::click_and_drag());
         let rect = response.rect;
         self.last_viewport_rect = Some(rect);
         self.last_floating_rects.clear();
         let _ = is_wide;
         let _ = has_floating_room;
 
-        painter.rect_filled(rect, CornerRadius::same(10), UniversalCanvasState::canvas_bg(theme));
+        let corner_r = if spatial_fullscreen { 0 } else { 10 };
+        painter.rect_filled(rect, CornerRadius::same(corner_r), UniversalCanvasState::canvas_bg(theme));
 
-        // Top-left Floating Freeze / Live Toggle inside 3D Viewport (interact BEFORE orbit/draw checks)
-        let (freeze_pill_rect, pointer_in_freeze_pill, freeze_pill_hovered) =
+        // Top-left Floating Freeze / Live Toggle inside 3D Viewport (hidden in Spatial Fullscreen mode)
+        let (freeze_pill_rect, pointer_in_freeze_pill, freeze_pill_hovered) = if spatial_fullscreen {
+            (Rect::NOTHING, false, false)
+        } else {
             UniversalCanvasState::interact_floating_freeze_pill(
                 ui,
                 rect,
                 "geometry_3d",
                 &mut universal_canvas.is_frozen,
                 sidebar_toggle_inset_px,
-            );
-        let pointer_in_floating = pointer_in_freeze_pill;
+            )
+        };
+        let pointer_in_floating = pointer_in_freeze_pill || pointer_blocked_by_hud;
 
         // Geometry Definitions & Model Centers
         let (center_3d, base_scale_unit, raw_members) = self.build_model_geometry(members);
@@ -896,9 +965,62 @@ impl BuildView {
                         if response.clicked() {
                             if let Some(id) = hovered_member {
                                 self.selected_member_id = Some(id);
-                                self.active_sidebar_tab = SidebarTab::Properties;
-                                self.floating_properties_open = true;
-                                self.properties_canvas_sync_tab = false;
+                                if spatial_fullscreen {
+                                    self.last_spatial_bim_pick = self.bim_bus.project.bim_ref_for_fem_id(id);
+                                    self.spatial_pick_seq = self.spatial_pick_seq.wrapping_add(1);
+                                } else {
+                                    self.active_sidebar_tab = SidebarTab::Properties;
+                                    self.floating_properties_open = true;
+                                    self.properties_canvas_sync_tab = false;
+                                }
+                            } else if spatial_fullscreen {
+                                // Fallback: check isolated footings or structural walls directly in 3D space
+                                let mut picked_bim: Option<(crate::core::BimElementKind, usize)> = None;
+                                if let Some(mpos) = response.interact_pointer_pos() {
+                                    let offset_x = center_3d.0 - 6.0;
+                                    let offset_z = center_3d.2 - 4.5;
+                                    let mut best_ft: Option<(f32, usize)> = None;
+                                    for ft in &self.bim_bus.project.footings {
+                                        let elev = self.bim_bus.project.level_elevation(ft.level_id) as f32 * 0.001;
+                                        let (sp, _) = project_3d(
+                                            ft.pos.0 as f32 * 0.001 + offset_x,
+                                            elev,
+                                            ft.pos.1 as f32 * 0.001 + offset_z,
+                                        );
+                                        let d = mpos.distance(sp);
+                                        if d <= 18.0 && best_ft.is_none_or(|(bd, _)| d < bd) {
+                                            best_ft = Some((d, ft.id));
+                                        }
+                                    }
+                                    if let Some((_, fid)) = best_ft {
+                                        picked_bim = Some((crate::core::BimElementKind::Footing, fid));
+                                    } else {
+                                        let mut best_w: Option<(f32, usize)> = None;
+                                        for w in &self.bim_bus.project.walls {
+                                            let z0 = self.bim_bus.project.level_elevation(w.base_level_id) as f32 * 0.001;
+                                            let (s0, _) = project_3d(
+                                                w.start.0 as f32 * 0.001 + offset_x,
+                                                z0 + 1.5,
+                                                w.start.1 as f32 * 0.001 + offset_z,
+                                            );
+                                            let (s1, _) = project_3d(
+                                                w.end.0 as f32 * 0.001 + offset_x,
+                                                z0 + 1.5,
+                                                w.end.1 as f32 * 0.001 + offset_z,
+                                            );
+                                            let d = distance_to_segment(mpos, s0, s1);
+                                            if d <= 14.0 && best_w.is_none_or(|(bd, _)| d < bd) {
+                                                best_w = Some((d, w.id));
+                                            }
+                                        }
+                                        if let Some((_, wid)) = best_w {
+                                            picked_bim = Some((crate::core::BimElementKind::Wall, wid));
+                                        }
+                                    }
+                                }
+                                self.selected_member_id = None;
+                                self.last_spatial_bim_pick = picked_bim;
+                                self.spatial_pick_seq = self.spatial_pick_seq.wrapping_add(1);
                             } else {
                                 self.selected_member_id = None;
                             }
@@ -1536,13 +1658,15 @@ impl BuildView {
             universal_canvas.paint_live_preview_world(&painter, rect, theme, &ground_to_screen);
         }
 
-        UniversalCanvasState::paint_floating_freeze_pill(
-            &painter,
-            freeze_pill_rect,
-            theme,
-            universal_canvas.is_frozen,
-            freeze_pill_hovered,
-        );
+        if !spatial_fullscreen {
+            UniversalCanvasState::paint_floating_freeze_pill(
+                &painter,
+                freeze_pill_rect,
+                theme,
+                universal_canvas.is_frozen,
+                freeze_pill_hovered,
+            );
+        }
 
         // 7. Floating Hover Glass Tooltip
         if let Some(hid) = hovered_member {
@@ -1600,6 +1724,10 @@ impl BuildView {
                     );
                 }
             }
+        }
+
+        if spatial_fullscreen {
+            return;
         }
 
         UniversalCanvasState::paint_rounded_viewport_border(
@@ -3156,19 +3284,32 @@ impl BuildView {
             let p1 = (n1.x as f32, n1.y as f32, n1.z as f32);
             let p2 = (n2.x as f32, n2.y as f32, n2.z as f32);
             let is_col = el.name.contains("Col") || el.name.contains("CL");
-            let ari = 0.88 + ((idx % 7) as f32) * 0.015;
+            let live_m = fallback_members.iter().find(|m| m.id == el.id);
+            let ari = live_m
+                .map(|m| m.ari as f32)
+                .unwrap_or_else(|| 0.88 + ((idx % 7) as f32) * 0.015);
+            let utilization = live_m.map(|m| m.utilization as f32).unwrap_or(0.42);
+            let force_kn = live_m
+                .map(|m| m.force_kn as f32)
+                .unwrap_or(if is_col { -640.0 } else { 215.0 });
+            let capacity_kn = live_m
+                .map(|m| m.capacity_kn as f32)
+                .unwrap_or(if is_col { 1450.0 } else { 520.0 });
+            let is_critical = live_m
+                .map(|m| m.is_critical || m.utilization > 0.85 || m.ari < 0.70)
+                .unwrap_or(idx == 0);
             list.push(Member3D {
-                id: idx + 1,
+                id: el.id,
                 p1,
                 p2,
                 name: el.name.clone(),
-                section: if is_col { "RC 400x400".to_string() } else { "WF / RC Beam".to_string() },
+                section: el.section.name.clone(),
                 base_width: if is_col { 8.5 } else { 6.5 },
-                force_kn: if is_col { -640.0 } else { 215.0 },
-                capacity_kn: if is_col { 1450.0 } else { 520.0 },
-                utilization: 0.42,
+                force_kn,
+                capacity_kn,
+                utilization,
                 ari,
-                is_critical: idx == 0,
+                is_critical,
             });
         }
         if list.is_empty() {

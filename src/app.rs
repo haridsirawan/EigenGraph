@@ -13,8 +13,8 @@ use crate::theme::MacTheme;
 use crate::views::{
     AiAssistantView, AiFirmView, AnalyzeView, BuildView, FacilityView,
     IndustrializedView, LeanView, MyProjectView, ParametricView, PlanningView, PredictionView,
-    ResearchConceptView, ResultsView, SafetyView, SettingsView, SustainabilityView,
-    UniversalCanvasState,
+    ResearchConceptView, ResultsView, SafetyView, SettingsView, SpatialWorkspaceState,
+    SustainabilityView, UniversalCanvasState,
 };
 
 pub struct EigenGraphApp {
@@ -48,6 +48,7 @@ pub struct EigenGraphApp {
     pub settings_view: SettingsView,
     pub universal_canvas: UniversalCanvasState,
     pub ai_assistant_view: AiAssistantView,
+    pub spatial_workspace: SpatialWorkspaceState,
 
     // Domain Data & Parametric Component Database
     pub projects: Vec<ProjectItem>,
@@ -72,9 +73,14 @@ pub struct EigenGraphApp {
 
 impl Default for EigenGraphApp {
     fn default() -> Self {
-        let has_vault = crate::core::InternalVault::has_connected_vault();
+        let _has_vault = crate::core::InternalVault::has_connected_vault();
         let personal_vault_projects = crate::core::InternalVault::list_personal_vault_projects();
-        let universal_canvas = UniversalCanvasState::default();
+        let mut universal_canvas = UniversalCanvasState::default();
+        let spatial_workspace = SpatialWorkspaceState::default();
+        if spatial_workspace.spatial_mode_enabled {
+            // Spatial full-viewport mode has no outer vertical page scroll conflict.
+            universal_canvas.is_frozen = false;
+        }
         let research_view = ResearchConceptView::default();
         let uc_earth = (
             universal_canvas.world_map.center_lat_lon.0,
@@ -117,12 +123,13 @@ impl Default for EigenGraphApp {
             settings_view: SettingsView::default(),
             universal_canvas,
             ai_assistant_view: AiAssistantView::default(),
+            spatial_workspace,
 
             projects: crate::core::InternalVault::default_nvw_dcr_lod_projects(),
             db_components: crate::core::InternalVault::load_or_init_parametric_components(),
             members: crate::core::InternalVault::default_nvw_dcr_lod_members(),
 
-            show_vault_startup_modal: !has_vault,
+            show_vault_startup_modal: false,
             vault_path_input: crate::core::InternalVault::default_vault_dir()
                 .to_string_lossy()
                 .to_string(),
@@ -340,9 +347,31 @@ impl EigenGraphApp {
                 },
             );
 
-            // Bottom Pinned Dock: Workspace Settings
+            // Bottom Pinned Dock: Spatial Mode Switch + Workspace Settings
             ui.separator();
             ui.add_space(6.0);
+
+            if icons::icon_button(
+                ui,
+                AppIcon::Sparkles,
+                "Antigravity Spatial Mode",
+                11.5,
+                self.theme.accent_blue,
+                self.theme.accent_blue.gamma_multiply(0.14),
+                Stroke::new(1.0, self.theme.accent_blue.gamma_multiply(0.35)),
+                CornerRadius::same(7),
+                Vec2::new(ui.available_width(), 30.0),
+            )
+            .on_hover_text("Return to zero-chrome Full-Canvas Earth & AI Command mode")
+            .clicked()
+            {
+                self.spatial_workspace.spatial_mode_enabled = true;
+                self.universal_canvas.is_frozen = false;
+                if is_overlay {
+                    self.sidebar_open = false;
+                }
+            }
+            ui.add_space(4.0);
 
             if icons::icon_button(
                 ui,
@@ -452,14 +481,42 @@ impl App for EigenGraphApp {
             }
         }
 
-        // Global Ctrl/Cmd+K or F1 toggles CAD Shortcuts & Module Quick-Jump Palette
-        if !ctx.egui_wants_keyboard_input()
-            && ctx.input(|i| {
+        // Global Ctrl/Cmd+K or F1 shortcuts
+        if !ctx.egui_wants_keyboard_input() {
+            if self.spatial_workspace.spatial_mode_enabled {
+                if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
+                    self.spatial_workspace.command_bar_expanded =
+                        !self.spatial_workspace.command_bar_expanded;
+                    if self.spatial_workspace.command_bar_expanded {
+                        self.spatial_workspace.request_focus_command = true;
+                    }
+                }
+                if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+                    self.universal_canvas.shortcuts_modal_open =
+                        !self.universal_canvas.shortcuts_modal_open;
+                }
+                if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    if self.show_settings {
+                        self.show_settings = false;
+                    } else if self.spatial_workspace.active_overlay_pillar.is_some() {
+                        self.spatial_workspace.active_overlay_pillar = None;
+                    } else if !self.spatial_workspace.command_input.is_empty() {
+                        self.spatial_workspace.command_input.clear();
+                    } else if self.spatial_workspace.command_bar_expanded {
+                        self.spatial_workspace.command_bar_expanded = false;
+                    } else if !self.spatial_workspace.popup_pinned {
+                        self.spatial_workspace.selected_target = None;
+                        self.universal_canvas.highlighted_bim_element = None;
+                        self.universal_canvas.last_picked_earth_lat_lon = None;
+                    }
+                }
+            } else if ctx.input(|i| {
                 (i.modifiers.command && i.key_pressed(egui::Key::K))
                     || i.key_pressed(egui::Key::F1)
-            })
-        {
-            self.universal_canvas.shortcuts_modal_open = !self.universal_canvas.shortcuts_modal_open;
+            }) {
+                self.universal_canvas.shortcuts_modal_open =
+                    !self.universal_canvas.shortcuts_modal_open;
+            }
         }
 
         // Handle Text-to-BIM commands dispatched from Dynamic Island Copilot or AI Firm
@@ -604,562 +661,26 @@ impl App for EigenGraphApp {
         let screen_rect = ctx.content_rect();
         let is_mobile = MacTheme::is_mobile(&ctx);
         let is_compact = MacTheme::is_compact(&ctx);
-
-        // Initialize or adapt sidebar drawer automatically when crossing mobile/tablet threshold
-        if !self.layout_initialized {
-            self.sidebar_open = !is_compact;
-            self.layout_initialized = true;
-            self.last_compact_layout = is_compact;
-            ctx.request_repaint();
-        } else if is_compact != self.last_compact_layout {
-            self.sidebar_open = !is_compact;
-            self.last_compact_layout = is_compact;
-            ctx.request_repaint();
-        }
-
-        // 1. DOCKED SIDEBAR ON DESKTOP (>= 960px WHEN OPEN)
-        let mut docked_sidebar_width = 0.0;
-        if !is_compact && self.sidebar_open {
-            let panel_resp = Panel::left("unified_sidebar")
-                .resizable(true)
-                .default_size(246.0)
-                .size_range(200.0..=320.0)
-                .frame(
-                    Frame::new()
-                        .fill(self.theme.bg_sidebar)
-                        .stroke(Stroke::new(1.0, self.theme.border_subtle))
-                        .inner_margin(Margin::symmetric(12, 10)),
-                )
-                .show(ui, |ui| {
-                    self.render_sidebar_contents(ui, false, is_mobile);
-                });
-            docked_sidebar_width = panel_resp.response.rect.width();
-        }
-
-        // 2. CENTRAL PANEL (Canvas-First Vertical Scroll Workspace without Top Toolbar)
         let workspace_snapshot = self.settings_view.workspace_settings_snapshot(
             &self.theme,
             &self.universal_canvas,
             self.ai_assistant_view.is_visible,
         );
-        let pointer_in_live_canvas = !self.universal_canvas.is_frozen
-            && match self.active_pillar {
-                NavigationPillar::ParametricDED => self
-                    .parametric_view
-                    .is_pointer_in_live_canvas(&ctx, self.universal_canvas.is_frozen),
-                NavigationPillar::GeometryAssembly => self
-                    .build_view
-                    .is_pointer_in_live_canvas(&ctx, self.universal_canvas.is_frozen),
-                _ => self.universal_canvas.is_pointer_in_live_canvas(&ctx),
-            };
-        let scroll_source = if pointer_in_live_canvas {
-            egui::scroll_area::ScrollSource::SCROLL_BAR
+
+        if self.spatial_workspace.spatial_mode_enabled {
+            self.render_spatial_mode_shell(ui, &ctx, &workspace_snapshot, is_mobile);
         } else {
-            egui::scroll_area::ScrollSource::default()
-        };
-        let outer_margin = if is_mobile {
-            Margin::symmetric(8, 8)
-        } else {
-            Margin::symmetric(14, 12)
-        };
-        let sidebar_inset = if !self.sidebar_open { 44.0 } else { 0.0 };
-        let uses_native_single_canvas = matches!(
-            self.active_pillar,
-            NavigationPillar::ParametricDED | NavigationPillar::GeometryAssembly
-        );
-
-        CentralPanel::default()
-            .frame(Frame::new().fill(self.theme.bg_canvas))
-            .show(ui, |ui| {
-                ScrollArea::vertical()
-                    .id_salt("workspace_main_vertical_scroll")
-                    .auto_shrink([false, false])
-                    .scroll_source(scroll_source)
-                    .show(ui, |ui| {
-                        Frame::new().inner_margin(outer_margin).show(ui, |ui| {
-                            let content_w = ui.available_width().max(160.0);
-                            ui.set_width(content_w);
-                            ui.set_max_width(content_w);
-                            if !uses_native_single_canvas {
-                                self.universal_canvas.show(
-                                    ui,
-                                    &self.theme,
-                                    self.active_pillar,
-                                    &mut self.build_view.bim_bus.project,
-                                    &mut self.members,
-                                    &mut self.parametric_view.variables,
-                                    workspace_snapshot.clone(),
-                                    sidebar_inset,
-                                );
-
-                                ui.add_space(10.0);
-
-                                let (_anchor_rect, anchor_resp) = ui.allocate_exact_size(
-                                    Vec2::new(ui.available_width().max(1.0), 1.0),
-                                    egui::Sense::hover(),
-                                );
-                                if std::mem::take(
-                                    &mut self.universal_canvas.request_scroll_to_workbench,
-                                ) {
-                                    anchor_resp.scroll_to_me(Some(Align::TOP));
-                                }
-
-                                ui.add_space(4.0);
-                            }
-
-                            match self.active_pillar {
-                    NavigationPillar::MyLibrary => {
-                        self.my_project_view.show(
-                            ui,
-                            &self.theme,
-                            &self.projects,
-                            &self.personal_vault_projects,
-                            &mut self.active_pillar,
-                            &mut self.feature_registry,
-                        );
-                        if std::mem::take(&mut self.my_project_view.request_open_settings_vault) {
-                            self.settings_view.active_subtab =
-                                crate::views::settings::SettingsSubTab::WorkspaceSettings;
-                            self.show_settings = true;
-                        }
-                        if std::mem::take(&mut self.my_project_view.request_refresh_vault) {
-                            self.personal_vault_projects =
-                                crate::core::InternalVault::list_personal_vault_projects();
-                        }
-                        if std::mem::take(&mut self.my_project_view.request_save_active_to_vault) {
-                            let raw_name = self.my_project_view.save_project_name_input.trim();
-                            let proj_name: String = if raw_name.is_empty() {
-                                "Workspace_Project".to_string()
-                            } else {
-                                raw_name.to_string()
-                            };
-                            self.build_view.bim_bus.project.project_name = proj_name.clone();
-                            self.parametric_view.bim_bus.project.project_name = proj_name.clone();
-                            self.sync_lifecycle_to_canvas();
-                            let mut archive = self.universal_canvas.build_unified_archive(
-                                &self.build_view.bim_bus.project,
-                                &self.members,
-                                &self.parametric_view.variables,
-                                workspace_snapshot.clone(),
-                            );
-                            archive.project_name = proj_name.clone();
-                            let safe_file: String = proj_name
-                                .chars()
-                                .map(|c| {
-                                    if c.is_alphanumeric() || c == '_' || c == '-' {
-                                        c
-                                    } else {
-                                        '_'
-                                    }
-                                })
-                                .collect();
-                            let fname = format!("{}.eigen", safe_file);
-                            match serde_json::to_string_pretty(&archive) {
-                                Ok(json) => match crate::core::InternalVault::save_project_archive_json(&fname, &json) {
-                                    Ok(saved) => {
-                                        self.my_project_view.export_success_msg = Some(format!(
-                                            "Saved complete workspace '{}' ({} BIM elems, {} drawings) to Vault ({})",
-                                            proj_name,
-                                            self.build_view.bim_bus.project.element_count(),
-                                            self.universal_canvas.entities.len(),
-                                            saved
-                                        ));
-                                        self.personal_vault_projects =
-                                            crate::core::InternalVault::list_personal_vault_projects();
-                                    }
-                                    Err(err) => {
-                                        self.my_project_view.export_success_msg =
-                                            Some(format!("Vault save failed: {}", err));
-                                    }
-                                },
-                                Err(err) => {
-                                    self.my_project_view.export_success_msg =
-                                        Some(format!("Archive serialization failed: {}", err));
-                                }
-                            }
-                        }
-                        if let Some(kind) = self.my_project_view.request_apply_template.take() {
-                            self.apply_typology_template(kind);
-                        }
-                        if std::mem::take(&mut self.my_project_view.request_export_active_archive) {
-                            self.sync_lifecycle_to_canvas();
-                            self.universal_canvas.export_unified_file(
-                                &self.build_view.bim_bus.project,
-                                &self.members,
-                                &self.parametric_view.variables,
-                                workspace_snapshot.clone(),
-                            );
-                            self.my_project_view.export_success_msg =
-                                self.universal_canvas.status_message.clone();
-                        }
-                        if let Some(entry) =
-                            self.my_project_view.pending_open_vault_project.take()
-                        {
-                            match crate::core::InternalVault::load_personal_vault_raw(&entry) {
-                                Ok(raw) => {
-                                    if let Ok(ws_cfg) = self.universal_canvas.apply_unified_archive(
-                                        &raw,
-                                        &mut self.build_view.bim_bus.project,
-                                        &mut self.members,
-                                        &mut self.parametric_view.variables,
-                                    ) {
-                                        self.settings_view.apply_workspace_settings(
-                                            &ws_cfg,
-                                            &mut self.theme,
-                                            &mut self.ai_assistant_view.is_visible,
-                                        );
-                                        self.parametric_view.bim_bus.project =
-                                            self.build_view.bim_bus.project.clone();
-                                        self.sync_bim_to_fem();
-                                        self.build_view.fit_view_to_project(&mut self.universal_canvas, &self.members);
-                                        self.sync_earth_maps();
-                                        self.sync_lifecycle_from_canvas();
-                                        self.my_project_view.export_success_msg = Some(format!(
-                                            "Loaded workspace '{}' ({} BIM elements, {} drawings, {} FEM members) from Vault.",
-                                            entry.name,
-                                            self.build_view.bim_bus.project.element_count(),
-                                            self.universal_canvas.entities.len(),
-                                            self.members.len(),
-                                        ));
-                                        self.active_pillar = NavigationPillar::GeometryAssembly;
-                                    } else {
-                                        match crate::core::InternalVault::load_personal_vault_project_model(&entry) {
-                                            Ok(model) => {
-                                                self.members = model
-                                                    .elements
-                                                    .iter()
-                                                    .map(|el| StructuralMember {
-                                                        id: el.id,
-                                                        name: el.name.clone(),
-                                                        section: el.section.name.clone(),
-                                                        ..Default::default()
-                                                    })
-                                                    .collect();
-                                                self.my_project_view.export_success_msg = Some(format!(
-                                                    "Loaded legacy structural model '{}' ({} nodes, {} elements) from personal Vault.",
-                                                    model.name,
-                                                    model.nodes.len(),
-                                                    model.elements.len()
-                                                ));
-                                                self.active_pillar = NavigationPillar::GeometryAssembly;
-                                            }
-                                            Err(err) => {
-                                                self.my_project_view.export_success_msg =
-                                                    Some(format!("Failed to load Vault project: {}", err));
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(err) => {
-                                    self.my_project_view.export_success_msg =
-                                        Some(format!("Failed to read Vault file: {}", err));
-                                }
-                            }
-                        }
-                    }
-                    NavigationPillar::AiAgent => {
-                        self.ai_firm_view.show(
-                            ui,
-                            &self.theme,
-                            &self.members,
-                            &self.build_view.bim_bus.project,
-                            &self.projects,
-                            &mut self.db_components,
-                            &mut self.feature_registry,
-                        );
-                    }
-                    NavigationPillar::ResearchConcept => {
-                        self.research_view.show(
-                            ui,
-                            &self.theme,
-                            &mut self.active_pillar,
-                            &mut self.feature_registry,
-                        );
-                    }
-                    NavigationPillar::ParametricDED => {
-                        self.parametric_view.show(
-                            ui,
-                            &self.theme,
-                            &mut self.db_components,
-                            &mut self.active_pillar,
-                            &mut self.feature_registry,
-                            &mut self.universal_canvas,
-                            &self.members,
-                            workspace_snapshot.clone(),
-                            sidebar_inset,
-                        );
-                    }
-                    NavigationPillar::GeometryAssembly => {
-                        self.build_view.show(
-                            ui,
-                            &self.theme,
-                            &self.members,
-                            &self.db_components,
-                            &mut self.feature_registry,
-                            &mut self.universal_canvas,
-                            &self.parametric_view.variables,
-                            workspace_snapshot.clone(),
-                            sidebar_inset,
-                        );
-                    }
-                    NavigationPillar::AnalysisSimulation => {
-                        self.analyze_view.show(
-                            ui,
-                            &self.theme,
-                            &self.members,
-                            &self.build_view.bim_bus.project,
-                            &mut self.feature_registry,
-                        );
-                    }
-                    NavigationPillar::TimeScheduling => {
-                        if !matches!(
-                            self.planning_view.active_subtab,
-                            crate::views::planning::PlanningSubTab::Schedule4d
-                                | crate::views::planning::PlanningSubTab::StagedErectionSvd
-                                | crate::views::planning::PlanningSubTab::ScheduleRiskMonteCarlo
-                                | crate::views::planning::PlanningSubTab::ResourceLeveling4d
-                                | crate::views::planning::PlanningSubTab::SiteDailyDiaryFleet
-                        ) {
-                            self.planning_view.active_subtab =
-                                crate::views::planning::PlanningSubTab::Schedule4d;
-                        }
-                        self.planning_view.show(
-                            ui,
-                            &self.theme,
-                            &self.parametric_view.variables,
-                            &self.members,
-                            &self.build_view.bim_bus.project,
-                            &mut self.feature_registry,
-                            &mut self.active_pillar,
-                        );
-                    }
-                    NavigationPillar::CostBudgeting => {
-                        if !matches!(
-                            self.planning_view.active_subtab,
-                            crate::views::planning::PlanningSubTab::DynamicRab
-                                | crate::views::planning::PlanningSubTab::TakeoffQto
-                                | crate::views::planning::PlanningSubTab::CostAriTradeoff
-                                | crate::views::planning::PlanningSubTab::WbsHierarchy
-                                | crate::views::planning::PlanningSubTab::EarnedValueEvm
-                                | crate::views::planning::PlanningSubTab::ValueEngineeringBid
-                                | crate::views::planning::PlanningSubTab::ProcurementContractsClaims
-                        ) {
-                            self.planning_view.active_subtab =
-                                crate::views::planning::PlanningSubTab::DynamicRab;
-                        }
-                        self.planning_view.show(
-                            ui,
-                            &self.theme,
-                            &self.parametric_view.variables,
-                            &self.members,
-                            &self.build_view.bim_bus.project,
-                            &mut self.feature_registry,
-                            &mut self.active_pillar,
-                        );
-                    }
-                    NavigationPillar::SustainabilityEnergy => {
-                        self.sustainability_view.show(
-                            ui,
-                            &self.theme,
-                            &self.members,
-                            &self.build_view.bim_bus.project,
-                            &mut self.feature_registry,
-                        );
-                    }
-                    NavigationPillar::FacilityManagement => {
-                        self.facility_view.show(
-                            ui,
-                            &self.theme,
-                            &self.members,
-                            &self.build_view.bim_bus.project,
-                            &mut self.feature_registry,
-                        );
-                    }
-                    NavigationPillar::SafetyHealth => {
-                        self.safety_view.show(
-                            ui,
-                            &self.theme,
-                            &self.members,
-                            &self.build_view.bim_bus.project,
-                            &mut self.feature_registry,
-                        );
-                    }
-                    NavigationPillar::LeanConstruction => {
-                        self.lean_view.show(
-                            ui,
-                            &self.theme,
-                            &self.members,
-                            &self.build_view.bim_bus.project,
-                            &mut self.feature_registry,
-                        );
-                    }
-                    NavigationPillar::IndustrializedAutomation => {
-                        self.industrialized_view.show(
-                            ui,
-                            &self.theme,
-                            &self.members,
-                            &self.build_view.bim_bus.project,
-                            &mut self.feature_registry,
-                        );
-                        if let Some(proj) = self.industrialized_view.request_apply_bim_project.take() {
-                            let el_cnt = proj.element_count();
-                            let pname = proj.project_name.clone();
-                            self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
-                            self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
-                            self.parametric_view.active_level_idx = 0;
-                            self.sync_bim_to_fem();
-                            self.build_view.fit_view_to_project(&mut self.universal_canvas, &self.members);
-                            self.sync_earth_maps();
-                            self.build_view.modify_status_msg = Some(format!(
-                                "Loaded IFC -> Editable BimProject '{}' ({} elements).",
-                                pname, el_cnt
-                            ));
-                            self.active_pillar = NavigationPillar::GeometryAssembly;
-                        }
-                    }
-                    NavigationPillar::Prediction => {
-                        let shm_feed = crate::views::prediction::ShmPredictionFeed {
-                            strain_micro: self.facility_view.simulated_strain_micro,
-                            freq_hz: self.facility_view.simulated_freq_hz,
-                            degradation_pct: self.facility_view.simulated_degradation_pct,
-                            live_packets: self.facility_view.shm_packets_received,
-                        };
-                        self.prediction_view.show(
-                            ui,
-                            &self.theme,
-                            &self.members,
-                            &self.build_view.bim_bus.project,
-                            shm_feed,
-                            &mut self.feature_registry,
-                        );
-                    }
-                    NavigationPillar::ReportPublishing => {
-                        self.results_view.show(
-                            ui,
-                            &self.theme,
-                            &self.members,
-                            &self.build_view.bim_bus.project,
-                            &mut self.feature_registry,
-                        );
-                    }
-                }
-                        });
-                    });
-            });
-
-        // Bidirectional Geometry <-> Analysis & Drafting deep-link bridge
-        if let Some((tab, member_id, note)) = self.build_view.requested_analysis_jump.take() {
-            self.analyze_view.active_subtab = tab;
-            if let Some(id) = member_id {
-                self.analyze_view.woodbury_disrupt_elem_id = id;
-            }
-            self.analyze_view.linked_from_geometry_note = Some(note);
-            self.active_pillar = NavigationPillar::AnalysisSimulation;
-        }
-        if let Some((member_id, render_mode, color_mode)) =
-            self.analyze_view.requested_geometry_jump.take()
-        {
-            if let Some(id) = member_id {
-                self.build_view.selected_member_id = Some(id);
-            }
-            if let Some(mode) = render_mode {
-                self.build_view.render_mode = mode;
-            }
-            if let Some(cm) = color_mode {
-                self.build_view.color_mode = cm;
-            }
-            self.build_view.analysis_panel_open = true;
-            self.active_pillar = NavigationPillar::GeometryAssembly;
-        }
-        if let Some(subtab) = self.analyze_view.requested_drafting_jump.take() {
-            self.parametric_view.active_drafting_subtab = subtab;
-            self.parametric_view.drafting_submenu_open = true;
-            self.active_pillar = NavigationPillar::ParametricDED;
+            self.render_classic_mode_shell(
+                ui,
+                &ctx,
+                screen_rect,
+                is_mobile,
+                is_compact,
+                &workspace_snapshot,
+            );
         }
 
         self.maybe_autosave_workspace(&ctx, &workspace_snapshot);
-
-        // Floating top-left sidebar reopen toggle when the navigation menu is closed
-        if !self.sidebar_open {
-            Area::new(Id::new("floating_sidebar_toggle"))
-                .order(Order::Foreground)
-                .fixed_pos(Pos2::new(screen_rect.left() + 10.0, screen_rect.top() + 10.0))
-                .show(&ctx, |ui| {
-                    if icons::icon_only_button(
-                        ui,
-                        AppIcon::Menu,
-                        self.theme.text_primary,
-                        self.theme.bg_card.gamma_multiply(0.95),
-                        Stroke::new(1.0, self.theme.border_card),
-                        CornerRadius::same(8),
-                        Vec2::new(34.0, 34.0),
-                        "Open navigation menu",
-                    )
-                    .clicked()
-                    {
-                        self.sidebar_open = true;
-                    }
-                });
-        }
-
-        // 3. FLOATING DYNAMIC ISLAND AI COPILOT
-        self.ai_assistant_view.show(
-            &ctx,
-            &self.theme,
-            self.active_pillar,
-            &self.members,
-            &self.projects,
-            &mut self.db_components,
-            docked_sidebar_width * 0.5,
-        );
-
-        // 4. RESPONSIVE NAVIGATION DRAWER OVERLAY (MOBILE & NARROW TABLET < 960px)
-        if is_compact && self.sidebar_open {
-            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                self.sidebar_open = false;
-            } else {
-                let drawer_w = (screen_rect.width() * 0.84).clamp(240.0, 300.0);
-                let drawer_h = screen_rect.height().max(260.0);
-                let backdrop_w = (screen_rect.width() - drawer_w).max(0.0);
-
-                if backdrop_w > 1.0 {
-                    Area::new(Id::new("mobile_sidebar_backdrop"))
-                        .order(Order::Foreground)
-                        .fixed_pos(Pos2::new(screen_rect.left() + drawer_w, screen_rect.top()))
-                        .show(&ctx, |ui| {
-                            let (rect, resp) = ui.allocate_exact_size(
-                                Vec2::new(backdrop_w, drawer_h),
-                                egui::Sense::click(),
-                            );
-                            ui.painter().rect_filled(
-                                rect,
-                                CornerRadius::ZERO,
-                                Color32::from_black_alpha(150),
-                            );
-                            if resp.clicked() {
-                                self.sidebar_open = false;
-                            }
-                        });
-                }
-
-                Area::new(Id::new("mobile_nav_drawer"))
-                    .order(Order::Foreground)
-                    .fixed_pos(screen_rect.min)
-                    .show(&ctx, |ui| {
-                        Frame::new()
-                            .fill(self.theme.bg_sidebar)
-                            .stroke(Stroke::new(1.0, self.theme.border_card))
-                            .inner_margin(Margin::symmetric(12, 10))
-                            .show(ui, |ui| {
-                                let inner_w = (drawer_w - 24.0).max(180.0);
-                                let inner_h = (drawer_h - 20.0).max(200.0);
-                                ui.set_min_size(Vec2::new(inner_w, inner_h));
-                                ui.set_max_size(Vec2::new(inner_w, inner_h));
-                                self.render_sidebar_contents(ui, true, is_mobile);
-                            });
-                    });
-            }
-        }
 
         // 5. CONSOLIDATED SETTINGS (WORKSPACE SETTINGS & FUTURE ROADMAP MODAL)
         if self.show_settings {
@@ -1282,6 +803,782 @@ impl App for EigenGraphApp {
 }
 
 impl EigenGraphApp {
+    /// Phase 46: Renders the zero-chrome Full-Viewport Spatial Earth & BIM Workspace alongside
+    /// the Antigravity AI Command Dock, Smart Context Element Pop-Up, and on-demand module overlays.
+    fn render_spatial_mode_shell(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        workspace_snapshot: &crate::views::universal_canvas::WorkspaceCanvasSettings,
+        is_mobile: bool,
+    ) {
+        use crate::views::spatial_workspace::{SpatialCanvasMode, SpatialLens};
+
+        let modal_open = self.show_settings
+            || self.show_vault_startup_modal
+            || self.universal_canvas.import_json_open
+            || self.universal_canvas.shortcuts_modal_open
+            || self.spatial_workspace.active_overlay_pillar.is_some();
+        let pointer_blocked = modal_open || self.spatial_workspace.is_pointer_over_hud(ctx);
+
+        let lens_pillar = match self.spatial_workspace.active_lens {
+            SpatialLens::Clean => NavigationPillar::GeometryAssembly,
+            SpatialLens::DcrHeatmap
+            | SpatialLens::AriRedundancy
+            | SpatialLens::AxialForce
+            | SpatialLens::ShearForce
+            | SpatialLens::BendingMoment => NavigationPillar::AnalysisSimulation,
+            SpatialLens::Erection4D => NavigationPillar::TimeScheduling,
+        };
+
+        CentralPanel::default()
+            .frame(
+                Frame::new()
+                    .fill(self.theme.bg_canvas)
+                    .inner_margin(Margin::ZERO),
+            )
+            .show(ui, |ui| {
+                match self.spatial_workspace.active_canvas_mode {
+                    SpatialCanvasMode::EarthGlobe | SpatialCanvasMode::EarthPlan2D => {
+                        self.universal_canvas.globe_mode =
+                            self.spatial_workspace.active_canvas_mode == SpatialCanvasMode::EarthGlobe;
+                        self.universal_canvas.show_spatial_fullscreen(
+                            ui,
+                            &self.theme,
+                            lens_pillar,
+                            &mut self.build_view.bim_bus.project,
+                            &self.members,
+                            pointer_blocked,
+                        );
+                    }
+                    SpatialCanvasMode::Bim3D => {
+                        self.build_view.show_spatial_fullscreen(
+                            ui,
+                            &self.theme,
+                            &self.members,
+                            &self.db_components,
+                            &mut self.feature_registry,
+                            &mut self.universal_canvas,
+                            &self.parametric_view.variables,
+                            workspace_snapshot.clone(),
+                            pointer_blocked,
+                        );
+                    }
+                }
+            });
+
+        self.spatial_workspace
+            .sync_pick_events(&mut self.universal_canvas, &mut self.build_view);
+
+        let hud_actions = self.spatial_workspace.render_hud_overlays(
+            ctx,
+            &self.theme,
+            &mut self.universal_canvas,
+            &mut self.build_view,
+            &mut self.ai_assistant_view,
+            &self.members,
+            &self.projects,
+            &mut self.db_components,
+        );
+        self.apply_spatial_hud_actions(hud_actions, workspace_snapshot);
+
+        // On-demand floating engineering module sheet summoned via `/vault`, `/cost`, `/analysis`, etc.
+        if let Some(overlay_pillar) = self.spatial_workspace.active_overlay_pillar {
+            let mut open = true;
+            let title = format!("{} ({})", overlay_pillar.clean_name(), overlay_pillar.badge());
+            egui::Window::new(title)
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(true)
+                .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+                .default_size(MacTheme::clamp_modal_size(ctx, Vec2::new(1020.0, 680.0)))
+                .max_size(MacTheme::modal_max_size(ctx))
+                .frame(
+                    Frame::new()
+                        .fill(self.theme.bg_card)
+                        .stroke(Stroke::new(1.1, self.theme.accent_blue.gamma_multiply(0.45)))
+                        .corner_radius(CornerRadius::same(14))
+                        .inner_margin(Margin::same(if is_mobile { 10 } else { 16 })),
+                )
+                .show(ctx, |ui| {
+                    ScrollArea::vertical()
+                        .id_salt(("spatial_module_overlay_scroll", overlay_pillar as usize))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let content_w = ui.available_width().max(160.0);
+                            ui.set_width(content_w);
+                            ui.set_max_width(content_w);
+                            self.render_pillar_module_body(
+                                ui,
+                                overlay_pillar,
+                                workspace_snapshot,
+                                0.0,
+                            );
+                        });
+                });
+            if !open {
+                self.spatial_workspace.active_overlay_pillar = None;
+            }
+        }
+    }
+
+    fn apply_spatial_hud_actions(
+        &mut self,
+        hud_actions: crate::views::spatial_workspace::SpatialHudActions,
+        workspace_snapshot: &crate::views::universal_canvas::WorkspaceCanvasSettings,
+    ) {
+        if hud_actions.load_sample_building {
+            let proj = crate::core::BimProject::sample_bimcraft_building();
+            self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
+            self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
+            self.universal_canvas.ground_origin_anchored = true;
+            self.sync_bim_to_fem();
+            self.build_view
+                .fit_view_to_project(&mut self.universal_canvas, &self.members);
+            self.sync_earth_maps();
+        }
+        if hud_actions.sync_fem_and_earth {
+            self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+            self.sync_bim_to_fem();
+            self.sync_earth_maps();
+        }
+        if hud_actions.fit_camera {
+            self.build_view
+                .fit_view_to_project(&mut self.universal_canvas, &self.members);
+        }
+        if hud_actions.export_archive {
+            self.sync_lifecycle_to_canvas();
+            self.universal_canvas.export_unified_file(
+                &self.build_view.bim_bus.project,
+                &self.members,
+                &self.parametric_view.variables,
+                workspace_snapshot.clone(),
+            );
+        }
+        if hud_actions.toggle_theme {
+            let next_mode = if self.theme.is_dark() {
+                crate::theme::ThemeMode::EngineeringLight
+            } else {
+                crate::theme::ThemeMode::ProDark
+            };
+            self.theme = MacTheme::for_mode(next_mode);
+        }
+        if hud_actions.open_settings {
+            self.show_settings = true;
+        }
+        if hud_actions.switch_to_classic_ui {
+            self.spatial_workspace.spatial_mode_enabled = false;
+        }
+        if let Some(fid) = hud_actions.toggle_n1_member {
+            if self.build_view.simulated_eliminated_ids.contains(&fid) {
+                self.build_view.simulated_eliminated_ids.retain(|&x| x != fid);
+            } else {
+                self.build_view.simulated_eliminated_ids.push(fid);
+            }
+        }
+        if hud_actions.run_auto_repair {
+            let msg = match self.build_view.bim_bus.repair_critical_members(&self.members) {
+                Ok(rep) => {
+                    self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+                    self.sync_bim_to_fem();
+                    rep.summary
+                }
+                Err(err) => err,
+            };
+            self.spatial_workspace.push_trace(msg.clone(), true);
+            self.ai_assistant_view
+                .chat_history
+                .push(crate::models::ChatMessage {
+                    is_user: false,
+                    message: format!("[Antigravity Auto-Repair]: {msg}"),
+                    time: crate::core::web_bridge::unix_timestamp_label(),
+                });
+        }
+    }
+
+    fn render_classic_mode_shell(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        screen_rect: Rect,
+        is_mobile: bool,
+        is_compact: bool,
+        workspace_snapshot: &crate::views::universal_canvas::WorkspaceCanvasSettings,
+    ) {
+        if !self.layout_initialized {
+            self.sidebar_open = !is_compact;
+            self.layout_initialized = true;
+            self.last_compact_layout = is_compact;
+            ctx.request_repaint();
+        } else if is_compact != self.last_compact_layout {
+            self.sidebar_open = !is_compact;
+            self.last_compact_layout = is_compact;
+            ctx.request_repaint();
+        }
+
+        let mut docked_sidebar_width = 0.0;
+        if !is_compact && self.sidebar_open {
+            let panel_resp = Panel::left("unified_sidebar")
+                .resizable(true)
+                .default_size(246.0)
+                .size_range(200.0..=320.0)
+                .frame(
+                    Frame::new()
+                        .fill(self.theme.bg_sidebar)
+                        .stroke(Stroke::new(1.0, self.theme.border_subtle))
+                        .inner_margin(Margin::symmetric(12, 10)),
+                )
+                .show(ui, |ui| {
+                    self.render_sidebar_contents(ui, false, is_mobile);
+                });
+            docked_sidebar_width = panel_resp.response.rect.width();
+        }
+
+        let pointer_in_live_canvas = !self.universal_canvas.is_frozen
+            && match self.active_pillar {
+                NavigationPillar::ParametricDED => self
+                    .parametric_view
+                    .is_pointer_in_live_canvas(ctx, self.universal_canvas.is_frozen),
+                NavigationPillar::GeometryAssembly => self
+                    .build_view
+                    .is_pointer_in_live_canvas(ctx, self.universal_canvas.is_frozen),
+                _ => self.universal_canvas.is_pointer_in_live_canvas(ctx),
+            };
+        let scroll_source = if pointer_in_live_canvas {
+            egui::scroll_area::ScrollSource::SCROLL_BAR
+        } else {
+            egui::scroll_area::ScrollSource::default()
+        };
+        let outer_margin = if is_mobile {
+            Margin::symmetric(8, 8)
+        } else {
+            Margin::symmetric(14, 12)
+        };
+        let sidebar_inset = if !self.sidebar_open { 44.0 } else { 0.0 };
+        let uses_native_single_canvas = matches!(
+            self.active_pillar,
+            NavigationPillar::ParametricDED | NavigationPillar::GeometryAssembly
+        );
+
+        CentralPanel::default()
+            .frame(Frame::new().fill(self.theme.bg_canvas))
+            .show(ui, |ui| {
+                ScrollArea::vertical()
+                    .id_salt("workspace_main_vertical_scroll")
+                    .auto_shrink([false, false])
+                    .scroll_source(scroll_source)
+                    .show(ui, |ui| {
+                        Frame::new().inner_margin(outer_margin).show(ui, |ui| {
+                            let content_w = ui.available_width().max(160.0);
+                            ui.set_width(content_w);
+                            ui.set_max_width(content_w);
+                            if !uses_native_single_canvas {
+                                self.universal_canvas.show(
+                                    ui,
+                                    &self.theme,
+                                    self.active_pillar,
+                                    &mut self.build_view.bim_bus.project,
+                                    &mut self.members,
+                                    &mut self.parametric_view.variables,
+                                    workspace_snapshot.clone(),
+                                    sidebar_inset,
+                                );
+
+                                ui.add_space(10.0);
+
+                                let (_anchor_rect, anchor_resp) = ui.allocate_exact_size(
+                                    Vec2::new(ui.available_width().max(1.0), 1.0),
+                                    egui::Sense::hover(),
+                                );
+                                if std::mem::take(
+                                    &mut self.universal_canvas.request_scroll_to_workbench,
+                                ) {
+                                    anchor_resp.scroll_to_me(Some(Align::TOP));
+                                }
+
+                                ui.add_space(4.0);
+                            }
+
+                            let target_pillar = self.active_pillar;
+                            self.render_pillar_module_body(
+                                ui,
+                                target_pillar,
+                                workspace_snapshot,
+                                sidebar_inset,
+                            );
+                        });
+                    });
+            });
+
+        if let Some((tab, member_id, note)) = self.build_view.requested_analysis_jump.take() {
+            self.analyze_view.active_subtab = tab;
+            if let Some(id) = member_id {
+                self.analyze_view.woodbury_disrupt_elem_id = id;
+            }
+            self.analyze_view.linked_from_geometry_note = Some(note);
+            self.active_pillar = NavigationPillar::AnalysisSimulation;
+        }
+        if let Some((member_id, render_mode, color_mode)) =
+            self.analyze_view.requested_geometry_jump.take()
+        {
+            if let Some(id) = member_id {
+                self.build_view.selected_member_id = Some(id);
+            }
+            if let Some(mode) = render_mode {
+                self.build_view.render_mode = mode;
+            }
+            if let Some(cm) = color_mode {
+                self.build_view.color_mode = cm;
+            }
+            self.build_view.analysis_panel_open = true;
+            self.active_pillar = NavigationPillar::GeometryAssembly;
+        }
+        if let Some(subtab) = self.analyze_view.requested_drafting_jump.take() {
+            self.parametric_view.active_drafting_subtab = subtab;
+            self.parametric_view.drafting_submenu_open = true;
+            self.active_pillar = NavigationPillar::ParametricDED;
+        }
+
+        if !self.sidebar_open {
+            Area::new(Id::new("floating_sidebar_toggle"))
+                .order(Order::Foreground)
+                .fixed_pos(Pos2::new(screen_rect.left() + 10.0, screen_rect.top() + 10.0))
+                .show(ctx, |ui| {
+                    if icons::icon_only_button(
+                        ui,
+                        AppIcon::Menu,
+                        self.theme.text_primary,
+                        self.theme.bg_card.gamma_multiply(0.95),
+                        Stroke::new(1.0, self.theme.border_card),
+                        CornerRadius::same(8),
+                        Vec2::new(34.0, 34.0),
+                        "Open navigation menu",
+                    )
+                    .clicked()
+                    {
+                        self.sidebar_open = true;
+                    }
+                });
+        }
+
+        self.ai_assistant_view.show(
+            ctx,
+            &self.theme,
+            self.active_pillar,
+            &self.members,
+            &self.projects,
+            &mut self.db_components,
+            docked_sidebar_width * 0.5,
+        );
+
+        if is_compact && self.sidebar_open {
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.sidebar_open = false;
+            } else {
+                let drawer_w = (screen_rect.width() * 0.84).clamp(240.0, 300.0);
+                let drawer_h = screen_rect.height().max(260.0);
+                let backdrop_w = (screen_rect.width() - drawer_w).max(0.0);
+
+                if backdrop_w > 1.0 {
+                    Area::new(Id::new("mobile_sidebar_backdrop"))
+                        .order(Order::Foreground)
+                        .fixed_pos(Pos2::new(screen_rect.left() + drawer_w, screen_rect.top()))
+                        .show(ctx, |ui| {
+                            let (rect, resp) = ui.allocate_exact_size(
+                                Vec2::new(backdrop_w, drawer_h),
+                                egui::Sense::click(),
+                            );
+                            ui.painter().rect_filled(
+                                rect,
+                                CornerRadius::ZERO,
+                                Color32::from_black_alpha(150),
+                            );
+                            if resp.clicked() {
+                                self.sidebar_open = false;
+                            }
+                        });
+                }
+
+                Area::new(Id::new("mobile_nav_drawer"))
+                    .order(Order::Foreground)
+                    .fixed_pos(screen_rect.min)
+                    .show(ctx, |ui| {
+                        Frame::new()
+                            .fill(self.theme.bg_sidebar)
+                            .stroke(Stroke::new(1.0, self.theme.border_card))
+                            .inner_margin(Margin::symmetric(12, 10))
+                            .show(ui, |ui| {
+                                let inner_w = (drawer_w - 24.0).max(180.0);
+                                let inner_h = (drawer_h - 20.0).max(200.0);
+                                ui.set_min_size(Vec2::new(inner_w, inner_h));
+                                ui.set_max_size(Vec2::new(inner_w, inner_h));
+                                self.render_sidebar_contents(ui, true, is_mobile);
+                            });
+                    });
+            }
+        }
+    }
+
+    fn render_pillar_module_body(
+        &mut self,
+        ui: &mut egui::Ui,
+        target_pillar: NavigationPillar,
+        workspace_snapshot: &crate::views::universal_canvas::WorkspaceCanvasSettings,
+        sidebar_inset: f32,
+    ) {
+        match target_pillar {
+            NavigationPillar::MyLibrary => {
+                self.my_project_view.show(
+                    ui,
+                    &self.theme,
+                    &self.projects,
+                    &self.personal_vault_projects,
+                    &mut self.active_pillar,
+                    &mut self.feature_registry,
+                );
+                if std::mem::take(&mut self.my_project_view.request_open_settings_vault) {
+                    self.settings_view.active_subtab =
+                        crate::views::settings::SettingsSubTab::WorkspaceSettings;
+                    self.show_settings = true;
+                }
+                if std::mem::take(&mut self.my_project_view.request_refresh_vault) {
+                    self.personal_vault_projects =
+                        crate::core::InternalVault::list_personal_vault_projects();
+                }
+                if std::mem::take(&mut self.my_project_view.request_save_active_to_vault) {
+                    let raw_name = self.my_project_view.save_project_name_input.trim();
+                    let proj_name: String = if raw_name.is_empty() {
+                        "Workspace_Project".to_string()
+                    } else {
+                        raw_name.to_string()
+                    };
+                    self.build_view.bim_bus.project.project_name = proj_name.clone();
+                    self.parametric_view.bim_bus.project.project_name = proj_name.clone();
+                    self.sync_lifecycle_to_canvas();
+                    let mut archive = self.universal_canvas.build_unified_archive(
+                        &self.build_view.bim_bus.project,
+                        &self.members,
+                        &self.parametric_view.variables,
+                        workspace_snapshot.clone(),
+                    );
+                    archive.project_name = proj_name.clone();
+                    let safe_file: String = proj_name
+                        .chars()
+                        .map(|c| {
+                            if c.is_alphanumeric() || c == '_' || c == '-' {
+                                c
+                            } else {
+                                '_'
+                            }
+                        })
+                        .collect();
+                    let fname = format!("{}.eigen", safe_file);
+                    match serde_json::to_string_pretty(&archive) {
+                        Ok(json) => match crate::core::InternalVault::save_project_archive_json(&fname, &json) {
+                            Ok(saved) => {
+                                self.my_project_view.export_success_msg = Some(format!(
+                                    "Saved complete workspace '{}' ({} BIM elems, {} drawings) to Vault ({})",
+                                    proj_name,
+                                    self.build_view.bim_bus.project.element_count(),
+                                    self.universal_canvas.entities.len(),
+                                    saved
+                                ));
+                                self.personal_vault_projects =
+                                    crate::core::InternalVault::list_personal_vault_projects();
+                            }
+                            Err(err) => {
+                                self.my_project_view.export_success_msg =
+                                    Some(format!("Vault save failed: {}", err));
+                            }
+                        },
+                        Err(err) => {
+                            self.my_project_view.export_success_msg =
+                                Some(format!("Archive serialization failed: {}", err));
+                        }
+                    }
+                }
+                if let Some(kind) = self.my_project_view.request_apply_template.take() {
+                    self.apply_typology_template(kind);
+                    if self.spatial_workspace.spatial_mode_enabled {
+                        self.spatial_workspace.active_canvas_mode =
+                            crate::views::spatial_workspace::SpatialCanvasMode::Bim3D;
+                        self.spatial_workspace.active_overlay_pillar = None;
+                    }
+                }
+                if std::mem::take(&mut self.my_project_view.request_export_active_archive) {
+                    self.sync_lifecycle_to_canvas();
+                    self.universal_canvas.export_unified_file(
+                        &self.build_view.bim_bus.project,
+                        &self.members,
+                        &self.parametric_view.variables,
+                        workspace_snapshot.clone(),
+                    );
+                    self.my_project_view.export_success_msg =
+                        self.universal_canvas.status_message.clone();
+                }
+                if let Some(entry) = self.my_project_view.pending_open_vault_project.take() {
+                    match crate::core::InternalVault::load_personal_vault_raw(&entry) {
+                        Ok(raw) => {
+                            if let Ok(ws_cfg) = self.universal_canvas.apply_unified_archive(
+                                &raw,
+                                &mut self.build_view.bim_bus.project,
+                                &mut self.members,
+                                &mut self.parametric_view.variables,
+                            ) {
+                                self.settings_view.apply_workspace_settings(
+                                    &ws_cfg,
+                                    &mut self.theme,
+                                    &mut self.ai_assistant_view.is_visible,
+                                );
+                                self.parametric_view.bim_bus.project =
+                                    self.build_view.bim_bus.project.clone();
+                                self.sync_bim_to_fem();
+                                self.build_view
+                                    .fit_view_to_project(&mut self.universal_canvas, &self.members);
+                                self.sync_earth_maps();
+                                self.sync_lifecycle_from_canvas();
+                                self.my_project_view.export_success_msg = Some(format!(
+                                    "Loaded workspace '{}' ({} BIM elements, {} drawings, {} FEM members) from Vault.",
+                                    entry.name,
+                                    self.build_view.bim_bus.project.element_count(),
+                                    self.universal_canvas.entities.len(),
+                                    self.members.len(),
+                                ));
+                                self.active_pillar = NavigationPillar::GeometryAssembly;
+                                if self.spatial_workspace.spatial_mode_enabled {
+                                    self.spatial_workspace.active_canvas_mode =
+                                        crate::views::spatial_workspace::SpatialCanvasMode::Bim3D;
+                                    self.spatial_workspace.active_overlay_pillar = None;
+                                }
+                            } else {
+                                match crate::core::InternalVault::load_personal_vault_project_model(&entry) {
+                                    Ok(model) => {
+                                        self.members = model
+                                            .elements
+                                            .iter()
+                                            .map(|el| StructuralMember {
+                                                id: el.id,
+                                                name: el.name.clone(),
+                                                section: el.section.name.clone(),
+                                                ..Default::default()
+                                            })
+                                            .collect();
+                                        self.my_project_view.export_success_msg = Some(format!(
+                                            "Loaded legacy structural model '{}' ({} nodes, {} elements) from personal Vault.",
+                                            model.name,
+                                            model.nodes.len(),
+                                            model.elements.len()
+                                        ));
+                                        self.active_pillar = NavigationPillar::GeometryAssembly;
+                                    }
+                                    Err(err) => {
+                                        self.my_project_view.export_success_msg =
+                                            Some(format!("Failed to load Vault project: {}", err));
+                                    }
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            self.my_project_view.export_success_msg =
+                                Some(format!("Failed to read Vault file: {}", err));
+                        }
+                    }
+                }
+            }
+            NavigationPillar::AiAgent => {
+                self.ai_firm_view.show(
+                    ui,
+                    &self.theme,
+                    &self.members,
+                    &self.build_view.bim_bus.project,
+                    &self.projects,
+                    &mut self.db_components,
+                    &mut self.feature_registry,
+                );
+            }
+            NavigationPillar::ResearchConcept => {
+                self.research_view.show(
+                    ui,
+                    &self.theme,
+                    &mut self.active_pillar,
+                    &mut self.feature_registry,
+                );
+            }
+            NavigationPillar::ParametricDED => {
+                self.parametric_view.show(
+                    ui,
+                    &self.theme,
+                    &mut self.db_components,
+                    &mut self.active_pillar,
+                    &mut self.feature_registry,
+                    &mut self.universal_canvas,
+                    &self.members,
+                    workspace_snapshot.clone(),
+                    sidebar_inset,
+                );
+            }
+            NavigationPillar::GeometryAssembly => {
+                self.build_view.show(
+                    ui,
+                    &self.theme,
+                    &self.members,
+                    &self.db_components,
+                    &mut self.feature_registry,
+                    &mut self.universal_canvas,
+                    &self.parametric_view.variables,
+                    workspace_snapshot.clone(),
+                    sidebar_inset,
+                );
+            }
+            NavigationPillar::AnalysisSimulation => {
+                self.analyze_view.show(
+                    ui,
+                    &self.theme,
+                    &self.members,
+                    &self.build_view.bim_bus.project,
+                    &mut self.feature_registry,
+                );
+            }
+            NavigationPillar::TimeScheduling => {
+                if !matches!(
+                    self.planning_view.active_subtab,
+                    crate::views::planning::PlanningSubTab::Schedule4d
+                        | crate::views::planning::PlanningSubTab::StagedErectionSvd
+                        | crate::views::planning::PlanningSubTab::ScheduleRiskMonteCarlo
+                        | crate::views::planning::PlanningSubTab::ResourceLeveling4d
+                        | crate::views::planning::PlanningSubTab::SiteDailyDiaryFleet
+                ) {
+                    self.planning_view.active_subtab =
+                        crate::views::planning::PlanningSubTab::Schedule4d;
+                }
+                self.planning_view.show(
+                    ui,
+                    &self.theme,
+                    &self.parametric_view.variables,
+                    &self.members,
+                    &self.build_view.bim_bus.project,
+                    &mut self.feature_registry,
+                    &mut self.active_pillar,
+                );
+            }
+            NavigationPillar::CostBudgeting => {
+                if !matches!(
+                    self.planning_view.active_subtab,
+                    crate::views::planning::PlanningSubTab::DynamicRab
+                        | crate::views::planning::PlanningSubTab::TakeoffQto
+                        | crate::views::planning::PlanningSubTab::CostAriTradeoff
+                        | crate::views::planning::PlanningSubTab::WbsHierarchy
+                        | crate::views::planning::PlanningSubTab::EarnedValueEvm
+                        | crate::views::planning::PlanningSubTab::ValueEngineeringBid
+                        | crate::views::planning::PlanningSubTab::ProcurementContractsClaims
+                ) {
+                    self.planning_view.active_subtab =
+                        crate::views::planning::PlanningSubTab::DynamicRab;
+                }
+                self.planning_view.show(
+                    ui,
+                    &self.theme,
+                    &self.parametric_view.variables,
+                    &self.members,
+                    &self.build_view.bim_bus.project,
+                    &mut self.feature_registry,
+                    &mut self.active_pillar,
+                );
+            }
+            NavigationPillar::SustainabilityEnergy => {
+                self.sustainability_view.show(
+                    ui,
+                    &self.theme,
+                    &self.members,
+                    &self.build_view.bim_bus.project,
+                    &mut self.feature_registry,
+                );
+            }
+            NavigationPillar::FacilityManagement => {
+                self.facility_view.show(
+                    ui,
+                    &self.theme,
+                    &self.members,
+                    &self.build_view.bim_bus.project,
+                    &mut self.feature_registry,
+                );
+            }
+            NavigationPillar::SafetyHealth => {
+                self.safety_view.show(
+                    ui,
+                    &self.theme,
+                    &self.members,
+                    &self.build_view.bim_bus.project,
+                    &mut self.feature_registry,
+                );
+            }
+            NavigationPillar::LeanConstruction => {
+                self.lean_view.show(
+                    ui,
+                    &self.theme,
+                    &self.members,
+                    &self.build_view.bim_bus.project,
+                    &mut self.feature_registry,
+                );
+            }
+            NavigationPillar::IndustrializedAutomation => {
+                self.industrialized_view.show(
+                    ui,
+                    &self.theme,
+                    &self.members,
+                    &self.build_view.bim_bus.project,
+                    &mut self.feature_registry,
+                );
+                if let Some(proj) = self.industrialized_view.request_apply_bim_project.take() {
+                    let el_cnt = proj.element_count();
+                    let pname = proj.project_name.clone();
+                    self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
+                    self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
+                    self.parametric_view.active_level_idx = 0;
+                    self.sync_bim_to_fem();
+                    self.build_view
+                        .fit_view_to_project(&mut self.universal_canvas, &self.members);
+                    self.sync_earth_maps();
+                    self.build_view.modify_status_msg = Some(format!(
+                        "Loaded IFC -> Editable BimProject '{}' ({} elements).",
+                        pname, el_cnt
+                    ));
+                    self.active_pillar = NavigationPillar::GeometryAssembly;
+                    if self.spatial_workspace.spatial_mode_enabled {
+                        self.spatial_workspace.active_canvas_mode =
+                            crate::views::spatial_workspace::SpatialCanvasMode::Bim3D;
+                        self.spatial_workspace.active_overlay_pillar = None;
+                    }
+                }
+            }
+            NavigationPillar::Prediction => {
+                let shm_feed = crate::views::prediction::ShmPredictionFeed {
+                    strain_micro: self.facility_view.simulated_strain_micro,
+                    freq_hz: self.facility_view.simulated_freq_hz,
+                    degradation_pct: self.facility_view.simulated_degradation_pct,
+                    live_packets: self.facility_view.shm_packets_received,
+                };
+                self.prediction_view.show(
+                    ui,
+                    &self.theme,
+                    &self.members,
+                    &self.build_view.bim_bus.project,
+                    shm_feed,
+                    &mut self.feature_registry,
+                );
+            }
+            NavigationPillar::ReportPublishing => {
+                self.results_view.show(
+                    ui,
+                    &self.theme,
+                    &self.members,
+                    &self.build_view.bim_bus.project,
+                    &mut self.feature_registry,
+                );
+            }
+        }
+    }
+
     fn render_shortcuts_quick_jump_modal_if_open(&mut self, ctx: &egui::Context) {
         if !self.universal_canvas.shortcuts_modal_open {
             return;

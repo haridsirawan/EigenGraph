@@ -306,6 +306,9 @@ pub struct BuildView {
     pub active_analysis_subtab: GeometryAnalysisSubTab,
     pub analysis_panel_open: bool,
     pub requested_analysis_jump: Option<(crate::views::analyze::AnalyzeSubTab, Option<usize>, String)>,
+    // Phase 46: Spatial Fullscreen BIM Picking State
+    pub last_spatial_bim_pick: Option<(crate::core::BimElementKind, usize)>,
+    pub spatial_pick_seq: u64,
 }
 
 impl Default for BuildView {
@@ -422,6 +425,8 @@ impl Default for BuildView {
             active_analysis_subtab: GeometryAnalysisSubTab::DiagramsAndHeatmap,
             analysis_panel_open: true,
             requested_analysis_jump: None,
+            last_spatial_bim_pick: None,
+            spatial_pick_seq: 0,
         }
     }
 }

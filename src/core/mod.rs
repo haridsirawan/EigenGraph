@@ -109,10 +109,10 @@ pub use csg::{
     Aabb3D, Bvh3D, CsgMeter, P3,
 };
 pub use bim::{
-    BimColumn, BimCommand, BimCommandBus, BimDimension, BimFooting, BimGrid, BimLevel, BimOpening,
-    BimProject, BimRoom, BimRun, BimSlab, BimWall, CompoundLayer, LayerFunction, OpeningKind,
-    RebarBar, RebarPreset, RunCategory, RunJustify, SectionCutProjection, SnapHit, SnapKind,
-    ViewRange,
+    BimColumn, BimCommand, BimCommandBus, BimDimension, BimElementKind, BimFooting, BimGrid,
+    BimLevel, BimOpening, BimProject, BimRoom, BimRun, BimSlab, BimWall, CompoundLayer,
+    LayerFunction, OpeningKind, RebarBar, RebarPreset, RunCategory, RunJustify,
+    SectionCutProjection, SnapHit, SnapKind, ViewRange,
 };
 pub use cso::{
     BbsScheduleItem, CsoReport, CuttingItem, CuttingStockOptimizer, MasterStockBar, PlacedCut,
