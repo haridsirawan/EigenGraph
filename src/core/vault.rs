@@ -551,10 +551,6 @@ impl InternalVault {
                     continue;
                 }
 
-                let Ok(raw) = std::fs::read_to_string(&path) else {
-                    continue;
-                };
-                let size_bytes = raw.len();
                 let cat_label = if rel_path.contains('/') {
                     top_folder.to_string()
                 } else {
@@ -562,28 +558,58 @@ impl InternalVault {
                 };
 
                 if is_ifc {
-                    let clean_raw = raw.trim_start_matches('\u{FEFF}');
+                    let size_bytes = std::fs::metadata(&path).map(|m| m.len() as usize).unwrap_or(0);
                     let mut display_name = fname
                         .trim_end_matches(".ifc")
                         .trim_end_matches(".IFC")
                         .to_string();
-                    let mut member_count = 0usize;
-                    // Fast metadata extraction (without stalling UI on very large models)
-                    let upper = clean_raw.to_ascii_uppercase();
-                    let node_count = upper.matches("=IFCBUILDINGSTOREY(").count()
-                        + upper.matches("= IFCBUILDINGSTOREY(").count();
-                    for pat in [
-                        "IFCWALL", "IFCCOLUMN", "IFCBEAM", "IFCSLAB",
-                        "IFCFOOTING", "IFCMEMBER", "IFCROOF", "IFCDOOR", "IFCWINDOW",
-                    ] {
-                        member_count += upper.matches(&format!("={pat}(")).count()
-                            + upper.matches(&format!("= {pat}(")).count();
-                    }
-                    if let Some(pos) = upper.find("IFCPROJECT(") {
-                        let tail = &clean_raw[pos..clean_raw.len().min(pos + 240)];
-                        let quotes: Vec<&str> = tail.split('\'').collect();
-                        if quotes.len() >= 4 && !quotes[3].trim().is_empty() {
-                            display_name = quotes[3].trim().to_string();
+                    let (mut node_count, mut member_count) = (0usize, 0usize);
+                    if let Ok(file) = std::fs::File::open(&path) {
+                        use std::io::Read;
+                        let mut reader = std::io::BufReader::with_capacity(65536, file);
+                        let mut chunk = [0_u8; 65536];
+                        let mut carry = Vec::<u8>::with_capacity(64);
+                        let mut head_captured = false;
+                        while let Ok(n) = reader.read(&mut chunk) {
+                            if n == 0 {
+                                break;
+                            }
+                            let mut window = Vec::with_capacity(carry.len() + n);
+                            window.extend_from_slice(&carry);
+                            window.extend_from_slice(&chunk[..n]);
+                            if !head_captured {
+                                head_captured = true;
+                                let head_str = String::from_utf8_lossy(&window[..window.len().min(65536)]);
+                                let clean_head = head_str.trim_start_matches('\u{FEFF}');
+                                let head_upper = clean_head.to_ascii_uppercase();
+                                if let Some(pos) = head_upper.find("IFCPROJECT(") {
+                                    let tail = &clean_head[pos..clean_head.len().min(pos + 240)];
+                                    let quotes: Vec<&str> = tail.split('\'').collect();
+                                    if quotes.len() >= 4 && !quotes[3].trim().is_empty() {
+                                        display_name = quotes[3].trim().to_string();
+                                    }
+                                }
+                            }
+                            // Count STEP entities strictly inside the new slice while preserving boundary overlap
+                            let search_len = window.len();
+                            let tail_keep = 36.min(search_len);
+                            let upper = window.iter().map(|b| b.to_ascii_uppercase()).collect::<Vec<u8>>();
+                            let upper_s = String::from_utf8_lossy(&upper);
+                            let cutoff = if n == chunk.len() { search_len.saturating_sub(tail_keep) } else { search_len };
+                            let scan_slice = &upper_s[..cutoff];
+                            node_count += scan_slice.matches("=IFCBUILDINGSTOREY(").count()
+                                + scan_slice.matches("= IFCBUILDINGSTOREY(").count();
+                            for pat in [
+                                "IFCWALL", "IFCCOLUMN", "IFCBEAM", "IFCSLAB",
+                                "IFCFOOTING", "IFCMEMBER", "IFCROOF", "IFCDOOR", "IFCWINDOW",
+                            ] {
+                                member_count += scan_slice.matches(&format!("={pat}(")).count()
+                                    + scan_slice.matches(&format!("= {pat}(")).count();
+                            }
+                            carry.clear();
+                            if n == chunk.len() && search_len >= tail_keep {
+                                carry.extend_from_slice(&window[search_len - tail_keep..]);
+                            }
                         }
                     }
                     out.push(PersonalVaultProjectEntry {
@@ -603,6 +629,11 @@ impl InternalVault {
                     });
                     continue;
                 }
+
+                let Ok(raw) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let size_bytes = raw.len();
 
                 let mut display_name = fname
                     .trim_end_matches(".eigen.json")
@@ -817,14 +848,19 @@ impl InternalVault {
             return None;
         }
         #[cfg(target_arch = "wasm32")]
-        let raw = crate::core::web_bridge::vault_read_file(&norm)?;
+        let raw = crate::core::web_bridge::vault_read_file_snippet(&norm)?;
         #[cfg(not(target_arch = "wasm32"))]
         let raw = {
+            use std::io::Read;
             let mut target = Self::vault_root_dir();
             for seg in norm.split('/').filter(|s| !s.is_empty()) {
                 target.push(seg);
             }
-            std::fs::read_to_string(target).ok()?
+            let file = std::fs::File::open(target).ok()?;
+            let byte_cap = (max_chars.saturating_mul(4)).max(4096) as u64;
+            let mut buf = String::new();
+            let _ = file.take(byte_cap).read_to_string(&mut buf);
+            buf
         };
         let snippet: String = raw.chars().take(max_chars).collect();
         Some(snippet)

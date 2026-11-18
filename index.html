@@ -62,8 +62,65 @@
         }
       } catch (_) {}
 
+      const INLINE_CACHE_LIMIT = 4 * 1024 * 1024;
+      const STREAM_CHUNK_BYTES = 8 * 1024 * 1024;
+      const HEAD_SLICE_BYTES = 131072;
       const fileCache = new Map();
+      const lazyFiles = new Map(); // relPath -> { file, handle, size_bytes, updated_at, head_text }
       let activeDirHandle = null;
+      let activeStream = null; // { id, filename, rel_path, mode, file, offset, total_bytes, pendingBuf, pendingLen, eof, fetching }
+      let nextStreamId = 1;
+
+      function advanceActiveStream() {
+        if (!activeStream || activeStream.fetching || activeStream.pendingBuf || activeStream.eof_consumed) return;
+        if (activeStream.offset >= activeStream.total_bytes) {
+          activeStream.pendingBuf = new Uint8Array(0);
+          activeStream.pendingLen = 0;
+          activeStream.eof = true;
+          persistSnapshot();
+          return;
+        }
+        const s = activeStream;
+        const end = Math.min(s.offset + STREAM_CHUNK_BYTES, s.total_bytes);
+        s.fetching = true;
+        s.file.slice(s.offset, end).arrayBuffer().then((buf) => {
+          if (!activeStream || activeStream.id !== s.id) return;
+          const u8 = new Uint8Array(buf);
+          s.pendingBuf = u8;
+          s.pendingLen = u8.byteLength;
+          s.offset = end;
+          s.eof = end >= s.total_bytes;
+          s.fetching = false;
+          persistSnapshot();
+        }).catch((err) => {
+          if (!activeStream || activeStream.id !== s.id) return;
+          s.fetching = false;
+          s.error = (err && err.message) ? err.message : String(err);
+          activeStream = null;
+          state.error_msg = `Stream read failed: ${s.error}`;
+          persistSnapshot();
+        });
+      }
+
+      function startFileStream(file, filename, relPath, mode) {
+        activeStream = {
+          id: nextStreamId++,
+          filename: String(filename || (file && file.name) || "model.ifc"),
+          rel_path: String(relPath || ""),
+          mode: String(mode || "vault_open"),
+          file,
+          offset: 0,
+          total_bytes: Number(file.size || 0),
+          pendingBuf: null,
+          pendingLen: 0,
+          eof: false,
+          eof_consumed: false,
+          fetching: false
+        };
+        state.status_msg = `Streaming '${activeStream.filename}' (${Math.max(1, Math.round(activeStream.total_bytes / (1024 * 1024)))} MB)...`;
+        persistSnapshot();
+        advanceActiveStream();
+      }
 
       function openDb() {
         return new Promise((resolve, reject) => {
@@ -172,7 +229,7 @@
         let memberCount = 0;
         if (isIfc) {
           try {
-            const head = content.slice(0, 65536);
+            const head = content.slice(0, HEAD_SLICE_BYTES);
             const projMatch = head.match(/IFCPROJECT\s*\([^,]*,[^,]*,\s*'([^']+)'/i);
             if (projMatch && projMatch[1] && projMatch[1].trim()) {
               displayName = projMatch[1].trim();
@@ -247,6 +304,14 @@
           const meta = extractProjectMeta(relPath, entry.content, entry.updated_at);
           if (meta) list.push(meta);
         }
+        for (const [relPath, lazy] of lazyFiles.entries()) {
+          if (fileCache.has(relPath)) continue;
+          const meta = extractProjectMeta(relPath, lazy.head_text || "", lazy.updated_at);
+          if (meta) {
+            meta.size_bytes = lazy.size_bytes || meta.size_bytes;
+            list.push(meta);
+          }
+        }
         list.sort((a, b) => a.name.localeCompare(b.name));
         state.projects = list;
       }
@@ -279,6 +344,7 @@
         try {
           await idbClearFiles();
           fileCache.clear();
+          lazyFiles.clear();
           let rootFolder = "";
           let importedCount = 0;
           const now = Date.now();
@@ -305,14 +371,21 @@
             ) {
               continue;
             }
-            if (file.size <= 64 * 1024 * 1024) {
+            if (file.size <= INLINE_CACHE_LIMIT) {
               const text = await file.text();
               fileCache.set(rel, { content: text, updated_at: file.lastModified || now });
-              if (file.size <= 12 * 1024 * 1024) {
-                await idbPut("files", { path: rel, content: text, updated_at: file.lastModified || now }).catch(() => {});
-              }
-              importedCount++;
+              await idbPut("files", { path: rel, content: text, updated_at: file.lastModified || now }).catch(() => {});
+            } else {
+              const headText = await file.slice(0, HEAD_SLICE_BYTES).text().catch(() => "");
+              lazyFiles.set(rel, {
+                file,
+                handle: null,
+                size_bytes: file.size,
+                updated_at: file.lastModified || now,
+                head_text: headText
+              });
             }
+            importedCount++;
           }
           rebuildProjectsFromCache();
           const finalName = rootFolder || "Local Browser Vault";
@@ -492,6 +565,7 @@
 
       async function scanDirectoryIntoCache(dirHandle) {
         fileCache.clear();
+        lazyFiles.clear();
         const shardDirs = new Set(["Columns", "Beams", "Slabs", "Walls", "Footings", "Rebar"]);
         async function traverse(handle, prefix, depth) {
           if (depth > 6) return;
@@ -517,12 +591,19 @@
                     continue;
                   }
                   const f = await entry.getFile();
-                  if (f.size <= 64 * 1024 * 1024) {
+                  if (f.size <= INLINE_CACHE_LIMIT) {
                     const text = await f.text();
                     fileCache.set(rel, { content: text, updated_at: f.lastModified });
-                    if (f.size <= 12 * 1024 * 1024) {
-                      await idbPut("files", { path: rel, content: text, updated_at: f.lastModified }).catch(() => {});
-                    }
+                    await idbPut("files", { path: rel, content: text, updated_at: f.lastModified }).catch(() => {});
+                  } else {
+                    const headText = await f.slice(0, HEAD_SLICE_BYTES).text().catch(() => "");
+                    lazyFiles.set(rel, {
+                      file: f,
+                      handle: entry,
+                      size_bytes: f.size,
+                      updated_at: f.lastModified,
+                      head_text: headText
+                    });
                   }
                 }
               }
@@ -740,7 +821,9 @@
       async function disconnectVaultAsync() {
         hideDirPickerOverlay();
         activeDirHandle = null;
+        activeStream = null;
         fileCache.clear();
+        lazyFiles.clear();
         await idbDelete("handles", "active_handle").catch(() => {});
         await idbDelete("meta", "vault_meta").catch(() => {});
         state.connected = false;
@@ -857,9 +940,81 @@
           const hit = fileCache.get(norm);
           return hit ? hit.content : "";
         },
+        readFileSnippetSync: (relPath) => {
+          const norm = String(relPath || "").replace(/\\/g, "/");
+          const hit = fileCache.get(norm);
+          if (hit) return hit.content;
+          const lazy = lazyFiles.get(norm);
+          return lazy && lazy.head_text ? lazy.head_text : "";
+        },
+        isFileLazy: (relPath) => {
+          const norm = String(relPath || "").replace(/\\/g, "/");
+          return lazyFiles.has(norm) && !fileCache.has(norm);
+        },
+        requestFileAsync: (relPath, mode) => {
+          const norm = String(relPath || "").replace(/\\/g, "/");
+          const lazy = lazyFiles.get(norm);
+          if (!lazy) return false;
+          const base = norm.split("/").pop() || norm;
+          const resolveFile = async () => {
+            try {
+              const fileObj = (lazy.handle && typeof lazy.handle.getFile === "function")
+                ? await lazy.handle.getFile()
+                : lazy.file;
+              if (!fileObj) {
+                state.error_msg = `Lazy Vault handle missing for '${norm}'.`;
+                persistSnapshot();
+                return;
+              }
+              startFileStream(fileObj, base, norm, mode || "vault_open");
+            } catch (err) {
+              state.error_msg = (err && err.message) ? err.message : String(err);
+              persistSnapshot();
+            }
+          };
+          void resolveFile();
+          return true;
+        },
+        pollStreamStateJson: () => {
+          if (!activeStream) {
+            return JSON.stringify({ active: false });
+          }
+          advanceActiveStream();
+          const s = activeStream;
+          return JSON.stringify({
+            active: true,
+            id: s.id,
+            ready: !!s.pendingBuf,
+            filename: s.filename,
+            rel_path: s.rel_path,
+            mode: s.mode,
+            loaded_bytes: s.offset,
+            total_bytes: s.total_bytes,
+            eof: !!s.eof
+          });
+        },
+        takeStreamChunkBytes: () => {
+          if (!activeStream || !activeStream.pendingBuf) {
+            return new Uint8Array(0);
+          }
+          const chunk = activeStream.pendingBuf;
+          const isEof = !!activeStream.eof;
+          activeStream.pendingBuf = null;
+          activeStream.pendingLen = 0;
+          if (isEof) {
+            activeStream.eof_consumed = true;
+            state.status_msg = `Loaded '${activeStream.filename}' (${Math.round(activeStream.total_bytes / 1024)} KB).`;
+            activeStream = null;
+            persistSnapshot();
+          } else {
+            advanceActiveStream();
+          }
+          return chunk;
+        },
         writeFileAsync: (relPath, content) => {
           const norm = String(relPath || "").replace(/\\/g, "/");
           const now = Date.now();
+          lazyFiles.delete(norm);
           fileCache.set(norm, { content: String(content || ""), updated_at: now });
           rebuildProjectsFromCache();
           persistSnapshot();
@@ -871,6 +1026,7 @@
         deleteFileAsync: (relPath) => {
           const norm = String(relPath || "").replace(/\\/g, "/");
           fileCache.delete(norm);
+          lazyFiles.delete(norm);
           rebuildProjectsFromCache();
           persistSnapshot();
           void idbDelete("files", norm).catch(() => {});
@@ -892,7 +1048,7 @@
               try {
                 const file = activeFileInput.files && activeFileInput.files[0];
                 if (!file) return;
-                if (file.size <= 64 * 1024 * 1024) {
+                if (file.size <= INLINE_CACHE_LIMIT) {
                   const text = await file.text();
                   if (!(await tryImportVaultBundle(file.name, text))) {
                     pendingPickedFileJson = JSON.stringify({ filename: file.name, content: text });
@@ -900,8 +1056,7 @@
                     persistSnapshot();
                   }
                 } else {
-                  state.error_msg = `File '${file.name}' exceeds 64 MB import limit.`;
-                  persistSnapshot();
+                  startFileStream(file, file.name, file.name, "picked_import");
                 }
               } catch (err) {
                 state.error_msg = (err && err.message) ? err.message : String(err);
@@ -929,6 +1084,17 @@
               rel_path: norm,
               category,
               size_bytes: entry && typeof entry.content === "string" ? entry.content.length : 0
+            });
+          }
+          for (const [relPath, lazy] of lazyFiles.entries()) {
+            const norm = String(relPath || "").replace(/\\/g, "/");
+            if (fileCache.has(norm)) continue;
+            const parts = norm.split("/");
+            const category = parts.length > 1 ? parts[0] : "Vault Root";
+            items.push({
+              rel_path: norm,
+              category,
+              size_bytes: Number(lazy.size_bytes || 0)
             });
           }
           items.sort((a, b) => a.rel_path.localeCompare(b.rel_path));
@@ -966,13 +1132,15 @@
         e.preventDefault();
         try {
           const file = e.dataTransfer.files[0];
-          if (file && file.size <= 64 * 1024 * 1024) {
+          if (file && file.size <= INLINE_CACHE_LIMIT) {
             const text = await file.text();
             if (!(await tryImportVaultBundle(file.name, text))) {
               pendingPickedFileJson = JSON.stringify({ filename: file.name, content: text });
               state.status_msg = `Dropped '${file.name}' (${Math.round(file.size / 1024)} KB).`;
               persistSnapshot();
             }
+          } else if (file) {
+            startFileStream(file, file.name, file.name, "picked_import");
           }
         } catch (err) {
           state.error_msg = (err && err.message) ? err.message : String(err);

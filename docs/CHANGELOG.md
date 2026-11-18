@@ -7,6 +7,26 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.5.6] - 2026-11-18 — Phase 56: Sharp HiDPI 3D Earth Tile LOD & LRU Cache, Unlimited Lazy Vault Streaming, OpenBIM BREP/Voids/`IFCMAPCONVERSION` & Earth 3D `Slab`/`Door`/`Window`/`Isolate`
+
+### Added & Changed
+- **Sharp Pixel-Calibrated 3D Earth Imagery & LRU Tile Cache (`src/core/gis/map_widget.rs`, `src/core/gis/earth_globe.rs`)**:
+  - Replaced flat 2D zoom-floor tile selection in `paint_spherical_raster_tiles` with `SlippyMapState::resolved_3d_tile_zoom` and `collect_globe_site_tile_quads`, calibrating tile resolution directly against 3D orbital camera distance (`d_surf / f_px`) and physical HiDPI pixel density (`pixels_per_point`) plus Mercator-interpolated globe quad UVs and 5-level ancestor fallback so satellite imagery remains sharp while zooming in.
+  - Raised orbital tile ceiling to Z5 for regional globe clarity, increased visible tile budget to 120 center-prioritized quads, added gentle building-scale overzoom softening past provider max zoom, and upgraded `WorldTileCache` from full-flush (`240`) eviction to an access-tick LRU cache (`MAX_CACHED_TILES = 640`, parallel `inflight = 20`).
+- **Removed 64 MB Browser Vault Cap with Lazy Handle Indexing & Chunked Binary Streaming (`index.html`, `src/core/web_bridge.rs`, `src/core/vault.rs`, `src/app.rs`)**:
+  - Removed all `64 * 1024 * 1024` browser size rejections across directory scanning (`scanDirectoryIntoCache`, `ingestDirectoryFileList`), `openFilePicker`, and drag-and-drop.
+  - Files larger than 4 MB are indexed lazily via lightweight `lazyFiles` file handles reading only a 128 KB head slice for `[IFC]` metadata during Vault scans, then streamed asynchronously on demand in 8 MB binary `Uint8Array` chunks (`startFileStream`, `poll_file_stream_event`) directly into Rust WASM memory without triggering browser single-string limits.
+  - Upgraded Native desktop `InternalVault::list_personal_vault_projects_at` and `read_vault_context_snippet` to bounded `BufReader` streaming scans (`64 KB` chunks) so multi-hundred-megabyte local `.ifc` files index with constant RAM.
+- **Memory-Compact `StepParser` & Expanded OpenBIM BREP / Door-Window / UTM Geo-Referencing (`src/core/ifc.rs`)**:
+  - Eliminated full-file `.to_ascii_uppercase()` and whole-buffer comment copies in `StepParser::parse_step` (`find_ascii_tag_ignore_case`, inline per-statement comment cleanup) to reduce peak heap allocation on large STEP models.
+  - Added geometry extraction for `IFCFACETEDBREP`, `IFCSHELLBASEDSURFACEMODEL`, `IFCFACEBASEDSURFACEMODEL`, `IFCCLOSEDSHELL`, `IFCOPENSHELL`, `IFCFACE`, `IFCFACEOUTERBOUND`, `IFCPOLYLOOP`, `IFCSWEPTDISKSOLID`, and structural steel profiles (`IFCISHAPEPROFILEDEF` / `L` / `T` / `U` / `C`).
+  - Added automatic extraction of hosted door/window voids (`IFCRELVOIDSELEMENT` + `IFCRELFILLSELEMENT` with proximity fallback) into `BimWall.openings`, plus automatic UTM/EPSG decoding (`IFCMAPCONVERSION` + `IFCPROJECTEDCRS`) in `IfcModel::site_lat_lon`.
+- **Direct Earth 3D `Slab`, `Door`, `Window`, Live Azimuth HUD, `Isolate Story` & `Anchor Here` (`src/views/universal_canvas.rs`, `src/views/spatial_workspace.rs`)**:
+  - Added `EarthBimTool::{Slab, Door, Window}` and `SpatialManualTool::{Slab, Door, Window}` with 2-corner elevated slab ghosts, wall-projected door/window opening ghosts, and live length + azimuth (`@ deg`) drag callouts directly on Earth 3D.
+  - Added `Isolate` active Story visibility/picking isolation (`earth_bim_author.isolate_active_story`) and 1-click `Anchor Here` model site relocation inside the unified Dynamic Island Earth 3D Studio Bar.
+
+---
+
 ## [v0.5.5] - 2026-11-18 — Phase 55: Vault Recursive OpenBIM IFC Reader, Zero Built-In Demo Files & Unified Earth 3D BIM/CAD Canvas (`BIM 3D` & `Plan 2D` Removed)
 
 ### Added & Changed

@@ -840,6 +840,9 @@ pub enum SpatialManualTool {
     Beam,
     Wall,
     Footing,
+    Slab,
+    Door,
+    Window,
     Line2D,
     Rect2D,
     Measure,
@@ -853,6 +856,9 @@ impl SpatialManualTool {
         Self::Beam,
         Self::Wall,
         Self::Footing,
+        Self::Slab,
+        Self::Door,
+        Self::Window,
         Self::Line2D,
         Self::Rect2D,
         Self::Measure,
@@ -866,6 +872,9 @@ impl SpatialManualTool {
             Self::Beam => "Beam",
             Self::Wall => "Wall",
             Self::Footing => "Footing",
+            Self::Slab => "Slab",
+            Self::Door => "Door",
+            Self::Window => "Window",
             Self::Line2D => "Line",
             Self::Rect2D => "Rect",
             Self::Measure => "Measure",
@@ -876,12 +885,15 @@ impl SpatialManualTool {
     pub fn tooltip(self) -> &'static str {
         match self {
             Self::OrbitPan => "Orbit Earth / Navigate 3D scene & select elements",
-            Self::Column => "Place manual structural Column (click ground in 3D BIM)",
-            Self::Beam => "Draw manual structural Beam (click start & end in 3D BIM)",
-            Self::Wall => "Draw manual shear/partition Wall (click start & end in 3D BIM)",
+            Self::Column => "Place manual structural Column directly on Earth 3D",
+            Self::Beam => "Draw manual structural Beam (click start & end on Earth 3D)",
+            Self::Wall => "Draw manual shear/partition Wall (click start & end on Earth 3D)",
             Self::Footing => "Place manual isolated Footing on ground origin",
-            Self::Line2D => "Draw 2D vector CAD line segment on Earth / Plan",
-            Self::Rect2D => "Draw 2D rectangular boundary / slab outline on Earth / Plan",
+            Self::Slab => "Draw rectangular floor/roof Slab on active Story plane (2 corner clicks)",
+            Self::Door => "Insert CSG Single Door (900x2100mm) by clicking any 3D Wall",
+            Self::Window => "Insert CSG Window (1800x1400mm) by clicking any 3D Wall",
+            Self::Line2D => "Draw 2D vector CAD line segment on Earth 3D",
+            Self::Rect2D => "Draw 2D rectangular boundary / slab outline on Earth 3D",
             Self::Measure => "Measure geodesic distance across Earth / site coordinates",
             Self::Terraform => "Cycle 3D Earth sculpting & megaproject brush (Uplift / Carve / Seawall / Bridge)",
         }
@@ -894,6 +906,9 @@ impl SpatialManualTool {
             Self::Beam => AppIcon::Beam,
             Self::Wall => AppIcon::Wall,
             Self::Footing => AppIcon::Slab,
+            Self::Slab => AppIcon::Layers,
+            Self::Door => AppIcon::Wrench,
+            Self::Window => AppIcon::Grid,
             Self::Line2D => AppIcon::LineSeg,
             Self::Rect2D => AppIcon::RectShape,
             Self::Measure => AppIcon::DimensionRuler,
@@ -931,6 +946,9 @@ impl SpatialManualTool {
                 universal_canvas.earth_bim_author.active_tool == EarthBimTool::Footing
                     || build_view.ground_author_tool == Ground3DAuthorTool::Footing
             }
+            Self::Slab => universal_canvas.earth_bim_author.active_tool == EarthBimTool::Slab,
+            Self::Door => universal_canvas.earth_bim_author.active_tool == EarthBimTool::Door,
+            Self::Window => universal_canvas.earth_bim_author.active_tool == EarthBimTool::Window,
             Self::Line2D => {
                 universal_canvas.earth_bim_author.active_tool == EarthBimTool::None
                     && universal_canvas.active_tool == UniversalCanvasTool::Line
@@ -1011,6 +1029,33 @@ impl SpatialManualTool {
                 universal_canvas.ground_origin_anchored = true;
                 zoom_in_if_high_altitude(universal_canvas);
                 spatial.push_trace("Draw Footing directly on Earth 3D (click point)", true);
+            }
+            Self::Slab => {
+                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::Slab;
+                universal_canvas.earth_bim_author.pending_start_mm = None;
+                universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
+                universal_canvas.ground_origin_anchored = true;
+                zoom_in_if_high_altitude(universal_canvas);
+                spatial.push_trace("Draw Slab on Earth 3D (click 2 opposite corners)", true);
+            }
+            Self::Door => {
+                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::Door;
+                universal_canvas.earth_bim_author.pending_start_mm = None;
+                universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
+                universal_canvas.ground_origin_anchored = true;
+                zoom_in_if_high_altitude(universal_canvas);
+                spatial.push_trace("Insert Door: click any 3D Wall on Earth 3D", true);
+            }
+            Self::Window => {
+                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.earth_bim_author.active_tool = EarthBimTool::Window;
+                universal_canvas.earth_bim_author.pending_start_mm = None;
+                universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
+                universal_canvas.ground_origin_anchored = true;
+                zoom_in_if_high_altitude(universal_canvas);
+                spatial.push_trace("Insert Window: click any 3D Wall on Earth 3D", true);
             }
             Self::Line2D => {
                 build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
@@ -3103,7 +3148,18 @@ impl SpatialWorkspaceState {
         universal_canvas.earth_bim_author.footing_size_mm = build_view.author_footing_size_mm;
         universal_canvas.earth_bim_author.erection_day_limit = self.active_4d_day as usize;
         universal_canvas.earth_bim_author.active_tool = match build_view.ground_author_tool {
-            Ground3DAuthorTool::Orbit => crate::views::universal_canvas::EarthBimTool::None,
+            Ground3DAuthorTool::Orbit => {
+                if matches!(
+                    universal_canvas.earth_bim_author.active_tool,
+                    crate::views::universal_canvas::EarthBimTool::Slab
+                        | crate::views::universal_canvas::EarthBimTool::Door
+                        | crate::views::universal_canvas::EarthBimTool::Window
+                ) {
+                    universal_canvas.earth_bim_author.active_tool
+                } else {
+                    crate::views::universal_canvas::EarthBimTool::None
+                }
+            }
             Ground3DAuthorTool::Column => crate::views::universal_canvas::EarthBimTool::Column,
             Ground3DAuthorTool::Beam => crate::views::universal_canvas::EarthBimTool::Beam,
             Ground3DAuthorTool::Wall => crate::views::universal_canvas::EarthBimTool::Wall,
@@ -3122,6 +3178,8 @@ impl SpatialWorkspaceState {
         // 1. Conditional Top-Center Active Lens / Manual Tool Pill (top-left corner stays 100% pure canvas)
         if self.active_lens != SpatialLens::Clean
             || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
+            || universal_canvas.earth_bim_author.active_tool
+                != crate::views::universal_canvas::EarthBimTool::None
             || universal_canvas.active_tool != UniversalCanvasTool::SelectPan
             || universal_canvas.measure_active
         {
@@ -3379,6 +3437,25 @@ impl SpatialWorkspaceState {
                                         .size(9.8)
                                         .color(theme.text_muted),
                                 );
+                            } else if matches!(
+                                universal_canvas.earth_bim_author.active_tool,
+                                crate::views::universal_canvas::EarthBimTool::Slab
+                                    | crate::views::universal_canvas::EarthBimTool::Door
+                                    | crate::views::universal_canvas::EarthBimTool::Window
+                            ) {
+                                let (_, _, story_lbl, _) =
+                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
+                                let hint = match universal_canvas.earth_bim_author.active_tool {
+                                    crate::views::universal_canvas::EarthBimTool::Slab => {
+                                        format!("Tool: Slab ({story_lbl}) — click 2 opposite corners")
+                                    }
+                                    crate::views::universal_canvas::EarthBimTool::Door => {
+                                        "Tool: Door (900x2100mm) — click any 3D Wall".to_string()
+                                    }
+                                    _ => "Tool: Window (1800x1400mm) — click any 3D Wall".to_string(),
+                                };
+                                icons::pill_badge(ui, AppIcon::Wrench, hint, theme.accent_orange);
+                                ui.label(RichText::new("(Esc: Orbit)").size(9.8).color(theme.text_muted));
                             } else if universal_canvas.active_tool != UniversalCanvasTool::SelectPan {
                                 icons::pill_badge(
                                     ui,
@@ -7269,6 +7346,25 @@ impl SpatialWorkspaceState {
                                     }
                                 }
                                 if ui
+                                    .small_button(if universal_canvas.earth_bim_author.isolate_active_story {
+                                        "Isolate ON"
+                                    } else {
+                                        "Isolate"
+                                    })
+                                    .on_hover_text("Isolate active Story elements for unobstructed interior BIM authoring")
+                                    .clicked()
+                                {
+                                    universal_canvas.earth_bim_author.isolate_active_story =
+                                        !universal_canvas.earth_bim_author.isolate_active_story;
+                                }
+                                if ui
+                                    .small_button("Anchor Here")
+                                    .on_hover_text("Relocate BIM/IFC origin (0,0) to current Earth 3D center GPS coordinates")
+                                    .clicked()
+                                {
+                                    actions.anchor_and_build_site = Some(universal_canvas.world_map.center_lat_lon);
+                                }
+                                if ui
                                     .small_button(if universal_canvas.ortho_mode { "Ortho ON" } else { "Ortho" })
                                     .on_hover_text("Toggle orthogonal 90° snap when drawing Beams/Walls/Lines on Earth 3D")
                                     .clicked()
@@ -9372,5 +9468,75 @@ END-ISO-10303-21;\r\n";
             let r = spatial.hud_rects[0];
             assert!(r.right() <= win_w + 1.0 && r.left() >= -1.0);
         }
+    }
+
+    #[test]
+    fn test_phase56_earth3d_slab_door_window_isolation_and_unlimited_vault_ifc() {
+        // 1. Browser WASM Vault bridge has no artificial 64 MB cap and streams via lazyFiles + startFileStream
+        let html = include_str!("../../index.html");
+        assert!(!html.contains("64 * 1024 * 1024"), "Artificial 64 MB limit must be removed from index.html");
+        assert!(html.contains("startFileStream") && html.contains("lazyFiles"));
+
+        // 2. Slab, Door, and Window authoring tools activate directly on Earth 3D
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        for tool in [
+            SpatialManualTool::Slab,
+            SpatialManualTool::Door,
+            SpatialManualTool::Window,
+        ] {
+            let _ = tool.apply(&mut spatial, &mut canvas, &mut build);
+            assert_eq!(spatial.active_canvas_mode, SpatialCanvasMode::EarthGlobe);
+            assert!(tool.is_active(spatial.active_canvas_mode, &canvas, &build));
+        }
+
+        // 3. Story Isolation filters picking to only the active level
+        let _ = build.bim_bus.execute_natural_language("portal 2x1 @6m 2floors").unwrap();
+        let lvl2_id = build.bim_bus.project.levels[1].id;
+        let col_l2 = build
+            .bim_bus
+            .project
+            .columns
+            .iter()
+            .find(|c| c.base_level_id == lvl2_id)
+            .expect("Level 2 column")
+            .clone();
+        let col_l1 = build
+            .bim_bus
+            .project
+            .columns
+            .iter()
+            .find(|c| c.base_level_id == build.bim_bus.project.levels[0].id && c.top_level_id != lvl2_id + 1)
+            .unwrap_or(&build.bim_bus.project.columns[0])
+            .clone();
+
+        canvas.ground_origin_lat_lon = (-6.2088, 106.8456);
+        canvas.ground_origin_anchored = true;
+        canvas.world_map.center_lat_lon = (-6.2088, 106.8456);
+        canvas.world_map.zoom_level = 19.0;
+        let rect = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+        let xf = crate::core::gis::GlobeScreenTransform::from_view(
+            rect,
+            canvas.world_map.center_lat_lon.0,
+            canvas.world_map.center_lat_lon.1,
+            canvas.world_map.zoom_level,
+            &canvas.earth_world.camera,
+        );
+        let l2_ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+            canvas.ground_origin_lat_lon,
+            [col_l2.pos.0, col_l2.pos.1],
+        );
+        let l2_top_m = build.bim_bus.project.level_elevation(col_l2.top_level_id) * 0.001;
+        let (l2_px, _, _) = xf.project_lat_lon_elev(l2_ll.0, l2_ll.1, l2_top_m).unwrap();
+        canvas.last_globe_xform = Some(xf);
+
+        // Isolate Level 1 -> Level 2-only top column shaft at L2 top cannot be picked when Level 2 isn't active
+        canvas.earth_bim_author.base_level_id = build.bim_bus.project.levels[0].id;
+        canvas.earth_bim_author.top_level_id = lvl2_id;
+        canvas.earth_bim_author.isolate_active_story = true;
+        let _ = col_l1.id;
+        let picked_isolated_l2 = canvas.pick_bim_element_at_screen(l2_px, rect, &build.bim_bus.project);
+        assert_ne!(picked_isolated_l2, Some((crate::core::BimElementKind::Column, col_l2.id)));
     }
 }

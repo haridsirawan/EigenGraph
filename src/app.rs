@@ -69,6 +69,7 @@ pub struct EigenGraphApp {
     last_uc_earth: (f64, f64, f32, crate::core::gis::TileSource),
     last_res_earth: (f64, f64, f32, crate::core::gis::TileSource),
     last_planning_sim_day: u32,
+    pending_lazy_vault_entry: Option<crate::core::vault::PersonalVaultProjectEntry>,
 }
 
 impl Default for EigenGraphApp {
@@ -147,6 +148,7 @@ impl Default for EigenGraphApp {
             last_uc_earth: uc_earth,
             last_res_earth: res_earth,
             last_planning_sim_day: 0,
+            pending_lazy_vault_entry: None,
         }
     }
 }
@@ -682,6 +684,56 @@ impl App for EigenGraphApp {
                     .attach_local_file_context(payload.filename, &payload.content);
             } else {
                 self.handle_imported_file(payload);
+            }
+        }
+
+        // Poll asynchronous chunked binary streaming for arbitrary-size (>4 MB) Vault/Picker files in Browser WASM
+        match crate::core::web_bridge::poll_file_stream_event() {
+            crate::core::web_bridge::FileStreamPollResult::Idle => {}
+            crate::core::web_bridge::FileStreamPollResult::Progress {
+                filename,
+                loaded_bytes,
+                total_bytes,
+            } => {
+                self.spatial_workspace.vault_feedback = Some(format!(
+                    "Streaming '{}': {:.1} / {:.1} MB...",
+                    filename,
+                    loaded_bytes as f64 / 1_048_576.0,
+                    total_bytes.max(1) as f64 / 1_048_576.0
+                ));
+                ctx.request_repaint();
+            }
+            crate::core::web_bridge::FileStreamPollResult::Completed {
+                filename,
+                rel_path,
+                mode,
+                content,
+            } => {
+                if mode == "vault_open" {
+                    let entry = self
+                        .pending_lazy_vault_entry
+                        .take()
+                        .unwrap_or_else(|| crate::core::vault::PersonalVaultProjectEntry {
+                            name: filename.clone(),
+                            filename: filename.clone(),
+                            rel_path: rel_path.clone(),
+                            abs_path: rel_path.clone(),
+                            category: "Vault".to_string(),
+                            node_count: 0,
+                            member_count: 0,
+                            size_bytes: content.len(),
+                            updated_label: "Streamed".to_string(),
+                        });
+                    self.open_vault_raw_payload(&entry, &content);
+                } else {
+                    let payload = crate::core::web_bridge::ImportedFilePayload { filename, content };
+                    if std::mem::take(&mut self.spatial_workspace.pending_context_file_pick) {
+                        self.spatial_workspace
+                            .attach_local_file_context(payload.filename, &payload.content);
+                    } else {
+                        self.handle_imported_file(payload);
+                    }
+                }
             }
         }
 
@@ -1460,135 +1512,159 @@ impl EigenGraphApp {
     }
 
     fn open_vault_project_entry(&mut self, entry: crate::core::vault::PersonalVaultProjectEntry) {
-        match crate::core::InternalVault::load_personal_vault_raw(&entry) {
-            Ok(raw) => {
-                let clean_raw = raw.trim_start_matches('\u{FEFF}');
-                let is_ifc = entry.filename.to_ascii_lowercase().ends_with(".ifc")
-                    || clean_raw.trim_start().to_ascii_uppercase().starts_with("ISO-10303-21;");
-                if is_ifc {
-                    match crate::core::ifc::IfcModel::parse_to_bim_project_with_fallback(
-                        clean_raw,
-                        &entry.filename,
-                    ) {
-                        Ok((proj, site_geo, summary_msg)) => {
-                            self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
-                            self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
-                            self.parametric_view.active_level_idx = 0;
-                            let target_geo = site_geo.unwrap_or_else(|| {
-                                if self.universal_canvas.ground_origin_anchored
-                                    && (self.universal_canvas.ground_origin_lat_lon.0.abs() > 1e-4
-                                        || self.universal_canvas.ground_origin_lat_lon.1.abs() > 1e-4)
-                                {
-                                    self.universal_canvas.ground_origin_lat_lon
-                                } else {
-                                    self.universal_canvas.world_map.center_lat_lon
-                                }
-                            });
-                            self.universal_canvas.ground_origin_lat_lon = target_geo;
-                            self.universal_canvas.ground_origin_anchored = true;
-                            self.universal_canvas.globe_mode = true;
-                            self.universal_canvas.earth_world.camera.tilt_deg = 42.0;
-                            self.universal_canvas.earth_world.start_fly_to(
-                                &self.universal_canvas.world_map,
-                                target_geo.0,
-                                target_geo.1,
-                                18.0,
-                                &entry.name,
-                            );
-                            self.sync_bim_to_fem();
-                            self.build_view
-                                .fit_view_to_project(&mut self.universal_canvas, &self.members);
-                            self.sync_earth_maps();
-                            self.my_project_view.export_success_msg = Some(summary_msg.clone());
-                            self.build_view.modify_status_msg = Some(summary_msg.clone());
-                            self.active_pillar = NavigationPillar::GeometryAssembly;
-                            if self.spatial_workspace.spatial_mode_enabled {
-                                self.spatial_workspace.active_canvas_mode =
-                                    crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
-                                self.spatial_workspace.active_overlay_pillar = None;
-                                self.spatial_workspace.vault_feedback = Some(summary_msg.clone());
-                                self.spatial_workspace.push_trace(summary_msg, true);
-                            }
-                        }
-                        Err(err) => {
-                            let msg = format!("Failed importing IFC '{}': {err}", entry.filename);
-                            self.my_project_view.export_success_msg = Some(msg.clone());
-                            self.spatial_workspace.vault_feedback = Some(msg.clone());
-                            self.spatial_workspace.push_trace(msg, false);
-                        }
-                    }
-                    return;
-                }
-                if let Ok(ws_cfg) = self.universal_canvas.apply_unified_archive(
-                    clean_raw,
-                    &mut self.build_view.bim_bus.project,
-                    &mut self.members,
-                    &mut self.parametric_view.variables,
-                ) {
-                    self.settings_view.apply_workspace_settings(
-                        &ws_cfg,
-                        &mut self.theme,
-                        &mut self.ai_assistant_view.is_visible,
-                    );
-                    self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
-                    self.universal_canvas.ground_origin_anchored = true;
-                    self.universal_canvas.globe_mode = true;
-                    self.sync_bim_to_fem();
-                    self.build_view
-                        .fit_view_to_project(&mut self.universal_canvas, &self.members);
-                    self.sync_earth_maps();
-                    self.sync_lifecycle_from_canvas();
-                    let loaded_msg = format!(
-                        "Loaded workspace '{}' ({} BIM elements, {} drawings, {} FEM members) from Vault.",
-                        entry.name,
-                        self.build_view.bim_bus.project.element_count(),
-                        self.universal_canvas.entities.len(),
-                        self.members.len(),
-                    );
-                    self.my_project_view.export_success_msg = Some(loaded_msg.clone());
-                    self.active_pillar = NavigationPillar::GeometryAssembly;
-                    if self.spatial_workspace.spatial_mode_enabled {
-                        self.spatial_workspace.active_canvas_mode =
-                            crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
-                        self.spatial_workspace.active_overlay_pillar = None;
-                        self.spatial_workspace.push_trace(loaded_msg, true);
-                    }
-                } else {
-                    match crate::core::InternalVault::load_personal_vault_project_model(&entry) {
-                        Ok(model) => {
-                            self.members = model
-                                .elements
-                                .iter()
-                                .map(|el| StructuralMember {
-                                    id: el.id,
-                                    name: el.name.clone(),
-                                    section: el.section.name.clone(),
-                                    ..Default::default()
-                                })
-                                .collect();
-                            let legacy_msg = format!(
-                                "Loaded legacy structural model '{}' ({} nodes, {} elements) from personal Vault.",
-                                model.name,
-                                model.nodes.len(),
-                                model.elements.len()
-                            );
-                            self.my_project_view.export_success_msg = Some(legacy_msg.clone());
-                            self.active_pillar = NavigationPillar::GeometryAssembly;
-                            if self.spatial_workspace.spatial_mode_enabled {
-                                self.spatial_workspace.active_overlay_pillar = None;
-                                self.spatial_workspace.push_trace(legacy_msg, true);
-                            }
-                        }
-                        Err(err) => {
-                            self.my_project_view.export_success_msg =
-                                Some(format!("Failed to load Vault project: {}", err));
-                        }
-                    }
-                }
+        if crate::core::web_bridge::vault_is_file_lazy(&entry.rel_path) {
+            self.pending_lazy_vault_entry = Some(entry.clone());
+            if crate::core::web_bridge::vault_request_file_async(&entry.rel_path, "vault_open") {
+                let msg = format!(
+                    "Streaming '{}' ({:.1} MB) from Vault...",
+                    entry.filename,
+                    entry.size_bytes.max(1) as f64 / 1_048_576.0
+                );
+                self.spatial_workspace.vault_feedback = Some(msg.clone());
+                self.spatial_workspace.push_trace(msg, true);
+                return;
             }
+        }
+        match crate::core::InternalVault::load_personal_vault_raw(&entry) {
+            Ok(raw) => self.open_vault_raw_payload(&entry, &raw),
             Err(err) => {
                 self.my_project_view.export_success_msg =
                     Some(format!("Failed to read Vault file: {}", err));
+                self.spatial_workspace.vault_feedback =
+                    Some(format!("Failed to read Vault file: {}", err));
+            }
+        }
+    }
+
+    fn open_vault_raw_payload(
+        &mut self,
+        entry: &crate::core::vault::PersonalVaultProjectEntry,
+        raw: &str,
+    ) {
+        let clean_raw = raw.trim_start_matches('\u{FEFF}');
+        let is_ifc = entry.filename.to_ascii_lowercase().ends_with(".ifc")
+            || clean_raw
+                .trim_start()
+                .get(..13)
+                .is_some_and(|h| h.eq_ignore_ascii_case("ISO-10303-21;"));
+        if is_ifc {
+            self.import_ifc_raw_onto_earth(&entry.name, &entry.filename, clean_raw);
+            return;
+        }
+        if let Ok(ws_cfg) = self.universal_canvas.apply_unified_archive(
+            clean_raw,
+            &mut self.build_view.bim_bus.project,
+            &mut self.members,
+            &mut self.parametric_view.variables,
+        ) {
+            self.settings_view.apply_workspace_settings(
+                &ws_cfg,
+                &mut self.theme,
+                &mut self.ai_assistant_view.is_visible,
+            );
+            self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+            self.universal_canvas.ground_origin_anchored = true;
+            self.universal_canvas.globe_mode = true;
+            self.sync_bim_to_fem();
+            self.build_view
+                .fit_view_to_project(&mut self.universal_canvas, &self.members);
+            self.sync_earth_maps();
+            self.sync_lifecycle_from_canvas();
+            let loaded_msg = format!(
+                "Loaded workspace '{}' ({} BIM elements, {} drawings, {} FEM members) from Vault.",
+                entry.name,
+                self.build_view.bim_bus.project.element_count(),
+                self.universal_canvas.entities.len(),
+                self.members.len(),
+            );
+            self.my_project_view.export_success_msg = Some(loaded_msg.clone());
+            self.active_pillar = NavigationPillar::GeometryAssembly;
+            if self.spatial_workspace.spatial_mode_enabled {
+                self.spatial_workspace.active_canvas_mode =
+                    crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
+                self.spatial_workspace.active_overlay_pillar = None;
+                self.spatial_workspace.push_trace(loaded_msg, true);
+            }
+        } else if let Ok(model) =
+            crate::core::EigenProjectArchive::deserialize_from_eigen_json(clean_raw)
+                .or_else(|_| serde_json::from_str::<crate::core::StructuralModel>(clean_raw))
+        {
+            self.members = model
+                .elements
+                .iter()
+                .map(|el| StructuralMember {
+                    id: el.id,
+                    name: el.name.clone(),
+                    section: el.section.name.clone(),
+                    ..Default::default()
+                })
+                .collect();
+            let legacy_msg = format!(
+                "Loaded legacy structural model '{}' ({} nodes, {} elements) from personal Vault.",
+                model.name,
+                model.nodes.len(),
+                model.elements.len()
+            );
+            self.my_project_view.export_success_msg = Some(legacy_msg.clone());
+            self.active_pillar = NavigationPillar::GeometryAssembly;
+            if self.spatial_workspace.spatial_mode_enabled {
+                self.spatial_workspace.active_overlay_pillar = None;
+                self.spatial_workspace.push_trace(legacy_msg, true);
+            }
+        } else {
+            let msg = format!("Failed to parse Vault project '{}'.", entry.filename);
+            self.my_project_view.export_success_msg = Some(msg.clone());
+            self.spatial_workspace.vault_feedback = Some(msg);
+        }
+    }
+
+    fn import_ifc_raw_onto_earth(&mut self, display_label: &str, filename: &str, clean_raw: &str) {
+        match crate::core::ifc::IfcModel::parse_to_bim_project_with_fallback(clean_raw, filename) {
+            Ok((proj, site_geo, summary_msg)) => {
+                self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
+                self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
+                self.parametric_view.active_level_idx = 0;
+                let target_geo = site_geo.unwrap_or_else(|| {
+                    if self.universal_canvas.ground_origin_anchored
+                        && (self.universal_canvas.ground_origin_lat_lon.0.abs() > 1e-4
+                            || self.universal_canvas.ground_origin_lat_lon.1.abs() > 1e-4)
+                    {
+                        self.universal_canvas.ground_origin_lat_lon
+                    } else {
+                        self.universal_canvas.world_map.center_lat_lon
+                    }
+                });
+                self.universal_canvas.ground_origin_lat_lon = target_geo;
+                self.universal_canvas.ground_origin_anchored = true;
+                self.universal_canvas.globe_mode = true;
+                self.universal_canvas.earth_world.camera.tilt_deg = 42.0;
+                self.universal_canvas.earth_world.start_fly_to(
+                    &self.universal_canvas.world_map,
+                    target_geo.0,
+                    target_geo.1,
+                    18.0,
+                    display_label,
+                );
+                self.sync_bim_to_fem();
+                self.build_view
+                    .fit_view_to_project(&mut self.universal_canvas, &self.members);
+                self.sync_earth_maps();
+                self.my_project_view.export_success_msg = Some(summary_msg.clone());
+                self.build_view.modify_status_msg = Some(summary_msg.clone());
+                self.active_pillar = NavigationPillar::GeometryAssembly;
+                if self.spatial_workspace.spatial_mode_enabled {
+                    self.spatial_workspace.active_canvas_mode =
+                        crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
+                    self.spatial_workspace.active_overlay_pillar = None;
+                    self.spatial_workspace.vault_feedback = Some(summary_msg.clone());
+                    self.spatial_workspace.push_trace(summary_msg, true);
+                }
+            }
+            Err(err) => {
+                let msg = format!("Failed importing IFC '{}': {err}", filename);
+                self.my_project_view.export_success_msg = Some(msg.clone());
+                self.spatial_workspace.vault_feedback = Some(msg.clone());
+                self.spatial_workspace.push_trace(msg, false);
             }
         }
     }
@@ -2490,9 +2566,14 @@ impl EigenGraphApp {
 
     fn handle_imported_file(&mut self, payload: crate::core::web_bridge::ImportedFilePayload) {
         let lower = payload.filename.to_lowercase();
-        let trimmed = payload.content.trim_start();
-        if lower.ends_with(".ifc") || trimmed.starts_with("ISO-10303-21") {
-            match crate::core::ifc::IfcModel::parse(&payload.content) {
+        let trimmed = payload.content.trim_start_matches('\u{FEFF}').trim_start();
+        if lower.ends_with(".ifc") || trimmed.get(..13).is_some_and(|h| h.eq_ignore_ascii_case("ISO-10303-21")) {
+            let clean_raw = payload.content.trim_start_matches('\u{FEFF}');
+            if self.spatial_workspace.spatial_mode_enabled {
+                self.import_ifc_raw_onto_earth(&payload.filename, &payload.filename, clean_raw);
+                return;
+            }
+            match crate::core::ifc::IfcModel::parse(clean_raw) {
                 Ok(m) => {
                     self.industrialized_view.export_status = Some(format!(
                         "Imported IFC '{}' ({} entities, {} elements).",

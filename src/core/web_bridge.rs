@@ -121,6 +121,21 @@ mod js_vault {
         #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = readFileSync)]
         pub fn read_file_sync(rel_path: &str) -> String;
 
+        #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = readFileSnippetSync)]
+        pub fn read_file_snippet_sync(rel_path: &str) -> String;
+
+        #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = isFileLazy)]
+        pub fn is_file_lazy(rel_path: &str) -> bool;
+
+        #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = requestFileAsync)]
+        pub fn request_file_async(rel_path: &str, mode: &str) -> bool;
+
+        #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = pollStreamStateJson)]
+        pub fn poll_stream_state_json() -> String;
+
+        #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = takeStreamChunkBytes)]
+        pub fn take_stream_chunk_bytes() -> js_sys::Uint8Array;
+
         #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = writeFileAsync)]
         pub fn write_file_async(rel_path: &str, content: &str);
 
@@ -238,6 +253,166 @@ pub fn vault_read_file(rel_path: &str) -> Option<String> {
     {
         let _ = rel_path;
         None
+    }
+}
+
+/// Reads either full inline cached text or the bounded head preview of a lazy large file for quick snippets.
+pub fn vault_read_file_snippet(rel_path: &str) -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let content = js_vault::read_file_snippet_sync(rel_path);
+        if content.is_empty() {
+            None
+        } else {
+            Some(content)
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = rel_path;
+        None
+    }
+}
+
+/// Returns true when the given Vault file is indexed lazily on disk/handle rather than held in RAM.
+pub fn vault_is_file_lazy(rel_path: &str) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_vault::is_file_lazy(rel_path)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = rel_path;
+        false
+    }
+}
+
+/// Starts asynchronous chunked binary streaming of a lazy Vault file in browser WASM.
+pub fn vault_request_file_async(rel_path: &str, mode: &str) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_vault::request_file_async(rel_path, mode)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (rel_path, mode);
+        false
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct JsStreamStatus {
+    #[serde(default)]
+    active: bool,
+    #[serde(default)]
+    id: u64,
+    #[serde(default)]
+    ready: bool,
+    #[serde(default)]
+    filename: String,
+    #[serde(default)]
+    rel_path: String,
+    #[serde(default)]
+    mode: String,
+    #[serde(default)]
+    loaded_bytes: usize,
+    #[serde(default)]
+    total_bytes: usize,
+    #[serde(default)]
+    eof: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct WasmStreamBuffer {
+    stream_id: u64,
+    filename: String,
+    rel_path: String,
+    mode: String,
+    bytes: Vec<u8>,
+}
+
+#[cfg(target_arch = "wasm32")]
+static ACTIVE_WASM_STREAM: std::sync::Mutex<Option<WasmStreamBuffer>> =
+    std::sync::Mutex::new(None);
+
+/// Result of polling any active chunked large-file stream from browser JS into Rust memory.
+#[derive(Debug, Clone)]
+pub enum FileStreamPollResult {
+    Idle,
+    Progress {
+        filename: String,
+        loaded_bytes: usize,
+        total_bytes: usize,
+    },
+    Completed {
+        filename: String,
+        rel_path: String,
+        mode: String,
+        content: String,
+    },
+}
+
+/// Drains one ready binary chunk per call from JS `Blob.slice` without crossing JS's 512 MB single-string ceiling.
+pub fn poll_file_stream_event() -> FileStreamPollResult {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let raw_status = js_vault::poll_stream_state_json();
+        let Ok(st) = serde_json::from_str::<JsStreamStatus>(&raw_status) else {
+            return FileStreamPollResult::Idle;
+        };
+        if !st.active {
+            return FileStreamPollResult::Idle;
+        }
+        if !st.ready {
+            return FileStreamPollResult::Progress {
+                filename: st.filename,
+                loaded_bytes: st.loaded_bytes,
+                total_bytes: st.total_bytes,
+            };
+        }
+        let chunk_arr = js_vault::take_stream_chunk_bytes();
+        let chunk = chunk_arr.to_vec();
+        let Ok(mut guard) = ACTIVE_WASM_STREAM.lock() else {
+            return FileStreamPollResult::Idle;
+        };
+        let buf_state = match guard.as_mut() {
+            Some(existing) if existing.stream_id == st.id => existing,
+            _ => {
+                *guard = Some(WasmStreamBuffer {
+                    stream_id: st.id,
+                    filename: st.filename.clone(),
+                    rel_path: st.rel_path.clone(),
+                    mode: st.mode.clone(),
+                    bytes: Vec::with_capacity(st.total_bytes.min(128 * 1024 * 1024)),
+                });
+                guard.as_mut().unwrap()
+            }
+        };
+        buf_state.bytes.extend_from_slice(&chunk);
+        if st.eof {
+            let finished = guard.take().unwrap();
+            let text = match String::from_utf8(finished.bytes) {
+                Ok(s) => s,
+                Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+            };
+            FileStreamPollResult::Completed {
+                filename: finished.filename,
+                rel_path: finished.rel_path,
+                mode: finished.mode,
+                content: text,
+            }
+        } else {
+            FileStreamPollResult::Progress {
+                filename: st.filename,
+                loaded_bytes: st.loaded_bytes,
+                total_bytes: st.total_bytes,
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        FileStreamPollResult::Idle
     }
 }
 

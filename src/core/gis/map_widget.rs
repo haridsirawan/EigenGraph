@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::f64::consts::PI;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use egui::{Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Ui, Vec2};
 
@@ -95,11 +96,22 @@ enum TileEntryState {
     },
 }
 
-/// Thread-safe / WASM-safe shared raster slippy-tile cache for live web & native map streaming.
+#[derive(Clone)]
+struct CachedTileEntry {
+    state: TileEntryState,
+    last_used_tick: u64,
+}
+
+/// Thread-safe / WASM-safe LRU raster slippy-tile cache for crisp streaming at arbitrary 3D zoom.
 #[derive(Clone, Default)]
 pub struct WorldTileCache {
-    inner: Arc<Mutex<HashMap<(u8, u8, u32, u32), TileEntryState>>>,
+    inner: Arc<Mutex<HashMap<(u8, u8, u32, u32), CachedTileEntry>>>,
+    access_tick: Arc<AtomicU64>,
 }
+
+const MAX_CACHED_TILES: usize = 640;
+const LRU_EVICT_BATCH: usize = 160;
+const MAX_INFLIGHT_TILE_REQUESTS: usize = 20;
 
 impl std::fmt::Debug for WorldTileCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -109,6 +121,10 @@ impl std::fmt::Debug for WorldTileCache {
 }
 
 impl WorldTileCache {
+    fn next_tick(&self) -> u64 {
+        self.access_tick.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
     pub fn clear(&self) {
         if let Ok(mut guard) = self.inner.lock() {
             guard.clear();
@@ -122,7 +138,7 @@ impl WorldTileCache {
         let total = guard.len();
         let ready = guard
             .values()
-            .filter(|v| matches!(v, TileEntryState::Ready { .. }))
+            .filter(|v| matches!(v.state, TileEntryState::Ready { .. }))
             .count();
         (ready, total)
     }
@@ -132,24 +148,41 @@ impl WorldTileCache {
             return;
         }
         let key = (provider.provider_id(), z, x, y);
+        let tick = self.next_tick();
         {
             let Ok(mut guard) = self.inner.lock() else {
                 return;
             };
-            if guard.contains_key(&key) {
+            if let Some(existing) = guard.get_mut(&key) {
+                existing.last_used_tick = tick;
                 return;
             }
             let inflight = guard
                 .values()
-                .filter(|s| matches!(s, TileEntryState::Loading))
+                .filter(|s| matches!(s.state, TileEntryState::Loading))
                 .count();
-            if inflight >= 12 {
+            if inflight >= MAX_INFLIGHT_TILE_REQUESTS {
                 return;
             }
-            if guard.len() > 240 {
-                guard.retain(|_, v| matches!(v, TileEntryState::Loading));
+            if guard.len() >= MAX_CACHED_TILES {
+                // Evict only oldest least-recently-used non-loading entries so crisp parent tiles remain resident.
+                let mut candidates: Vec<((u8, u8, u32, u32), u64)> = guard
+                    .iter()
+                    .filter(|(_, v)| !matches!(v.state, TileEntryState::Loading))
+                    .map(|(k, v)| (*k, v.last_used_tick))
+                    .collect();
+                candidates.sort_by_key(|(_, t)| *t);
+                for (old_k, _) in candidates.into_iter().take(LRU_EVICT_BATCH) {
+                    guard.remove(&old_k);
+                }
             }
-            guard.insert(key, TileEntryState::Loading);
+            guard.insert(
+                key,
+                CachedTileEntry {
+                    state: TileEntryState::Loading,
+                    last_used_tick: tick,
+                },
+            );
         }
 
         let url = provider.tile_url(z, x, y);
@@ -157,7 +190,13 @@ impl WorldTileCache {
         {
             let _ = (ctx, url);
             if let Ok(mut guard) = self.inner.lock() {
-                guard.insert(key, TileEntryState::Failed);
+                guard.insert(
+                    key,
+                    CachedTileEntry {
+                        state: TileEntryState::Failed,
+                        last_used_tick: tick,
+                    },
+                );
             }
         }
 
@@ -165,6 +204,7 @@ impl WorldTileCache {
         {
             let inner = self.inner.clone();
             let ctx_clone = ctx.clone();
+            let access_tick = self.access_tick.clone();
             std::thread::spawn(move || {
                 let output = std::process::Command::new("curl")
                     .args([
@@ -174,7 +214,7 @@ impl WorldTileCache {
                         "--max-time",
                         "8",
                         "-A",
-                        "EigenGraph-BIM/0.3.5 (https://eigengraph.net)",
+                        "EigenGraph-BIM/0.5.6 (https://eigengraph.net)",
                         &url,
                     ])
                     .output();
@@ -185,17 +225,27 @@ impl WorldTileCache {
                         None
                     }
                 });
+                let done_tick = access_tick.fetch_add(1, Ordering::Relaxed) + 1;
                 if let Ok(mut guard) = inner.lock() {
                     if let Some(image) = decoded {
                         guard.insert(
                             key,
-                            TileEntryState::Ready {
-                                image: Some(image),
-                                texture: None,
+                            CachedTileEntry {
+                                state: TileEntryState::Ready {
+                                    image: Some(image),
+                                    texture: None,
+                                },
+                                last_used_tick: done_tick,
                             },
                         );
                     } else {
-                        guard.insert(key, TileEntryState::Failed);
+                        guard.insert(
+                            key,
+                            CachedTileEntry {
+                                state: TileEntryState::Failed,
+                                last_used_tick: done_tick,
+                            },
+                        );
                     }
                 }
                 ctx_clone.request_repaint();
@@ -206,20 +256,31 @@ impl WorldTileCache {
         {
             let inner = self.inner.clone();
             let ctx_clone = ctx.clone();
+            let access_tick = self.access_tick.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let fetched = fetch_tile_wasm(&url).await;
                 let decoded = fetched.and_then(|bytes| decode_tile_bytes_to_color_image(&bytes));
+                let done_tick = access_tick.fetch_add(1, Ordering::Relaxed) + 1;
                 if let Ok(mut guard) = inner.lock() {
                     if let Some(image) = decoded {
                         guard.insert(
                             key,
-                            TileEntryState::Ready {
-                                image: Some(image),
-                                texture: None,
+                            CachedTileEntry {
+                                state: TileEntryState::Ready {
+                                    image: Some(image),
+                                    texture: None,
+                                },
+                                last_used_tick: done_tick,
                             },
                         );
                     } else {
-                        guard.insert(key, TileEntryState::Failed);
+                        guard.insert(
+                            key,
+                            CachedTileEntry {
+                                state: TileEntryState::Failed,
+                                last_used_tick: done_tick,
+                            },
+                        );
                     }
                 }
                 ctx_clone.request_repaint();
@@ -237,11 +298,13 @@ impl WorldTileCache {
     ) -> Option<egui::TextureId> {
         let p = provider.provider_id();
         let key = (p, z, x, y);
+        let tick = self.next_tick();
         let Ok(mut guard) = self.inner.lock() else {
             return None;
         };
         let entry = guard.get_mut(&key)?;
-        if let TileEntryState::Ready { image, texture } = entry {
+        entry.last_used_tick = tick;
+        if let TileEntryState::Ready { image, texture } = &mut entry.state {
             if let Some(tex) = texture {
                 return Some(tex.id());
             }
@@ -841,7 +904,7 @@ impl SlippyMapState {
             let (north_lat, _) = WebMercator::tile_coords_to_lat_lon(0.0, ty_i as f64, z_int as f32);
             let (south_lat, _) = WebMercator::tile_coords_to_lat_lon(0.0, (ty_i + 1) as f64, z_int as f32);
             for tx_raw in min_tx..=max_tx {
-                if budget >= 64 {
+                if budget >= 120 {
                     break;
                 }
                 budget += 1;
@@ -863,7 +926,7 @@ impl SlippyMapState {
                         uv_rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                     });
                 } else {
-                    for ancestor in 1..=2_u8 {
+                    for ancestor in 1..=5_u8 {
                         if z_int <= ancestor {
                             break;
                         }
@@ -892,6 +955,140 @@ impl SlippyMapState {
         out
     }
 
+    /// Computes exact physical-pixel-calibrated Slippy tile zoom level `z` for the 3D globe camera.
+    pub fn resolved_3d_tile_zoom(
+        &self,
+        xform: &super::earth_globe::GlobeScreenTransform,
+        pixels_per_point: f32,
+    ) -> u8 {
+        let ppp = (pixels_per_point as f64).clamp(1.0, 4.0);
+        let m_per_phys_px = (xform.d_surf / (xform.f_px * ppp).max(120.0)) * EARTH_RADIUS_METERS;
+        let cos_lat = xform.center_lat_deg.to_radians().cos().clamp(0.15, 1.0);
+        let exact_z = (156543.03392 * cos_lat / m_per_phys_px.max(0.05)).log2();
+        let max_z = self.tile_provider.max_zoom();
+        ((exact_z + 0.35).floor() as i32).clamp(2, max_z) as u8
+    }
+
+    /// Streams 3D-perspective & HiDPI calibrated Mercator tiles for curved globe zoom (`zoom >= 4.5`).
+    pub fn collect_globe_site_tile_quads(
+        &self,
+        ctx: &egui::Context,
+        xform: &super::earth_globe::GlobeScreenTransform,
+    ) -> Vec<TileGeoQuad> {
+        if self.tile_provider == TileSource::SyntheticVectorTerrain {
+            return Vec::new();
+        }
+        let z_int = self.resolved_3d_tile_zoom(xform, ctx.pixels_per_point());
+        let n_tiles = 1_i64 << z_int;
+        let n_f = n_tiles as f64;
+        let (ctx_f, cty_f) = WebMercator::lat_lon_to_tile_coords(
+            xform.center_lat_deg,
+            xform.center_lon_deg,
+            z_int as f32,
+        );
+
+        let mut min_tx = ctx_f.floor() as i64 - 1;
+        let mut max_tx = ctx_f.floor() as i64 + 1;
+        let mut min_ty = (cty_f.floor() as i64 - 1).clamp(0, n_tiles - 1);
+        let mut max_ty = (cty_f.floor() as i64 + 1).clamp(0, n_tiles - 1);
+
+        for gy in 0..=4 {
+            let fy = -0.06 + (gy as f32) * 0.28;
+            for gx in 0..=4 {
+                let fx = -0.06 + (gx as f32) * 0.28;
+                let sp = Pos2::new(
+                    xform.rect.min.x + xform.rect.width() * fx,
+                    xform.rect.min.y + xform.rect.height() * fy,
+                );
+                let (lat, lon, hit) = xform.screen_to_lat_lon(sp);
+                if !hit {
+                    continue;
+                }
+                let (mut tx_f, ty_f) = WebMercator::lat_lon_to_tile_coords(lat, lon, z_int as f32);
+                while tx_f - ctx_f > n_f * 0.5 {
+                    tx_f -= n_f;
+                }
+                while tx_f - ctx_f < -n_f * 0.5 {
+                    tx_f += n_f;
+                }
+                let txi = tx_f.floor() as i64;
+                let tyi = (ty_f.floor() as i64).clamp(0, n_tiles - 1);
+                min_tx = min_tx.min(txi);
+                max_tx = max_tx.max(txi);
+                min_ty = min_ty.min(tyi);
+                max_ty = max_ty.max(tyi);
+            }
+        }
+
+        // Clamp radial spread around focus center so tilted horizon views stay within crisp tile budget
+        let c_txi = ctx_f.floor() as i64;
+        let c_tyi = cty_f.floor() as i64;
+        min_tx = min_tx.max(c_txi - 5);
+        max_tx = max_tx.min(c_txi + 5);
+        min_ty = min_ty.max(c_tyi - 5).clamp(0, n_tiles - 1);
+        max_ty = max_ty.min(c_tyi + 5).clamp(0, n_tiles - 1);
+
+        let mut coords: Vec<(i64, i64, f64)> = Vec::new();
+        for ty_i in min_ty..=max_ty {
+            for tx_raw in min_tx..=max_tx {
+                let dx = tx_raw as f64 + 0.5 - ctx_f;
+                let dy = ty_i as f64 + 0.5 - cty_f;
+                coords.push((tx_raw, ty_i, dx * dx + dy * dy));
+            }
+        }
+        coords.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut out = Vec::with_capacity(coords.len().min(120));
+        for (tx_raw, ty_i, _) in coords.into_iter().take(120) {
+            let ty = ty_i as u32;
+            let (north_lat, _) = WebMercator::tile_coords_to_lat_lon(0.0, ty_i as f64, z_int as f32);
+            let (south_lat, _) = WebMercator::tile_coords_to_lat_lon(0.0, (ty_i + 1) as f64, z_int as f32);
+            let tx_wrapped = tx_raw.rem_euclid(n_tiles) as u32;
+            let west_lon = (tx_raw as f64 / n_f) * 360.0 - 180.0;
+            let east_lon = ((tx_raw + 1) as f64 / n_f) * 360.0 - 180.0;
+
+            self.tile_cache.request_tile(ctx, self.tile_provider, z_int, tx_wrapped, ty);
+
+            if let Some(tex_id) =
+                self.tile_cache.get_or_upload_texture(ctx, self.tile_provider, z_int, tx_wrapped, ty)
+            {
+                out.push(TileGeoQuad {
+                    tex_id,
+                    north_lat,
+                    west_lon,
+                    south_lat,
+                    east_lon,
+                    uv_rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                });
+            } else {
+                for ancestor in 1..=5_u8 {
+                    if z_int <= ancestor {
+                        break;
+                    }
+                    let pz = z_int - ancestor;
+                    let factor = 1_u32 << ancestor;
+                    let px = tx_wrapped / factor;
+                    let py = ty / factor;
+                    if let Some(ptex) = self.tile_cache.get_or_upload_texture(ctx, self.tile_provider, pz, px, py) {
+                        let sx = (tx_wrapped % factor) as f32 / factor as f32;
+                        let sy = (ty % factor) as f32 / factor as f32;
+                        let sw = 1.0 / factor as f32;
+                        out.push(TileGeoQuad {
+                            tex_id: ptex,
+                            north_lat,
+                            west_lon,
+                            south_lat,
+                            east_lon,
+                            uv_rect: Rect::from_min_max(Pos2::new(sx, sy), Pos2::new(sx + sw, sy + sw)),
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// Streams front-hemisphere Web Mercator tiles sized for curved 3D Earth orbital zoom (`zoom < 4.5`).
     pub fn collect_globe_tile_quads(
         &self,
@@ -904,7 +1101,8 @@ impl SlippyMapState {
             return Vec::new();
         }
         let max_z = self.tile_provider.max_zoom();
-        let z_int = (self.zoom_level.round() as i32 + 1).clamp(min_z as i32, max_z.min(4)) as u8;
+        let dpi_boost = ctx.pixels_per_point().max(1.0).log2();
+        let z_int = ((self.zoom_level + dpi_boost).round() as i32 + 1).clamp(min_z as i32, max_z.min(5)) as u8;
         let n_tiles = 1_i64 << z_int;
         let n_f = n_tiles as f64;
         let c_vec = super::earth_globe::lat_lon_to_unit_sphere(center_lat, center_lon);
@@ -937,21 +1135,29 @@ impl SlippyMapState {
                         east_lon,
                         uv_rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                     });
-                } else if z_int > 1 {
-                    let pz = z_int - 1;
-                    let px = tx / 2;
-                    let py = ty / 2;
-                    if let Some(ptex) = self.tile_cache.get_or_upload_texture(ctx, self.tile_provider, pz, px, py) {
-                        let sx = (tx % 2) as f32 * 0.5;
-                        let sy = (ty % 2) as f32 * 0.5;
-                        out.push(TileGeoQuad {
-                            tex_id: ptex,
-                            north_lat,
-                            west_lon,
-                            south_lat,
-                            east_lon,
-                            uv_rect: Rect::from_min_max(Pos2::new(sx, sy), Pos2::new(sx + 0.5, sy + 0.5)),
-                        });
+                } else {
+                    for ancestor in 1..=3_u8 {
+                        if z_int <= ancestor {
+                            break;
+                        }
+                        let pz = z_int - ancestor;
+                        let factor = 1_u32 << ancestor;
+                        let px = tx / factor;
+                        let py = ty / factor;
+                        if let Some(ptex) = self.tile_cache.get_or_upload_texture(ctx, self.tile_provider, pz, px, py) {
+                            let sx = (tx % factor) as f32 / factor as f32;
+                            let sy = (ty % factor) as f32 / factor as f32;
+                            let sw = 1.0 / factor as f32;
+                            out.push(TileGeoQuad {
+                                tex_id: ptex,
+                                north_lat,
+                                west_lon,
+                                south_lat,
+                                east_lon,
+                                uv_rect: Rect::from_min_max(Pos2::new(sx, sy), Pos2::new(sx + sw, sy + sw)),
+                            });
+                            break;
+                        }
                     }
                 }
             }
@@ -1779,14 +1985,63 @@ mod tests {
         if let Ok(mut guard) = cache.inner.lock() {
             guard.insert(
                 (1, 14, 12000, 8000),
-                TileEntryState::Ready {
-                    image: Some(color_img),
-                    texture: None,
+                CachedTileEntry {
+                    state: TileEntryState::Ready {
+                        image: Some(color_img),
+                        texture: None,
+                    },
+                    last_used_tick: 1,
                 },
             );
         }
         let (ready, total) = cache.stats();
         assert_eq!(ready, 1);
         assert_eq!(total, 1);
+    }
+
+    #[test]
+    fn test_phase56_earth3d_pixel_calibrated_tile_lod_and_lru_cache() {
+        let mut map = SlippyMapState::default();
+        map.tile_provider = TileSource::EsriWorldImagery;
+        map.center_lat_lon = (-6.2088, 106.8456);
+        map.zoom_level = 15.0;
+
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 900.0));
+        let cam = crate::core::gis::earth_globe::GlobeCamera::default();
+        let xform = crate::core::gis::earth_globe::GlobeScreenTransform::from_view(
+            rect,
+            map.center_lat_lon.0,
+            map.center_lat_lon.1,
+            map.zoom_level,
+            &cam,
+        );
+
+        // At zoom=15 on a 900px viewport, 3D camera surface scale is ~1.3 m/px -> must request >= Z17 (not blurry Z15)
+        let z_1x = map.resolved_3d_tile_zoom(&xform, 1.0);
+        let z_retina = map.resolved_3d_tile_zoom(&xform, 2.0);
+        assert!(z_1x >= 17, "Expected >= Z17 at camera zoom=15.0 (1x DPI), got Z{z_1x}");
+        assert!(z_retina >= 18, "Expected >= Z18 on HiDPI 2x screen, got Z{z_retina}");
+
+        // Verify LRU eviction preserves newest ready entries instead of flushing the entire cache
+        let cache = WorldTileCache::default();
+        if let Ok(mut guard) = cache.inner.lock() {
+            for idx in 0..(MAX_CACHED_TILES + 10) {
+                let tick = cache.next_tick();
+                guard.insert(
+                    (3, 17, idx as u32, 100),
+                    CachedTileEntry {
+                        state: TileEntryState::Failed,
+                        last_used_tick: tick,
+                    },
+                );
+            }
+        }
+        let ctx = egui::Context::default();
+        cache.request_tile(&ctx, TileSource::EsriWorldImagery, 17, 999999, 100);
+        let (_, remaining) = cache.stats();
+        assert!(remaining > 400 && remaining < MAX_CACHED_TILES, "LRU must retain recent tiles (remaining={remaining})");
+        let guard = cache.inner.lock().unwrap();
+        assert!(guard.contains_key(&(3, 17, (MAX_CACHED_TILES + 5) as u32, 100)));
+        assert!(!guard.contains_key(&(3, 17, 0, 100)));
     }
 }

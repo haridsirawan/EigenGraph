@@ -1592,13 +1592,19 @@ impl PlanetaryWorldState {
         let quads = if world_map.zoom_level < 4.5 {
             world_map.collect_globe_tile_quads(ctx, tile_z_min, xform.center_lat_deg, xform.center_lon_deg)
         } else {
-            world_map.collect_visible_tile_quads(
-                ctx,
-                xform.rect.width() * 1.45,
-                xform.rect.height() * 1.45,
-            )
+            world_map.collect_globe_site_tile_quads(ctx, xform)
         };
-        const SUB: usize = 4;
+        let sub: usize = if world_map.zoom_level >= 10.5 { 2 } else { 4 };
+        let use_merc_interp = world_map.zoom_level < 10.0;
+        let max_provider_z = world_map.tile_provider.max_zoom() as f32;
+        let overzoom_fade = ((world_map.zoom_level - (max_provider_z + 0.5)).clamp(0.0, 2.0) / 2.0) * 0.16;
+        let base_tint = if overzoom_fade > 0.01 {
+            let v = (255.0 * (1.0 - overzoom_fade)).round() as u8;
+            Color32::from_rgb(v, v, (v as f32 * 1.02).min(255.0) as u8)
+        } else {
+            Color32::WHITE
+        };
+
         for quad in quads {
             let mid_lat = 0.5 * (quad.north_lat + quad.south_lat);
             let mid_lon = 0.5 * (quad.west_lon + quad.east_lon);
@@ -1610,11 +1616,26 @@ impl PlanetaryWorldState {
                 continue;
             }
 
+            let (y_north, y_south) = if use_merc_interp {
+                let lat_to_merc_y = |deg: f64| -> f64 {
+                    let r = deg.clamp(-85.05, 85.05).to_radians();
+                    (std::f64::consts::FRAC_PI_4 + r * 0.5).tan().ln()
+                };
+                (lat_to_merc_y(quad.north_lat), lat_to_merc_y(quad.south_lat))
+            } else {
+                (0.0, 0.0)
+            };
+
             let mut mesh = egui::epaint::Mesh::with_texture(quad.tex_id);
             let sample = |ix: usize, iy: usize| -> Option<(Pos2, Pos2, Color32, bool)> {
-                let fx = ix as f64 / SUB as f64;
-                let fy = iy as f64 / SUB as f64;
-                let lat = quad.north_lat + (quad.south_lat - quad.north_lat) * fy;
+                let fx = ix as f64 / sub as f64;
+                let fy = iy as f64 / sub as f64;
+                let lat = if use_merc_interp {
+                    let my = y_north + (y_south - y_north) * fy;
+                    my.sinh().atan().to_degrees()
+                } else {
+                    quad.north_lat + (quad.south_lat - quad.north_lat) * fy
+                };
                 let lon = quad.west_lon + (quad.east_lon - quad.west_lon) * fx;
                 let w = lat_lon_to_unit_sphere(lat, lon);
                 let (sp, _, front) = xform.project_lat_lon_elev(lat, lon, 0.0)?;
@@ -1622,21 +1643,21 @@ impl PlanetaryWorldState {
                     quad.uv_rect.min.x + quad.uv_rect.width() * fx as f32,
                     quad.uv_rect.min.y + quad.uv_rect.height() * fy as f32,
                 );
-                let shade = self.shade_color(Color32::WHITE, w, xform);
+                let shade = self.shade_color(base_tint, w, xform);
                 Some((sp, uv, shade, front))
             };
 
-            let mut grid: Vec<Vec<Option<(Pos2, Pos2, Color32, bool)>>> = Vec::with_capacity(SUB + 1);
-            for iy in 0..=SUB {
-                let mut row = Vec::with_capacity(SUB + 1);
-                for ix in 0..=SUB {
+            let mut grid: Vec<Vec<Option<(Pos2, Pos2, Color32, bool)>>> = Vec::with_capacity(sub + 1);
+            for iy in 0..=sub {
+                let mut row = Vec::with_capacity(sub + 1);
+                for ix in 0..=sub {
                     row.push(sample(ix, iy));
                 }
                 grid.push(row);
             }
 
-            for iy in 0..SUB {
-                for ix in 0..SUB {
+            for iy in 0..sub {
+                for ix in 0..sub {
                     let (Some(a), Some(b), Some(c), Some(d)) = (
                         grid[iy][ix],
                         grid[iy][ix + 1],

@@ -1210,7 +1210,13 @@ impl IfcModel {
                     if let Some(prof_id) = item_ent.get_ref(0) {
                         if let Some(prof) = step_model.entities.get(&prof_id) {
                             match prof.type_name.as_str() {
-                                "IFCRECTANGLEPROFILEDEF" | "IFCRECTANGLEHOLLOWPROFILEDEF" => {
+                                "IFCRECTANGLEPROFILEDEF"
+                                | "IFCRECTANGLEHOLLOWPROFILEDEF"
+                                | "IFCISHAPEPROFILEDEF"
+                                | "IFCLSHAPEPROFILEDEF"
+                                | "IFCTSHAPEPROFILEDEF"
+                                | "IFCUSHAPEPROFILEDEF"
+                                | "IFCCSHAPEPROFILEDEF" => {
                                     let hx = prof.get_f64(3).unwrap_or(400.0) * unit_scale * 0.5;
                                     let hy = prof.get_f64(4).unwrap_or(400.0) * unit_scale * 0.5;
                                     profile_pts = vec![(-hx, -hy), (hx, -hy), (hx, hy), (-hx, hy)];
@@ -1294,6 +1300,151 @@ impl IfcModel {
                                 lines.push((xform_pt(first), xform_pt(last)));
                             }
                         }
+                    }
+                }
+                "IFCFACETEDBREP" => {
+                    if let Some(shell_id) = item_ent.get_ref(0) {
+                        extract_item(
+                            step_model,
+                            shell_id,
+                            false,
+                            depth_guard + 1,
+                            origin,
+                            xform_pt,
+                            xform_dir,
+                            axis_frame,
+                            unit_scale,
+                            cartesian_points,
+                            directions,
+                            point_lists_m,
+                            lines,
+                            push_pt,
+                        );
+                    }
+                }
+                "IFCSHELLBASEDSURFACEMODEL" | "IFCFACEBASEDSURFACEMODEL" => {
+                    for shell_id in item_ent.get_ref_list(0) {
+                        extract_item(
+                            step_model,
+                            shell_id,
+                            false,
+                            depth_guard + 1,
+                            origin,
+                            xform_pt,
+                            xform_dir,
+                            axis_frame,
+                            unit_scale,
+                            cartesian_points,
+                            directions,
+                            point_lists_m,
+                            lines,
+                            push_pt,
+                        );
+                    }
+                }
+                "IFCCLOSEDSHELL" | "IFCOPENSHELL" | "IFCCONNECTEDFACESET" => {
+                    for face_id in item_ent.get_ref_list(0).into_iter().take(256) {
+                        extract_item(
+                            step_model,
+                            face_id,
+                            false,
+                            depth_guard + 1,
+                            origin,
+                            xform_pt,
+                            xform_dir,
+                            axis_frame,
+                            unit_scale,
+                            cartesian_points,
+                            directions,
+                            point_lists_m,
+                            lines,
+                            push_pt,
+                        );
+                    }
+                }
+                "IFCFACE" | "IFCFACESURFACE" => {
+                    for bound_id in item_ent.get_ref_list(0) {
+                        extract_item(
+                            step_model,
+                            bound_id,
+                            false,
+                            depth_guard + 1,
+                            origin,
+                            xform_pt,
+                            xform_dir,
+                            axis_frame,
+                            unit_scale,
+                            cartesian_points,
+                            directions,
+                            point_lists_m,
+                            lines,
+                            push_pt,
+                        );
+                    }
+                }
+                "IFCFACEOUTERBOUND" | "IFCFACEBOUND" => {
+                    if let Some(loop_id) = item_ent.get_ref(0) {
+                        extract_item(
+                            step_model,
+                            loop_id,
+                            false,
+                            depth_guard + 1,
+                            origin,
+                            xform_pt,
+                            xform_dir,
+                            axis_frame,
+                            unit_scale,
+                            cartesian_points,
+                            directions,
+                            point_lists_m,
+                            lines,
+                            push_pt,
+                        );
+                    }
+                }
+                "IFCPOLYLOOP" => {
+                    let pt_ids = item_ent.get_ref_list(0);
+                    let mut pts = Vec::with_capacity(pt_ids.len());
+                    for pid in pt_ids {
+                        if let Some(&raw_p) = cartesian_points.get(&pid) {
+                            let wp = xform_pt(raw_p);
+                            push_pt(wp);
+                            pts.push(wp);
+                        }
+                    }
+                    if lines.len() < 48 {
+                        for pair in pts.windows(2) {
+                            lines.push((pair[0], pair[1]));
+                        }
+                        if pts.len() >= 3 {
+                            lines.push((*pts.last().unwrap(), pts[0]));
+                        }
+                    }
+                }
+                "IFCSWEPTDISKSOLID" => {
+                    if let Some(curve_id) = item_ent.get_ref(0) {
+                        let radius = item_ent.get_f64(1).unwrap_or(50.0).abs() * unit_scale;
+                        let mut disk_pts = Vec::new();
+                        extract_item(
+                            step_model,
+                            curve_id,
+                            false,
+                            depth_guard + 1,
+                            origin,
+                            xform_pt,
+                            xform_dir,
+                            axis_frame,
+                            unit_scale,
+                            cartesian_points,
+                            directions,
+                            point_lists_m,
+                            &mut disk_pts,
+                            &mut |pt| {
+                                push_pt((pt.0 - radius, pt.1 - radius, pt.2 - radius));
+                                push_pt((pt.0 + radius, pt.1 + radius, pt.2 + radius));
+                            },
+                        );
+                        lines.extend(disk_pts);
                     }
                 }
                 _ => {}
@@ -1602,8 +1753,8 @@ impl IfcModel {
     pub fn to_bim_project(&self) -> Result<crate::core::bim::BimProject, String> {
         use crate::core::P2;
         use crate::core::bim::{
-            BimColumn, BimFooting, BimGrid, BimLevel, BimProject, BimRun, BimSlab, BimWall,
-            RunCategory, RunJustify, ViewRange,
+            BimColumn, BimFooting, BimGrid, BimLevel, BimOpening, BimProject, BimRun, BimSlab,
+            BimWall, OpeningKind, RunCategory, RunJustify, ViewRange,
         };
 
         fn collect_storeys(node: &IfcSpatialNode, out: &mut Vec<(String, f64)>) {
@@ -1694,8 +1845,11 @@ impl IfcModel {
         let mut slabs = Vec::new();
         let mut xs_mm: Vec<f64> = Vec::new();
         let mut ys_mm: Vec<f64> = Vec::new();
+        let mut wall_step_to_idx: HashMap<usize, usize> = HashMap::new();
+        let mut elem_by_step: HashMap<usize, &IfcElementSummary> = HashMap::new();
 
         for el in &self.elements {
+            elem_by_step.insert(el.step_id, el);
             let dx = (el.bbox.max_x - el.bbox.min_x).abs();
             let dy = (el.bbox.max_y - el.bbox.min_y).abs();
             let dz = (el.bbox.max_z - el.bbox.min_z).abs();
@@ -1712,6 +1866,7 @@ impl IfcModel {
                         (P2(cx, cy - half), P2(cx, cy + half), (dx * 1000.0).clamp(120.0, 500.0))
                     };
                     let base_lvl = match_level(el.bbox.min_z);
+                    let w_idx = walls.len();
                     walls.push(BimWall {
                         id: alloc_id(),
                         name: if el.name.is_empty() { "IFC Wall".to_string() } else { el.name.clone() },
@@ -1725,6 +1880,7 @@ impl IfcModel {
                         layers: BimWall::default_compound_layers(thk_mm),
                         openings: Vec::new(),
                     });
+                    wall_step_to_idx.insert(el.step_id, w_idx);
                     xs_mm.extend([p0.0, p1.0]);
                     ys_mm.extend([p0.1, p1.1]);
                 }
@@ -1833,6 +1989,117 @@ impl IfcModel {
             }
         }
 
+        // Project IFCRELVOIDSELEMENT / IFCRELFILLSELEMENT (Doors & Windows) into host wall openings
+        if !walls.is_empty() {
+            let mut opening_to_filler: HashMap<usize, usize> = HashMap::new();
+            for fill in self.raw_step.get_entities_of_type("IFCRELFILLSELEMENT") {
+                if let (Some(op_id), Some(el_id)) = (fill.get_ref(4), fill.get_ref(5)) {
+                    opening_to_filler.insert(op_id, el_id);
+                }
+            }
+            let mut matched_fillers = std::collections::HashSet::new();
+            let push_opening_onto_wall = |wall: &mut BimWall, oid: usize, levels: &[BimLevel], geom_el: &IfcElementSummary, kind: OpeningKind, mark_prefix: &str| {
+                let wlen = wall.start.dist(wall.end).max(400.0);
+                let dir_x = (wall.end.0 - wall.start.0) / wlen;
+                let dir_y = (wall.end.1 - wall.start.1) / wlen;
+                let dx_m = (geom_el.bbox.max_x - geom_el.bbox.min_x).abs();
+                let dy_m = (geom_el.bbox.max_y - geom_el.bbox.min_y).abs();
+                let dz_m = (geom_el.bbox.max_z - geom_el.bbox.min_z).abs();
+                let proj_w = (dx_m * dir_x.abs() + dy_m * dir_y.abs()) * 1000.0;
+                let def_w = if matches!(kind, OpeningKind::SingleDoor | OpeningKind::DoubleDoor | OpeningKind::SlidingDoor) {
+                    900.0
+                } else {
+                    1500.0
+                };
+                let q_w = geom_el.quantities.get("Width").copied().unwrap_or(0.0) * 1000.0;
+                let base_w = if proj_w.max(q_w) >= 350.0 { proj_w.max(q_w) } else { def_w };
+                let width_mm = base_w.clamp(500.0, (wlen - 200.0).max(500.0));
+                let height_mm = (dz_m * 1000.0).max(geom_el.quantities.get("Height").copied().unwrap_or(0.0) * 1000.0).clamp(600.0, 2600.0);
+                let cx_mm = geom_el.centroid.0 * 1000.0;
+                let cy_mm = geom_el.centroid.1 * 1000.0;
+                let proj_along = (cx_mm - wall.start.0) * dir_x + (cy_mm - wall.start.1) * dir_y;
+                let offset_along_mm = (proj_along - width_mm * 0.5).clamp(100.0, (wlen - width_mm - 100.0).max(100.0));
+                let base_z_mm = levels.iter().find(|l| l.id == wall.base_level_id).map(|l| l.elevation_mm).unwrap_or(0.0);
+                let raw_sill = geom_el.bbox.min_z * 1000.0 - base_z_mm;
+                let sill_height_mm = if matches!(kind, OpeningKind::SingleDoor | OpeningKind::DoubleDoor | OpeningKind::SlidingDoor) {
+                    raw_sill.clamp(0.0, 150.0)
+                } else {
+                    raw_sill.clamp(400.0, 1600.0)
+                };
+                wall.openings.push(BimOpening {
+                    id: oid,
+                    mark: format!("{mark_prefix}{oid}"),
+                    kind,
+                    offset_along_mm,
+                    width_mm,
+                    height_mm,
+                    sill_height_mm,
+                    flip_facing: false,
+                    flip_hand: false,
+                });
+            };
+
+            for rel in self.raw_step.get_entities_of_type("IFCRELVOIDSELEMENT") {
+                if let (Some(host_id), Some(opening_id)) = (rel.get_ref(4), rel.get_ref(5)) {
+                    if let Some(&w_idx) = wall_step_to_idx.get(&host_id) {
+                        let filler_id = opening_to_filler.get(&opening_id).copied();
+                        let filler_el = filler_id.and_then(|fid| elem_by_step.get(&fid).copied());
+                        let geom_el = filler_el.or_else(|| elem_by_step.get(&opening_id).copied());
+                        if let Some(gel) = geom_el {
+                            if let Some(fid) = filler_id {
+                                matched_fillers.insert(fid);
+                            }
+                            let is_window = gel.class_name == "IFCWINDOW"
+                                || filler_el.is_some_and(|f| f.class_name == "IFCWINDOW");
+                            let kind = if is_window {
+                                OpeningKind::CasementWindow
+                            } else {
+                                OpeningKind::SingleDoor
+                            };
+                            let oid = alloc_id();
+                            push_opening_onto_wall(&mut walls[w_idx], oid, &levels, gel, kind, if is_window { "W-" } else { "D-" });
+                        }
+                    }
+                }
+            }
+
+            // Proximity fallback for standalone IFCDOOR / IFCWINDOW not explicitly linked via IFCRELVOIDSELEMENT
+            for el in &self.elements {
+                if matched_fillers.contains(&el.step_id)
+                    || (el.class_name != "IFCDOOR" && el.class_name != "IFCWINDOW")
+                {
+                    continue;
+                }
+                let p = P2(el.centroid.0 * 1000.0, el.centroid.1 * 1000.0);
+                let mut best: Option<(usize, f64)> = None;
+                for (w_idx, w) in walls.iter().enumerate() {
+                    let ab_x = w.end.0 - w.start.0;
+                    let ab_y = w.end.1 - w.start.1;
+                    let ab_len2 = ab_x * ab_x + ab_y * ab_y;
+                    if ab_len2 < 1.0 {
+                        continue;
+                    }
+                    let t = (((p.0 - w.start.0) * ab_x + (p.1 - w.start.1) * ab_y) / ab_len2).clamp(0.0, 1.0);
+                    let qx = w.start.0 + t * ab_x;
+                    let qy = w.start.1 + t * ab_y;
+                    let d = ((p.0 - qx).powi(2) + (p.1 - qy).powi(2)).sqrt();
+                    if d < 550.0 && best.is_none_or(|(_, bd)| d < bd) {
+                        best = Some((w_idx, d));
+                    }
+                }
+                if let Some((w_idx, _)) = best {
+                    let is_window = el.class_name == "IFCWINDOW";
+                    let kind = if is_window {
+                        OpeningKind::CasementWindow
+                    } else {
+                        OpeningKind::SingleDoor
+                    };
+                    let oid = alloc_id();
+                    push_opening_onto_wall(&mut walls[w_idx], oid, &levels, el, kind, if is_window { "W-" } else { "D-" });
+                }
+            }
+        }
+
         if walls.is_empty() && columns.is_empty() && runs.is_empty() && footings.is_empty() && slabs.is_empty() {
             return Err("No convertible BIM structural/architectural elements found in this IFC model.".to_string());
         }
@@ -1916,6 +2183,57 @@ impl IfcModel {
             let lon = parse_dms(site.parameters.get(10));
             if let (Some(la), Some(lo)) = (lat, lon) {
                 if (la.abs() > 1e-4 || lo.abs() > 1e-4) && (-90.0..=90.0).contains(&la) && (-180.0..=180.0).contains(&lo) {
+                    return Some((la, lo));
+                }
+            }
+        }
+        // Fallback: IFC4/4.3 IFCMAPCONVERSION + IFCPROJECTEDCRS UTM Eastings/Northings -> WGS84 (lat, lon)
+        for mc in self.raw_step.get_entities_of_type("IFCMAPCONVERSION") {
+            let east = mc.get_f64(2).unwrap_or(0.0);
+            let north = mc.get_f64(3).unwrap_or(0.0);
+            if east.abs() < 100.0 && north.abs() < 100.0 {
+                continue;
+            }
+            let (easting_m, northing_m) = if east.abs() > 10_000_000.0 || north.abs() > 15_000_000.0 {
+                (east * self.unit_scale, north * self.unit_scale)
+            } else {
+                (east, north)
+            };
+            let crs_ent = mc.get_ref(1).and_then(|cid| self.raw_step.entities.get(&cid));
+            let mut epsg_num: Option<u32> = None;
+            let mut zone_opt: Option<(u8, bool)> = None;
+            if let Some(crs) = crs_ent {
+                for p in &crs.parameters {
+                    if let Some(s) = p.as_str() {
+                        let up = s.to_ascii_uppercase();
+                        if let Some(pos) = up.find("EPSG:") {
+                            if let Ok(code) = up[pos + 5..].trim().parse::<u32>() {
+                                epsg_num = Some(code);
+                                break;
+                            }
+                        }
+                        if (up.ends_with('S') || up.ends_with('N')) && up.len() <= 4 {
+                            let is_south = up.ends_with('S');
+                            if let Ok(z) = up[..up.len() - 1].trim().parse::<u8>() {
+                                if (1..=60).contains(&z) {
+                                    zone_opt = Some((z, is_south));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(code) = epsg_num {
+                if (32601..=32660).contains(&code) {
+                    zone_opt = Some(((code - 32600) as u8, false));
+                } else if (32701..=32760).contains(&code) {
+                    zone_opt = Some(((code - 32700) as u8, true));
+                }
+            }
+            if let Some((zone, is_south)) = zone_opt {
+                let engine = crate::core::gis::crs_projection::GeoProjectionEngine::new(zone, is_south);
+                let (la, lo) = engine.utm_to_wgs84(easting_m, northing_m);
+                if la.is_finite() && lo.is_finite() && (-85.0..=85.0).contains(&la) && (-180.0..=180.0).contains(&lo) {
                     return Some((la, lo));
                 }
             }
@@ -4076,22 +4394,20 @@ impl StepParser {
         let mut model = StepModel::default();
         let no_bom = raw_content.trim_start_matches('\u{FEFF}');
 
-        // 1. Strip comments /* ... */
-        let cleaned = Self::strip_step_comments(no_bom);
-
-        // 2. Identify HEADER and DATA sections (case-insensitive STEP tags)
-        let header_str = Self::extract_section(&cleaned, "HEADER", "ENDSEC");
-        let data_str = Self::extract_section(&cleaned, "DATA", "ENDSEC");
-
-        if let Some(h) = header_str {
-            model.header = Self::parse_header(&h);
+        // 1. Locate HEADER and DATA slices without cloning/uppercasing the entire STEP buffer.
+        if let Some(h) = Self::extract_section_slice(no_bom, "HEADER", "ENDSEC") {
+            let clean_h = if h.contains("/*") {
+                Self::strip_step_comments(h)
+            } else {
+                h.to_string()
+            };
+            model.header = Self::parse_header(&clean_h);
         }
 
-        if let Some(d) = data_str {
-            Self::parse_data_section(&d, &mut model)?;
+        if let Some(d) = Self::extract_section_slice(no_bom, "DATA", "ENDSEC") {
+            Self::parse_data_section(d, &mut model)?;
         } else {
-            // If explicit DATA section not found, parse entire content for #id statements
-            Self::parse_data_section(&cleaned, &mut model)?;
+            Self::parse_data_section(no_bom, &mut model)?;
         }
 
         if model.entities.is_empty() {
@@ -4099,6 +4415,30 @@ impl StepParser {
         }
 
         Ok(model)
+    }
+
+    fn find_ascii_tag_ignore_case(haystack: &str, needle_upper: &str) -> Option<usize> {
+        let h = haystack.as_bytes();
+        let n = needle_upper.as_bytes();
+        if n.is_empty() || h.len() < n.len() {
+            return None;
+        }
+        'outer: for i in 0..=(h.len() - n.len()) {
+            for j in 0..n.len() {
+                if h[i + j].to_ascii_uppercase() != n[j] {
+                    continue 'outer;
+                }
+            }
+            return Some(i);
+        }
+        None
+    }
+
+    fn extract_section_slice<'a>(s: &'a str, start_tag: &str, end_tag: &str) -> Option<&'a str> {
+        let start_idx = Self::find_ascii_tag_ignore_case(s, start_tag)?;
+        let tail = &s[start_idx + start_tag.len()..];
+        let end_idx = Self::find_ascii_tag_ignore_case(tail, end_tag)?;
+        Some(&tail[..end_idx])
     }
 
     fn strip_step_comments(s: &str) -> String {
@@ -4124,25 +4464,28 @@ impl StepParser {
         out
     }
 
-    fn extract_section(s: &str, start_tag: &str, end_tag: &str) -> Option<String> {
-        let upper = s.to_ascii_uppercase();
-        if let Some(start_idx) = upper.find(start_tag) {
-            let sub = &s[start_idx + start_tag.len()..];
-            let sub_upper = &upper[start_idx + start_tag.len()..];
-            if let Some(end_idx) = sub_upper.find(end_tag) {
-                return Some(sub[..end_idx].to_string());
-            }
-        }
-        None
-    }
-
     fn split_step_statements(s: &str) -> Vec<&str> {
         let mut stmts = Vec::new();
         let bytes = s.as_bytes();
         let mut start = 0usize;
         let mut in_quote = false;
+        let mut in_comment = false;
         let mut i = 0usize;
         while i < bytes.len() {
+            if in_comment {
+                if bytes[i] == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    in_comment = false;
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+                continue;
+            }
+            if !in_quote && bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                in_comment = true;
+                i += 2;
+                continue;
+            }
             if bytes[i] == b'\'' {
                 if in_quote && i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
                     i += 2;
@@ -4200,8 +4543,14 @@ impl StepParser {
     }
 
     fn parse_data_section(data_content: &str, model: &mut StepModel) -> Result<(), String> {
+        let mut scratch;
         for stmt in Self::split_step_statements(data_content) {
-            let trimmed = stmt.trim();
+            let trimmed = if stmt.contains("/*") {
+                scratch = Self::strip_step_comments(stmt);
+                scratch.trim()
+            } else {
+                stmt.trim()
+            };
             if !trimmed.starts_with('#') {
                 continue;
             }
@@ -4846,6 +5195,80 @@ mod tests {
         assert!(bim.levels.len() >= 2);
         assert!(bim.element_count() > 0);
         assert!(!bim.columns.is_empty());
+    }
+
+    #[test]
+    fn test_phase56_ifc_brep_sweptdisk_voids_and_map_conversion_utm() {
+        let ifc = r#"ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
+FILE_NAME('UTM_BREP_Tower.ifc','2026-11-18T12:00:00',('Architect'),('EigenGraph'),'v0.5.6','','');
+FILE_SCHEMA(('IFC4'));
+ENDSEC;
+DATA;
+#1=IFCPROJECT('0Proj56',$,'Nusantara BREP Core',$,$,$,$,(#10),#20);
+#2=IFCSITE('0Site56',$,'IKN Sector 1A',$,$,#30,$,$,.ELEMENT.,(0,0,0),(0,0,0),$,$,$);
+#3=IFCBUILDING('0Bldg56',$,'Tower Core',$,$,#31,$,$,.ELEMENT.,$,$,$);
+#4=IFCBUILDINGSTOREY('0Lvl1_56',$,'Ground Floor',$,$,#32,$,$,.ELEMENT.,0.0);
+#10=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,#40,$);
+#11=IFCPROJECTEDCRS('EPSG:32750','IKN Nusantara UTM 50S','WGS84','UTM','50S',$,$);
+#12=IFCMAPCONVERSION(#10,#11,488000.0,9894000.0,45.0,1.0,0.0,1.0);
+#20=IFCUNITASSIGNMENT((#21));
+#21=IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);
+#30=IFCLOCALPLACEMENT($,#40);
+#31=IFCLOCALPLACEMENT(#30,#40);
+#32=IFCLOCALPLACEMENT(#31,#40);
+#40=IFCAXIS2PLACEMENT3D(#50,#51,#52);
+#50=IFCCARTESIANPOINT((0.,0.,0.));
+#51=IFCDIRECTION((0.,0.,1.));
+#52=IFCDIRECTION((1.,0.,0.));
+#60=IFCWALL('0Wall56',$,'BREP_Core_Wall',$,$,#32,#100,.STANDARD.);
+#100=IFCPRODUCTDEFINITIONSHAPE($,$,(#101));
+#101=IFCSHAPEREPRESENTATION(#10,'Body','Brep',(#102));
+#102=IFCFACETEDBREP(#103);
+#103=IFCCLOSEDSHELL((#104));
+#104=IFCFACE((#105));
+#105=IFCFACEOUTERBOUND(#106,.T.);
+#106=IFCPOLYLOOP((#110,#111,#112,#113));
+#110=IFCCARTESIANPOINT((0.,0.,0.));
+#111=IFCCARTESIANPOINT((6000.,0.,0.));
+#112=IFCCARTESIANPOINT((6000.,250.,3500.));
+#113=IFCCARTESIANPOINT((0.,250.,3500.));
+#200=IFCOPENINGELEMENT('0Open56',$,'Door_Void',$,$,#32,#201,$);
+#201=IFCPRODUCTDEFINITIONSHAPE($,$,(#202));
+#202=IFCSHAPEREPRESENTATION(#10,'Body','SweptSolid',(#203));
+#203=IFCEXTRUDEDAREASOLID(#204,#205,#51,2100.);
+#204=IFCRECTANGLEPROFILEDEF(.AREA.,'OpProf',#206,1000.,300.);
+#205=IFCAXIS2PLACEMENT3D(#207,#51,#52);
+#206=IFCAXIS2PLACEMENT2D(#50,$);
+#207=IFCCARTESIANPOINT((2500.,125.,0.));
+#210=IFCRELVOIDSELEMENT('0Void56',$,$,$,#60,#200);
+#220=IFCDOOR('0Door56',$,'Core_Entry_Door',$,$,#32,#201,2100.,1000.,.SINGLE_SWING_LEFT.,$,$);
+#221=IFCRELFILLSELEMENT('0Fill56',$,$,$,#200,#220);
+#300=IFCMEMBER('0Brace56',$,'Circular_Brace',$,$,#32,#301,.BRACE.);
+#301=IFCPRODUCTDEFINITIONSHAPE($,$,(#302));
+#302=IFCSHAPEREPRESENTATION(#10,'Body','AdvancedSweptSolid',(#303));
+#303=IFCSWEPTDISKSOLID(#304,60.,$,$,$);
+#304=IFCPOLYLINE((#110,#112));
+#400=IFCRELCONTAINEDINSPATIALSTRUCTURE('0Cont56',$,$,$,(#60,#220,#300),#4);
+ENDSEC;
+END-ISO-10303-21;"#;
+
+        let model = IfcModel::parse(ifc).expect("Parse Phase 56 BREP + MapConversion IFC4");
+        let geo = model.site_lat_lon().expect("Should decode EPSG:32750 UTM into WGS84 lat/lon");
+        assert!(geo.0 < 0.0 && geo.0 > -3.0 && geo.1 > 116.0 && geo.1 < 118.0, "Got IKN UTM50S geo {geo:?}");
+
+        let wall_el = model.elements.iter().find(|e| e.step_id == 60).expect("Wall element present");
+        assert!(wall_el.bbox.dimensions().0 >= 5.9, "BREP wall X span expected >= 5.9m");
+        assert!(wall_el.bbox.dimensions().2 >= 3.4, "BREP wall Z height expected >= 3.4m");
+
+        let brace_el = model.elements.iter().find(|e| e.step_id == 300).expect("SweptDiskSolid element present");
+        assert!(brace_el.bbox.dimensions().0 >= 5.9, "SweptDiskSolid X span expected >= 5.9m");
+
+        let bim = model.to_bim_project().expect("Convert to BimProject");
+        assert_eq!(bim.walls.len(), 1);
+        assert_eq!(bim.walls[0].openings.len(), 1, "IFCRELVOIDSELEMENT/IFCRELFILLSELEMENT must populate BimWall.openings");
+        assert!((bim.walls[0].openings[0].width_mm - 1000.0).abs() < 150.0);
     }
 }
 

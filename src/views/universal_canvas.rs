@@ -355,7 +355,7 @@ pub struct CadShortcutFeedback {
     pub letter_key: Option<char>,
 }
 
-/// Phase 55: Direct 3D BIM placement tools inside the unified Earth 3D canvas.
+/// Phase 55–56: Direct 3D BIM placement tools inside the unified Earth 3D canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EarthBimTool {
     #[default]
@@ -364,6 +364,9 @@ pub enum EarthBimTool {
     Beam,
     Wall,
     Footing,
+    Slab,
+    Door,
+    Window,
 }
 
 /// Phase 55: Structural visualization overlay rendered directly over 3D BIM buildings on Earth 3D.
@@ -384,6 +387,7 @@ pub struct EarthBimAuthorConfig {
     pub active_lens: EarthBimLens,
     pub base_level_id: usize,
     pub top_level_id: usize,
+    pub isolate_active_story: bool,
     pub col_width_mm: f64,
     pub col_depth_mm: f64,
     pub beam_width_mm: f64,
@@ -402,6 +406,7 @@ impl Default for EarthBimAuthorConfig {
             active_lens: EarthBimLens::Clean,
             base_level_id: 1,
             top_level_id: 2,
+            isolate_active_story: false,
             col_width_mm: 400.0,
             col_depth_mm: 400.0,
             beam_width_mm: 300.0,
@@ -4651,6 +4656,103 @@ impl UniversalCanvasState {
                                 self.earth_bim_author.pending_start_mm = Some(pt);
                             }
                         }
+                        EarthBimTool::Slab => {
+                            if let Some(s) = self.earth_bim_author.pending_start_mm.take() {
+                                let min_x = s[0].min(pt[0]);
+                                let max_x = s[0].max(pt[0]);
+                                let min_y = s[1].min(pt[1]);
+                                let max_y = s[1].max(pt[1]);
+                                if (max_x - min_x) >= 300.0 && (max_y - min_y) >= 300.0 {
+                                    self.pending_earth_bim_commands.push(crate::core::BimCommand::AddSlab {
+                                        level_id: base_level_id,
+                                        boundary: vec![
+                                            crate::core::P2(min_x, min_y),
+                                            crate::core::P2(max_x, min_y),
+                                            crate::core::P2(max_x, max_y),
+                                            crate::core::P2(min_x, max_y),
+                                        ],
+                                        openings: Vec::new(),
+                                        thickness_mm: 150.0,
+                                        is_roof: false,
+                                        roof_slope_deg: 0.0,
+                                    });
+                                    self.status_message = Some(format!(
+                                        "Placed Slab ({:.2} x {:.2} m) on Earth 3D Level #{}",
+                                        (max_x - min_x) * 0.001,
+                                        (max_y - min_y) * 0.001,
+                                        base_level_id
+                                    ));
+                                }
+                            } else {
+                                self.earth_bim_author.pending_start_mm = Some(pt);
+                            }
+                        }
+                        EarthBimTool::Door | EarthBimTool::Window => {
+                            let is_door = self.earth_bim_author.active_tool == EarthBimTool::Door;
+                            let target_wall_id = self
+                                .pick_bim_element_at_screen(pos, rect, bim_project)
+                                .and_then(|(k, id)| {
+                                    if k == crate::core::BimElementKind::Wall {
+                                        Some(id)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .or_else(|| {
+                                    // Proximity fallback to closest wall segment in XY world mm
+                                    bim_project
+                                        .walls
+                                        .iter()
+                                        .filter_map(|w| {
+                                            let ab_x = w.end.0 - w.start.0;
+                                            let ab_y = w.end.1 - w.start.1;
+                                            let l2 = ab_x * ab_x + ab_y * ab_y;
+                                            if l2 < 1.0 {
+                                                return None;
+                                            }
+                                            let t = (((raw[0] - w.start.0) * ab_x + (raw[1] - w.start.1) * ab_y) / l2).clamp(0.0, 1.0);
+                                            let d = ((raw[0] - (w.start.0 + t * ab_x)).powi(2)
+                                                + (raw[1] - (w.start.1 + t * ab_y)).powi(2))
+                                            .sqrt();
+                                            if d <= 1200.0 { Some((w.id, d)) } else { None }
+                                        })
+                                        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                                        .map(|(id, _)| id)
+                                });
+                            if let Some(wid) = target_wall_id {
+                                if let Some(wall) = bim_project.walls.iter().find(|w| w.id == wid) {
+                                    let wlen = wall.start.dist(wall.end).max(400.0);
+                                    let ux = (wall.end.0 - wall.start.0) / wlen;
+                                    let uy = (wall.end.1 - wall.start.1) / wlen;
+                                    let proj_along = (raw[0] - wall.start.0) * ux + (raw[1] - wall.start.1) * uy;
+                                    let (kind, width_mm, height_mm, sill_height_mm) = if is_door {
+                                        (crate::core::bim::OpeningKind::SingleDoor, 900.0, 2100.0, 0.0)
+                                    } else {
+                                        (crate::core::bim::OpeningKind::CasementWindow, 1800.0, 1400.0, 900.0)
+                                    };
+                                    let offset_along_mm = (proj_along - width_mm * 0.5)
+                                        .clamp(120.0, (wlen - width_mm - 120.0).max(120.0));
+                                    self.pending_earth_bim_commands.push(crate::core::BimCommand::AddOpening {
+                                        wall_id: wid,
+                                        kind,
+                                        offset_along_mm,
+                                        width_mm,
+                                        height_mm,
+                                        sill_height_mm,
+                                    });
+                                    self.status_message = Some(format!(
+                                        "Added {} to Wall #{} on Earth 3D",
+                                        if is_door { "Door" } else { "Window" },
+                                        wid
+                                    ));
+                                }
+                            } else {
+                                self.status_message = Some(format!(
+                                    "Click near a 3D Wall on Earth 3D to insert a {}.",
+                                    if is_door { "Door" } else { "Window" }
+                                ));
+                            }
+                        }
                         EarthBimTool::None => {}
                     }
                 }
@@ -5388,9 +5490,16 @@ impl UniversalCanvasState {
                 let level_rank = |lvl_id: usize| -> usize {
                     bim_project.levels.iter().position(|l| l.id == lvl_id).unwrap_or(0)
                 };
+                let isolate = self.earth_bim_author.isolate_active_story;
+                let active_lvl_id = self.earth_bim_author.base_level_id.max(1);
+                let active_top_id = self.earth_bim_author.top_level_id.max(active_lvl_id);
+                let show_on_story = |lvl: usize| -> bool { !isolate || lvl == active_lvl_id };
 
                 // 6A. Isolated Footings (Ground Pads)
                 for ft in &bim_project.footings {
+                    if !show_on_story(ft.level_id) && !(isolate && active_lvl_id <= 1) {
+                        continue;
+                    }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Footing, ft.id));
                     let z_m = bim_project.level_elevation(ft.level_id) * 0.001;
                     let pts: Vec<Pos2> = ft
@@ -5416,6 +5525,9 @@ impl UniversalCanvasState {
                 // 6B. Floor & Roof Slabs
                 for sl in &bim_project.slabs {
                     if sl.boundary.len() < 3 {
+                        continue;
+                    }
+                    if isolate && sl.level_id != active_lvl_id && sl.level_id != active_top_id {
                         continue;
                     }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Slab, sl.id));
@@ -5446,6 +5558,9 @@ impl UniversalCanvasState {
 
                 // 6C. Extruded 3D Walls & Door/Window Openings
                 for w in &bim_project.walls {
+                    if !show_on_story(w.base_level_id) {
+                        continue;
+                    }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Wall, w.id));
                     let z0 = bim_project.level_elevation(w.base_level_id) * 0.001;
                     let z1 = w
@@ -5524,6 +5639,9 @@ impl UniversalCanvasState {
 
                 // 6D. Structural Columns (3D Extruded Prisms at Ground Scale, Bold Shafts from Orbit)
                 for col in &bim_project.columns {
+                    if isolate && col.base_level_id != active_lvl_id && col.top_level_id != active_lvl_id {
+                        continue;
+                    }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Column, col.id));
                     let base_m = bim_project.level_elevation(col.base_level_id) * 0.001;
                     let top_m = bim_project.level_elevation(col.top_level_id) * 0.001;
@@ -5580,6 +5698,9 @@ impl UniversalCanvasState {
 
                 // 6E. Structural Beams / Runs
                 for run in &bim_project.runs {
+                    if isolate && run.level_id != active_lvl_id && run.level_id != active_top_id {
+                        continue;
+                    }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Run, run.id));
                     let elev_m = bim_project.level_elevation(run.level_id) * 0.001;
                     if let (Some(p0), Some(p1)) = (
@@ -5678,15 +5799,92 @@ impl UniversalCanvasState {
                                                 ));
                                             }
                                         }
-                                        let len_m = (snap_pt[0] - s[0]).hypot(snap_pt[1] - s[1]) * 0.001;
+                                        let dx_m = (snap_pt[0] - s[0]) * 0.001;
+                                        let dy_m = (snap_pt[1] - s[1]) * 0.001;
+                                        let len_m = dx_m.hypot(dy_m);
+                                        let ang_deg = dy_m.atan2(dx_m).to_degrees();
                                         let mid = Pos2::new((p0.x + p1.x) * 0.5, (p0.y + p1.y) * 0.5 - 10.0);
                                         clip_painter.text(
                                             mid,
                                             Align2::CENTER_BOTTOM,
-                                            format!("{len_m:.2} m"),
+                                            format!("{len_m:.2} m @ {ang_deg:.0}°"),
                                             egui::FontId::monospace(10.5),
                                             ghost_col,
                                         );
+                                    }
+                                }
+                            }
+                            EarthBimTool::Slab => {
+                                if let Some(s) = self.earth_bim_author.pending_start_mm {
+                                    let min_x = s[0].min(snap_pt[0]);
+                                    let max_x = s[0].max(snap_pt[0]);
+                                    let min_y = s[1].min(snap_pt[1]);
+                                    let max_y = s[1].max(snap_pt[1]);
+                                    let corners = [
+                                        (min_x, min_y),
+                                        (max_x, min_y),
+                                        (max_x, max_y),
+                                        (min_x, max_y),
+                                    ];
+                                    let pts: Vec<Pos2> = corners.iter().filter_map(|(x, y)| proj_mm(*x, *y, base_m)).collect();
+                                    if pts.len() == 4 {
+                                        clip_painter.add(egui::Shape::convex_polygon(
+                                            pts,
+                                            Color32::from_rgba_unmultiplied(0, 240, 255, 48),
+                                            ghost_stroke,
+                                        ));
+                                    }
+                                    if let Some(p_lbl) = proj_mm(0.5 * (min_x + max_x), 0.5 * (min_y + max_y), base_m) {
+                                        clip_painter.text(
+                                            p_lbl,
+                                            Align2::CENTER_CENTER,
+                                            format!("{:.2} x {:.2} m", (max_x - min_x) * 0.001, (max_y - min_y) * 0.001),
+                                            egui::FontId::monospace(10.5),
+                                            ghost_col,
+                                        );
+                                    }
+                                }
+                            }
+                            EarthBimTool::Door | EarthBimTool::Window => {
+                                let is_door = self.earth_bim_author.active_tool == EarthBimTool::Door;
+                                if let Some(w) = bim_project
+                                    .walls
+                                    .iter()
+                                    .filter(|w| show_on_story(w.base_level_id))
+                                    .min_by(|a, b| {
+                                        let dist_w = |wl: &crate::core::BimWall| -> f64 {
+                                            let ab_x = wl.end.0 - wl.start.0;
+                                            let ab_y = wl.end.1 - wl.start.1;
+                                            let l2 = (ab_x * ab_x + ab_y * ab_y).max(1.0);
+                                            let t = (((snap_pt[0] - wl.start.0) * ab_x + (snap_pt[1] - wl.start.1) * ab_y) / l2).clamp(0.0, 1.0);
+                                            ((snap_pt[0] - (wl.start.0 + t * ab_x)).powi(2)
+                                                + (snap_pt[1] - (wl.start.1 + t * ab_y)).powi(2))
+                                            .sqrt()
+                                        };
+                                        dist_w(a).partial_cmp(&dist_w(b)).unwrap_or(std::cmp::Ordering::Equal)
+                                    })
+                                {
+                                    let wlen = w.start.dist(w.end).max(400.0);
+                                    let ux = (w.end.0 - w.start.0) / wlen;
+                                    let uy = (w.end.1 - w.start.1) / wlen;
+                                    let proj_along = (snap_pt[0] - w.start.0) * ux + (snap_pt[1] - w.start.1) * uy;
+                                    let (ow, oh, osill) = if is_door { (900.0, 2100.0, 0.0) } else { (1800.0, 1400.0, 900.0) };
+                                    let off = (proj_along - ow * 0.5).clamp(120.0, (wlen - ow - 120.0).max(120.0));
+                                    let u0 = (off / wlen).clamp(0.0, 1.0);
+                                    let u1 = ((off + ow) / wlen).clamp(0.0, 1.0);
+                                    let wz0 = bim_project.level_elevation(w.base_level_id) * 0.001 + osill * 0.001;
+                                    let wz1 = wz0 + oh * 0.001;
+                                    if let (Some(p0), Some(p1), Some(p2), Some(p3)) = (
+                                        proj_mm(w.start.0 + (w.end.0 - w.start.0) * u0, w.start.1 + (w.end.1 - w.start.1) * u0, wz0),
+                                        proj_mm(w.start.0 + (w.end.0 - w.start.0) * u1, w.start.1 + (w.end.1 - w.start.1) * u1, wz0),
+                                        proj_mm(w.start.0 + (w.end.0 - w.start.0) * u1, w.start.1 + (w.end.1 - w.start.1) * u1, wz1),
+                                        proj_mm(w.start.0 + (w.end.0 - w.start.0) * u0, w.start.1 + (w.end.1 - w.start.1) * u0, wz1),
+                                    ) {
+                                        clip_painter.add(egui::Shape::convex_polygon(
+                                            vec![p0, p1, p2, p3],
+                                            Color32::from_rgba_unmultiplied(0, 240, 255, 90),
+                                            ghost_stroke,
+                                        ));
                                     }
                                 }
                             }
@@ -5747,9 +5945,16 @@ impl UniversalCanvasState {
                         .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
                 };
 
+                let isolate = self.earth_bim_author.isolate_active_story;
+                let active_lvl_id = self.earth_bim_author.base_level_id.max(1);
+                let active_top_id = self.earth_bim_author.top_level_id.max(active_lvl_id);
+
                 // 1. Columns (3D vertical shaft)
                 let mut best_col: Option<(f32, usize)> = None;
                 for c in &bim_project.columns {
+                    if isolate && c.base_level_id != active_lvl_id && c.top_level_id != active_lvl_id {
+                        continue;
+                    }
                     let z0 = bim_project.level_elevation(c.base_level_id) * 0.001;
                     let z1 = bim_project.level_elevation(c.top_level_id) * 0.001;
                     if let (Some(p0), Some(p1)) = (proj_mm(c.pos.0, c.pos.1, z0), proj_mm(c.pos.0, c.pos.1, z1)) {
@@ -5766,6 +5971,9 @@ impl UniversalCanvasState {
                 // 2. Beams / Runs (at elevated storey height)
                 let mut best_run: Option<(f32, usize)> = None;
                 for r in &bim_project.runs {
+                    if isolate && r.level_id != active_lvl_id && r.level_id != active_top_id {
+                        continue;
+                    }
                     let z = bim_project.level_elevation(r.level_id) * 0.001;
                     if let (Some(p0), Some(p1)) = (proj_mm(r.start.0, r.start.1, z), proj_mm(r.end.0, r.end.1, z)) {
                         let d = seg_dist(pos, p0, p1);
@@ -5780,6 +5988,9 @@ impl UniversalCanvasState {
 
                 // 3. Walls (3D extruded face quad or chords)
                 for w in bim_project.walls.iter().rev() {
+                    if isolate && w.base_level_id != active_lvl_id {
+                        continue;
+                    }
                     let z0 = bim_project.level_elevation(w.base_level_id) * 0.001;
                     let z1 = w
                         .top_level_id
@@ -5804,6 +6015,9 @@ impl UniversalCanvasState {
 
                 // 4. Footings
                 for f in &bim_project.footings {
+                    if isolate && active_lvl_id > 1 && f.level_id != active_lvl_id {
+                        continue;
+                    }
                     let z = bim_project.level_elevation(f.level_id) * 0.001;
                     if let Some(sp) = proj_mm(f.pos.0, f.pos.1, z) {
                         if pos.distance(sp) <= 18.0 {
@@ -5814,6 +6028,9 @@ impl UniversalCanvasState {
 
                 // 5. Slabs / Roofs (elevated 3D polygon)
                 for sl in bim_project.slabs.iter().rev() {
+                    if isolate && sl.level_id != active_lvl_id && sl.level_id != active_top_id {
+                        continue;
+                    }
                     let z = bim_project.level_elevation(sl.level_id) * 0.001;
                     let pts: Vec<Pos2> = sl
                         .boundary
