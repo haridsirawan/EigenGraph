@@ -1514,7 +1514,7 @@ impl EigenGraphApp {
         if hud_actions.pick_local_context_file {
             self.spatial_workspace.pending_context_file_pick = true;
             crate::core::web_bridge::trigger_file_picker(
-                ".eigen,.json,.ifc,.csv,.md,.txt,.yaml,.yml",
+                ".eigen,.json,.geojson,.ifc,.csv,.xyz,.pts,.md,.txt,.yaml,.yml",
             );
         }
         if let Some((lat, lon)) = hud_actions.anchor_and_build_site {
@@ -1706,6 +1706,9 @@ impl EigenGraphApp {
             self.import_ifc_raw_onto_earth(&entry.name, &entry.filename, &entry.rel_path, clean_raw);
             return;
         }
+        if self.ingest_geojson_or_survey_onto_earth(&entry.filename, clean_raw) {
+            return;
+        }
         if let Ok(ws_cfg) = self.universal_canvas.apply_unified_archive(
             clean_raw,
             &mut self.build_view.bim_bus.project,
@@ -1815,9 +1818,57 @@ impl EigenGraphApp {
         );
         proxy.elev_m = self.universal_canvas.earth_world.effective_elevation_m(lat, lon) as f64;
         self.universal_canvas.world_index.upsert_building(proxy, true);
+        self.universal_canvas
+            .refresh_neighborhood_coupling(&self.build_view.bim_bus.project);
         if save_manifest {
             crate::core::InternalVault::save_world_spatial_index(&self.universal_canvas.world_index);
         }
+    }
+
+    fn ingest_geojson_or_survey_onto_earth(&mut self, filename: &str, clean_raw: &str) -> bool {
+        let lower = filename.to_ascii_lowercase();
+        let trimmed = clean_raw.trim_start();
+        let looks_geojson = lower.ends_with(".geojson")
+            || (lower.ends_with(".json")
+                && (trimmed.contains("\"FeatureCollection\"") || trimmed.contains("\"coordinates\"")));
+        if looks_geojson {
+            if let Ok((cnt, centroid_opt)) = self.universal_canvas.urban_vectors.ingest_geojson(clean_raw, filename) {
+                self.universal_canvas.globe_mode = true;
+                self.universal_canvas.world_map.vector_site_overlay = true;
+                if let Some((lat, lon)) = centroid_opt {
+                    self.universal_canvas.earth_world.start_fly_to(
+                        &self.universal_canvas.world_map,
+                        lat,
+                        lon,
+                        16.5,
+                        filename,
+                    );
+                    if !self.universal_canvas.ground_origin_anchored {
+                        self.universal_canvas.ground_origin_lat_lon = (lat, lon);
+                    }
+                }
+                let msg = format!("Loaded {cnt} crisp GeoJSON vector feature(s) from '{filename}' onto Earth 3D.");
+                self.universal_canvas.status_message = Some(msg.clone());
+                self.spatial_workspace.vault_feedback = Some(msg.clone());
+                self.spatial_workspace.push_trace(msg, true);
+                return true;
+            }
+        }
+        if lower.ends_with(".xyz") || lower.ends_with(".pts") {
+            if let Ok(tin) = crate::core::gis::parse_survey_xyz_to_tin(clean_raw) {
+                let npts = tin.points.len();
+                self.universal_canvas.active_site_tin = Some(tin);
+                self.universal_canvas.site_tin_is_live_dem = false;
+                self.universal_canvas.show_terrain_contours = true;
+                self.universal_canvas.globe_mode = true;
+                let msg = format!("Loaded {npts} survey terrain point(s) from '{filename}' into Earth 3D TIN.");
+                self.universal_canvas.status_message = Some(msg.clone());
+                self.spatial_workspace.vault_feedback = Some(msg.clone());
+                self.spatial_workspace.push_trace(msg, true);
+                return true;
+            }
+        }
+        false
     }
 
     fn import_ifc_raw_onto_earth(
@@ -1891,6 +1942,8 @@ impl EigenGraphApp {
                     .earth_world
                     .effective_elevation_m(target_geo.0, target_geo.1) as f64;
                 self.universal_canvas.world_index.upsert_building(proxy, true);
+                self.universal_canvas
+                    .refresh_neighborhood_coupling(&self.build_view.bim_bus.project);
                 crate::core::InternalVault::save_world_spatial_index(&self.universal_canvas.world_index);
 
                 self.build_view
@@ -2857,14 +2910,32 @@ impl EigenGraphApp {
             return;
         }
 
+        if self.ingest_geojson_or_survey_onto_earth(&payload.filename, payload.content.trim_start_matches('\u{FEFF}')) {
+            if lower.ends_with(".xyz") || lower.ends_with(".pts") {
+                let _ = self.research_view.import_survey_points_csv_xyz(&payload.content);
+            }
+            return;
+        }
         if lower.ends_with(".csv") || lower.ends_with(".xyz") || lower.ends_with(".pts") {
             match self.research_view.import_survey_points_csv_xyz(&payload.content) {
                 Ok(cnt) => {
+                    if let Ok(tin) = crate::core::gis::parse_survey_xyz_to_tin(&payload.content) {
+                        self.universal_canvas.active_site_tin = Some(tin);
+                        self.universal_canvas.site_tin_is_live_dem = false;
+                        self.universal_canvas.show_terrain_contours = true;
+                    }
                     self.universal_canvas.status_message = Some(format!(
-                        "Imported {} survey points from '{}' into Planning TIN terrain.",
+                        "Imported {} survey points from '{}' into Earth 3D & Planning TIN terrain.",
                         cnt, payload.filename
                     ));
-                    self.active_pillar = NavigationPillar::ResearchConcept;
+                    if !self.spatial_workspace.spatial_mode_enabled {
+                        self.active_pillar = NavigationPillar::ResearchConcept;
+                    } else {
+                        self.spatial_workspace.push_trace(
+                            format!("Loaded {cnt} survey terrain points onto Earth 3D"),
+                            true,
+                        );
+                    }
                 }
                 Err(e) => {
                     self.universal_canvas.status_message =

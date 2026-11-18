@@ -365,6 +365,7 @@
               !(
                 lower.endsWith(".eigen") ||
                 lower.endsWith(".json") ||
+                lower.endsWith(".geojson") ||
                 lower.endsWith(".md") ||
                 lower.endsWith(".txt") ||
                 lower.endsWith(".csv") ||
@@ -584,6 +585,7 @@
                 if (
                   lower.endsWith(".eigen") ||
                   lower.endsWith(".json") ||
+                  lower.endsWith(".geojson") ||
                   lower.endsWith(".txt") ||
                   lower.endsWith(".md") ||
                   lower.endsWith(".csv") ||
@@ -1070,7 +1072,7 @@
               }
             });
           }
-          activeFileInput.accept = accept || ".ifc,.eigen,.json,.csv,.xyz,.e2k";
+          activeFileInput.accept = accept || ".ifc,.eigen,.json,.geojson,.csv,.xyz,.e2k";
           activeFileInput.click();
         },
         pollPickedFileJson: () => {

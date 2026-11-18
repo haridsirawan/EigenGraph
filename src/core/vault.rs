@@ -815,9 +815,11 @@ impl InternalVault {
                     let lower = fname.to_lowercase();
                     if !(lower.ends_with(".eigen")
                         || lower.ends_with(".json")
+                        || lower.ends_with(".geojson")
                         || lower.ends_with(".md")
                         || lower.ends_with(".txt")
                         || lower.ends_with(".csv")
+                        || lower.ends_with(".xyz")
                         || lower.ends_with(".ifc"))
                     {
                         continue;

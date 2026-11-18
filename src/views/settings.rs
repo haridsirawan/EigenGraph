@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — Phase 58 Georeferenced IFC4 Writeback, Crisp Full-Rust Vector Cadastre, 3D TIN Terrain Contours & Planetary Portfolio Triage",
+                        "v{} — Phase 59 Streaming OSM/GeoJSON Urban Vectors, Live Terrarium DEM TINs, Multi-Building Seismic Pounding/Wind Coupling & Batch City Assignment",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)

@@ -352,6 +352,19 @@ pub enum PlannedProposalAction {
     OpenSheet(NavigationPillar),
     AddStory,
     AddSlab,
+    // Phase 59: Live AI Multi-Action Tool-Calling for World Portfolio, Vector Earth, DEM & Neighborhood Coupling
+    BatchPinCity {
+        query: String,
+        city_name: String,
+    },
+    PinActiveBuilding {
+        lat: f64,
+        lon: f64,
+        heading_deg: f64,
+    },
+    AuditNeighborhood,
+    EnableTerrainContours,
+    SwitchPureVector,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -387,6 +400,19 @@ pub enum GeminiDirective {
     OpenSheet(NavigationPillar),
     AddStory,
     AddSlab,
+    // Phase 59: Live AI Multi-Action Tool-Calling for World Portfolio, Vector Earth, DEM & Neighborhood Coupling
+    BatchPinCity {
+        query: String,
+        city_name: String,
+    },
+    PinActiveBuilding {
+        lat: f64,
+        lon: f64,
+        heading_deg: f64,
+    },
+    AuditNeighborhood,
+    EnableTerrainContours,
+    SwitchPureVector,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -507,6 +533,32 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::AddStory);
             } else if upper == "ADD_SLAB" || upper == "ADD_FLOOR_SLAB" {
                 directives.push(GeminiDirective::AddSlab);
+            } else if upper.starts_with("BATCH_PIN_CITY:") {
+                let args: Vec<&str> = tag[15..].split(',').map(|s| s.trim()).collect();
+                if args.len() >= 2 && !args[0].is_empty() && !args[1].is_empty() {
+                    directives.push(GeminiDirective::BatchPinCity {
+                        query: args[0].to_string(),
+                        city_name: args[1].to_string(),
+                    });
+                }
+            } else if upper.starts_with("PIN_ACTIVE:") {
+                let nums: Vec<f64> = tag[11..]
+                    .split(',')
+                    .filter_map(|s| s.trim().parse::<f64>().ok())
+                    .collect();
+                if nums.len() >= 2 {
+                    directives.push(GeminiDirective::PinActiveBuilding {
+                        lat: nums[0].clamp(-85.0, 85.0),
+                        lon: nums[1].clamp(-180.0, 180.0),
+                        heading_deg: nums.get(2).copied().unwrap_or(0.0).rem_euclid(360.0),
+                    });
+                }
+            } else if upper == "AUDIT_NEIGHBORHOOD" || upper == "AUDIT_POUNDING" {
+                directives.push(GeminiDirective::AuditNeighborhood);
+            } else if upper == "TOGGLE_TOPO" || upper == "ENABLE_TOPO" {
+                directives.push(GeminiDirective::EnableTerrainContours);
+            } else if upper == "TOGGLE_VECTOR" || upper == "PURE_VECTOR" {
+                directives.push(GeminiDirective::SwitchPureVector);
             }
             cursor = &after_start[end + 2..];
         } else {
@@ -1198,6 +1250,9 @@ pub struct SpatialWorkspaceState {
     pub vault_note_folder: String,
     // Phase 58: Planetary Portfolio triage filter inside Vault drawer & Dynamic Island
     pub world_portfolio_filter: crate::core::gis::WorldPortfolioFilter,
+    // Phase 59: Batch City Geo-Assign UI state inside Vault drawer
+    pub batch_pin_query: String,
+    pub batch_pin_city_idx: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -1286,6 +1341,8 @@ impl Default for SpatialWorkspaceState {
             hover_more_tools_open: false,
             vault_note_folder: "KnowledgeBase".to_string(),
             world_portfolio_filter: crate::core::gis::WorldPortfolioFilter::All,
+            batch_pin_query: String::new(),
+            batch_pin_city_idx: 0,
         }
     }
 }
@@ -1946,6 +2003,82 @@ impl SpatialWorkspaceState {
                         out.sync_fem_and_earth = true;
                     }
                 }
+                PlannedProposalAction::BatchPinCity { query, city_name } => {
+                    if let Some((canon, lat, lon)) =
+                        crate::core::gis::SlippyMapState::resolve_city_hint_in_text(city_name)
+                    {
+                        let moved = universal_canvas
+                            .world_index
+                            .relocate_city_batch(query, lat, lon, &canon);
+                        if moved > 0 {
+                            crate::core::InternalVault::save_world_spatial_index(&universal_canvas.world_index);
+                        }
+                        self.push_trace(format!("Batch-pinned {moved} models matching '{query}' -> {canon}"), moved > 0);
+                        ai_assistant.chat_history.push(crate::models::ChatMessage {
+                            is_user: false,
+                            message: format!(
+                                "[World Index]: Relocated {moved} Staging model(s) matching '{query}' onto {canon} ({lat:.4}°, {lon:.4}°)."
+                            ),
+                            time: crate::core::web_bridge::unix_timestamp_label(),
+                        });
+                    }
+                }
+                PlannedProposalAction::PinActiveBuilding { lat, lon, heading_deg } => {
+                    universal_canvas.ground_origin_lat_lon = (*lat, *lon);
+                    universal_canvas.ground_origin_anchored = true;
+                    if let Some(rel) = universal_canvas.active_world_project_rel_path.clone() {
+                        universal_canvas.world_index.pin_building_at(&rel, *lat, *lon, *heading_deg);
+                        universal_canvas.pending_world_pin_event =
+                            Some((rel, *lat, *lon, *heading_deg));
+                    }
+                    universal_canvas.earth_world.start_fly_to(
+                        &universal_canvas.world_map,
+                        *lat,
+                        *lon,
+                        18.0,
+                        "Pinned Active Site",
+                    );
+                    universal_canvas.refresh_neighborhood_coupling(&build_view.bim_bus.project);
+                    out.sync_fem_and_earth = true;
+                    self.push_trace(format!("Pinned active model @ ({lat:.4}°, {lon:.4}°)"), true);
+                }
+                PlannedProposalAction::AuditNeighborhood => {
+                    universal_canvas.refresh_neighborhood_coupling(&build_view.bim_bus.project);
+                    let rep = &universal_canvas.neighborhood_report;
+                    let summary = format!(
+                        "[Neighborhood Coupled Audit]: Evaluated {} neighbor(s) within 220m • Pounding Risks={} • Tight Buffers={} • Min Gap={} • Recommended Wind Exposure={:?} • Venturi Speedup={:.2}x • Cascade Overlap={}",
+                        rep.neighbors_evaluated,
+                        rep.pounding_risk_count,
+                        rep.tight_buffer_count,
+                        rep.min_clear_gap_m.map_or("N/A".to_string(), |g| format!("{g:.2}m")),
+                        rep.recommended_exposure,
+                        rep.venturi_speedup_factor,
+                        rep.cascade_overlap_count,
+                    );
+                    ai_assistant.chat_history.push(crate::models::ChatMessage {
+                        is_user: false,
+                        message: summary,
+                        time: crate::core::web_bridge::unix_timestamp_label(),
+                    });
+                    self.push_trace(
+                        format!(
+                            "Neighborhood: {} checked, {} pounding risk(s)",
+                            rep.neighbors_evaluated, rep.pounding_risk_count
+                        ),
+                        rep.pounding_risk_count == 0,
+                    );
+                }
+                PlannedProposalAction::EnableTerrainContours => {
+                    universal_canvas.show_terrain_contours = true;
+                    universal_canvas.ensure_site_tin_generated();
+                    self.push_trace("Enabled 3D TIN Terrain Contours & Slope Hazard", true);
+                }
+                PlannedProposalAction::SwitchPureVector => {
+                    universal_canvas.world_map.tile_provider =
+                        crate::core::gis::TileSource::SyntheticVectorTerrain;
+                    universal_canvas.world_map.vector_site_overlay = true;
+                    self.push_trace("Switched Earth 3D to Pure Rust Vector (anti-blur)", true);
+                }
             }
         }
         self.sessions_dirty = true;
@@ -2068,6 +2201,22 @@ impl SpatialWorkspaceState {
                             }
                             GeminiDirective::AddStory => PlannedProposalAction::AddStory,
                             GeminiDirective::AddSlab => PlannedProposalAction::AddSlab,
+                            GeminiDirective::BatchPinCity { query, city_name } => {
+                                PlannedProposalAction::BatchPinCity {
+                                    query: query.clone(),
+                                    city_name: city_name.clone(),
+                                }
+                            }
+                            GeminiDirective::PinActiveBuilding { lat, lon, heading_deg } => {
+                                PlannedProposalAction::PinActiveBuilding {
+                                    lat: *lat,
+                                    lon: *lon,
+                                    heading_deg: *heading_deg,
+                                }
+                            }
+                            GeminiDirective::AuditNeighborhood => PlannedProposalAction::AuditNeighborhood,
+                            GeminiDirective::EnableTerrainContours => PlannedProposalAction::EnableTerrainContours,
+                            GeminiDirective::SwitchPureVector => PlannedProposalAction::SwitchPureVector,
                         })
                         .collect();
                     let preview: String = directives
@@ -2092,6 +2241,15 @@ impl SpatialWorkspaceState {
                             }
                             GeminiDirective::AddStory => "AddStory(+3.5m)".to_string(),
                             GeminiDirective::AddSlab => "AddSlab".to_string(),
+                            GeminiDirective::BatchPinCity { query, city_name } => {
+                                format!("BatchPin('{query}'->{city_name})")
+                            }
+                            GeminiDirective::PinActiveBuilding { lat, lon, heading_deg } => {
+                                format!("PinSite({lat:.3},{lon:.3}@{heading_deg:.0}°)")
+                            }
+                            GeminiDirective::AuditNeighborhood => "AuditNeighborhood".to_string(),
+                            GeminiDirective::EnableTerrainContours => "EnableTopoTIN".to_string(),
+                            GeminiDirective::SwitchPureVector => "PureVectorEarth".to_string(),
                         })
                         .collect::<Vec<_>>()
                         .join(" + ");
@@ -2754,6 +2912,25 @@ impl SpatialWorkspaceState {
         } else if lower == "next unlocated" || lower == "next staging" {
             actions.fly_to_next_world_building = Some(crate::core::gis::WorldPortfolioFilter::UnlocatedStaging);
             return actions;
+        } else if lower.contains("pounding") || lower.contains("neighborhood") || lower.contains("tetangga") {
+            let sub = self.apply_proposal_actions(
+                &[PlannedProposalAction::AuditNeighborhood],
+                universal_canvas,
+                build_view,
+                ai_assistant,
+            );
+            actions.merge(sub);
+            self.command_bar_expanded = true;
+            return actions;
+        } else if lower == "pure vector" || lower == "vector earth" {
+            let sub = self.apply_proposal_actions(
+                &[PlannedProposalAction::SwitchPureVector],
+                universal_canvas,
+                build_view,
+                ai_assistant,
+            );
+            actions.merge(sub);
+            return actions;
         } else if lower.contains("portfolio") && (lower.contains("audit") || lower.contains("summary") || lower.contains("ringkas")) {
             let sum = universal_canvas.world_index.portfolio_summary();
             let msg = format!(
@@ -2960,7 +3137,7 @@ impl SpatialWorkspaceState {
                  Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s. \
                  Active BIM elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}. \
                  To propose workspace actions, you may append bracket directives: \
-                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[ADD_STORY]], [[ADD_SLAB]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[ARI_AUDIT]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
+                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[ADD_STORY]], [[ADD_SLAB]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[ARI_AUDIT]], [[BATCH_PIN_CITY:keyword,city]], [[PIN_ACTIVE:lat,lon,heading]], [[AUDIT_NEIGHBORHOOD]], [[TOGGLE_TOPO]], [[TOGGLE_VECTOR]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
                 site.elevation_m,
                 site.seismic_pga_ss_g,
                 site.design_wind_ms,
@@ -3307,6 +3484,15 @@ impl SpatialWorkspaceState {
                                 if ui.small_button("+15°").on_hover_text("Rotate North azimuth +15 deg (E)").clicked() {
                                     universal_canvas.placing_heading_deg =
                                         (universal_canvas.placing_heading_deg + 15.0).rem_euclid(360.0);
+                                }
+                                if let Some(az) = universal_canvas.active_vector_snap_az_deg {
+                                    if ui
+                                        .small_button(format!("Align {az:.0}° [A]"))
+                                        .on_hover_text("Align building azimuth directly to snapped vector road/parcel boundary")
+                                        .clicked()
+                                    {
+                                        universal_canvas.placing_heading_deg = az.rem_euclid(360.0);
+                                    }
                                 }
                                 if ui.small_button("Cancel").clicked() {
                                     universal_canvas.placing_unlocated_rel_path = None;
@@ -6168,6 +6354,60 @@ impl SpatialWorkspaceState {
                             }
                         }
                     });
+                    if universal_canvas.world_index.unlocated_count() > 0 {
+                        ui.add_space(2.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Batch Pin:").size(9.5).color(theme.text_muted));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.batch_pin_query)
+                                    .hint_text("Folder/name")
+                                    .desired_width(82.0),
+                            );
+                            let cities = crate::core::gis::GLOBAL_CITY_CATALOG;
+                            let sel_idx = self.batch_pin_city_idx.min(cities.len().saturating_sub(1));
+                            let (sel_city, sel_lat, sel_lon, _) = cities[sel_idx];
+                            egui::ComboBox::from_id_salt("vault_batch_city_combo")
+                                .width(102.0)
+                                .selected_text(sel_city)
+                                .show_ui(ui, |ui| {
+                                    for (i, &(cname, _, _, _)) in cities.iter().enumerate() {
+                                        ui.selectable_value(&mut self.batch_pin_city_idx, i, cname);
+                                    }
+                                });
+                            if ui
+                                .small_button("Assign City")
+                                .on_hover_text("Relocate all Staging models matching keyword onto the selected city grid")
+                                .clicked()
+                            {
+                                let q = if self.batch_pin_query.trim().is_empty() {
+                                    self.vault_filter_query.trim().to_string()
+                                } else {
+                                    self.batch_pin_query.trim().to_string()
+                                };
+                                let q_eff = if q.is_empty() { sel_city.to_string() } else { q };
+                                let moved = universal_canvas
+                                    .world_index
+                                    .relocate_city_batch(&q_eff, sel_lat, sel_lon, sel_city);
+                                if moved > 0 {
+                                    crate::core::InternalVault::save_world_spatial_index(&universal_canvas.world_index);
+                                    self.vault_feedback = Some(format!(
+                                        "Batch-assigned {moved} Staging model(s) matching '{q_eff}' to {sel_city}."
+                                    ));
+                                    universal_canvas.earth_world.start_fly_to(
+                                        &universal_canvas.world_map,
+                                        sel_lat,
+                                        sel_lon,
+                                        14.5,
+                                        sel_city,
+                                    );
+                                } else {
+                                    self.vault_feedback = Some(format!(
+                                        "No Staging models matched '{q_eff}'."
+                                    ));
+                                }
+                            }
+                        });
+                    }
                     ui.add_space(2.0);
                     ScrollArea::vertical()
                         .id_salt("antigravity_vault_explorer_scroll")
@@ -7316,6 +7556,34 @@ impl SpatialWorkspaceState {
                                             format!("World: {world_total} Bldgs"),
                                             theme.accent_blue,
                                         );
+                                        let rep = &universal_canvas.neighborhood_report;
+                                        if rep.neighbors_evaluated > 0 {
+                                            let exp_tag = match rep.recommended_exposure {
+                                                crate::core::wind::ExposureCategory::ExposureB => "ExpB",
+                                                crate::core::wind::ExposureCategory::ExposureC => "ExpC",
+                                                crate::core::wind::ExposureCategory::ExposureD => "ExpD",
+                                            };
+                                            let gap_tag = rep
+                                                .min_clear_gap_m
+                                                .map_or("--".to_string(), |g| format!("{g:.1}m"));
+                                            let nb_col = if rep.pounding_risk_count > 0 {
+                                                theme.accent_red
+                                            } else if rep.tight_buffer_count > 0 {
+                                                theme.accent_orange
+                                            } else {
+                                                theme.accent_green
+                                            };
+                                            icons::pill_badge(
+                                                ui,
+                                                AppIcon::AlertTriangle,
+                                                format!(
+                                                    "Nb:{} Gap {gap_tag} {exp_tag}{}",
+                                                    rep.neighbors_evaluated,
+                                                    if rep.pounding_risk_count > 0 { " POUND" } else { "" }
+                                                ),
+                                                nb_col,
+                                            );
+                                        }
                                         if world_crit > 0
                                             && ui
                                                 .small_button(format!("{world_crit} Crit • Fly"))
@@ -7654,11 +7922,15 @@ impl SpatialWorkspaceState {
                                 }
                                 if ui
                                     .small_button(if universal_canvas.show_terrain_contours {
-                                        "Topo ON"
+                                        if universal_canvas.site_tin_is_live_dem {
+                                            "Topo DEM ON"
+                                        } else {
+                                            "Topo ON"
+                                        }
                                     } else {
                                         "Topo"
                                     })
-                                    .on_hover_text("Toggle 3D TIN terrain contours & SNI 8460:2017 steep slope (>30°) overlay on Earth 3D")
+                                    .on_hover_text("Toggle live Terrarium DEM / 3D TIN terrain contours & SNI 8460:2017 steep slope (>30°) overlay on Earth 3D")
                                     .clicked()
                                 {
                                     universal_canvas.show_terrain_contours = !universal_canvas.show_terrain_contours;
@@ -7666,7 +7938,32 @@ impl SpatialWorkspaceState {
                                         universal_canvas.ensure_site_tin_generated();
                                     }
                                 }
-                                if universal_canvas.active_world_project_rel_path.is_some() {
+                                if ui
+                                    .small_button(if universal_canvas.urban_vectors.live_osm_streaming {
+                                        "OSM Vec ON"
+                                    } else {
+                                        "OSM Vec"
+                                    })
+                                    .on_hover_text("Stream crisp OpenStreetMap vector streets, rivers & buildings over Earth 3D")
+                                    .clicked()
+                                {
+                                    universal_canvas.urban_vectors.live_osm_streaming =
+                                        !universal_canvas.urban_vectors.live_osm_streaming;
+                                }
+                                if let Some(rel) = universal_canvas.active_world_project_rel_path.clone() {
+                                    if ui
+                                        .small_button("Move Pin")
+                                        .on_hover_text("Reposition active building on Earth 3D with automatic road/parcel vector OSNAP")
+                                        .clicked()
+                                    {
+                                        universal_canvas.globe_mode = true;
+                                        universal_canvas.placing_unlocated_rel_path = Some(rel.clone());
+                                        universal_canvas.placing_heading_deg = universal_canvas
+                                            .world_index
+                                            .get(&rel)
+                                            .map(|b| b.heading_deg)
+                                            .unwrap_or(0.0);
+                                    }
                                     if ui
                                         .small_button("-15°")
                                         .on_hover_text("Rotate active Earth building -15° counter-clockwise (Shift+R)")
@@ -10062,6 +10359,130 @@ END-ISO-10303-21;\r\n";
             assert_eq!(spatial.hud_rects.len(), 1);
             let r = spatial.hud_rects[0];
             assert!(r.right() <= win_w + 1.0 && r.left() >= -1.0);
+        }
+    }
+
+    #[test]
+    fn test_phase59_osm_geojson_dem_neighborhood_batch_pin_and_gemini_tools() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = crate::theme::MacTheme::default();
+
+        // 1. GeoJSON site parcel & road ingestion + vector snapping
+        let geo = r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"Access Rd","highway":"secondary"},"geometry":{"type":"LineString","coordinates":[[106.844,-6.2088],[106.847,-6.2088]]}}]}"#;
+        let (ingested, _) = canvas.urban_vectors.ingest_geojson(geo, "Jakarta").expect("GeoJSON ok");
+        assert_eq!(ingested, 1);
+
+        // 2. Seed unlocated Staging models + nearby tight neighbor for Pounding + Wind + DEM test
+        canvas.world_index.upsert_building(
+            crate::core::gis::WorldBuildingProxy {
+                id: 11,
+                rel_path: "Projects/Surabaya/Warehouse_01.ifc".to_string(),
+                name: "Warehouse_01".to_string(),
+                filename: "Warehouse_01.ifc".to_string(),
+                lat: 0.0,
+                lon: 0.0,
+                elev_m: 0.0,
+                heading_deg: 0.0,
+                footprint_local_m: vec![[-10.0, -8.0], [10.0, -8.0], [10.0, 8.0], [-10.0, 8.0]],
+                total_height_m: 14.0,
+                story_count: 4,
+                member_count: 40,
+                max_dcr: 0.72,
+                min_ari: 0.85,
+                source: crate::core::gis::GeoPlacementSource::StagingCampusAuto,
+                address_hint: String::new(),
+            },
+            true,
+        );
+        let origin = (-6.2088, 106.8456);
+        let nb_ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(origin, [16_500.0, 0.0]);
+        canvas.world_index.upsert_building(
+            crate::core::gis::WorldBuildingProxy {
+                id: 12,
+                rel_path: "Projects/Jakarta/Neighbor_Tower.ifc".to_string(),
+                name: "Neighbor_Tower".to_string(),
+                filename: "Neighbor_Tower.ifc".to_string(),
+                lat: nb_ll.0,
+                lon: nb_ll.1,
+                elev_m: 10.0,
+                heading_deg: 0.0,
+                footprint_local_m: vec![[-10.0, -8.0], [10.0, -8.0], [10.0, 8.0], [-10.0, 8.0]],
+                total_height_m: 38.0,
+                story_count: 10,
+                member_count: 150,
+                max_dcr: 0.94,
+                min_ari: 0.65,
+                source: crate::core::gis::GeoPlacementSource::UserPinnedOnEarth,
+                address_hint: "Jakarta".to_string(),
+            },
+            true,
+        );
+        canvas.ground_origin_lat_lon = origin;
+        canvas.ground_origin_anchored = true;
+        build.bim_bus.execute_natural_language("portal 2x2 @6m 10floors").expect("build tower");
+
+        // 3. Parse & execute multi-action Gemini directives (Batch Pin + Audit Neighborhood + Topo + Vector)
+        let raw_ai = "Plan ready. [[BATCH_PIN_CITY:Surabaya, Surabaya]] [[AUDIT_NEIGHBORHOOD]] [[TOGGLE_TOPO]] [[TOGGLE_VECTOR]]";
+        let (_, dirs) = parse_gemini_action_directives(raw_ai);
+        assert_eq!(dirs.len(), 4);
+
+        let _ = spatial.apply_proposal_actions(
+            &[
+                PlannedProposalAction::BatchPinCity {
+                    query: "Surabaya".to_string(),
+                    city_name: "Surabaya".to_string(),
+                },
+                PlannedProposalAction::AuditNeighborhood,
+                PlannedProposalAction::EnableTerrainContours,
+                PlannedProposalAction::SwitchPureVector,
+            ],
+            &mut canvas,
+            &mut build,
+            &mut ai,
+        );
+        assert_eq!(canvas.world_index.unlocated_count(), 0);
+        assert!(canvas.neighborhood_report.neighbors_evaluated >= 1);
+        assert!(canvas.neighborhood_report.pounding_risk_count >= 1);
+        assert!(canvas.show_terrain_contours);
+        assert_eq!(
+            canvas.world_map.tile_provider,
+            crate::core::gis::TileSource::SyntheticVectorTerrain
+        );
+
+        // 4. Expanded Dynamic Island + Neighborhood Pill + Batch Pin Vault Drawer stay inside bounds on Desktop & Mobile
+        spatial.mobile_deck_pinned = true;
+        spatial.vault_drawer_open = true;
+        for win_w in [1200.0_f32, 390.0] {
+            let ctx = egui::Context::default();
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 820.0))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert!(!spatial.hud_rects.is_empty());
+            for r in &spatial.hud_rects {
+                assert!(r.right() <= win_w + 1.0 && r.left() >= -1.0);
+            }
         }
     }
 }

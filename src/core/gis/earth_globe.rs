@@ -1629,6 +1629,95 @@ impl PlanetaryWorldState {
         }
     }
 
+    /// Projects pure-Rust OSM Overpass & GeoJSON urban vector roads, rivers, cadastral parcels,
+    /// and 3D context building footprints sharply onto Earth 3D (`zero-blur at any zoom`).
+    pub fn paint_urban_vector_features(
+        &self,
+        painter: &egui::Painter,
+        xform: &GlobeScreenTransform,
+        theme: &MacTheme,
+        features: &[super::vector_layers::UrbanVectorFeature],
+    ) {
+        use super::vector_layers::UrbanVectorKind;
+        if xform.zoom_level < 12.5 || features.is_empty() {
+            return;
+        }
+        let road_scale = ((xform.zoom_level - 13.0) * 0.45).clamp(1.0, 3.2);
+        for feat in features {
+            if feat.points_lat_lon.len() < 2 {
+                continue;
+            }
+            let mut base_pts = Vec::with_capacity(feat.points_lat_lon.len());
+            for &(la, lo) in &feat.points_lat_lon {
+                if let Some((sp, _, true)) = xform.project_lat_lon_elev(la, lo, 0.0) {
+                    base_pts.push(sp);
+                }
+            }
+            if base_pts.len() < 2 {
+                continue;
+            }
+            if !base_pts.iter().any(|p| xform.rect.expand(40.0).contains(*p)) {
+                continue;
+            }
+            match feat.kind {
+                UrbanVectorKind::RoadMajor => {
+                    painter.add(egui::Shape::line(
+                        base_pts,
+                        Stroke::new(2.2 * road_scale, Color32::from_rgba_unmultiplied(245, 158, 11, 200)),
+                    ));
+                }
+                UrbanVectorKind::RoadMinor => {
+                    painter.add(egui::Shape::line(
+                        base_pts,
+                        Stroke::new(1.1 * road_scale, Color32::from_rgba_unmultiplied(203, 213, 225, 150)),
+                    ));
+                }
+                UrbanVectorKind::RiverWaterway => {
+                    painter.add(egui::Shape::line(
+                        base_pts,
+                        Stroke::new(2.6 * road_scale, Color32::from_rgba_unmultiplied(56, 189, 248, 195)),
+                    ));
+                }
+                UrbanVectorKind::ParcelBoundary => {
+                    if feat.closed && base_pts.len() >= 3 {
+                        painter.add(egui::Shape::closed_line(
+                            base_pts,
+                            Stroke::new(1.5, theme.accent_orange.gamma_multiply(0.92)),
+                        ));
+                    } else {
+                        painter.add(egui::Shape::line(
+                            base_pts,
+                            Stroke::new(1.5, theme.accent_orange.gamma_multiply(0.92)),
+                        ));
+                    }
+                }
+                UrbanVectorKind::ContextBuilding => {
+                    if base_pts.len() >= 3 {
+                        let h = feat.height_m.max(4.0) as f64;
+                        let mut roof_pts = Vec::with_capacity(feat.points_lat_lon.len());
+                        for &(la, lo) in &feat.points_lat_lon {
+                            if let Some((rp, _, true)) = xform.project_lat_lon_elev(la, lo, h) {
+                                roof_pts.push(rp);
+                            }
+                        }
+                        if roof_pts.len() == base_pts.len() {
+                            painter.add(egui::Shape::convex_polygon(
+                                roof_pts,
+                                Color32::from_rgba_unmultiplied(100, 116, 139, 95),
+                                Stroke::new(1.0, Color32::from_rgba_unmultiplied(148, 163, 184, 170)),
+                            ));
+                        } else {
+                            painter.add(egui::Shape::closed_line(
+                                base_pts,
+                                Stroke::new(1.0, Color32::from_rgba_unmultiplied(148, 163, 184, 150)),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn shade_color(&self, base: Color32, world_unit: [f64; 3], xform: &GlobeScreenTransform) -> Color32 {
         if !self.camera.day_night_lighting {
             return base;

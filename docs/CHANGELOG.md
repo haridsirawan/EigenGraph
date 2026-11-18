@@ -7,6 +7,23 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.5.9] - 2026-11-18 — Phase 59: Streaming OSM Overpass & GeoJSON Urban Vectors, Live Terrarium DEM Topography, Inter-Building Seismic Pounding/Wind/Collapse Coupling & Gemini Batch Directives
+
+### Added & Changed
+- **Streaming OpenStreetMap Overpass & Pure-Rust GeoJSON Urban Vectors (`src/core/gis/vector_layers.rs`, `src/core/gis/earth_globe.rs`, `src/core/vault.rs`, `index.html`, `src/app.rs`)**:
+  - Created `UrbanVectorLayerCache`, `UrbanVectorFeature`, `UrbanVectorKind` (`RoadMajor`, `RoadMinor`, `RiverWaterway`, `ParcelBoundary`, `ContextBuilding`), `parse_geojson_features`, `parse_overpass_json`, and `snap_lat_lon_to_vector_edge`.
+  - Added async Overpass road/waterway/building fetching across Web WASM (`web_sys`) and Native `curl`, `.geojson` Vault/local import with centroid camera flight, `paint_urban_vector_features` on Earth 3D (`OSM Vec ON` toggle), and automatic vector road/parcel OSNAP + `Align [A]` azimuth matching in `"Place on Earth"` and `"Move Pin"` workflows.
+- **Live Terrarium RGB DEM Elevation Tiles & `.xyz`/`.pts`/`.csv` Earth 3D Survey TIN (`src/core/gis/dem_stream.rs`, `src/views/universal_canvas.rs`, `src/app.rs`)**:
+  - Created `DemTileCache`, `decode_terrarium_rgb`, `decode_terrarium_png_bytes`, `build_site_tin`, and `parse_survey_xyz_to_tin` decoding AWS/Mapzen Terrarium elevation PNGs into Delaunay-triangulated `TinSurfaceMesh` surfaces.
+  - Upgraded `UniversalCanvasState::ensure_site_tin_generated` and `render_world_canvas` to auto-upgrade local TIN contours (`Topo DEM ON`) when live Terrarium DEM tiles finish downloading, and routed `.xyz`/`.pts`/`.csv` survey imports straight onto Earth 3D.
+- **Multi-Building Inter-Structure Coupled Hazard Analysis (`src/core/gis/neighborhood_physics.rs`, `src/views/universal_canvas.rs`, `src/views/spatial_workspace.rs`)**:
+  - Added `evaluate_neighborhood_coupling`, `polygon_min_distance_m`, `NeighborhoodAuditReport`, `NeighborPoundingContact`, and `PoundingSeverity` evaluating true rotated polygon edge clear gaps within `220 m` against SNI 1726 / ASCE 7 inelastic seismic separation (`delta_MT`), calibrating urban `ExposureCategory` (`B/C/D`), flagging narrow Venturi wind corridors, and detecting falling debris proximity around low-ARI buildings.
+  - Rendered live seismic pounding gap lines (`Gap X.Xm < Y.Ym [POUNDING]`), Tight Buffer / Venturi indicators, and `FALL ZONE` markers in Earth 3D (`paint_neighborhood_hazards`) plus live `Nb:k Gap ... Exp` status badges in Dynamic Island.
+- **Batch City Pinning UI, Direct `Move Pin` & Expanded Gemini Tool Directives (`src/views/spatial_workspace.rs`)**:
+  - Added Vault `Batch Pin` bar (`Keyword` + city selector + `Assign City` invoking `WorldSpatialIndex::relocate_city_batch`), Studio Bar `Move Pin` reposition trigger, and five new Gemini action directives (`[[BATCH_PIN_CITY:...]]`, `[[PIN_ACTIVE:...]]`, `[[AUDIT_NEIGHBORHOOD]]`, `[[TOGGLE_TOPO]]`, `[[TOGGLE_VECTOR]]`) alongside offline `"audit pounding"` / `"pure vector"` commands.
+
+---
+
 ## [v0.5.8] - 2026-11-18 — Phase 58: Georeferenced IFC4 Writeback, Crisp Full-Rust Vector Site/Cadastre Overlay, 3D TIN Terrain Contours & Planetary Portfolio Triage
 
 ### Added & Changed

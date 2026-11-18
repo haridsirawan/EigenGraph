@@ -8,6 +8,9 @@ pub mod crs_projection;
 pub mod tin_surface;
 pub mod earth_globe;
 pub mod world_index;
+pub mod vector_layers;
+pub mod dem_stream;
+pub mod neighborhood_physics;
 
 pub use map_widget::{
     SiteGeodeticPin, SlippyMapState, SlippyMapTelemetry, TileSource, WebMercator,
@@ -17,6 +20,18 @@ pub use map_widget::{
 pub use world_index::{
     GeoPlacementSource, WorldBuildingProxy, WorldClusterBeacon, WorldPortfolioFilter,
     WorldPortfolioSummary, WorldSpatialIndex, STAGING_CAMPUS_ORIGIN, WORLD_INDEX_FILENAME,
+};
+
+pub use vector_layers::{
+    parse_geojson_features, parse_overpass_json, UrbanVectorFeature, UrbanVectorKind,
+    UrbanVectorLayerCache,
+};
+
+pub use dem_stream::{decode_terrarium_rgb, parse_survey_xyz_to_tin, DecodedDemTile, DemTileCache};
+
+pub use neighborhood_physics::{
+    bim_footprint_hull_m, evaluate_neighborhood_coupling, polygon_min_distance_m,
+    NeighborPoundingContact, NeighborhoodAuditReport, PoundingSeverity,
 };
 
 pub use earth_globe::{

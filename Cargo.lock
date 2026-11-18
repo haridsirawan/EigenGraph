@@ -544,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "eigengraph"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "eframe",
  "egui",

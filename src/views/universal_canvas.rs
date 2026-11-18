@@ -501,6 +501,14 @@ pub struct UniversalCanvasState {
     pub site_tin_preset: crate::core::gis::DemTerrainPreset,
     pub show_terrain_contours: bool,
     pub hovered_world_building_rel_path: Option<String>,
+    // Phase 59: Urban Vector Streaming (OSM/GeoJSON), Live Terrarium DEM & Neighborhood Physics
+    pub urban_vectors: crate::core::gis::UrbanVectorLayerCache,
+    pub dem_cache: crate::core::gis::DemTileCache,
+    pub use_live_dem_tiles: bool,
+    pub site_tin_is_live_dem: bool,
+    pub neighborhood_report: crate::core::gis::NeighborhoodAuditReport,
+    pub show_neighborhood_hazards: bool,
+    pub active_vector_snap_az_deg: Option<f64>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -586,6 +594,13 @@ impl Default for UniversalCanvasState {
             site_tin_preset: crate::core::gis::DemTerrainPreset::TerracedCutFillPad,
             show_terrain_contours: false,
             hovered_world_building_rel_path: None,
+            urban_vectors: crate::core::gis::UrbanVectorLayerCache::default(),
+            dem_cache: crate::core::gis::DemTileCache::default(),
+            use_live_dem_tiles: true,
+            site_tin_is_live_dem: false,
+            neighborhood_report: crate::core::gis::NeighborhoodAuditReport::default(),
+            show_neighborhood_hazards: true,
+            active_vector_snap_az_deg: None,
         }
     }
 }
@@ -602,8 +617,19 @@ impl UniversalCanvasState {
         compute_site_environmental_coupling(lat, lon, &self.earth_world)
     }
 
-    /// Generates `active_site_tin` on demand from `site_tin_preset` (local 400m x 400m geotechnical TIN).
+    /// Generates `active_site_tin` on demand, preferring live Terrarium DEM elevation tiles when cached
+    /// and falling back cleanly to `site_tin_preset` (local 400m x 400m geotechnical TIN).
     pub fn ensure_site_tin_generated(&mut self) {
+        if self.use_live_dem_tiles {
+            if let Some(dem_tin) = self
+                .dem_cache
+                .build_site_tin(self.ground_origin_lat_lon, 400.0, 20)
+            {
+                self.active_site_tin = Some(dem_tin);
+                self.site_tin_is_live_dem = true;
+                return;
+            }
+        }
         if self.active_site_tin.is_none() {
             self.active_site_tin = Some(crate::core::gis::TinSurfaceMesh::generate_from_dem_preset(
                 self.site_tin_preset,
@@ -613,7 +639,32 @@ impl UniversalCanvasState {
                 28,
                 1.0,
             ));
+            self.site_tin_is_live_dem = false;
         }
+    }
+
+    /// Evaluates seismic pounding gaps, urban wind exposure & Venturi channeling, and debris zones
+    /// between the active BIM structure and all surrounding neighbors inside `world_index`.
+    pub fn refresh_neighborhood_coupling(&mut self, bim_project: &BimProject) {
+        if !self.ground_origin_anchored && self.world_index.buildings.is_empty() {
+            self.neighborhood_report = crate::core::gis::NeighborhoodAuditReport::default();
+            return;
+        }
+        let (hull, h_m) = crate::core::gis::bim_footprint_hull_m(bim_project);
+        let hdg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        self.neighborhood_report = crate::core::gis::evaluate_neighborhood_coupling(
+            self.ground_origin_lat_lon,
+            &hull,
+            hdg,
+            h_m,
+            self.active_world_project_rel_path.as_deref(),
+            &self.world_index,
+        );
     }
 
     /// Local ground relief offset (meters relative to Earth surface datum `0.0` at anchored origin).
@@ -2549,12 +2600,43 @@ impl UniversalCanvasState {
             None
         };
 
-        // 1b. Render Fine Millimeter Engineering Grid (site scale), BIM Base Layer, Domain Overlay, Entities & Preview
+        // 1b. Refresh live DEM TIN before immutable canvas borrows, then render Grid, Vector Urban, TIN & World Buildings
+        if self.globe_mode && self.show_terrain_contours && self.use_live_dem_tiles {
+            self.dem_cache.ensure_tile_for_lat_lon(
+                ui.ctx(),
+                self.ground_origin_lat_lon.0,
+                self.ground_origin_lat_lon.1,
+                self.world_map.zoom_level,
+            );
+            if !self.site_tin_is_live_dem {
+                if let Some(live_tin) = self.dem_cache.build_site_tin(self.ground_origin_lat_lon, 400.0, 20) {
+                    self.active_site_tin = Some(live_tin);
+                    self.site_tin_is_live_dem = true;
+                }
+            }
+        }
         let world_to_screen = |w: [f64; 2]| self.world_to_screen(rect, w);
         if self.show_grid && self.world_map.zoom_level >= 15.5 {
             self.paint_grid(&painter, rect, theme, &world_to_screen);
         }
         if self.globe_mode {
+            if let Some(ref xform) = active_globe_xform {
+                if self.world_map.vector_site_overlay
+                    || self.world_map.tile_provider == crate::core::gis::TileSource::SyntheticVectorTerrain
+                {
+                    self.urban_vectors.ensure_osm_cell_loaded(
+                        ui.ctx(),
+                        self.world_map.center_lat_lon.0,
+                        self.world_map.center_lat_lon.1,
+                        self.world_map.zoom_level,
+                    );
+                    if self.world_map.zoom_level >= 12.5 && self.urban_vectors.feature_count() > 0 {
+                        let (min_la, max_la, min_lo, max_lo) = self.visible_geo_bbox(xform);
+                        let vis_feats = self.urban_vectors.snapshot_visible(min_la, max_la, min_lo, max_lo, 900);
+                        self.earth_world.paint_urban_vector_features(&painter, xform, theme, &vis_feats);
+                    }
+                }
+            }
             if self.show_terrain_contours {
                 if let Some((ref tin, ref xform)) = self.active_site_tin.as_ref().zip(active_globe_xform.as_ref()) {
                     self.earth_world.paint_site_tin_contours_and_hazards(
@@ -2568,6 +2650,9 @@ impl UniversalCanvasState {
                 }
             }
             self.paint_planetary_world_buildings(&painter, rect, theme);
+            if self.show_neighborhood_hazards {
+                self.paint_neighborhood_hazards(&painter, rect, theme);
+            }
         }
         if self.show_bim_base_layer {
             self.paint_bim_base_layer(
@@ -4607,12 +4692,30 @@ impl UniversalCanvasState {
             }
         };
 
-        // Phase 57: Interactive "Place on Earth" Ghost Footprint mode for unlocated models
+        // Phase 57 & 59: Interactive "Place on Earth" Ghost Footprint mode + Vector Edge/Parcel OSNAP
         if self.globe_mode && self.placing_unlocated_rel_path.is_some() {
+            let resolve_place_coord = |raw_lat: f64, raw_lon: f64, skip_snap: bool| -> ((f64, f64), Option<f64>) {
+                if !skip_snap {
+                    if let Some((sla, slo, az)) = self
+                        .urban_vectors
+                        .snap_lat_lon_to_vector_edge((raw_lat, raw_lon), 18.0)
+                    {
+                        return ((sla, slo), Some(az));
+                    }
+                }
+                ((raw_lat, raw_lon), None)
+            };
             if let Some(hover) = response.hover_pos() {
                 let (lat, lon, hit) = self.screen_to_lat_lon_with_hit(hover, rect);
-                self.placing_hover_lat_lon = if hit { Some((lat, lon)) } else { None };
-                self.cursor_lat_lon = (lat, lon);
+                if hit {
+                    let ((pla, plo), az_opt) = resolve_place_coord(lat, lon, alt_held);
+                    self.placing_hover_lat_lon = Some((pla, plo));
+                    self.active_vector_snap_az_deg = az_opt;
+                    self.cursor_lat_lon = (pla, plo);
+                } else {
+                    self.placing_hover_lat_lon = None;
+                    self.active_vector_snap_az_deg = None;
+                }
             }
             if ui.input(|i| i.key_pressed(egui::Key::Q)) {
                 self.placing_heading_deg = (self.placing_heading_deg - 15.0).rem_euclid(360.0);
@@ -4620,32 +4723,40 @@ impl UniversalCanvasState {
             if ui.input(|i| i.key_pressed(egui::Key::E)) {
                 self.placing_heading_deg = (self.placing_heading_deg + 15.0).rem_euclid(360.0);
             }
+            if ui.input(|i| i.key_pressed(egui::Key::A)) {
+                if let Some(az) = self.active_vector_snap_az_deg {
+                    self.placing_heading_deg = az.rem_euclid(360.0);
+                }
+            }
             if response.secondary_clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 self.placing_unlocated_rel_path = None;
                 self.placing_hover_lat_lon = None;
+                self.active_vector_snap_az_deg = None;
                 return;
             }
             if response.clicked_by(egui::PointerButton::Primary) {
                 if let Some(pos) = response.interact_pointer_pos() {
                     let (lat, lon, hit) = self.screen_to_lat_lon_with_hit(pos, rect);
                     if hit {
+                        let ((pla, plo), _) = resolve_place_coord(lat, lon, alt_held);
                         if let Some(rel) = self.placing_unlocated_rel_path.take() {
                             let hdg = self.placing_heading_deg;
-                            self.world_index.pin_building_at(&rel, lat, lon, hdg);
+                            self.world_index.pin_building_at(&rel, pla, plo, hdg);
                             if self.active_world_project_rel_path.as_deref() == Some(rel.as_str()) {
-                                self.ground_origin_lat_lon = (lat, lon);
+                                self.ground_origin_lat_lon = (pla, plo);
                                 self.ground_origin_anchored = true;
                             }
-                            self.pending_world_pin_event = Some((rel.clone(), lat, lon, hdg));
+                            self.pending_world_pin_event = Some((rel.clone(), pla, plo, hdg));
                             self.status_message = Some(format!(
                                 "Pinned building '{}' onto Earth @ ({:.4}°, {:.4}°), heading {:.0}°",
                                 rel.split('/').next_back().unwrap_or(&rel),
-                                lat,
-                                lon,
+                                pla,
+                                plo,
                                 hdg
                             ));
                         }
                         self.placing_hover_lat_lon = None;
+                        self.active_vector_snap_az_deg = None;
                     }
                 }
             } else if response.dragged_by(egui::PointerButton::Primary) {
@@ -6658,16 +6769,92 @@ impl UniversalCanvasState {
                     ghost_stroke,
                 ));
                 if let Some((cp, _, true)) = xf.project_lat_lon_elev(hlat, hlon, base_relief + height_m + 1.5) {
+                    let snap_note = self
+                        .active_vector_snap_az_deg
+                        .map(|az| format!(" • Snap {az:.0}° [A]"))
+                        .unwrap_or_default();
                     clip_painter.text(
                         cp,
                         Align2::CENTER_BOTTOM,
                         format!(
-                            "Place Here ({hlat:.4}°, {hlon:.4}° | Hdg {:.0}° | {:+.0}m MSL)",
+                            "Place Here ({hlat:.4}°, {hlon:.4}° | Hdg {:.0}° | {:+.0}m MSL{snap_note})",
                             self.placing_heading_deg,
                             msl_elev
                         ),
                         egui::FontId::monospace(10.0),
                         Color32::from_rgb(0, 240, 255),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Renders inter-building seismic pounding separation gaps, Venturi wind corridors, and
+    /// collapse-risk proximity rings directly over neighboring structures on Earth 3D.
+    pub fn paint_neighborhood_hazards(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        theme: &MacTheme,
+    ) {
+        if self.world_map.zoom_level < 14.2 || self.neighborhood_report.contacts.is_empty() {
+            return;
+        }
+        let Some(ref xf) = self.last_globe_xform else {
+            return;
+        };
+        let clip_painter = painter.with_clip_rect(rect);
+        for contact in &self.neighborhood_report.contacts {
+            let elev = self.local_site_relief_m(contact.neighbor_lat, contact.neighbor_lon) + 2.0;
+            let (Some((pa, _, true)), Some((pb, _, true))) = (
+                xf.project_lat_lon_elev(contact.closest_active_ll.0, contact.closest_active_ll.1, elev),
+                xf.project_lat_lon_elev(contact.closest_neighbor_ll.0, contact.closest_neighbor_ll.1, elev),
+            ) else {
+                continue;
+            };
+            if !rect.expand(30.0).contains(pa) && !rect.expand(30.0).contains(pb) {
+                continue;
+            }
+            use crate::core::gis::PoundingSeverity;
+            let col = match contact.severity {
+                PoundingSeverity::PoundingRisk => theme.accent_red,
+                PoundingSeverity::TightBuffer => theme.accent_orange,
+                PoundingSeverity::SafeClearance if contact.venturi_channel => theme.accent_blue,
+                PoundingSeverity::SafeClearance => continue,
+            };
+            clip_painter.line_segment([pa, pb], Stroke::new(2.0, col));
+            clip_painter.circle_filled(pa, 3.0, col);
+            clip_painter.circle_filled(pb, 3.0, col);
+            let mid = Pos2::new(0.5 * (pa.x + pb.x), 0.5 * (pa.y + pb.y) - 6.0);
+            let tag = match contact.severity {
+                PoundingSeverity::PoundingRisk => format!(
+                    "Gap {:.2}m < {:.2}m [POUNDING]",
+                    contact.clear_gap_m, contact.required_gap_m
+                ),
+                PoundingSeverity::TightBuffer => {
+                    format!("Gap {:.2}m [Tight]", contact.clear_gap_m)
+                }
+                PoundingSeverity::SafeClearance => {
+                    format!("Wind Venturi ({:.1}m)", contact.clear_gap_m)
+                }
+            };
+            clip_painter.text(
+                mid,
+                Align2::CENTER_BOTTOM,
+                tag,
+                egui::FontId::monospace(9.5),
+                col,
+            );
+            if contact.inside_collapse_fall_zone {
+                if let Some((nc, _, true)) =
+                    xf.project_lat_lon_elev(contact.neighbor_lat, contact.neighbor_lon, elev + contact.neighbor_height_m * 0.5)
+                {
+                    clip_painter.text(
+                        nc,
+                        Align2::CENTER_CENTER,
+                        "FALL ZONE",
+                        egui::FontId::monospace(9.0),
+                        theme.accent_red,
                     );
                 }
             }
