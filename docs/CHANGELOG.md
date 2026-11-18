@@ -7,6 +7,24 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.5.8] - 2026-11-18 — Phase 58: Georeferenced IFC4 Writeback, Crisp Full-Rust Vector Site/Cadastre Overlay, 3D TIN Terrain Contours & Planetary Portfolio Triage
+
+### Added & Changed
+- **Standard OpenBIM IFC4 Georeferenced Writeback & `TrueNorth` Decoding (`src/core/bim.rs`, `src/core/ifc.rs`, `src/app.rs`)**:
+  - Upgraded `BimProject::export_ifc4_spatial_georeferenced` with `decimal_deg_to_ifc_dms`, emitting complete `IFCSITE` (`RefLatitude`, `RefLongitude`, `RefElevation`), `IFCPOSTALADDRESS`, `IFCGEOMETRICREPRESENTATIONCONTEXT` (`TrueNorth`), `IFCPROJECTEDCRS` (auto-detected WGS84/UTM EPSG), and `IFCMAPCONVERSION` while preserving `.MILLI.,.METRE.` structural unit invariance before projected CRS units.
+  - Added `IfcModel::site_heading_deg` to decode `IFCMAPCONVERSION` `(XAxisAbscissa, XAxisOrdinate)` and `TrueNorth` orientation vectors on round-trip imports, and wired `export_ifc4` in `src/app.rs` to embed active Earth coordinates, site MSL elevation, heading azimuth, and city hints.
+- **Crisp Full-Rust Vector Basemap & Zero-Blur Metric Site Cadastre (`src/core/gis/map_widget.rs`, `src/core/gis/earth_globe.rs`, `src/views/spatial_workspace.rs`)**:
+  - Added `SlippyMapState::vector_site_overlay`, `visual_layer_label`, and `cycle_basemap_visual_mode` (`Sat + Vec` ➔ `Pure Vector` ➔ `OSM + Vec` ➔ `Dark + Vec` ➔ `Satellite`).
+  - Added `PlanetaryWorldState::paint_vector_urban_and_cadastral_layer` to project crisp full-Rust regional city hubs/corridors (`GLOBAL_CITY_CATALOG`), adaptive metric cadastral grids (`150m` / `50m` / `20m` / `5m` / `2m`), pure vector neighborhood street blocks, range rings, and North/East axes on the spherical Earth tangent so zooming to 1:10 structural scale remains sharp without raster blur.
+- **3D `TinSurfaceMesh` Topographic Contour & Steep-Slope Hazard Drape (`src/core/gis/earth_globe.rs`, `src/views/universal_canvas.rs`, `src/views/spatial_workspace.rs`)**:
+  - Added `PlanetaryWorldState::paint_site_tin_contours_and_hazards`, `UniversalCanvasState::ensure_site_tin_generated`, and `local_site_relief_m`, projecting `ContourPolyline` elevations and SNI 8460:2017 `> 30°` steep-slope hazard facets directly onto Earth 3D while coupling active LOD 3 BIM elements, neighbor massing, and `"Place on Earth"` cursor ghosts seamlessly to local terrain relief without floating artifacts.
+  - Populated `WorldBuildingProxy.elev_m` from `earth_world.effective_elevation_m(lat, lon)` during Vault sync and site anchoring.
+- **Planetary Portfolio Triage HUD, Quick Heading Rotation, Hover Telemetry & `@World Portfolio` AI (`src/core/gis/world_index.rs`, `src/views/universal_canvas.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Added `WorldPortfolioFilter` (`All`, `UnlocatedStaging`, `CriticalRisk`, `VerifiedOrPinned`), `WorldPortfolioSummary`, `filtered_indices`, `next_building_matching`, `portfolio_summary`, `update_heading`, and `relocate_city_batch` in `WorldSpatialIndex`.
+  - Added cyan hover highlight + live neighbor building telemetry tooltip (`Name • City/Source • Floors • Max DCR% • Min ARI`) and `R`/`Shift+R` or `-15°`/`+15°` Dynamic Island heading controls, `Crit • Fly` and `Next Unloc` camera fly-to tour buttons, Vault triage filter pills (`Show: All / Unlocated / Critical / Located` up to 80 matches), `/portfolio` slash command, and `@World Portfolio` context attachment in `build_enriched_context_payload`.
+
+---
+
 ## [v0.5.7] - 2026-11-18 — Phase 57: Planetary Digital Twin `WorldSpatialIndex` (10,000+ Simultaneous Geo-BIM Projects), 4-Tier HLOD Rendering & Smart Unlocated `.ifc` Placement
 
 ### Added & Changed

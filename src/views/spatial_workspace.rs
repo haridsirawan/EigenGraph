@@ -188,6 +188,7 @@ impl AgentModelChoice {
 pub enum AiContextAttachment {
     SelectedElement,
     EarthSite,
+    WorldPortfolio,
     BimGeometry,
     FemRedundancy,
     ScheduleAndCost,
@@ -210,6 +211,7 @@ impl AiContextAttachment {
         match self {
             Self::SelectedElement => "domain:selected".to_string(),
             Self::EarthSite => "domain:earth".to_string(),
+            Self::WorldPortfolio => "domain:world_portfolio".to_string(),
             Self::BimGeometry => "domain:bim".to_string(),
             Self::FemRedundancy => "domain:fem".to_string(),
             Self::ScheduleAndCost => "domain:schedule_cost".to_string(),
@@ -223,6 +225,7 @@ impl AiContextAttachment {
         match self {
             Self::SelectedElement => AppIcon::Target,
             Self::EarthSite => AppIcon::Globe,
+            Self::WorldPortfolio => AppIcon::Layers,
             Self::BimGeometry => AppIcon::Cube3D,
             Self::FemRedundancy => AppIcon::Bolt,
             Self::ScheduleAndCost => AppIcon::Coins,
@@ -275,6 +278,7 @@ impl AiContextAttachment {
                 None => "@Selection".to_string(),
             },
             Self::EarthSite => "@Earth Site".to_string(),
+            Self::WorldPortfolio => "@World Portfolio".to_string(),
             Self::BimGeometry => "@BIM Model".to_string(),
             Self::FemRedundancy => "@FEM & ARI".to_string(),
             Self::ScheduleAndCost => "@4D/5D Cost".to_string(),
@@ -802,6 +806,12 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Open @ Add Context picker to attach BIM, FEM, Earth, or Vault files",
         icon: AppIcon::Layers,
     },
+    SlashCommandSpec {
+        cmd: "/portfolio",
+        category: "World",
+        description: "Jump Earth 3D to next unlocated Staging or critical Risk building across Vault",
+        icon: AppIcon::Globe,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -828,6 +838,8 @@ pub struct SpatialHudActions {
     pub pick_local_context_file: bool,
     pub anchor_and_build_site: Option<(f64, f64)>,
     pub apply_site_seismic: bool,
+    pub fly_to_next_world_building: Option<crate::core::gis::WorldPortfolioFilter>,
+    pub rotate_active_world_heading_deg: Option<f64>,
     pub undo: bool,
     pub redo: bool,
 }
@@ -1184,6 +1196,8 @@ pub struct SpatialWorkspaceState {
     // Phase 54: Restructured essential Dynamic Island drawer, subfolder note save, & structural triage
     pub hover_more_tools_open: bool,
     pub vault_note_folder: String,
+    // Phase 58: Planetary Portfolio triage filter inside Vault drawer & Dynamic Island
+    pub world_portfolio_filter: crate::core::gis::WorldPortfolioFilter,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -1271,6 +1285,7 @@ impl Default for SpatialWorkspaceState {
             vault_rename_target: None,
             hover_more_tools_open: false,
             vault_note_folder: "KnowledgeBase".to_string(),
+            world_portfolio_filter: crate::core::gis::WorldPortfolioFilter::All,
         }
     }
 }
@@ -2153,6 +2168,42 @@ impl SpatialWorkspaceState {
                         universal_canvas.earth_world.vitals.co2_ppm,
                     ));
                 }
+                AiContextAttachment::WorldPortfolio => {
+                    let sum = universal_canvas.world_index.portfolio_summary();
+                    let reg_str = sum
+                        .top_regions
+                        .iter()
+                        .map(|(r, c)| format!("{r} ({c})"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let crit_str = sum
+                        .top_critical
+                        .iter()
+                        .map(|b| {
+                            format!(
+                                "{} @ ({:.3}°,{:.3}°) DCR={:.0}% ARI={:.2}",
+                                b.name,
+                                b.lat,
+                                b.lon,
+                                b.max_dcr * 100.0,
+                                b.min_ari
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    step_traces.push("Audited Global World Portfolio".to_string());
+                    sections.push(format!(
+                        "[Planetary World Portfolio]: Total={}, GPS-Verified={}, City-Hint={}, User-Pinned={}, Unlocated Staging={}, Critical Risk={}. Regions: [{}]. Top Critical: [{}]",
+                        sum.total_buildings,
+                        sum.gps_verified_count,
+                        sum.city_hint_count,
+                        sum.user_pinned_count,
+                        sum.unlocated_count,
+                        sum.critical_count,
+                        reg_str,
+                        crit_str
+                    ));
+                }
                 AiContextAttachment::BimGeometry => {
                     step_traces.push("Scanned BIM Model Topology".to_string());
                     sections.push(format!(
@@ -2606,6 +2657,24 @@ impl SpatialWorkspaceState {
                     self.context_picker_open = true;
                     self.push_trace("Opened @ Add Context picker", true);
                 }
+                "/portfolio" => {
+                    self.attach_context(AiContextAttachment::WorldPortfolio);
+                    let sum = universal_canvas.world_index.portfolio_summary();
+                    if sum.critical_count > 0 {
+                        actions.fly_to_next_world_building =
+                            Some(crate::core::gis::WorldPortfolioFilter::CriticalRisk);
+                    } else if sum.unlocated_count > 0 {
+                        actions.fly_to_next_world_building =
+                            Some(crate::core::gis::WorldPortfolioFilter::UnlocatedStaging);
+                    }
+                    self.push_trace(
+                        format!(
+                            "Portfolio: {} total ({} unlocated, {} critical)",
+                            sum.total_buildings, sum.unlocated_count, sum.critical_count
+                        ),
+                        true,
+                    );
+                }
                 "/agent" => self.open_module_overlay(NavigationPillar::AiAgent),
                 "/planning" => self.open_module_overlay(NavigationPillar::ResearchConcept),
                 "/drafting" => self.open_module_overlay(NavigationPillar::ParametricDED),
@@ -2678,6 +2747,32 @@ impl SpatialWorkspaceState {
                 actions.sync_fem_and_earth = true;
                 actions.fit_camera = true;
             }
+            return actions;
+        } else if lower == "next critical" || lower == "fly critical" {
+            actions.fly_to_next_world_building = Some(crate::core::gis::WorldPortfolioFilter::CriticalRisk);
+            return actions;
+        } else if lower == "next unlocated" || lower == "next staging" {
+            actions.fly_to_next_world_building = Some(crate::core::gis::WorldPortfolioFilter::UnlocatedStaging);
+            return actions;
+        } else if lower.contains("portfolio") && (lower.contains("audit") || lower.contains("summary") || lower.contains("ringkas")) {
+            let sum = universal_canvas.world_index.portfolio_summary();
+            let msg = format!(
+                "Planetary Portfolio Audit: {} indexed Vault models (GPS Verified: {}, City Hint: {}, User Pinned: {}, Unlocated Staging: {}, Critical Risk DCR>=90%/ARI<0.70: {}). Top Regions: {}",
+                sum.total_buildings,
+                sum.gps_verified_count,
+                sum.city_hint_count,
+                sum.user_pinned_count,
+                sum.unlocated_count,
+                sum.critical_count,
+                sum.top_regions.iter().map(|(r, c)| format!("{r}:{c}")).collect::<Vec<_>>().join(", "),
+            );
+            ai_assistant.chat_history.push(crate::models::ChatMessage {
+                is_user: false,
+                message: msg,
+                time: crate::core::web_bridge::unix_timestamp_label(),
+            });
+            self.command_bar_expanded = true;
+            self.push_trace("Completed World Portfolio Audit", true);
             return actions;
         } else if let Some(target_sheet) = lower.strip_prefix("open ") {
             let pillar_opt = if target_sheet.contains("analysis") || target_sheet.contains("fem") {
@@ -6047,6 +6142,33 @@ impl SpatialWorkspaceState {
                         });
                     }
                     let fq = self.vault_filter_query.trim().to_lowercase();
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new("Show:").size(9.5).color(theme.text_muted));
+                        for pf in [
+                            crate::core::gis::WorldPortfolioFilter::All,
+                            crate::core::gis::WorldPortfolioFilter::UnlocatedStaging,
+                            crate::core::gis::WorldPortfolioFilter::CriticalRisk,
+                            crate::core::gis::WorldPortfolioFilter::VerifiedOrPinned,
+                        ] {
+                            let active = self.world_portfolio_filter == pf;
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new(pf.short_label())
+                                            .size(9.2)
+                                            .color(if active { Color32::WHITE } else { theme.text_secondary }),
+                                    )
+                                    .min_size(Vec2::new(0.0, 18.0))
+                                    .fill(if active { theme.accent_blue } else { theme.bg_card })
+                                    .corner_radius(CornerRadius::same(6)),
+                                )
+                                .clicked()
+                            {
+                                self.world_portfolio_filter = pf;
+                            }
+                        }
+                    });
+                    ui.add_space(2.0);
                     ScrollArea::vertical()
                         .id_salt("antigravity_vault_explorer_scroll")
                         .max_height(132.0)
@@ -6059,13 +6181,31 @@ impl SpatialWorkspaceState {
                                         .color(theme.text_muted),
                                 );
                             }
-                            for proj in vault_projects.iter().take(48) {
-                                if !fq.is_empty()
-                                    && !proj.name.to_lowercase().contains(&fq)
-                                    && !proj.rel_path.to_lowercase().contains(&fq)
-                                {
-                                    continue;
-                                }
+                            let portfolio_filter = self.world_portfolio_filter;
+                            for proj in vault_projects
+                                .iter()
+                                .filter(|proj| {
+                                    let proxy_opt = universal_canvas.world_index.get(&proj.rel_path);
+                                    let matches_pf = match portfolio_filter {
+                                        crate::core::gis::WorldPortfolioFilter::All => true,
+                                        crate::core::gis::WorldPortfolioFilter::UnlocatedStaging => {
+                                            proxy_opt.map_or(true, |b| b.is_unlocated())
+                                        }
+                                        crate::core::gis::WorldPortfolioFilter::CriticalRisk => {
+                                            proxy_opt.is_some_and(|b| b.is_critical())
+                                        }
+                                        crate::core::gis::WorldPortfolioFilter::VerifiedOrPinned => {
+                                            proxy_opt.is_some_and(|b| !b.is_unlocated())
+                                        }
+                                    };
+                                    let matches_q = fq.is_empty()
+                                        || proj.name.to_lowercase().contains(&fq)
+                                        || proj.rel_path.to_lowercase().contains(&fq)
+                                        || proxy_opt.is_some_and(|b| b.address_hint.to_lowercase().contains(&fq));
+                                    matches_pf && matches_q
+                                })
+                                .take(80)
+                            {
                                 let proxy_opt = universal_canvas.world_index.get(&proj.rel_path).cloned();
                                 let geo_tag = proxy_opt
                                     .as_ref()
@@ -6283,6 +6423,11 @@ impl SpatialWorkspaceState {
                                 AiContextAttachment::EarthSite,
                                 "Earth Viewport & Hazards",
                                 "Coordinates, elevation, seismic PGA Ss & climate".to_string(),
+                            ),
+                            (
+                                AiContextAttachment::WorldPortfolio,
+                                "Planetary Vault Portfolio",
+                                "Global 10,000+ project index, staging & critical counts".to_string(),
                             ),
                             (
                                 AiContextAttachment::BimGeometry,
@@ -7159,12 +7304,27 @@ impl SpatialWorkspaceState {
                                 };
                                 ui.horizontal_wrapped(|ui| {
                                     if world_total > 0 {
+                                        let world_crit = universal_canvas
+                                            .world_index
+                                            .buildings
+                                            .iter()
+                                            .filter(|b| b.is_critical())
+                                            .count();
                                         icons::pill_badge(
                                             ui,
                                             AppIcon::Layers,
                                             format!("World: {world_total} Bldgs"),
                                             theme.accent_blue,
                                         );
+                                        if world_crit > 0
+                                            && ui
+                                                .small_button(format!("{world_crit} Crit • Fly"))
+                                                .on_hover_text("Fly Earth 3D camera to the next high-DCR/low-ARI structure across the Vault")
+                                                .clicked()
+                                        {
+                                            actions.fly_to_next_world_building =
+                                                Some(crate::core::gis::WorldPortfolioFilter::CriticalRisk);
+                                        }
                                         if world_unloc > 0 {
                                             if ui
                                                 .small_button(format!("{world_unloc} Unlocated • Place"))
@@ -7189,6 +7349,14 @@ impl SpatialWorkspaceState {
                                                     universal_canvas.placing_heading_deg = 0.0;
                                                     self.push_trace(format!("Place '{rel}' onto Earth 3D (Q/E rotate)"), true);
                                                 }
+                                            }
+                                            if ui
+                                                .small_button("Next Unloc")
+                                                .on_hover_text("Fly camera to the next unlocated Staging parcel on Earth 3D")
+                                                .clicked()
+                                            {
+                                                actions.fly_to_next_world_building =
+                                                    Some(crate::core::gis::WorldPortfolioFilter::UnlocatedStaging);
                                             }
                                         }
                                     }
@@ -7471,6 +7639,48 @@ impl SpatialWorkspaceState {
                                     let next_grid = !build_view.show_grid;
                                     build_view.show_grid = next_grid;
                                     universal_canvas.show_grid = next_grid;
+                                }
+                                let map_lbl = format!("Map: {}", universal_canvas.world_map.visual_layer_label());
+                                if ui
+                                    .small_button(map_lbl)
+                                    .on_hover_text("Cycle Earth 3D layer: Satellite+Vector / Pure Rust Vector (anti-blur) / OSM+Vector / Dark+Vector")
+                                    .clicked()
+                                {
+                                    universal_canvas.world_map.cycle_basemap_visual_mode();
+                                    self.push_trace(
+                                        format!("Map layer: {}", universal_canvas.world_map.visual_layer_label()),
+                                        true,
+                                    );
+                                }
+                                if ui
+                                    .small_button(if universal_canvas.show_terrain_contours {
+                                        "Topo ON"
+                                    } else {
+                                        "Topo"
+                                    })
+                                    .on_hover_text("Toggle 3D TIN terrain contours & SNI 8460:2017 steep slope (>30°) overlay on Earth 3D")
+                                    .clicked()
+                                {
+                                    universal_canvas.show_terrain_contours = !universal_canvas.show_terrain_contours;
+                                    if universal_canvas.show_terrain_contours {
+                                        universal_canvas.ensure_site_tin_generated();
+                                    }
+                                }
+                                if universal_canvas.active_world_project_rel_path.is_some() {
+                                    if ui
+                                        .small_button("-15°")
+                                        .on_hover_text("Rotate active Earth building -15° counter-clockwise (Shift+R)")
+                                        .clicked()
+                                    {
+                                        actions.rotate_active_world_heading_deg = Some(-15.0);
+                                    }
+                                    if ui
+                                        .small_button("+15°")
+                                        .on_hover_text("Rotate active Earth building +15° clockwise (R)")
+                                        .clicked()
+                                    {
+                                        actions.rotate_active_world_heading_deg = Some(15.0);
+                                    }
                                 }
                             });
 
@@ -7999,6 +8209,12 @@ impl SpatialHudActions {
             self.anchor_and_build_site = other.anchor_and_build_site;
         }
         self.apply_site_seismic |= other.apply_site_seismic;
+        if other.fly_to_next_world_building.is_some() {
+            self.fly_to_next_world_building = other.fly_to_next_world_building;
+        }
+        if other.rotate_active_world_heading_deg.is_some() {
+            self.rotate_active_world_heading_deg = other.rotate_active_world_heading_deg;
+        }
         self.undo |= other.undo;
         self.redo |= other.redo;
     }
@@ -9753,5 +9969,99 @@ END-ISO-10303-21;\r\n";
 
         assert!(canvas.world_index.pin_building_at(&staging_rel, -0.9730, 116.7090, 45.0));
         assert_eq!(canvas.world_index.unlocated_count(), 19);
+    }
+
+    #[test]
+    fn test_phase58_vector_layers_tin_relief_portfolio_triage_and_hud_bounds() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = crate::theme::MacTheme::default();
+
+        // 1. Visual mode cycling covers Satellite+Vector -> Pure Vector -> OSM+Vector -> Dark+Vector
+        assert_eq!(canvas.world_map.visual_layer_label(), "Sat + Vec");
+        canvas.world_map.cycle_basemap_visual_mode();
+        assert_eq!(canvas.world_map.visual_layer_label(), "Pure Vector");
+        assert_eq!(
+            canvas.world_map.tile_provider,
+            crate::core::gis::TileSource::SyntheticVectorTerrain
+        );
+
+        // 2. Site TIN generation & local terrain relief sampling on Earth 3D
+        canvas.ground_origin_lat_lon = (-6.9175, 107.6191);
+        canvas.ground_origin_anchored = true;
+        canvas.site_tin_preset = crate::core::gis::DemTerrainPreset::VolcanicFoothillsRidge;
+        canvas.show_terrain_contours = true;
+        canvas.ensure_site_tin_generated();
+        assert!(canvas.active_site_tin.is_some());
+        assert!(canvas.local_site_relief_m(-6.9175, 107.6191).abs() < 0.05);
+        let offset_ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+            canvas.ground_origin_lat_lon,
+            [120_000.0, 90_000.0],
+        );
+        assert!(canvas.local_site_relief_m(offset_ll.0, offset_ll.1).abs() > 0.1);
+
+        // 3. Portfolio AI Context (@World Portfolio) injects global distribution into Gemini payload
+        canvas.world_index.upsert_building(
+            crate::core::gis::WorldBuildingProxy {
+                id: 1,
+                rel_path: "Projects/Bandung/Tower_A.ifc".to_string(),
+                name: "Bandung Critical Frame".to_string(),
+                filename: "Tower_A.ifc".to_string(),
+                lat: -6.9175,
+                lon: 107.6191,
+                elev_m: 710.0,
+                heading_deg: 20.0,
+                footprint_local_m: crate::core::gis::WorldBuildingProxy::default_footprint_m(),
+                total_height_m: 32.0,
+                story_count: 9,
+                member_count: 140,
+                max_dcr: 1.08,
+                min_ari: 0.64,
+                source: crate::core::gis::GeoPlacementSource::UserPinnedOnEarth,
+                address_hint: "Bandung".to_string(),
+            },
+            true,
+        );
+        canvas.active_world_project_rel_path = Some("Projects/Bandung/Tower_A.ifc".to_string());
+        spatial.attach_context(AiContextAttachment::WorldPortfolio);
+        let (chips, _, md) =
+            spatial.build_enriched_context_payload(&build.bim_bus.project, &members, &canvas);
+        assert!(chips.iter().any(|c| c == "@World Portfolio"));
+        assert!(md.contains("Critical Risk=1"));
+        assert!(md.contains("Bandung Critical Frame"));
+
+        // 4. Expanded Hover Deck + Vault Filter Drawer fit cleanly inside 1200px Desktop and 390px Mobile
+        spatial.mobile_deck_pinned = true;
+        spatial.vault_drawer_open = true;
+        for win_w in [1200.0_f32, 390.0] {
+            let ctx = egui::Context::default();
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 820.0))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(r.right() <= win_w + 1.0 && r.left() >= -1.0);
+        }
     }
 }

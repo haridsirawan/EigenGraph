@@ -714,6 +714,7 @@ pub struct SlippyMapState {
     pub center_lat_lon: (f64, f64),
     pub zoom_level: f32, // Continuous zoom 1.0 to 19.0
     pub tile_provider: TileSource,
+    pub vector_site_overlay: bool,
     pub active_pin: Option<(f64, f64)>,
     pub site_pins: Vec<SiteGeodeticPin>,
     pub crosshair_active: bool,
@@ -734,6 +735,7 @@ impl Default for SlippyMapState {
             center_lat_lon: (5.0, 98.0),
             zoom_level: 1.65,
             tile_provider: TileSource::EsriWorldImagery,
+            vector_site_overlay: true,
             active_pin: None,
             site_pins: Vec::new(),
             crosshair_active: true,
@@ -752,6 +754,55 @@ impl Default for SlippyMapState {
 impl SlippyMapState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Short mode label describing the active vector/satellite rendering layer.
+    pub fn visual_layer_label(&self) -> &'static str {
+        if self.tile_provider == TileSource::SyntheticVectorTerrain {
+            "Pure Vector"
+        } else if self.vector_site_overlay {
+            match self.tile_provider {
+                TileSource::EsriWorldImagery => "Sat + Vec",
+                TileSource::OpenStreetMap => "OSM + Vec",
+                TileSource::OpenTopoMap => "Topo + Vec",
+                TileSource::CartoDbDarkMatter => "Dark + Vec",
+                TileSource::SyntheticVectorTerrain => "Pure Vector",
+            }
+        } else {
+            match self.tile_provider {
+                TileSource::EsriWorldImagery => "Satellite",
+                TileSource::OpenStreetMap => "OSM Streets",
+                TileSource::OpenTopoMap => "OpenTopo",
+                TileSource::CartoDbDarkMatter => "Dark Map",
+                TileSource::SyntheticVectorTerrain => "Pure Vector",
+            }
+        }
+    }
+
+    /// Cycles through Satellite Hybrid Vector -> Pure Rust Vector -> OSM Hybrid Vector -> Dark Hybrid Vector -> Raster Only.
+    pub fn cycle_basemap_visual_mode(&mut self) {
+        match (self.tile_provider, self.vector_site_overlay) {
+            (TileSource::EsriWorldImagery, true) => {
+                self.tile_provider = TileSource::SyntheticVectorTerrain;
+                self.vector_site_overlay = true;
+            }
+            (TileSource::SyntheticVectorTerrain, _) => {
+                self.tile_provider = TileSource::OpenStreetMap;
+                self.vector_site_overlay = true;
+            }
+            (TileSource::OpenStreetMap, true) => {
+                self.tile_provider = TileSource::CartoDbDarkMatter;
+                self.vector_site_overlay = true;
+            }
+            (TileSource::CartoDbDarkMatter, true) => {
+                self.tile_provider = TileSource::EsriWorldImagery;
+                self.vector_site_overlay = false;
+            }
+            _ => {
+                self.tile_provider = TileSource::EsriWorldImagery;
+                self.vector_site_overlay = true;
+            }
+        }
     }
 
     /// Pans the map center by delta pixel offset on screen.

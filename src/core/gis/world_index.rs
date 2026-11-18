@@ -111,6 +111,10 @@ impl WorldBuildingProxy {
         self.source.is_unlocated()
     }
 
+    pub fn is_critical(&self) -> bool {
+        self.max_dcr >= 0.90 || self.min_ari < 0.70
+    }
+
     /// Builds a proxy directly from an in-memory `BimProject` and structural `members` slice.
     pub fn from_bim_project(
         rel_path: &str,
@@ -220,6 +224,40 @@ pub struct WorldClusterBeacon {
     pub min_ari: f64,
     pub label: String,
     pub primary_rel_path: String,
+}
+
+/// Portfolio triage filter used inside the Vault drawer and Planetary Tour controls (Phase 58).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WorldPortfolioFilter {
+    #[default]
+    All,
+    UnlocatedStaging,
+    CriticalRisk,
+    VerifiedOrPinned,
+}
+
+impl WorldPortfolioFilter {
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::UnlocatedStaging => "Unlocated",
+            Self::CriticalRisk => "Critical",
+            Self::VerifiedOrPinned => "Located",
+        }
+    }
+}
+
+/// Aggregated portfolio telemetry summary across all indexed Vault buildings for Gemini AI & HUD.
+#[derive(Debug, Clone, Default)]
+pub struct WorldPortfolioSummary {
+    pub total_buildings: usize,
+    pub unlocated_count: usize,
+    pub critical_count: usize,
+    pub gps_verified_count: usize,
+    pub city_hint_count: usize,
+    pub user_pinned_count: usize,
+    pub top_regions: Vec<(String, usize)>,
+    pub top_critical: Vec<WorldBuildingProxy>,
 }
 
 /// Spatial hash registry indexing thousands of Geo-BIM buildings for sub-millisecond Earth 3D queries.
@@ -380,6 +418,157 @@ impl WorldSpatialIndex {
         } else {
             false
         }
+    }
+
+    /// Updates building True North azimuth heading (degrees) non-destructively in the world index.
+    pub fn update_heading(&mut self, rel_path: &str, heading_deg: f64) -> bool {
+        if self.by_rel_path.len() != self.buildings.len() {
+            self.rebuild_spatial_hash();
+        }
+        let Some(&idx) = self.by_rel_path.get(rel_path) else {
+            return false;
+        };
+        if let Some(b) = self.buildings.get_mut(idx) {
+            b.heading_deg = heading_deg.rem_euclid(360.0);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn matches_filter(b: &WorldBuildingProxy, filter: WorldPortfolioFilter) -> bool {
+        match filter {
+            WorldPortfolioFilter::All => true,
+            WorldPortfolioFilter::UnlocatedStaging => b.is_unlocated(),
+            WorldPortfolioFilter::CriticalRisk => b.is_critical(),
+            WorldPortfolioFilter::VerifiedOrPinned => !b.is_unlocated(),
+        }
+    }
+
+    /// Returns indices of buildings matching `filter` and optional text query (name, path, or city hint).
+    pub fn filtered_indices(&self, filter: WorldPortfolioFilter, query: &str) -> Vec<usize> {
+        let fq = query.trim().to_ascii_lowercase();
+        self.buildings
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| {
+                Self::matches_filter(b, filter)
+                    && (fq.is_empty()
+                        || b.name.to_ascii_lowercase().contains(&fq)
+                        || b.rel_path.to_ascii_lowercase().contains(&fq)
+                        || b.address_hint.to_ascii_lowercase().contains(&fq))
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// Cycles cleanly to the next building matching `filter` after `after_rel` (ordered by risk when `CriticalRisk`).
+    pub fn next_building_matching(
+        &self,
+        filter: WorldPortfolioFilter,
+        after_rel: Option<&str>,
+    ) -> Option<&WorldBuildingProxy> {
+        let mut indices = self.filtered_indices(filter, "");
+        if indices.is_empty() {
+            return None;
+        }
+        if filter == WorldPortfolioFilter::CriticalRisk {
+            indices.sort_by(|&a, &b| {
+                let ba = &self.buildings[a];
+                let bb = &self.buildings[b];
+                bb.max_dcr
+                    .partial_cmp(&ba.max_dcr)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| ba.min_ari.partial_cmp(&bb.min_ari).unwrap_or(std::cmp::Ordering::Equal))
+            });
+        }
+        if let Some(cur) = after_rel {
+            if let Some(pos) = indices.iter().position(|&idx| self.buildings[idx].rel_path == cur) {
+                let next_idx = indices[(pos + 1) % indices.len()];
+                return self.buildings.get(next_idx);
+            }
+        }
+        self.buildings.get(indices[0])
+    }
+
+    /// Summarizes global Vault portfolio counts, regional distribution, and top critical buildings.
+    pub fn portfolio_summary(&self) -> WorldPortfolioSummary {
+        let mut s = WorldPortfolioSummary {
+            total_buildings: self.buildings.len(),
+            ..Default::default()
+        };
+        let mut region_counts: HashMap<String, usize> = HashMap::new();
+        let mut crit_indices = Vec::new();
+        for (i, b) in self.buildings.iter().enumerate() {
+            match b.source {
+                GeoPlacementSource::FileNativeGeo => s.gps_verified_count += 1,
+                GeoPlacementSource::AddressOrFolderHint => s.city_hint_count += 1,
+                GeoPlacementSource::UserPinnedOnEarth => s.user_pinned_count += 1,
+                GeoPlacementSource::StagingCampusAuto => s.unlocated_count += 1,
+            }
+            if b.is_critical() {
+                s.critical_count += 1;
+                crit_indices.push(i);
+            }
+            let region = if !b.address_hint.trim().is_empty() {
+                b.address_hint.trim().to_string()
+            } else if b.is_unlocated() {
+                "Staging Campus".to_string()
+            } else {
+                "Pinned Custom".to_string()
+            };
+            *region_counts.entry(region).or_default() += 1;
+        }
+        let mut regions: Vec<(String, usize)> = region_counts.into_iter().collect();
+        regions.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        regions.truncate(6);
+        s.top_regions = regions;
+
+        crit_indices.sort_by(|&a, &b| {
+            self.buildings[b]
+                .max_dcr
+                .partial_cmp(&self.buildings[a].max_dcr)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        crit_indices.truncate(5);
+        s.top_critical = crit_indices.into_iter().map(|i| self.buildings[i].clone()).collect();
+        s
+    }
+
+    /// Batch-pins staging models whose path, name, or hint matches `query` onto `(lat, lon)` with small grid jitter.
+    pub fn relocate_city_batch(&mut self, query: &str, lat: f64, lon: f64, city_label: &str) -> usize {
+        let q = query.trim().to_ascii_lowercase();
+        if q.is_empty() {
+            return 0;
+        }
+        let mut moved = 0usize;
+        let lat_clamped = lat.clamp(-85.0, 85.0);
+        let lon_norm = Self::normalize_lon(lon);
+        for b in &mut self.buildings {
+            if b.is_unlocated()
+                && (b.rel_path.to_ascii_lowercase().contains(&q)
+                    || b.name.to_ascii_lowercase().contains(&q)
+                    || b.address_hint.to_ascii_lowercase().contains(&q))
+            {
+                let col = (moved % 25) as f64;
+                let row = (moved / 25) as f64;
+                let off = SlippyMapState::world_mm_to_lat_lon(
+                    (lat_clamped, lon_norm),
+                    [col * 45_000.0, -row * 45_000.0],
+                );
+                b.lat = off.0;
+                b.lon = off.1;
+                b.source = GeoPlacementSource::UserPinnedOnEarth;
+                if b.address_hint.is_empty() && !city_label.is_empty() {
+                    b.address_hint = city_label.to_string();
+                }
+                moved += 1;
+            }
+        }
+        if moved > 0 {
+            self.rebuild_spatial_hash();
+        }
+        moved
     }
 
     /// Queries visible building indices inside the given geographic viewport bbox sorted closest to focus.
@@ -654,5 +843,60 @@ mod tests {
         let loaded = WorldSpatialIndex::from_manifest_json(&json).expect("deserialize world manifest");
         assert_eq!(loaded.buildings.len(), 10_000);
         assert!((loaded.get(&staging_path).unwrap().heading_deg - 30.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_phase58_world_index_filtering_cycle_summary_and_heading_update() {
+        let mut idx = WorldSpatialIndex::default();
+        for (i, (name, path, dcr, ari, src, city)) in [
+            ("LowRisk", "Projects/Jakarta/A.ifc", 0.55, 0.94, GeoPlacementSource::FileNativeGeo, "Jakarta"),
+            ("HighDcr", "Projects/Bandung/B.ifc", 1.12, 0.75, GeoPlacementSource::AddressOrFolderHint, "Bandung"),
+            ("StagedOne", "Projects/Bandung/C.ifc", 0.92, 0.62, GeoPlacementSource::StagingCampusAuto, ""),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            idx.upsert_building(
+                WorldBuildingProxy {
+                    id: WorldBuildingProxy::stable_id_for_path(path),
+                    rel_path: path.to_string(),
+                    name: name.to_string(),
+                    filename: format!("{name}.ifc"),
+                    lat: -6.2 - i as f64 * 0.1,
+                    lon: 106.8 + i as f64 * 0.1,
+                    elev_m: 15.0,
+                    heading_deg: 0.0,
+                    footprint_local_m: WorldBuildingProxy::default_footprint_m(),
+                    total_height_m: 20.0,
+                    story_count: 5,
+                    member_count: 40,
+                    max_dcr: dcr,
+                    min_ari: ari,
+                    source: src,
+                    address_hint: city.to_string(),
+                },
+                true,
+            );
+        }
+
+        let summary = idx.portfolio_summary();
+        assert_eq!(summary.total_buildings, 3);
+        assert_eq!(summary.unlocated_count, 1);
+        assert_eq!(summary.critical_count, 2);
+        assert_eq!(summary.top_critical[0].name, "HighDcr");
+
+        let next_crit = idx.next_building_matching(WorldPortfolioFilter::CriticalRisk, None).unwrap();
+        assert_eq!(next_crit.name, "HighDcr");
+        let after_crit = idx
+            .next_building_matching(WorldPortfolioFilter::CriticalRisk, Some(&next_crit.rel_path))
+            .unwrap();
+        assert_eq!(after_crit.name, "StagedOne");
+
+        assert!(idx.update_heading("Projects/Jakarta/A.ifc", -15.0));
+        assert!((idx.get("Projects/Jakarta/A.ifc").unwrap().heading_deg - 345.0).abs() < 1e-6);
+
+        let moved = idx.relocate_city_batch("Bandung", -6.9175, 107.6191, "Bandung");
+        assert_eq!(moved, 1);
+        assert_eq!(idx.unlocated_count(), 0);
     }
 }

@@ -13,8 +13,10 @@ use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Vec2};
 use serde::{Deserialize, Serialize};
 
 use super::map_widget::{
-    ear_clip_polygon, SlippyMapState, TileSource, EARTH_RADIUS_METERS, WORLD_LANDMASSES,
+    ear_clip_polygon, SlippyMapState, TileSource, EARTH_RADIUS_METERS, GLOBAL_CITY_CATALOG,
+    WORLD_LANDMASSES,
 };
+use super::tin_surface::TinSurfaceMesh;
 use crate::theme::MacTheme;
 
 /// Angular resolution (degrees) of each sparse planetary modification cell (~111 km per deg at Equator).
@@ -1342,6 +1344,18 @@ impl PlanetaryWorldState {
             self.paint_spherical_raster_tiles(ui.ctx(), &gp, &xform, world_map);
         }
 
+        // 4b. Crisp Full-Rust Vector Urban Arterials, Metric Cadastre & Compass Rose (zero-blur at any zoom)
+        if world_map.tile_provider == TileSource::SyntheticVectorTerrain || world_map.vector_site_overlay {
+            self.paint_vector_urban_and_cadastral_layer(
+                &gp,
+                &xform,
+                theme,
+                world_map,
+                ground_origin_lat_lon,
+                ground_origin_anchored,
+            );
+        }
+
         // 5. Geodetic Graticule Arcs (15 deg parallels & meridians on front hemisphere)
         if show_grid {
             self.paint_spherical_graticule(&gp, &xform, theme, world_map.zoom_level);
@@ -1389,6 +1403,230 @@ impl PlanetaryWorldState {
         }
 
         xform
+    }
+
+    /// Renders zero-blur full-Rust vector city corridors, metric cadastral grids (`100m`/`25m`/`5m`/`1m`),
+    /// range rings, and directional compass bearings onto the 3D globe surface.
+    pub fn paint_vector_urban_and_cadastral_layer(
+        &self,
+        painter: &egui::Painter,
+        xform: &GlobeScreenTransform,
+        theme: &MacTheme,
+        world_map: &SlippyMapState,
+        ground_origin_lat_lon: (f64, f64),
+        ground_origin_anchored: bool,
+    ) {
+        let is_pure_vec = world_map.tile_provider == TileSource::SyntheticVectorTerrain;
+        if is_pure_vec && world_map.zoom_level >= 3.5 && world_map.zoom_level < 13.5 {
+            // Crisp continental vector city hubs & inter-city regional corridors in Pure Vector mode
+            let mut visible_hubs: Vec<(&str, f64, f64, Pos2)> = Vec::new();
+            for &(city, lat, lon, _) in GLOBAL_CITY_CATALOG {
+                if let Some((sp, _, true)) = xform.project_lat_lon_elev(lat, lon, 0.0) {
+                    if xform.rect.expand(24.0).contains(sp) {
+                        visible_hubs.push((city, lat, lon, sp));
+                    }
+                }
+            }
+            let corr_stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(56, 189, 248, 48));
+            for i in 0..visible_hubs.len() {
+                let (c1, la1, lo1, sp1) = visible_hubs[i];
+                for &(c2, la2, lo2, sp2) in visible_hubs.iter().skip(i + 1).take(3) {
+                    let dist_sq = (la2 - la1).powi(2) + (lo2 - lo1).powi(2);
+                    if dist_sq < 64.0 && c1 != c2 {
+                        painter.line_segment([sp1, sp2], corr_stroke);
+                    }
+                }
+                painter.circle_filled(sp1, 2.5, theme.accent_blue.gamma_multiply(0.75));
+                if world_map.zoom_level >= 5.2 {
+                    painter.text(
+                        sp1 + Vec2::new(0.0, -5.0),
+                        Align2::CENTER_BOTTOM,
+                        c1,
+                        FontId::proportional(9.2),
+                        theme.text_secondary,
+                    );
+                }
+            }
+        }
+
+        if world_map.zoom_level < 13.0 {
+            return;
+        }
+
+        let origin = if ground_origin_anchored {
+            ground_origin_lat_lon
+        } else {
+            (xform.center_lat_deg, xform.center_lon_deg)
+        };
+        let (step_m, half_span_m) = if world_map.zoom_level >= 19.0 {
+            (2.0_f64, 30.0_f64)
+        } else if world_map.zoom_level >= 17.5 {
+            (5.0, 75.0)
+        } else if world_map.zoom_level >= 16.0 {
+            (20.0, 200.0)
+        } else if world_map.zoom_level >= 14.5 {
+            (50.0, 450.0)
+        } else {
+            (150.0, 1200.0)
+        };
+
+        let major_alpha = if is_pure_vec { 88 } else { 54 };
+        let minor_alpha = if is_pure_vec { 44 } else { 24 };
+        let major_stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(56, 189, 248, major_alpha));
+        let minor_stroke = Stroke::new(0.7, Color32::from_rgba_unmultiplied(148, 163, 184, minor_alpha));
+        let axis_n_stroke = Stroke::new(1.3, Color32::from_rgba_unmultiplied(34, 197, 94, if is_pure_vec { 160 } else { 110 }));
+        let axis_e_stroke = Stroke::new(1.3, Color32::from_rgba_unmultiplied(239, 68, 68, if is_pure_vec { 160 } else { 110 }));
+
+        let proj_m = |east_m: f64, north_m: f64| -> Option<Pos2> {
+            let ll = SlippyMapState::world_mm_to_lat_lon(origin, [east_m * 1000.0, north_m * 1000.0]);
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, 0.0)
+                .and_then(|(p, _, v)| if v { Some(p) } else { None })
+        };
+
+        let lines_per_side = (half_span_m / step_m).round() as i32;
+        for k in -lines_per_side..=lines_per_side {
+            let d = k as f64 * step_m;
+            let st_ns = if k == 0 {
+                axis_n_stroke
+            } else if k % 5 == 0 {
+                major_stroke
+            } else {
+                minor_stroke
+            };
+            if let (Some(a), Some(b)) = (proj_m(d, -half_span_m), proj_m(d, half_span_m)) {
+                painter.line_segment([a, b], st_ns);
+            }
+            let st_ew = if k == 0 {
+                axis_e_stroke
+            } else if k % 5 == 0 {
+                major_stroke
+            } else {
+                minor_stroke
+            };
+            if let (Some(a), Some(b)) = (proj_m(-half_span_m, d), proj_m(half_span_m, d)) {
+                painter.line_segment([a, b], st_ew);
+            }
+        }
+
+        // Pure-Rust crisp vector street blocks when in Offline Pure Vector mode at city/site zoom
+        if is_pure_vec && world_map.zoom_level >= 13.5 {
+            let block_step = if world_map.zoom_level >= 16.5 { 60.0 } else { 180.0 };
+            let street_col = Color32::from_rgba_unmultiplied(245, 158, 11, 78);
+            let street_stroke = Stroke::new(2.0, street_col);
+            for b in -3..=3 {
+                let d = b as f64 * block_step;
+                let span = block_step * 3.5;
+                if let (Some(a), Some(b_pt)) = (proj_m(d, -span), proj_m(d, span)) {
+                    painter.line_segment([a, b_pt], street_stroke);
+                }
+                if let (Some(a), Some(b_pt)) = (proj_m(-span, d), proj_m(span, d)) {
+                    painter.line_segment([a, b_pt], street_stroke);
+                }
+            }
+        }
+
+        // Metric range ring & True North / East vector compass labels
+        let ring_r_m = step_m * 3.0;
+        let mut ring_pts = Vec::with_capacity(33);
+        for seg in 0..=32 {
+            let th = (seg as f64 / 32.0) * std::f64::consts::TAU;
+            if let Some(p) = proj_m(ring_r_m * th.cos(), ring_r_m * th.sin()) {
+                ring_pts.push(p);
+            }
+        }
+        if ring_pts.len() >= 12 {
+            painter.add(egui::Shape::line(
+                ring_pts,
+                Stroke::new(0.9, theme.accent_blue.gamma_multiply(0.5)),
+            ));
+        }
+        for (lbl, ex, ny, col) in [
+            (format!("N +{:.0}m", ring_r_m), 0.0, ring_r_m, theme.accent_green),
+            (format!("E +{:.0}m", ring_r_m), ring_r_m, 0.0, theme.accent_red),
+        ] {
+            if let Some(p) = proj_m(ex, ny) {
+                painter.text(p, Align2::CENTER_CENTER, lbl, FontId::monospace(9.0), col);
+            }
+        }
+    }
+
+    /// Drapes `TinSurfaceMesh` contours (`ContourPolyline`) and SNI 8460:2017 steep-slope hazard
+    /// triangles (`> 30°`) cleanly onto the curved Earth 3D surface around `origin`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint_site_tin_contours_and_hazards(
+        &self,
+        painter: &egui::Painter,
+        xform: &GlobeScreenTransform,
+        theme: &MacTheme,
+        origin: (f64, f64),
+        base_elev_m: f64,
+        tin: &TinSurfaceMesh,
+    ) {
+        if xform.zoom_level < 12.0 || tin.points.is_empty() {
+            return;
+        }
+        let (ref_z, _) = tin.sample_elevation_and_slope(0.0, 0.0);
+        let project_local = |xm: f32, ym: f32, zm: f32| -> Option<Pos2> {
+            let ll = SlippyMapState::world_mm_to_lat_lon(origin, [xm as f64 * 1000.0, ym as f64 * 1000.0]);
+            let elev = base_elev_m + (zm - ref_z) as f64;
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, elev)
+                .and_then(|(p, _, v)| if v { Some(p) } else { None })
+        };
+
+        // 1. Highlight SNI 8460:2017 steep slope instability facets (> 30 deg)
+        for tm in tin.triangle_metrics.iter().filter(|t| t.is_steep_hazard).take(900) {
+            let p0 = tin.points[tm.indices[0]];
+            let p1 = tin.points[tm.indices[1]];
+            let p2 = tin.points[tm.indices[2]];
+            if let (Some(s0), Some(s1), Some(s2)) = (
+                project_local(p0.x, p0.y, p0.z),
+                project_local(p1.x, p1.y, p1.z),
+                project_local(p2.x, p2.y, p2.z),
+            ) {
+                painter.add(egui::Shape::convex_polygon(
+                    vec![s0, s1, s2],
+                    Color32::from_rgba_unmultiplied(239, 68, 68, 42),
+                    Stroke::new(0.4, Color32::from_rgba_unmultiplied(239, 68, 68, 70)),
+                ));
+            }
+        }
+
+        // 2. Render iso-elevation contour lines
+        let span_z = (tin.max_elevation - tin.min_elevation).max(1.0);
+        let contours = tin.extract_contours(2.0, 10.0);
+        for contour in contours {
+            let t = ((contour.elevation_m - tin.min_elevation) / span_z).clamp(0.0, 1.0);
+            let col = Color32::from_rgb(
+                (56.0 + 185.0 * t) as u8,
+                (189.0 - 95.0 * t) as u8,
+                (148.0 - 110.0 * t) as u8,
+            )
+            .gamma_multiply(if contour.is_index_contour { 0.88 } else { 0.52 });
+            let stroke = Stroke::new(if contour.is_index_contour { 1.4 } else { 0.7 }, col);
+            for &(a, b) in contour.segments.iter().take(600) {
+                if let (Some(sa), Some(sb)) = (
+                    project_local(a[0], a[1], contour.elevation_m),
+                    project_local(b[0], b[1], contour.elevation_m),
+                ) {
+                    painter.line_segment([sa, sb], stroke);
+                }
+            }
+            if contour.is_index_contour {
+                if let Some(&(a, _)) = contour.segments.first() {
+                    if let Some(sa) = project_local(a[0], a[1], contour.elevation_m) {
+                        painter.text(
+                            sa,
+                            Align2::LEFT_BOTTOM,
+                            format!("{:.0}m", contour.elevation_m),
+                            FontId::monospace(8.5),
+                            theme.text_primary.gamma_multiply(0.85),
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn shade_color(&self, base: Color32, world_unit: [f64; 3], xform: &GlobeScreenTransform) -> Color32 {

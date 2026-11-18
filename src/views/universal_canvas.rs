@@ -496,6 +496,11 @@ pub struct UniversalCanvasState {
     pub placing_hover_lat_lon: Option<(f64, f64)>,
     pub clicked_world_building_rel_path: Option<String>,
     pub pending_world_pin_event: Option<(String, f64, f64, f64)>,
+    // Phase 58: 3D TIN Relief Overlay & Neighbor Hover Telemetry
+    pub active_site_tin: Option<crate::core::gis::TinSurfaceMesh>,
+    pub site_tin_preset: crate::core::gis::DemTerrainPreset,
+    pub show_terrain_contours: bool,
+    pub hovered_world_building_rel_path: Option<String>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -577,6 +582,10 @@ impl Default for UniversalCanvasState {
             placing_hover_lat_lon: None,
             clicked_world_building_rel_path: None,
             pending_world_pin_event: None,
+            active_site_tin: None,
+            site_tin_preset: crate::core::gis::DemTerrainPreset::TerracedCutFillPad,
+            show_terrain_contours: false,
+            hovered_world_building_rel_path: None,
         }
     }
 }
@@ -591,6 +600,39 @@ impl UniversalCanvasState {
             self.world_map.center_lat_lon
         };
         compute_site_environmental_coupling(lat, lon, &self.earth_world)
+    }
+
+    /// Generates `active_site_tin` on demand from `site_tin_preset` (local 400m x 400m geotechnical TIN).
+    pub fn ensure_site_tin_generated(&mut self) {
+        if self.active_site_tin.is_none() {
+            self.active_site_tin = Some(crate::core::gis::TinSurfaceMesh::generate_from_dem_preset(
+                self.site_tin_preset,
+                400.0,
+                400.0,
+                28,
+                28,
+                1.0,
+            ));
+        }
+    }
+
+    /// Local ground relief offset (meters relative to Earth surface datum `0.0` at anchored origin).
+    pub fn local_site_relief_m(&self, lat: f64, lon: f64) -> f64 {
+        if !self.show_terrain_contours {
+            return 0.0;
+        }
+        let Some(ref tin) = self.active_site_tin else {
+            return 0.0;
+        };
+        let [east_mm, north_mm] = SlippyMapState::lat_lon_to_world_mm(self.ground_origin_lat_lon, lat, lon);
+        let east_m = (east_mm * 0.001) as f32;
+        let north_m = (north_mm * 0.001) as f32;
+        if east_m.abs() > tin.extent_x_m * 0.5 || north_m.abs() > tin.extent_y_m * 0.5 {
+            return 0.0;
+        }
+        let (ref_z, _) = tin.sample_elevation_and_slope(0.0, 0.0);
+        let (local_z, _) = tin.sample_elevation_and_slope(east_m, north_m);
+        (local_z - ref_z) as f64
     }
     /// Theme-aware canvas viewport background matching Universal Canvas across all modules.
     pub fn canvas_bg(theme: &MacTheme) -> Color32 {
@@ -2513,6 +2555,18 @@ impl UniversalCanvasState {
             self.paint_grid(&painter, rect, theme, &world_to_screen);
         }
         if self.globe_mode {
+            if self.show_terrain_contours {
+                if let Some((ref tin, ref xform)) = self.active_site_tin.as_ref().zip(active_globe_xform.as_ref()) {
+                    self.earth_world.paint_site_tin_contours_and_hazards(
+                        &painter,
+                        xform,
+                        theme,
+                        self.ground_origin_lat_lon,
+                        0.0,
+                        tin,
+                    );
+                }
+            }
             self.paint_planetary_world_buildings(&painter, rect, theme);
         }
         if self.show_bim_base_layer {
@@ -4839,6 +4893,39 @@ impl UniversalCanvasState {
         }
 
         if self.active_tool == UniversalCanvasTool::SelectPan {
+            if self.globe_mode
+                && self.world_map.zoom_level >= 8.5
+                && !response.dragged()
+            {
+                if let Some(hover) = response.hover_pos() {
+                    self.hovered_world_building_rel_path =
+                        match self.pick_world_building_or_cluster_at_screen(hover, rect) {
+                            Some(WorldPickOutcome::HydrateBuilding(rel)) => Some(rel),
+                            _ => None,
+                        };
+                } else {
+                    self.hovered_world_building_rel_path = None;
+                }
+            } else {
+                self.hovered_world_building_rel_path = None;
+            }
+            if self.globe_mode
+                && !ui.ctx().egui_wants_keyboard_input()
+                && ui.input(|i| i.key_pressed(egui::Key::R))
+            {
+                if let Some(ref active_rel) = self.active_world_project_rel_path.clone() {
+                    let step = if shift_held { -15.0 } else { 15.0 };
+                    if let Some(b) = self.world_index.get(active_rel).cloned() {
+                        let next_hdg = (b.heading_deg + step).rem_euclid(360.0);
+                        self.world_index.update_heading(active_rel, next_hdg);
+                        self.pending_world_pin_event = Some((active_rel.clone(), b.lat, b.lon, next_hdg));
+                        self.status_message = Some(format!(
+                            "Rotated '{}' True North heading -> {:.0}°",
+                            b.name, next_hdg
+                        ));
+                    }
+                }
+            }
             if response.dragged_by(egui::PointerButton::Primary) {
                 let delta = response.drag_delta();
                 if self.globe_mode {
@@ -6239,7 +6326,8 @@ impl UniversalCanvasState {
             (x_mm, y_mm)
         };
         let ll = SlippyMapState::world_mm_to_lat_lon(self.ground_origin_lat_lon, [rx_mm, ry_mm]);
-        xf.project_lat_lon_elev(ll.0, ll.1, elev_m * lift_scale)
+        let relief = self.local_site_relief_m(ll.0, ll.1);
+        xf.project_lat_lon_elev(ll.0, ll.1, relief + elev_m * lift_scale)
             .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
     }
 
@@ -6373,15 +6461,18 @@ impl UniversalCanvasState {
                 if self.active_world_project_rel_path.as_deref() == Some(b.rel_path.as_str()) {
                     continue;
                 }
+                let is_hovered =
+                    self.hovered_world_building_rel_path.as_deref() == Some(b.rel_path.as_str());
                 let hull_mm = b.rotated_footprint_world_mm();
                 let mut base_pts = Vec::with_capacity(hull_mm.len());
                 let mut roof_pts = Vec::with_capacity(hull_mm.len());
-                let top_elev = b.total_height_m * lift_scale;
+                let base_elev = self.local_site_relief_m(b.lat, b.lon);
+                let top_elev = base_elev + b.total_height_m * lift_scale;
                 let mut ok = true;
                 for pt_mm in &hull_mm {
                     let ll = SlippyMapState::world_mm_to_lat_lon((b.lat, b.lon), *pt_mm);
                     if let (Some((bp, _, v0)), Some((tp, _, v1))) = (
-                        xf.project_lat_lon_elev(ll.0, ll.1, 0.0),
+                        xf.project_lat_lon_elev(ll.0, ll.1, base_elev),
                         xf.project_lat_lon_elev(ll.0, ll.1, top_elev),
                     ) {
                         if !v0 || !v1 {
@@ -6431,9 +6522,13 @@ impl UniversalCanvasState {
                         EarthBimLens::Erection4D => Color32::from_rgb(56, 189, 248),
                     }
                 };
-                let side_fill = base_col.gamma_multiply(0.38);
-                let roof_fill = base_col.gamma_multiply(0.62);
-                let edge_stroke = Stroke::new(1.1, base_col.gamma_multiply(0.95));
+                let side_fill = base_col.gamma_multiply(if is_hovered { 0.56 } else { 0.38 });
+                let roof_fill = base_col.gamma_multiply(if is_hovered { 0.82 } else { 0.62 });
+                let edge_stroke = if is_hovered {
+                    Stroke::new(2.0, Color32::from_rgb(0, 240, 255))
+                } else {
+                    Stroke::new(1.1, base_col.gamma_multiply(0.95))
+                };
                 for i in 0..base_pts.len() {
                     let ni = (i + 1) % base_pts.len();
                     clip_painter.add(egui::Shape::convex_polygon(
@@ -6445,10 +6540,61 @@ impl UniversalCanvasState {
                 clip_painter.add(egui::Shape::convex_polygon(
                     roof_pts.clone(),
                     roof_fill,
-                    Stroke::new(1.4, Color32::WHITE.gamma_multiply(0.75)),
+                    Stroke::new(
+                        if is_hovered { 2.2 } else { 1.4 },
+                        if is_hovered {
+                            Color32::from_rgb(0, 240, 255)
+                        } else {
+                            Color32::WHITE.gamma_multiply(0.75)
+                        },
+                    ),
                 ));
 
-                if self.world_map.zoom_level >= 14.8 {
+                if is_hovered {
+                    let rc = roof_pts
+                        .iter()
+                        .fold(Vec2::ZERO, |acc, p| acc + p.to_vec2())
+                        / (roof_pts.len() as f32);
+                    let city_tag = if b.address_hint.is_empty() {
+                        b.source.short_label().to_string()
+                    } else {
+                        b.address_hint.clone()
+                    };
+                    let tip = format!(
+                        "{} • {} • {}F • DCR {:.0}% • ARI {:.2} [Click to Edit]",
+                        b.name,
+                        city_tag,
+                        b.story_count,
+                        b.max_dcr * 100.0,
+                        b.min_ari
+                    );
+                    let tip_pos = Pos2::new(rc.x, rc.y - 12.0);
+                    let galley = clip_painter.layout_no_wrap(
+                        tip,
+                        egui::FontId::proportional(10.0),
+                        Color32::WHITE,
+                    );
+                    let pill_rect = Rect::from_center_size(
+                        tip_pos - Vec2::new(0.0, galley.size().y * 0.5),
+                        galley.size() + Vec2::new(14.0, 8.0),
+                    );
+                    clip_painter.rect_filled(
+                        pill_rect,
+                        CornerRadius::same(7),
+                        Color32::from_rgba_unmultiplied(15, 23, 42, 232),
+                    );
+                    clip_painter.rect_stroke(
+                        pill_rect,
+                        CornerRadius::same(7),
+                        Stroke::new(1.1, Color32::from_rgb(0, 240, 255)),
+                        egui::StrokeKind::Inside,
+                    );
+                    clip_painter.galley(
+                        pill_rect.min + Vec2::new(7.0, 4.0),
+                        galley,
+                        Color32::WHITE,
+                    );
+                } else if self.world_map.zoom_level >= 14.8 {
                     let rc = roof_pts
                         .iter()
                         .fold(Vec2::ZERO, |acc, p| acc + p.to_vec2())
@@ -6478,6 +6624,8 @@ impl UniversalCanvasState {
             } else {
                 (crate::core::gis::WorldBuildingProxy::default_footprint_m(), 14.0)
             };
+            let base_relief = self.local_site_relief_m(hlat, hlon);
+            let msl_elev = self.earth_world.effective_elevation_m(hlat, hlon);
             let rad = self.placing_heading_deg.to_radians();
             let (sh, ch) = (rad.sin(), rad.cos());
             let mut bpts = Vec::with_capacity(hull_m.len());
@@ -6487,8 +6635,8 @@ impl UniversalCanvasState {
                 let ry_mm = (xm * sh + ym * ch) * 1000.0;
                 let ll = SlippyMapState::world_mm_to_lat_lon((hlat, hlon), [rx_mm, ry_mm]);
                 if let (Some((bp, _, true)), Some((rp, _, true))) = (
-                    xf.project_lat_lon_elev(ll.0, ll.1, 0.0),
-                    xf.project_lat_lon_elev(ll.0, ll.1, height_m),
+                    xf.project_lat_lon_elev(ll.0, ll.1, base_relief),
+                    xf.project_lat_lon_elev(ll.0, ll.1, base_relief + height_m),
                 ) {
                     bpts.push(bp);
                     rpts.push(rp);
@@ -6509,11 +6657,15 @@ impl UniversalCanvasState {
                     Color32::from_rgba_unmultiplied(0, 240, 255, 85),
                     ghost_stroke,
                 ));
-                if let Some((cp, _, true)) = xf.project_lat_lon_elev(hlat, hlon, height_m + 1.5) {
+                if let Some((cp, _, true)) = xf.project_lat_lon_elev(hlat, hlon, base_relief + height_m + 1.5) {
                     clip_painter.text(
                         cp,
                         Align2::CENTER_BOTTOM,
-                        format!("Place Here ({hlat:.4}°, {hlon:.4}° | Hdg {:.0}°)", self.placing_heading_deg),
+                        format!(
+                            "Place Here ({hlat:.4}°, {hlon:.4}° | Hdg {:.0}° | {:+.0}m MSL)",
+                            self.placing_heading_deg,
+                            msl_elev
+                        ),
                         egui::FontId::monospace(10.0),
                         Color32::from_rgb(0, 240, 255),
                     );
@@ -6597,12 +6749,13 @@ impl UniversalCanvasState {
             let hull_mm = b.rotated_footprint_world_mm();
             let mut base_pts = Vec::with_capacity(hull_mm.len());
             let mut roof_pts = Vec::with_capacity(hull_mm.len());
-            let top_elev = b.total_height_m * lift_scale;
+            let base_elev = self.local_site_relief_m(b.lat, b.lon);
+            let top_elev = base_elev + b.total_height_m * lift_scale;
             let mut ok = true;
             for pt_mm in &hull_mm {
                 let ll = SlippyMapState::world_mm_to_lat_lon((b.lat, b.lon), *pt_mm);
                 if let (Some((bp, _, true)), Some((tp, _, true))) = (
-                    xf.project_lat_lon_elev(ll.0, ll.1, 0.0),
+                    xf.project_lat_lon_elev(ll.0, ll.1, base_elev),
                     xf.project_lat_lon_elev(ll.0, ll.1, top_elev),
                 ) {
                     base_pts.push(bp);

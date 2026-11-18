@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — Phase 57 Planetary Digital Twin World Index (10,000+ Simultaneous Buildings on Earth 3D) & Smart Unlocated Model Placement",
+                        "v{} — Phase 58 Georeferenced IFC4 Writeback, Crisp Full-Rust Vector Cadastre, 3D TIN Terrain Contours & Planetary Portfolio Triage",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)

@@ -1199,7 +1199,40 @@ impl EigenGraphApp {
             );
         }
         if hud_actions.export_ifc4 {
-            let ifc = self.build_view.bim_bus.project.export_ifc4_spatial();
+            let active_proxy = self
+                .universal_canvas
+                .active_world_project_rel_path
+                .as_deref()
+                .and_then(|r| self.universal_canvas.world_index.get(r))
+                .cloned();
+            let (lat, lon) = if let Some(ref p) = active_proxy {
+                (p.lat, p.lon)
+            } else {
+                self.universal_canvas.ground_origin_lat_lon
+            };
+            let has_geo = self.universal_canvas.ground_origin_anchored
+                || active_proxy.is_some()
+                || lat.abs() > 1e-4
+                || lon.abs() > 1e-4;
+            let elev_m = if let Some(ref p) = active_proxy {
+                if p.elev_m.abs() > 0.1 {
+                    p.elev_m
+                } else {
+                    self.universal_canvas.earth_world.effective_elevation_m(lat, lon) as f64
+                }
+            } else {
+                self.universal_canvas.earth_world.effective_elevation_m(lat, lon) as f64
+            };
+            let heading_deg = active_proxy.as_ref().map(|p| p.heading_deg).unwrap_or(0.0);
+            let city_hint = active_proxy
+                .as_ref()
+                .map(|p| p.address_hint.as_str())
+                .filter(|s| !s.trim().is_empty());
+            let ifc = self.build_view.bim_bus.project.export_ifc4_spatial_georeferenced(
+                if has_geo { Some((lat, lon, elev_m)) } else { None },
+                heading_deg,
+                city_hint,
+            );
             let raw_name = if self.build_view.bim_bus.project.project_name.trim().is_empty() {
                 "EigenGraph_BIM".to_string()
             } else {
@@ -1215,7 +1248,14 @@ impl EigenGraphApp {
             let fname = format!("{raw_name}.ifc");
             match crate::core::web_bridge::save_text_file(&fname, &ifc, "text/plain;charset=utf-8") {
                 Ok(_) => {
-                    self.spatial_workspace.push_trace(format!("Exported IFC4 ({fname})"), true);
+                    self.spatial_workspace.push_trace(
+                        if has_geo {
+                            format!("Exported Georeferenced IFC4 ({fname} @ {lat:.4}°, {lon:.4}°)")
+                        } else {
+                            format!("Exported IFC4 ({fname})")
+                        },
+                        true,
+                    );
                 }
                 Err(err) => {
                     self.spatial_workspace.push_trace(err, false);
@@ -1519,6 +1559,53 @@ impl EigenGraphApp {
                 true,
             );
         }
+        if let Some(filter) = hud_actions.fly_to_next_world_building {
+            let next_target = self
+                .universal_canvas
+                .world_index
+                .next_building_matching(
+                    filter,
+                    self.universal_canvas.active_world_project_rel_path.as_deref(),
+                )
+                .cloned();
+            if let Some(target_b) = next_target {
+                self.universal_canvas.globe_mode = true;
+                self.universal_canvas.earth_world.camera.tilt_deg = 40.0;
+                self.universal_canvas.earth_world.start_fly_to(
+                    &self.universal_canvas.world_map,
+                    target_b.lat,
+                    target_b.lon,
+                    17.5,
+                    &target_b.name,
+                );
+                self.universal_canvas.clicked_world_building_rel_path = Some(target_b.rel_path.clone());
+                self.spatial_workspace.push_trace(
+                    format!(
+                        "Flying Earth 3D -> {} ({:.4}°, {:.4}°)",
+                        target_b.name, target_b.lat, target_b.lon
+                    ),
+                    true,
+                );
+            } else {
+                self.spatial_workspace.push_trace(
+                    format!("No '{}' projects in World Index", filter.short_label()),
+                    false,
+                );
+            }
+        }
+        if let Some(delta_deg) = hud_actions.rotate_active_world_heading_deg {
+            if let Some(rel) = self.universal_canvas.active_world_project_rel_path.clone() {
+                if let Some(b) = self.universal_canvas.world_index.get(&rel).cloned() {
+                    let next_hdg = (b.heading_deg + delta_deg).rem_euclid(360.0);
+                    self.universal_canvas.world_index.update_heading(&rel, next_hdg);
+                    crate::core::InternalVault::save_world_spatial_index(&self.universal_canvas.world_index);
+                    self.spatial_workspace.push_trace(
+                        format!("True North heading -> {:.0}°", next_hdg),
+                        true,
+                    );
+                }
+            }
+        }
         if hud_actions.undo {
             let domain = forced_domain.or_else(|| {
                 self.spatial_workspace.pop_undo_domain(
@@ -1715,7 +1802,7 @@ impl EigenGraphApp {
                 }
             });
         let hint = existing.map(|b| b.address_hint).unwrap_or_default();
-        let proxy = crate::core::gis::WorldBuildingProxy::from_bim_project(
+        let mut proxy = crate::core::gis::WorldBuildingProxy::from_bim_project(
             rel,
             fname,
             lat,
@@ -1726,6 +1813,7 @@ impl EigenGraphApp {
             source,
             hint,
         );
+        proxy.elev_m = self.universal_canvas.earth_world.effective_elevation_m(lat, lon) as f64;
         self.universal_canvas.world_index.upsert_building(proxy, true);
         if save_manifest {
             crate::core::InternalVault::save_world_spatial_index(&self.universal_canvas.world_index);
@@ -1787,7 +1875,7 @@ impl EigenGraphApp {
                 );
                 self.sync_bim_to_fem();
 
-                let proxy = crate::core::gis::WorldBuildingProxy::from_bim_project(
+                let mut proxy = crate::core::gis::WorldBuildingProxy::from_bim_project(
                     rel_path,
                     filename,
                     target_geo.0,
@@ -1798,6 +1886,10 @@ impl EigenGraphApp {
                     final_src,
                     addr_hint.clone(),
                 );
+                proxy.elev_m = self
+                    .universal_canvas
+                    .earth_world
+                    .effective_elevation_m(target_geo.0, target_geo.1) as f64;
                 self.universal_canvas.world_index.upsert_building(proxy, true);
                 crate::core::InternalVault::save_world_spatial_index(&self.universal_canvas.world_index);
 

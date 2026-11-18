@@ -2241,6 +2241,32 @@ impl IfcModel {
         None
     }
 
+    /// Decodes North azimuth rotation (degrees) from `IFCMAPCONVERSION` `(XAxisAbscissa, XAxisOrdinate)`
+    /// or `IFCGEOMETRICREPRESENTATIONCONTEXT.TrueNorth`.
+    pub fn site_heading_deg(&self) -> f64 {
+        for mc in self.raw_step.get_entities_of_type("IFCMAPCONVERSION") {
+            if let (Some(cos_a), Some(sin_a)) = (mc.get_f64(5), mc.get_f64(6)) {
+                if cos_a.is_finite() && sin_a.is_finite() && (cos_a.abs() > 1e-6 || sin_a.abs() > 1e-6) {
+                    return sin_a.atan2(cos_a).to_degrees();
+                }
+            }
+        }
+        for ctx in self.raw_step.get_entities_of_type("IFCGEOMETRICREPRESENTATIONCONTEXT") {
+            if let Some(dir_id) = ctx.get_ref(5) {
+                if let Some(dir) = self.raw_step.entities.get(&dir_id) {
+                    if let Some(list) = dir.parameters.first().and_then(|v| v.as_list()) {
+                        let tx = list.first().and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let ty = list.get(1).and_then(|v| v.as_f64()).unwrap_or(1.0);
+                        if tx.abs() > 1e-6 || ty.abs() > 1e-6 {
+                            return tx.atan2(ty).to_degrees();
+                        }
+                    }
+                }
+            }
+        }
+        0.0
+    }
+
     /// Extracts street, city, region, and country strings from `IFCSITE.SiteAddress -> IFCPOSTALADDRESS`.
     pub fn extract_postal_address(&self) -> Option<String> {
         let mut parts: Vec<String> = Vec::new();
@@ -5476,6 +5502,29 @@ END-ISO-10303-21;"#;
         assert_eq!(src3, crate::core::gis::GeoPlacementSource::StagingCampusAuto);
         let (fp, h_m) = m_folder.bounding_footprint_and_height_m();
         assert!(fp.len() >= 4 && h_m >= 3.2);
+    }
+
+    #[test]
+    fn test_phase58_ifc4_geo_writeback_roundtrip_lat_lon_utm_heading_and_address() {
+        let mut proj = crate::core::bim::BimProject::empty();
+        proj.project_name = "IKN Civic Pavilion".to_string();
+        let ifc_text = proj.export_ifc4_spatial_georeferenced(
+            Some((-0.9730, 116.7090, 42.5)),
+            32.5,
+            Some("IKN Nusantara"),
+        );
+        assert!(ifc_text.contains("EPSG:32750"));
+        assert!(ifc_text.contains("IFCMAPCONVERSION"));
+        assert!(ifc_text.contains("IFCPOSTALADDRESS"));
+
+        let parsed = IfcModel::parse(&ifc_text).expect("Georeferenced IFC4 export should parse");
+        let (la, lo) = parsed.site_lat_lon().expect("Should round-trip IFCSITE RefLatitude/RefLongitude");
+        assert!((la - (-0.9730)).abs() < 1e-4, "lat={la}");
+        assert!((lo - 116.7090).abs() < 1e-4, "lon={lo}");
+        let hdg = parsed.site_heading_deg();
+        assert!((hdg - 32.5).abs() < 0.05, "hdg={hdg}");
+        let addr = parsed.extract_postal_address().unwrap_or_default();
+        assert!(addr.contains("IKN Nusantara"), "addr={addr}");
     }
 }
 

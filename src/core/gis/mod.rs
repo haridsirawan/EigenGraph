@@ -15,8 +15,8 @@ pub use map_widget::{
 };
 
 pub use world_index::{
-    GeoPlacementSource, WorldBuildingProxy, WorldClusterBeacon, WorldSpatialIndex,
-    STAGING_CAMPUS_ORIGIN, WORLD_INDEX_FILENAME,
+    GeoPlacementSource, WorldBuildingProxy, WorldClusterBeacon, WorldPortfolioFilter,
+    WorldPortfolioSummary, WorldSpatialIndex, STAGING_CAMPUS_ORIGIN, WORLD_INDEX_FILENAME,
 };
 
 pub use earth_globe::{
