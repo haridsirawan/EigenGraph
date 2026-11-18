@@ -23,7 +23,7 @@
 
 ## 🏛️ Overview
 
-**EigenGraph** (`EigenGraph/EigenGraph`) is a client-side **WebAssembly + WebGL2** 10D BIM and structural mechanics workstation compiled cleanly from Rust (`v0.5.6`, Phase 56 Unlimited Lazy Vault & Chunked OpenBIM Streaming, Sharp HiDPI-Calibrated 3D Earth Tile LOD & LRU Cache, OpenBIM BREP/Opening/UTM `IfcMapConversion` Reader, and Direct Earth 3D `Slab`/`Door`/`Window`/`Isolate Story` Authoring) and deployed automatically to **Cloudflare Workers**.
+**EigenGraph** (`EigenGraph/EigenGraph`) is a client-side **WebAssembly + WebGL2** 10D BIM and structural mechanics workstation compiled cleanly from Rust (`v0.5.7`, Phase 57 Planetary Digital Twin World Spatial Index (`10,000+` Simultaneous Geo-BIM Projects across LOD 0/1/2/3 on Earth 3D), Smart Unlocated `.ifc` Geo-Placement / `IFCPOSTALADDRESS` / Staging Campus & Click-to-Hydrate Editing) and deployed automatically to **Cloudflare Workers**.
 
 ### 15 Engineering Modules
 1. **📁 Vault** — Project records, parametric component catalog, interactive HTML5 3D viewer & Markdown dossier browser downloads.

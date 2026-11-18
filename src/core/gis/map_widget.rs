@@ -19,6 +19,50 @@ pub const EARTH_HALF_CIRCUMFERENCE: f64 = PI * EARTH_RADIUS_METERS; // ≈ 20,03
 pub const MAX_LATITUDE: f64 = 85.0511287798066;
 pub const MIN_LATITUDE: f64 = -85.0511287798066;
 
+/// Curated global engineering cities & infrastructure hubs shared across geocoding and World Spatial Indexing.
+pub const GLOBAL_CITY_CATALOG: &[(&str, f64, f64, f32)] = &[
+    ("Jakarta", -6.2088, 106.8456, 15.0),
+    ("Bandung", -6.9175, 107.6191, 15.0),
+    ("Surabaya", -7.2575, 112.7521, 15.0),
+    ("Yogyakarta", -7.7956, 110.3695, 15.0),
+    ("Semarang", -6.9667, 110.4167, 15.0),
+    ("Medan", 3.5952, 98.6722, 15.0),
+    ("Makassar", -5.1477, 119.4327, 15.0),
+    ("Balikpapan", -1.2379, 116.8529, 15.0),
+    ("Palu", -0.8917, 119.8707, 15.0),
+    ("Nusantara IKN", -0.9730, 116.7090, 15.0),
+    ("IKN", -0.9730, 116.7090, 15.0),
+    ("Bali Denpasar", -8.6705, 115.2126, 15.0),
+    ("Singapore", 1.3521, 103.8198, 15.0),
+    ("Tokyo", 35.6762, 139.6503, 15.0),
+    ("Osaka", 34.6937, 135.5023, 15.0),
+    ("Seoul", 37.5665, 126.9780, 15.0),
+    ("Taipei", 25.0330, 121.5654, 15.0),
+    ("Kuala Lumpur", 3.1390, 101.6869, 15.0),
+    ("Bangkok", 13.7563, 100.5018, 15.0),
+    ("Manila", 14.5995, 120.9842, 15.0),
+    ("San Francisco", 37.7749, -122.4194, 15.0),
+    ("Los Angeles", 34.0522, -118.2437, 15.0),
+    ("Seattle", 47.6062, -122.3321, 15.0),
+    ("New York", 40.7128, -74.0060, 15.0),
+    ("Chicago", 41.8781, -87.6298, 15.0),
+    ("London", 51.5072, -0.1276, 15.0),
+    ("Zurich", 47.3769, 8.5417, 15.0),
+    ("Paris", 48.8566, 2.3522, 15.0),
+    ("Berlin", 52.5200, 13.4050, 15.0),
+    ("Istanbul", 41.0082, 28.9784, 15.0),
+    ("Dubai", 25.2048, 55.2708, 15.0),
+    ("Riyadh", 24.7136, 46.6753, 15.0),
+    ("Sydney", -33.8688, 151.2093, 15.0),
+    ("Melbourne", -37.8136, 144.9631, 15.0),
+    ("Auckland", -36.8509, 174.7645, 15.0),
+    ("Christchurch", -43.5320, 172.6306, 15.0),
+    ("Santiago", -33.4489, -70.6693, 15.0),
+    ("Mexico City", 19.4326, -99.1332, 15.0),
+    ("Mumbai", 19.0760, 72.8777, 15.0),
+    ("Cairo", 30.0444, 31.2357, 15.0),
+];
+
 /// Supported tile provider themes and raster/vector sources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TileSource {
@@ -1335,49 +1379,36 @@ impl SlippyMapState {
 
         // 2. Curated Global Engineering Cities & Infrastructure Hubs
         let lower = q.to_lowercase();
-        let catalog: &[(&str, f64, f64, f32)] = &[
-            ("Jakarta", -6.2088, 106.8456, 15.0),
-            ("Bandung", -6.9175, 107.6191, 15.0),
-            ("Surabaya", -7.2575, 112.7521, 15.0),
-            ("Yogyakarta", -7.7956, 110.3695, 15.0),
-            ("Palu", -0.8917, 119.8707, 15.0),
-            ("Nusantara IKN", -0.9730, 116.7090, 15.0),
-            ("Bali Denpasar", -8.6705, 115.2126, 15.0),
-            ("Singapore", 1.3521, 103.8198, 15.0),
-            ("Tokyo", 35.6762, 139.6503, 15.0),
-            ("Osaka", 34.6937, 135.5023, 15.0),
-            ("Seoul", 37.5665, 126.9780, 15.0),
-            ("Taipei", 25.0330, 121.5654, 15.0),
-            ("Kuala Lumpur", 3.1390, 101.6869, 15.0),
-            ("Bangkok", 13.7563, 100.5018, 15.0),
-            ("Manila", 14.5995, 120.9842, 15.0),
-            ("San Francisco", 37.7749, -122.4194, 15.0),
-            ("Los Angeles", 34.0522, -118.2437, 15.0),
-            ("Seattle", 47.6062, -122.3321, 15.0),
-            ("New York", 40.7128, -74.0060, 15.0),
-            ("Chicago", 41.8781, -87.6298, 15.0),
-            ("London", 51.5072, -0.1276, 15.0),
-            ("Zurich", 47.3769, 8.5417, 15.0),
-            ("Paris", 48.8566, 2.3522, 15.0),
-            ("Berlin", 52.5200, 13.4050, 15.0),
-            ("Istanbul", 41.0082, 28.9784, 15.0),
-            ("Dubai", 25.2048, 55.2708, 15.0),
-            ("Riyadh", 24.7136, 46.6753, 15.0),
-            ("Sydney", -33.8688, 151.2093, 15.0),
-            ("Melbourne", -37.8136, 144.9631, 15.0),
-            ("Auckland", -36.8509, 174.7645, 15.0),
-            ("Christchurch", -43.5320, 172.6306, 15.0),
-            ("Santiago", -33.4489, -70.6693, 15.0),
-            ("Mexico City", 19.4326, -99.1332, 15.0),
-            ("Mumbai", 19.0760, 72.8777, 15.0),
-            ("Cairo", 30.0444, 31.2357, 15.0),
-        ];
-        for &(name, lat, lon, z) in catalog {
+        for &(name, lat, lon, z) in GLOBAL_CITY_CATALOG {
             if name.to_lowercase().contains(&lower) {
                 return Some((name.to_string(), lat, lon, z));
             }
         }
         None
+    }
+
+    /// Scans an address string, Vault subfolder path, or filename for a matching city cue (longest match first).
+    pub fn resolve_city_hint_in_text(text: &str) -> Option<(String, f64, f64)> {
+        let lower = text.to_lowercase();
+        if lower.trim().is_empty() {
+            return None;
+        }
+        let mut best: Option<(usize, &str, f64, f64)> = None;
+        for &(city, lat, lon, _) in GLOBAL_CITY_CATALOG {
+            let c_low = city.to_lowercase();
+            // Require word-like boundary separation so "ikn" or "palu" avoids false substring noise inside generic words
+            let bytes = lower.as_bytes();
+            let cb = c_low.as_bytes();
+            if let Some(pos) = lower.find(&c_low) {
+                let left_ok = pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric();
+                let right_idx = pos + cb.len();
+                let right_ok = right_idx >= bytes.len() || !bytes[right_idx].is_ascii_alphanumeric();
+                if left_ok && right_ok && best.is_none_or(|(blen, _, _, _)| city.len() > blen) {
+                    best = Some((city.len(), city, lat, lon));
+                }
+            }
+        }
+        best.map(|(_, city, lat, lon)| (city.to_string(), lat, lon))
     }
 
     /// Removes a site pin by ID.

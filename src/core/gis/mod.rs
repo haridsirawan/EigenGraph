@@ -7,10 +7,16 @@ pub mod map_widget;
 pub mod crs_projection;
 pub mod tin_surface;
 pub mod earth_globe;
+pub mod world_index;
 
 pub use map_widget::{
     SiteGeodeticPin, SlippyMapState, SlippyMapTelemetry, TileSource, WebMercator,
-    EARTH_HALF_CIRCUMFERENCE, EARTH_RADIUS_METERS, MAX_LATITUDE, MIN_LATITUDE,
+    EARTH_HALF_CIRCUMFERENCE, EARTH_RADIUS_METERS, GLOBAL_CITY_CATALOG, MAX_LATITUDE, MIN_LATITUDE,
+};
+
+pub use world_index::{
+    GeoPlacementSource, WorldBuildingProxy, WorldClusterBeacon, WorldSpatialIndex,
+    STAGING_CAMPUS_ORIGIN, WORLD_INDEX_FILENAME,
 };
 
 pub use earth_globe::{

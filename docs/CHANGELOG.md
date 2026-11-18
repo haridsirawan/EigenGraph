@@ -7,6 +7,22 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.5.7] - 2026-11-18 — Phase 57: Planetary Digital Twin `WorldSpatialIndex` (10,000+ Simultaneous Geo-BIM Projects), 4-Tier HLOD Rendering & Smart Unlocated `.ifc` Placement
+
+### Added & Changed
+- **Planetary Digital Twin Spatial Registry (`src/core/gis/world_index.rs`, `src/core/gis/mod.rs`, `src/core/vault.rs`, `index.html`)**:
+  - Created `WorldSpatialIndex` and lightweight `WorldBuildingProxy` (~300 bytes/building) backed by `0.05° × 0.05°` spatial hash buckets (`O(visible_cells)` viewport queries scaling smoothly to `10,000+` indexed projects) and persisted to `_eigengraph_world_index.json` across both Web WASM and Native Desktop Vaults.
+  - Added `InternalVault::sync_world_spatial_index_with_vault` and head-only O(1) coordinate inspection (`IFCSITE`, `IFCMAPCONVERSION` UTM EPSG, `IFCPOSTALADDRESS`, Vault path/filename city hints, and `.eigen.json` `world_origin_lat_lon`) so connecting any Vault indexes every project onto the Earth globe without loading heavy geometries upfront.
+- **Smart Placement Waterfall, `IFCPOSTALADDRESS` Decoder & Anti-Overlap Staging Campus (`src/core/ifc.rs`, `src/core/gis/map_widget.rs`, `src/core/gis/world_index.rs`)**:
+  - Shared `GLOBAL_CITY_CATALOG` and added `SlippyMapState::resolve_city_hint_in_text`, `IfcModel::extract_postal_address`, `resolve_location_or_city`, `bounding_footprint_and_height_m`, and `parse_to_bim_project_with_geo`.
+  - Unlocated imports without GPS coordinates or city cues are placed cleanly into non-overlapping `48 m` pitch grid parcels inside the dedicated **Staging Campus** (`GeoPlacementSource::StagingCampusAuto`) rather than stacking at `(0°, 0°)` in the Atlantic Ocean.
+- **Multi-Building Earth 3D HLOD Renderer, Interactive `"Place on Earth"` Mode & Click-to-Hydrate (`src/views/universal_canvas.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Implemented `paint_planetary_world_buildings` and `pick_world_building_or_cluster_at_screen`: **LOD 0** (`zoom < 8.5`) renders regional project cluster beacons (click to fly & zoom in), **LOD 1/2** (`zoom >= 8.5`) renders up to 450 simultaneous visible extruded 3D neighbor buildings colored by active Structural Lens (`Clean`, `DCR%`, `ARI`) right alongside the **LOD 3** live-editable active BIM model (`project_active_bim_mm` preserving heading alignment).
+  - Clicking any neighbor 3D massing building on Earth seamlessly hydrates that project as the active editable `BimProject` without leaving the globe view.
+  - Added interactive **`Place on Earth`** mode (`placing_unlocated_rel_path`, `Q`/`E` or `-15°`/`+15°` azimuth rotation, cursor-tracked 3D ghost footprint, 1-click permanent pin to `_eigengraph_world_index.json`), `[GPS / City / Pin / Stage]` badges + `Place` buttons in the Vault Drawer, and `World: N Bldgs` + `M Unlocated • Place` controls in the Dynamic Island.
+
+---
+
 ## [v0.5.6] - 2026-11-18 — Phase 56: Sharp HiDPI 3D Earth Tile LOD & LRU Cache, Unlimited Lazy Vault Streaming, OpenBIM BREP/Voids/`IFCMAPCONVERSION` & Earth 3D `Slab`/`Door`/`Window`/`Isolate`
 
 ### Added & Changed

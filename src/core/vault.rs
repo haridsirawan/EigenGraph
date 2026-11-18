@@ -547,7 +547,13 @@ impl InternalVault {
                     .unwrap_or_else(|_| fname.to_string());
                 let top_folder = rel_path.split('/').next().unwrap_or("Vault Root");
                 let in_shard = rel_path.contains('/') && shard_dirs.contains(&top_folder);
-                if is_json && !is_eigen && (in_shard || fname == "active_live_project.json" || top_folder != "Projects") {
+                if is_json
+                    && !is_eigen
+                    && (in_shard
+                        || fname == "active_live_project.json"
+                        || fname == crate::core::gis::WORLD_INDEX_FILENAME
+                        || top_folder != "Projects")
+                {
                     continue;
                 }
 
@@ -1166,6 +1172,199 @@ impl InternalVault {
         let _ = std::fs::create_dir_all(root.join("Exports"));
         let _ = std::fs::create_dir_all(root.join("AI_Context"));
         root
+    }
+
+    /// Loads `_eigengraph_world_index.json` from the Vault root and rebuilds spatial hash buckets cleanly.
+    pub fn load_world_spatial_index() -> crate::core::gis::WorldSpatialIndex {
+        #[cfg(target_arch = "wasm32")]
+        let raw_opt = crate::core::web_bridge::vault_read_file(crate::core::gis::WORLD_INDEX_FILENAME);
+        #[cfg(not(target_arch = "wasm32"))]
+        let raw_opt = std::fs::read_to_string(
+            Self::vault_root_dir().join(crate::core::gis::WORLD_INDEX_FILENAME),
+        )
+        .ok();
+        raw_opt
+            .and_then(|s| crate::core::gis::WorldSpatialIndex::from_manifest_json(&s).ok())
+            .unwrap_or_default()
+    }
+
+    /// Saves `_eigengraph_world_index.json` persistently into the Vault root across Web and Native targets.
+    pub fn save_world_spatial_index(index: &crate::core::gis::WorldSpatialIndex) {
+        let Ok(json) = index.to_manifest_json() else {
+            return;
+        };
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::core::web_bridge::vault_write_file(crate::core::gis::WORLD_INDEX_FILENAME, &json);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let target = Self::vault_root_dir().join(crate::core::gis::WORLD_INDEX_FILENAME);
+            let _ = std::fs::write(target, json);
+        }
+    }
+
+    /// Synchronizes all discovered Vault projects into `world_index` cleanly without loading full multi-hundred-MB meshes.
+    pub fn sync_world_spatial_index_with_vault(
+        entries: &[PersonalVaultProjectEntry],
+        world_index: &mut crate::core::gis::WorldSpatialIndex,
+    ) {
+        use crate::core::gis::{GeoPlacementSource, SlippyMapState, WorldBuildingProxy};
+        for entry in entries {
+            if world_index.get(&entry.rel_path).is_some() {
+                continue;
+            }
+            let lower = entry.filename.to_lowercase();
+            let mut lat = 0.0_f64;
+            let mut lon = 0.0_f64;
+            let mut src = GeoPlacementSource::StagingCampusAuto;
+            let mut hint = String::new();
+            let mut footprint = WorldBuildingProxy::default_footprint_m();
+            let mut height_m = (entry.node_count.max(2) as f64 * 3.5).clamp(7.0, 220.0);
+
+            if !lower.ends_with(".ifc") {
+                if let Some(snippet) = Self::read_vault_context_snippet(&entry.rel_path, 32768) {
+                    if let Some(pos) = snippet.find("\"world_origin_lat_lon\"") {
+                        let tail = &snippet[pos..snippet.len().min(pos + 96)];
+                        let bracket_start = tail.find('[');
+                        let bracket_end = tail.find(']');
+                        if let (Some(b0), Some(b1)) = (bracket_start, bracket_end) {
+                            let nums: Vec<f64> = tail[b0 + 1..b1]
+                                .split(',')
+                                .filter_map(|t| t.trim().parse::<f64>().ok())
+                                .collect();
+                            if nums.len() >= 2 && (nums[0].abs() > 1e-4 || nums[1].abs() > 1e-4) {
+                                lat = nums[0];
+                                lon = nums[1];
+                                src = GeoPlacementSource::FileNativeGeo;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Fast O(1) head check for .ifc geo-tags (`IFCSITE`, `IFCPOSTALADDRESS`, or folder/filename city hint)
+                if let Some(head) = Self::read_vault_context_snippet(&entry.rel_path, 65536) {
+                    if let Ok(head_step) = crate::core::ifc::StepParser::parse_step(&head) {
+                        for site in head_step.get_entities_of_type("IFCSITE") {
+                            let dms_to_deg = |idx: usize| -> Option<f64> {
+                                let list = site.parameters.get(idx)?.as_list()?;
+                                if list.len() < 2 {
+                                    return None;
+                                }
+                                let d = list.first()?.as_f64().unwrap_or(0.0);
+                                let m = list.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                let s = list.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                let mil = list.get(3).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                let sign = if d < 0.0 || m < 0.0 || s < 0.0 { -1.0 } else { 1.0 };
+                                Some(sign * (d.abs() + m.abs() / 60.0 + (s.abs() + mil.abs() * 1e-6) / 3600.0))
+                            };
+                            if let (Some(la), Some(lo)) = (dms_to_deg(9), dms_to_deg(10)) {
+                                if (la.abs() > 1e-4 || lo.abs() > 1e-4)
+                                    && (-90.0..=90.0).contains(&la)
+                                    && (-180.0..=180.0).contains(&lo)
+                                {
+                                    lat = la;
+                                    lon = lo;
+                                    src = GeoPlacementSource::FileNativeGeo;
+                                    break;
+                                }
+                            }
+                        }
+                        if src == GeoPlacementSource::StagingCampusAuto {
+                            for mc in head_step.get_entities_of_type("IFCMAPCONVERSION") {
+                                let east = mc.get_f64(2).unwrap_or(0.0);
+                                let north = mc.get_f64(3).unwrap_or(0.0);
+                                if east.abs() >= 100.0 || north.abs() >= 100.0 {
+                                    if let Some(crs) = mc.get_ref(1).and_then(|cid| head_step.entities.get(&cid)) {
+                                        for p in &crs.parameters {
+                                            if let Some(s) = p.as_str() {
+                                                let up = s.to_ascii_uppercase();
+                                                if let Some(pos) = up.find("EPSG:") {
+                                                    if let Ok(code) = up[pos + 5..].trim().parse::<u32>() {
+                                                        let (z, south) = if (32601..=32660).contains(&code) {
+                                                            ((code - 32600) as u8, false)
+                                                        } else if (32701..=32760).contains(&code) {
+                                                            ((code - 32700) as u8, true)
+                                                        } else {
+                                                            continue;
+                                                        };
+                                                        let eng = crate::core::gis::GeoProjectionEngine::new(z, south);
+                                                        let (em, nm) = if east.abs() > 10_000_000.0 { (east * 0.001, north * 0.001) } else { (east, north) };
+                                                        let (la, lo) = eng.utm_to_wgs84(em, nm);
+                                                        if (-85.0..=85.0).contains(&la) && (-180.0..=180.0).contains(&lo) {
+                                                            lat = la;
+                                                            lon = lo;
+                                                            src = GeoPlacementSource::FileNativeGeo;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if src == GeoPlacementSource::StagingCampusAuto {
+                        if let Some((city, cla, clo)) = SlippyMapState::resolve_city_hint_in_text(&format!(
+                            "{} | {} | {}",
+                            entry.rel_path, entry.name, &head[..head.len().min(4096)]
+                        )) {
+                            lat = cla;
+                            lon = clo;
+                            src = GeoPlacementSource::AddressOrFolderHint;
+                            hint = city;
+                        }
+                    }
+                }
+            }
+
+            if src == GeoPlacementSource::StagingCampusAuto {
+                if let Some((city, cla, clo)) = SlippyMapState::resolve_city_hint_in_text(&format!(
+                    "{} | {} | {}",
+                    entry.rel_path, entry.name, entry.category
+                )) {
+                    lat = cla;
+                    lon = clo;
+                    src = GeoPlacementSource::AddressOrFolderHint;
+                    hint = city;
+                }
+            }
+
+            let span_boost = ((entry.member_count as f64).sqrt() * 1.4).clamp(7.0, 48.0);
+            if footprint == WorldBuildingProxy::default_footprint_m() && entry.member_count > 12 {
+                footprint = vec![
+                    [-span_boost, -span_boost * 0.75],
+                    [span_boost, -span_boost * 0.75],
+                    [span_boost, span_boost * 0.75],
+                    [-span_boost, span_boost * 0.75],
+                ];
+                height_m = height_m.max((entry.node_count.max(1) as f64) * 3.5);
+            }
+
+            world_index.upsert_building(
+                WorldBuildingProxy {
+                    id: WorldBuildingProxy::stable_id_for_path(&entry.rel_path),
+                    rel_path: entry.rel_path.clone(),
+                    name: entry.name.clone(),
+                    filename: entry.filename.clone(),
+                    lat,
+                    lon,
+                    elev_m: 0.0,
+                    heading_deg: 0.0,
+                    footprint_local_m: footprint,
+                    total_height_m: height_m,
+                    story_count: entry.node_count.max(1),
+                    member_count: entry.member_count,
+                    max_dcr: 0.45,
+                    min_ari: 0.92,
+                    source: src,
+                    address_hint: hint,
+                },
+                true,
+            );
+        }
     }
 
     /// Reactive Zero-Click Auto-Synchronizer:

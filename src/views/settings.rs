@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — Phase 56 Unlimited Lazy Vault Streaming, Sharp HiDPI 3D Earth LOD & LRU Cache, OpenBIM BREP/Openings & Direct Earth 3D Authoring",
+                        "v{} — Phase 57 Planetary Digital Twin World Index (10,000+ Simultaneous Buildings on Earth 3D) & Smart Unlocated Model Placement",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)

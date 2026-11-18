@@ -217,7 +217,11 @@
         const isProjFolder = norm.startsWith("Projects/");
         const isIfc = lower.endsWith(".ifc");
         const isEigenExt = lower.endsWith(".eigen") || lower.endsWith(".eigen.json");
-        const isProjJson = isProjFolder && lower.endsWith(".json") && base !== "active_live_project.json";
+        const isProjJson =
+          isProjFolder &&
+          lower.endsWith(".json") &&
+          base !== "active_live_project.json" &&
+          base !== "_eigengraph_world_index.json";
         if (!isIfc && !isEigenExt && !isProjJson) return null;
 
         let displayName = base

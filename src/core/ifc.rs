@@ -2241,6 +2241,156 @@ impl IfcModel {
         None
     }
 
+    /// Extracts street, city, region, and country strings from `IFCSITE.SiteAddress -> IFCPOSTALADDRESS`.
+    pub fn extract_postal_address(&self) -> Option<String> {
+        let mut parts: Vec<String> = Vec::new();
+        fn collect_addr(ent: &StepEntity, out: &mut Vec<String>) {
+            for p in &ent.parameters {
+                match p {
+                    StepValue::String(s) if !s.trim().is_empty() => out.push(s.trim().to_string()),
+                    StepValue::List(items) => {
+                        for it in items {
+                            if let Some(s) = it.as_str() {
+                                if !s.trim().is_empty() {
+                                    out.push(s.trim().to_string());
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for site in self.raw_step.get_entities_of_type("IFCSITE") {
+            if let Some(addr_id) = site.get_ref(13) {
+                if let Some(addr_ent) = self.raw_step.entities.get(&addr_id) {
+                    collect_addr(addr_ent, &mut parts);
+                }
+            }
+        }
+        if parts.is_empty() {
+            for addr_ent in self.raw_step.get_entities_of_type("IFCPOSTALADDRESS") {
+                collect_addr(addr_ent, &mut parts);
+            }
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(", "))
+        }
+    }
+
+    /// Resolves `(Option<(lat, lon)>, GeoPlacementSource, address_or_city_label)` via waterfall:
+    /// 1) Native `IFCSITE` / `IFCMAPCONVERSION` CRS, 2) `IFCPOSTALADDRESS` / Vault path / filename city match,
+    /// 3) Unlocated (`None` -> Staging Campus until pinned).
+    pub fn resolve_location_or_city(
+        &self,
+        rel_path: &str,
+        filename: &str,
+    ) -> (
+        Option<(f64, f64)>,
+        crate::core::gis::GeoPlacementSource,
+        String,
+    ) {
+        if let Some((la, lo)) = self.site_lat_lon() {
+            let hint = self.extract_postal_address().unwrap_or_default();
+            return (
+                Some((la, lo)),
+                crate::core::gis::GeoPlacementSource::FileNativeGeo,
+                hint,
+            );
+        }
+        let postal = self.extract_postal_address().unwrap_or_default();
+        let proj_name = self.spatial_root.name.as_str();
+        let combined = format!("{postal} | {rel_path} | {filename} | {proj_name}");
+        if let Some((city, la, lo)) =
+            crate::core::gis::SlippyMapState::resolve_city_hint_in_text(&combined)
+        {
+            return (
+                Some((la, lo)),
+                crate::core::gis::GeoPlacementSource::AddressOrFolderHint,
+                city,
+            );
+        }
+        (
+            None,
+            crate::core::gis::GeoPlacementSource::StagingCampusAuto,
+            postal,
+        )
+    }
+
+    /// Computes compact local footprint polygon `[east_m, north_m]` around centroid and total Z height in meters.
+    pub fn bounding_footprint_and_height_m(&self) -> (Vec<[f64; 2]>, f64) {
+        let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
+        let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
+        let (mut min_z, mut max_z) = (f64::INFINITY, f64::NEG_INFINITY);
+        for el in &self.elements {
+            min_x = min_x.min(el.bbox.min_x);
+            max_x = max_x.max(el.bbox.max_x);
+            min_y = min_y.min(el.bbox.min_y);
+            max_y = max_y.max(el.bbox.max_y);
+            min_z = min_z.min(el.bbox.min_z);
+            max_z = max_z.max(el.bbox.max_z);
+        }
+        if min_x.is_finite() && max_x > min_x + 0.5 && max_y > min_y + 0.5 {
+            let hw = ((max_x - min_x) * 0.5).clamp(2.5, 250.0);
+            let hd = ((max_y - min_y) * 0.5).clamp(2.5, 250.0);
+            let h = if max_z.is_finite() && min_z.is_finite() {
+                (max_z - min_z).clamp(3.2, 650.0)
+            } else {
+                7.0
+            };
+            (vec![[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]], h)
+        } else {
+            (crate::core::gis::WorldBuildingProxy::default_footprint_m(), 7.0)
+        }
+    }
+
+    /// Rich IFC import returning `BimProject`, resolved `(lat, lon)`, `GeoPlacementSource`, address/city cue, and message.
+    pub fn parse_to_bim_project_with_geo(
+        raw_content: &str,
+        fallback_name: &str,
+        rel_path: &str,
+    ) -> Result<
+        (
+            crate::core::bim::BimProject,
+            Option<(f64, f64)>,
+            crate::core::gis::GeoPlacementSource,
+            String,
+            String,
+        ),
+        String,
+    > {
+        let cleaned = raw_content.trim_start_matches('\u{FEFF}');
+        let (bim, site_geo_opt, msg) = Self::parse_to_bim_project_with_fallback(cleaned, fallback_name)?;
+        if let Ok(model) = Self::parse(cleaned) {
+            let (geo_opt, src, hint) = model.resolve_location_or_city(rel_path, fallback_name);
+            return Ok((bim, geo_opt.or(site_geo_opt), src, hint, msg));
+        }
+        if let Some((city, la, lo)) =
+            crate::core::gis::SlippyMapState::resolve_city_hint_in_text(&format!("{rel_path} | {fallback_name}"))
+        {
+            return Ok((
+                bim,
+                Some((la, lo)),
+                crate::core::gis::GeoPlacementSource::AddressOrFolderHint,
+                city,
+                msg,
+            ));
+        }
+        Ok((
+            bim,
+            site_geo_opt,
+            if site_geo_opt.is_some() {
+                crate::core::gis::GeoPlacementSource::FileNativeGeo
+            } else {
+                crate::core::gis::GeoPlacementSource::StagingCampusAuto
+            },
+            String::new(),
+            msg,
+        ))
+    }
+
     /// Parses any IFC STEP file (`IFC2x3`, `IFC4`, `IFC4.3`) into an editable `BimProject`,
     /// optional site `(lat, lon)`, and diagnostic summary, falling back to `InteropEngine::import_from_ifc`
     /// when a model only defines analytical wireframes.
@@ -5269,6 +5419,63 @@ END-ISO-10303-21;"#;
         assert_eq!(bim.walls.len(), 1);
         assert_eq!(bim.walls[0].openings.len(), 1, "IFCRELVOIDSELEMENT/IFCRELFILLSELEMENT must populate BimWall.openings");
         assert!((bim.walls[0].openings[0].width_mm - 1000.0).abs() < 150.0);
+    }
+
+    #[test]
+    fn test_phase57_ifc_postal_address_folder_city_fallback_and_unlocated_staging() {
+        let postal_ifc = r#"ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');
+FILE_NAME('Surabaya_Office.ifc','2026-11-18T12:00:00',('A'),('B'),'C','','');
+FILE_SCHEMA(('IFC4'));
+ENDSEC;
+DATA;
+#1=IFCPROJECT('0P57',$,'East Java Office',$,$,$,$,(#10),#20);
+#2=IFCSITE('0S57',$,'Main Site',$,$,#30,$,$,.ELEMENT.,(0,0,0),(0,0,0),$,$,#90);
+#90=IFCPOSTALADDRESS(.SITE.,$,$,'Jl. Basuki Rahmat 10',$,$,'Surabaya','East Java','60271','Indonesia');
+#3=IFCBUILDING('0B57',$,'Office Tower',$,$,#31,$,$,.ELEMENT.,$,$,$);
+#4=IFCBUILDINGSTOREY('0L57',$,'Level 1',$,$,#32,$,$,.ELEMENT.,0.0);
+#10=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,#40,$);
+#20=IFCUNITASSIGNMENT((#21));
+#21=IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);
+#30=IFCLOCALPLACEMENT($,#40);
+#31=IFCLOCALPLACEMENT(#30,#40);
+#32=IFCLOCALPLACEMENT(#31,#40);
+#40=IFCAXIS2PLACEMENT3D(#50,#51,#52);
+#50=IFCCARTESIANPOINT((0.,0.,0.));
+#51=IFCDIRECTION((0.,0.,1.));
+#52=IFCDIRECTION((1.,0.,0.));
+#60=IFCCOLUMN('0C57',$,'C1',$,$,#32,#70,.COLUMN.);
+#70=IFCPRODUCTDEFINITIONSHAPE($,$,(#71));
+#71=IFCSHAPEREPRESENTATION(#10,'Body','SweptSolid',(#72));
+#72=IFCEXTRUDEDAREASOLID(#73,#40,#51,4200.);
+#73=IFCRECTANGLEPROFILEDEF(.AREA.,'P400',#74,400.,400.);
+#74=IFCAXIS2PLACEMENT2D(#50,$);
+#80=IFCRELCONTAINEDINSPATIALSTRUCTURE('0Rel57',$,$,$,(#60),#4);
+ENDSEC;
+END-ISO-10303-21;"#;
+
+        let m_postal = IfcModel::parse(postal_ifc).expect("Parse Surabaya IFC");
+        assert!(m_postal.extract_postal_address().unwrap().contains("Surabaya"));
+        let (geo1, src1, city1) = m_postal.resolve_location_or_city("Projects/Tower.ifc", "Tower.ifc");
+        assert_eq!(src1, crate::core::gis::GeoPlacementSource::AddressOrFolderHint);
+        assert_eq!(city1, "Surabaya");
+        assert!((geo1.unwrap().0 - (-7.2575)).abs() < 0.05);
+
+        // Folder cue test when file itself lacks IFCPOSTALADDRESS
+        let no_addr_ifc = postal_ifc.replace("#90=IFCPOSTALADDRESS(.SITE.,$,$,'Jl. Basuki Rahmat 10',$,$,'Surabaya','East Java','60271','Indonesia');", "#90=IFCPOSTALADDRESS(.SITE.,$,$,'Plot 1',$,$,'UnknownTown','','00000','');");
+        let m_folder = IfcModel::parse(&no_addr_ifc).expect("Parse generic IFC");
+        let (geo2, src2, city2) = m_folder.resolve_location_or_city("Projects/Bandung/Villa_A.ifc", "Villa_A.ifc");
+        assert_eq!(src2, crate::core::gis::GeoPlacementSource::AddressOrFolderHint);
+        assert_eq!(city2, "Bandung");
+        assert!((geo2.unwrap().0 - (-6.9175)).abs() < 0.05);
+
+        // Truly unlocated model falls back cleanly to StagingCampusAuto (None GPS) rather than (0,0) ocean
+        let (geo3, src3, _) = m_folder.resolve_location_or_city("Projects/Unnamed_Model_01.ifc", "Unnamed_Model_01.ifc");
+        assert!(geo3.is_none());
+        assert_eq!(src3, crate::core::gis::GeoPlacementSource::StagingCampusAuto);
+        let (fp, h_m) = m_folder.bounding_footprint_and_height_m();
+        assert!(fp.len() >= 4 && h_m >= 3.2);
     }
 }
 

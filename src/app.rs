@@ -77,6 +77,14 @@ impl Default for EigenGraphApp {
         let _has_vault = crate::core::InternalVault::has_connected_vault();
         let personal_vault_projects = crate::core::InternalVault::list_personal_vault_projects();
         let mut universal_canvas = UniversalCanvasState::default();
+        if !personal_vault_projects.is_empty() || _has_vault {
+            let mut widx = crate::core::InternalVault::load_world_spatial_index();
+            crate::core::InternalVault::sync_world_spatial_index_with_vault(
+                &personal_vault_projects,
+                &mut widx,
+            );
+            universal_canvas.world_index = widx;
+        }
         let mut spatial_workspace = SpatialWorkspaceState::default();
         if spatial_workspace.spatial_mode_enabled {
             // Spatial full-viewport mode has no outer vertical page scroll conflict.
@@ -439,6 +447,10 @@ impl App for EigenGraphApp {
             self.last_vault_bridge_version = cur_vault_ver;
             self.personal_vault_projects =
                 crate::core::InternalVault::list_personal_vault_projects();
+            crate::core::InternalVault::sync_world_spatial_index_with_vault(
+                &self.personal_vault_projects,
+                &mut self.universal_canvas.world_index,
+            );
             if crate::core::InternalVault::has_connected_vault() {
                 self.show_vault_startup_modal = false;
                 if let Some(sess_json) = crate::core::InternalVault::load_ai_sessions_json() {
@@ -771,6 +783,42 @@ impl App for EigenGraphApp {
         {
             self.last_bim_sig = cur_bim_sig;
             self.sync_bim_to_fem();
+            self.sync_active_building_to_world_index(false);
+        }
+        if let Some((rel, lat, lon, hdg)) = self.universal_canvas.pending_world_pin_event.take() {
+            crate::core::InternalVault::save_world_spatial_index(&self.universal_canvas.world_index);
+            self.spatial_workspace.push_trace(
+                format!("Pinned '{}' on Earth @ ({:.4}°, {:.4}° | Hdg {:.0}°)", rel, lat, lon, hdg),
+                true,
+            );
+        }
+        if let Some(clicked_rel) = self.universal_canvas.clicked_world_building_rel_path.take() {
+            if let Some(entry) = self
+                .personal_vault_projects
+                .iter()
+                .find(|p| p.rel_path == clicked_rel)
+                .cloned()
+                .or_else(|| {
+                    self.universal_canvas.world_index.get(&clicked_rel).map(|b| {
+                        crate::core::vault::PersonalVaultProjectEntry {
+                            name: b.name.clone(),
+                            filename: b.filename.clone(),
+                            rel_path: b.rel_path.clone(),
+                            abs_path: crate::core::InternalVault::vault_root_dir()
+                                .join(&b.rel_path)
+                                .to_string_lossy()
+                                .to_string(),
+                            category: "World".to_string(),
+                            node_count: b.story_count,
+                            member_count: b.member_count,
+                            size_bytes: 0,
+                            updated_label: b.source.short_label().to_string(),
+                        }
+                    })
+                })
+            {
+                self.open_vault_project_entry(entry);
+            }
         }
         self.sync_earth_maps();
         if self.planning_view.simulation_day != self.last_planning_sim_day {
@@ -1365,6 +1413,8 @@ impl EigenGraphApp {
         if hud_actions.disconnect_vault {
             let _ = crate::core::InternalVault::disconnect_vault();
             self.personal_vault_projects.clear();
+            self.universal_canvas.world_index = crate::core::gis::WorldSpatialIndex::default();
+            self.universal_canvas.active_world_project_rel_path = None;
             self.spatial_workspace.vault_drawer_open = false;
             self.spatial_workspace.vault_path_popover_open = false;
             self.spatial_workspace
@@ -1374,7 +1424,12 @@ impl EigenGraphApp {
             crate::core::web_bridge::vault_refresh();
             self.personal_vault_projects =
                 crate::core::InternalVault::list_personal_vault_projects();
-            self.spatial_workspace.push_trace("Refreshed Vault index", true);
+            crate::core::InternalVault::sync_world_spatial_index_with_vault(
+                &self.personal_vault_projects,
+                &mut self.universal_canvas.world_index,
+            );
+            crate::core::InternalVault::save_world_spatial_index(&self.universal_canvas.world_index);
+            self.spatial_workspace.push_trace("Refreshed Vault & World Spatial Index", true);
         }
         if hud_actions.save_active_to_vault {
             self.sync_lifecycle_to_canvas();
@@ -1399,8 +1454,11 @@ impl EigenGraphApp {
                     Ok(_) => {
                         self.personal_vault_projects =
                             crate::core::InternalVault::list_personal_vault_projects();
+                        let saved_rel = format!("Projects/{filename}");
+                        self.universal_canvas.active_world_project_rel_path = Some(saved_rel);
+                        self.sync_active_building_to_world_index(true);
                         self.spatial_workspace.vault_feedback =
-                            Some(format!("Saved '{filename}' into Vault."));
+                            Some(format!("Saved '{filename}' into Vault & World Index."));
                         self.spatial_workspace
                             .push_trace(format!("Saved {filename} to Vault"), true);
                     }
@@ -1432,6 +1490,16 @@ impl EigenGraphApp {
                 18.2,
                 "Anchored BIM Site",
             );
+            if let Some(rel) = self.universal_canvas.active_world_project_rel_path.clone() {
+                let hdg = self
+                    .universal_canvas
+                    .world_index
+                    .get(&rel)
+                    .map(|b| b.heading_deg)
+                    .unwrap_or(0.0);
+                self.universal_canvas.world_index.pin_building_at(&rel, lat, lon, hdg);
+            }
+            self.sync_active_building_to_world_index(true);
             self.spatial_workspace.active_canvas_mode =
                 crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
             self.sync_bim_to_fem();
@@ -1548,7 +1616,7 @@ impl EigenGraphApp {
                 .get(..13)
                 .is_some_and(|h| h.eq_ignore_ascii_case("ISO-10303-21;"));
         if is_ifc {
-            self.import_ifc_raw_onto_earth(&entry.name, &entry.filename, clean_raw);
+            self.import_ifc_raw_onto_earth(&entry.name, &entry.filename, &entry.rel_path, clean_raw);
             return;
         }
         if let Ok(ws_cfg) = self.universal_canvas.apply_unified_archive(
@@ -1563,9 +1631,19 @@ impl EigenGraphApp {
                 &mut self.ai_assistant_view.is_visible,
             );
             self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+            self.universal_canvas.active_world_project_rel_path = Some(entry.rel_path.clone());
+            if let Some(pinned) = self.universal_canvas.world_index.get(&entry.rel_path).cloned() {
+                if pinned.source == crate::core::gis::GeoPlacementSource::UserPinnedOnEarth
+                    || (self.universal_canvas.ground_origin_lat_lon.0.abs() < 1e-4
+                        && self.universal_canvas.ground_origin_lat_lon.1.abs() < 1e-4)
+                {
+                    self.universal_canvas.ground_origin_lat_lon = (pinned.lat, pinned.lon);
+                }
+            }
             self.universal_canvas.ground_origin_anchored = true;
             self.universal_canvas.globe_mode = true;
             self.sync_bim_to_fem();
+            self.sync_active_building_to_world_index(true);
             self.build_view
                 .fit_view_to_project(&mut self.universal_canvas, &self.members);
             self.sync_earth_maps();
@@ -1618,25 +1696,87 @@ impl EigenGraphApp {
         }
     }
 
-    fn import_ifc_raw_onto_earth(&mut self, display_label: &str, filename: &str, clean_raw: &str) {
-        match crate::core::ifc::IfcModel::parse_to_bim_project_with_fallback(clean_raw, filename) {
-            Ok((proj, site_geo, summary_msg)) => {
+    fn sync_active_building_to_world_index(&mut self, save_manifest: bool) {
+        let Some(ref rel) = self.universal_canvas.active_world_project_rel_path else {
+            return;
+        };
+        let fname = rel.split('/').next_back().unwrap_or(rel);
+        let existing = self.universal_canvas.world_index.get(rel).cloned();
+        let (lat, lon) = self.universal_canvas.ground_origin_lat_lon;
+        let heading = existing.as_ref().map(|b| b.heading_deg).unwrap_or(0.0);
+        let source = existing
+            .as_ref()
+            .map(|b| b.source)
+            .unwrap_or_else(|| {
+                if lat.abs() > 1e-4 || lon.abs() > 1e-4 {
+                    crate::core::gis::GeoPlacementSource::UserPinnedOnEarth
+                } else {
+                    crate::core::gis::GeoPlacementSource::StagingCampusAuto
+                }
+            });
+        let hint = existing.map(|b| b.address_hint).unwrap_or_default();
+        let proxy = crate::core::gis::WorldBuildingProxy::from_bim_project(
+            rel,
+            fname,
+            lat,
+            lon,
+            heading,
+            &self.build_view.bim_bus.project,
+            &self.members,
+            source,
+            hint,
+        );
+        self.universal_canvas.world_index.upsert_building(proxy, true);
+        if save_manifest {
+            crate::core::InternalVault::save_world_spatial_index(&self.universal_canvas.world_index);
+        }
+    }
+
+    fn import_ifc_raw_onto_earth(
+        &mut self,
+        display_label: &str,
+        filename: &str,
+        rel_path: &str,
+        clean_raw: &str,
+    ) {
+        match crate::core::ifc::IfcModel::parse_to_bim_project_with_geo(clean_raw, filename, rel_path)
+        {
+            Ok((proj, geo_opt, resolved_src, addr_hint, summary_msg)) => {
                 self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
                 self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
                 self.parametric_view.active_level_idx = 0;
-                let target_geo = site_geo.unwrap_or_else(|| {
-                    if self.universal_canvas.ground_origin_anchored
-                        && (self.universal_canvas.ground_origin_lat_lon.0.abs() > 1e-4
-                            || self.universal_canvas.ground_origin_lat_lon.1.abs() > 1e-4)
-                    {
-                        self.universal_canvas.ground_origin_lat_lon
+
+                let existing_opt = self.universal_canvas.world_index.get(rel_path).cloned();
+                let (target_geo, final_src, final_hdg) = if let Some(ref ex) = existing_opt {
+                    if ex.source == crate::core::gis::GeoPlacementSource::UserPinnedOnEarth {
+                        ((ex.lat, ex.lon), ex.source, ex.heading_deg)
+                    } else if let Some(geo) = geo_opt {
+                        (geo, resolved_src, ex.heading_deg)
+                    } else if ex.source == crate::core::gis::GeoPlacementSource::StagingCampusAuto {
+                        ((ex.lat, ex.lon), ex.source, ex.heading_deg)
                     } else {
-                        self.universal_canvas.world_map.center_lat_lon
+                        let slot = self.universal_canvas.world_index.unlocated_count();
+                        (
+                            self.universal_canvas.world_index.staging_slot_lat_lon(slot),
+                            crate::core::gis::GeoPlacementSource::StagingCampusAuto,
+                            0.0,
+                        )
                     }
-                });
+                } else if let Some(geo) = geo_opt {
+                    (geo, resolved_src, 0.0)
+                } else {
+                    let slot = self.universal_canvas.world_index.unlocated_count();
+                    (
+                        self.universal_canvas.world_index.staging_slot_lat_lon(slot),
+                        crate::core::gis::GeoPlacementSource::StagingCampusAuto,
+                        0.0,
+                    )
+                };
+
                 self.universal_canvas.ground_origin_lat_lon = target_geo;
                 self.universal_canvas.ground_origin_anchored = true;
                 self.universal_canvas.globe_mode = true;
+                self.universal_canvas.active_world_project_rel_path = Some(rel_path.to_string());
                 self.universal_canvas.earth_world.camera.tilt_deg = 42.0;
                 self.universal_canvas.earth_world.start_fly_to(
                     &self.universal_canvas.world_map,
@@ -1646,18 +1786,42 @@ impl EigenGraphApp {
                     display_label,
                 );
                 self.sync_bim_to_fem();
+
+                let proxy = crate::core::gis::WorldBuildingProxy::from_bim_project(
+                    rel_path,
+                    filename,
+                    target_geo.0,
+                    target_geo.1,
+                    final_hdg,
+                    &self.build_view.bim_bus.project,
+                    &self.members,
+                    final_src,
+                    addr_hint.clone(),
+                );
+                self.universal_canvas.world_index.upsert_building(proxy, true);
+                crate::core::InternalVault::save_world_spatial_index(&self.universal_canvas.world_index);
+
                 self.build_view
                     .fit_view_to_project(&mut self.universal_canvas, &self.members);
                 self.sync_earth_maps();
-                self.my_project_view.export_success_msg = Some(summary_msg.clone());
-                self.build_view.modify_status_msg = Some(summary_msg.clone());
+                let geo_note = match final_src {
+                    crate::core::gis::GeoPlacementSource::StagingCampusAuto => {
+                        format!("{summary_msg} • Placed in Staging Campus (click 'Place' to pin real Earth site)")
+                    }
+                    crate::core::gis::GeoPlacementSource::AddressOrFolderHint if !addr_hint.is_empty() => {
+                        format!("{summary_msg} • Auto-geolocated via city '{addr_hint}'")
+                    }
+                    _ => summary_msg,
+                };
+                self.my_project_view.export_success_msg = Some(geo_note.clone());
+                self.build_view.modify_status_msg = Some(geo_note.clone());
                 self.active_pillar = NavigationPillar::GeometryAssembly;
                 if self.spatial_workspace.spatial_mode_enabled {
                     self.spatial_workspace.active_canvas_mode =
                         crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
                     self.spatial_workspace.active_overlay_pillar = None;
-                    self.spatial_workspace.vault_feedback = Some(summary_msg.clone());
-                    self.spatial_workspace.push_trace(summary_msg, true);
+                    self.spatial_workspace.vault_feedback = Some(geo_note.clone());
+                    self.spatial_workspace.push_trace(geo_note, true);
                 }
             }
             Err(err) => {
@@ -2570,7 +2734,8 @@ impl EigenGraphApp {
         if lower.ends_with(".ifc") || trimmed.get(..13).is_some_and(|h| h.eq_ignore_ascii_case("ISO-10303-21")) {
             let clean_raw = payload.content.trim_start_matches('\u{FEFF}');
             if self.spatial_workspace.spatial_mode_enabled {
-                self.import_ifc_raw_onto_earth(&payload.filename, &payload.filename, clean_raw);
+                let import_rel = format!("Imports/{}", payload.filename);
+                self.import_ifc_raw_onto_earth(&payload.filename, &payload.filename, &import_rel, clean_raw);
                 return;
             }
             match crate::core::ifc::IfcModel::parse(clean_raw) {

@@ -1612,6 +1612,7 @@ impl SpatialWorkspaceState {
         universal_canvas: &UniversalCanvasState,
     ) -> bool {
         universal_canvas.earth_bim_author.active_tool != crate::views::universal_canvas::EarthBimTool::None
+            || universal_canvas.placing_unlocated_rel_path.is_some()
             || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
             || build_view.pending_3d_start_mm.is_some()
             || universal_canvas.earth_bim_author.pending_start_mm.is_some()
@@ -1630,6 +1631,8 @@ impl SpatialWorkspaceState {
         universal_canvas.earth_bim_author.active_tool =
             crate::views::universal_canvas::EarthBimTool::None;
         universal_canvas.earth_bim_author.pending_start_mm = None;
+        universal_canvas.placing_unlocated_rel_path = None;
+        universal_canvas.placing_hover_lat_lon = None;
         universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
         universal_canvas.measure_active = false;
         self.push_trace("Returned to Earth 3D Orbit / Select", true);
@@ -3180,6 +3183,7 @@ impl SpatialWorkspaceState {
             || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
             || universal_canvas.earth_bim_author.active_tool
                 != crate::views::universal_canvas::EarthBimTool::None
+            || universal_canvas.placing_unlocated_rel_path.is_some()
             || universal_canvas.active_tool != UniversalCanvasTool::SelectPan
             || universal_canvas.measure_active
         {
@@ -3190,6 +3194,30 @@ impl SpatialWorkspaceState {
                 .show(ctx, |ui| {
                     Self::antigravity_glass_frame(theme, 16, Margin::symmetric(12, 5)).show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
+                            if let Some(rel) = universal_canvas.placing_unlocated_rel_path.clone() {
+                                let short_n = rel.split('/').next_back().unwrap_or(&rel);
+                                icons::pill_badge(
+                                    ui,
+                                    AppIcon::Target,
+                                    format!(
+                                        "Place '{}' on Earth • Hdg {:.0}° (Click Ground)",
+                                        short_n, universal_canvas.placing_heading_deg
+                                    ),
+                                    theme.accent_orange,
+                                );
+                                if ui.small_button("-15°").on_hover_text("Rotate North azimuth -15 deg (Q)").clicked() {
+                                    universal_canvas.placing_heading_deg =
+                                        (universal_canvas.placing_heading_deg - 15.0).rem_euclid(360.0);
+                                }
+                                if ui.small_button("+15°").on_hover_text("Rotate North azimuth +15 deg (E)").clicked() {
+                                    universal_canvas.placing_heading_deg =
+                                        (universal_canvas.placing_heading_deg + 15.0).rem_euclid(360.0);
+                                }
+                                if ui.small_button("Cancel").clicked() {
+                                    universal_canvas.placing_unlocated_rel_path = None;
+                                    universal_canvas.placing_hover_lat_lon = None;
+                                }
+                            }
                             if self.active_lens != SpatialLens::Clean {
                                 icons::pill_badge(
                                     ui,
@@ -5582,6 +5610,7 @@ impl SpatialWorkspaceState {
         ui: &mut Ui,
         theme: &MacTheme,
         vault_projects: &[crate::core::vault::PersonalVaultProjectEntry],
+        universal_canvas: &mut UniversalCanvasState,
         panel_w: f32,
     ) -> SpatialHudActions {
         let mut actions = SpatialHudActions::default();
@@ -6030,13 +6059,23 @@ impl SpatialWorkspaceState {
                                         .color(theme.text_muted),
                                 );
                             }
-                            for proj in vault_projects.iter().take(10) {
+                            for proj in vault_projects.iter().take(48) {
                                 if !fq.is_empty()
                                     && !proj.name.to_lowercase().contains(&fq)
                                     && !proj.rel_path.to_lowercase().contains(&fq)
                                 {
                                     continue;
                                 }
+                                let proxy_opt = universal_canvas.world_index.get(&proj.rel_path).cloned();
+                                let geo_tag = proxy_opt
+                                    .as_ref()
+                                    .map(|b| match b.source {
+                                        crate::core::gis::GeoPlacementSource::FileNativeGeo => "GPS",
+                                        crate::core::gis::GeoPlacementSource::AddressOrFolderHint => "City",
+                                        crate::core::gis::GeoPlacementSource::UserPinnedOnEarth => "Pin",
+                                        crate::core::gis::GeoPlacementSource::StagingCampusAuto => "Stage",
+                                    })
+                                    .unwrap_or("Stage");
                                 ui.horizontal(|ui| {
                                     if ui
                                         .small_button("@")
@@ -6052,14 +6091,28 @@ impl SpatialWorkspaceState {
                                     }
                                     if ui
                                         .button(
-                                            RichText::new(&proj.name)
+                                            RichText::new(format!("[{geo_tag}] {}", proj.name))
                                                 .size(10.5)
                                                 .color(theme.text_primary),
                                         )
-                                        .on_hover_text("Load Vault project onto Earth/BIM canvas")
+                                        .on_hover_text("Load Vault project onto Earth 3D (auto-flies to building)")
                                         .clicked()
                                     {
                                         actions.open_vault_project = Some(proj.clone());
+                                    }
+                                    if ui
+                                        .small_button("Place")
+                                        .on_hover_text("Place or relocate this model anywhere on Earth 3D interactively")
+                                        .clicked()
+                                    {
+                                        universal_canvas.globe_mode = true;
+                                        universal_canvas.placing_unlocated_rel_path = Some(proj.rel_path.clone());
+                                        universal_canvas.placing_heading_deg = proxy_opt
+                                            .as_ref()
+                                            .map(|b| b.heading_deg)
+                                            .unwrap_or(0.0);
+                                        self.vault_drawer_open = false;
+                                        self.push_trace(format!("Click Earth 3D to place '{}'", proj.name), true);
                                     }
                                     if ui.small_button("Ren").on_hover_text("Rename file").clicked() {
                                         self.vault_rename_target = Some((proj.rel_path.clone(), proj.name.clone()));
@@ -6732,6 +6785,7 @@ impl SpatialWorkspaceState {
                             ui,
                             theme,
                             vault_projects,
+                            universal_canvas,
                             cap_w,
                         );
                         actions.merge(vault_act);
@@ -7090,8 +7144,10 @@ impl SpatialWorkspaceState {
                             ui.set_width(deck_w);
                             ui.set_max_width(deck_w);
 
-                            // 1. Contextual Structural Health Strip (visible when BIM/FEM model exists)
-                            if !build_view.bim_bus.project.is_empty() || !members.is_empty() {
+                            // 1. Contextual World Portfolio & Structural Health Strip
+                            let world_total = universal_canvas.world_index.buildings.len();
+                            let world_unloc = universal_canvas.world_index.unlocated_count();
+                            if world_total > 0 || !build_view.bim_bus.project.is_empty() || !members.is_empty() {
                                 let (worst_target, max_dcr, min_ari, crit_cnt) =
                                     self.structural_health_summary(&build_view.bim_bus.project, members);
                                 let health_col = if max_dcr > 95.0 || min_ari < 0.65 {
@@ -7102,23 +7158,59 @@ impl SpatialWorkspaceState {
                                     theme.accent_green
                                 };
                                 ui.horizontal_wrapped(|ui| {
-                                    icons::pill_badge(
-                                        ui,
-                                        AppIcon::Bolt,
-                                        format!(
-                                            "{}C {}B • Max DCR {:.0}% • Min ARI {:.2}{}",
-                                            build_view.bim_bus.project.columns.len(),
-                                            build_view.bim_bus.project.runs.len(),
-                                            max_dcr,
-                                            min_ari,
-                                            if crit_cnt > 0 {
-                                                format!(" • Crit {crit_cnt}")
-                                            } else {
-                                                String::new()
+                                    if world_total > 0 {
+                                        icons::pill_badge(
+                                            ui,
+                                            AppIcon::Layers,
+                                            format!("World: {world_total} Bldgs"),
+                                            theme.accent_blue,
+                                        );
+                                        if world_unloc > 0 {
+                                            if ui
+                                                .small_button(format!("{world_unloc} Unlocated • Place"))
+                                                .on_hover_text("Pick next unlocated Staging model and click anywhere on Earth 3D to pin its real address")
+                                                .clicked()
+                                            {
+                                                let next_rel = universal_canvas
+                                                    .active_world_project_rel_path
+                                                    .clone()
+                                                    .filter(|r| universal_canvas.world_index.get(r).is_some_and(|b| b.is_unlocated()))
+                                                    .or_else(|| {
+                                                        universal_canvas
+                                                            .world_index
+                                                            .buildings
+                                                            .iter()
+                                                            .find(|b| b.is_unlocated())
+                                                            .map(|b| b.rel_path.clone())
+                                                    });
+                                                if let Some(rel) = next_rel {
+                                                    universal_canvas.globe_mode = true;
+                                                    universal_canvas.placing_unlocated_rel_path = Some(rel.clone());
+                                                    universal_canvas.placing_heading_deg = 0.0;
+                                                    self.push_trace(format!("Place '{rel}' onto Earth 3D (Q/E rotate)"), true);
+                                                }
                                             }
-                                        ),
-                                        health_col,
-                                    );
+                                        }
+                                    }
+                                    if !build_view.bim_bus.project.is_empty() || !members.is_empty() {
+                                        icons::pill_badge(
+                                            ui,
+                                            AppIcon::Bolt,
+                                            format!(
+                                                "{}C {}B • Max DCR {:.0}% • Min ARI {:.2}{}",
+                                                build_view.bim_bus.project.columns.len(),
+                                                build_view.bim_bus.project.runs.len(),
+                                                max_dcr,
+                                                min_ari,
+                                                if crit_cnt > 0 {
+                                                    format!(" • Crit {crit_cnt}")
+                                                } else {
+                                                    String::new()
+                                                }
+                                            ),
+                                            health_col,
+                                        );
+                                    }
                                     if let Some(target) = worst_target {
                                         if ui
                                             .small_button("Inspect Worst")
@@ -9538,5 +9630,128 @@ END-ISO-10303-21;\r\n";
         let _ = col_l1.id;
         let picked_isolated_l2 = canvas.pick_bim_element_at_screen(l2_px, rect, &build.bim_bus.project);
         assert_ne!(picked_isolated_l2, Some((crate::core::BimElementKind::Column, col_l2.id)));
+    }
+
+    #[test]
+    fn test_phase57_multi_building_earth3d_lod_picking_and_place_on_earth_pinning() {
+        use crate::core::gis::{GeoPlacementSource, WorldBuildingProxy};
+        use crate::views::universal_canvas::WorldPickOutcome;
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+
+        // Populate 200 buildings in WorldSpatialIndex across Jakarta + Staging Campus
+        for i in 0..200_usize {
+            let rel = format!("Projects/Complex/Tower_{i:03}.ifc");
+            let is_staging = i < 20;
+            canvas.world_index.upsert_building(
+                WorldBuildingProxy {
+                    id: WorldBuildingProxy::stable_id_for_path(&rel),
+                    rel_path: rel,
+                    name: format!("Tower_{i:03}"),
+                    filename: format!("Tower_{i:03}.ifc"),
+                    lat: if is_staging { 0.0 } else { -6.2088 + (i % 10) as f64 * 0.0008 },
+                    lon: if is_staging { 0.0 } else { 106.8456 + (i / 10) as f64 * 0.0008 },
+                    elev_m: 0.0,
+                    heading_deg: 0.0,
+                    footprint_local_m: vec![[-12.0, -10.0], [12.0, -10.0], [12.0, 10.0], [-12.0, 10.0]],
+                    total_height_m: 28.0,
+                    story_count: 8,
+                    member_count: 64,
+                    max_dcr: 0.62,
+                    min_ari: 0.88,
+                    source: if is_staging {
+                        GeoPlacementSource::StagingCampusAuto
+                    } else {
+                        GeoPlacementSource::FileNativeGeo
+                    },
+                    address_hint: if is_staging { String::new() } else { "Jakarta".to_string() },
+                },
+                true,
+            );
+        }
+        assert_eq!(canvas.world_index.buildings.len(), 200);
+        assert_eq!(canvas.world_index.unlocated_count(), 20);
+
+        let rect = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1100.0, 760.0));
+
+        // 1. LOD 0 orbital cluster picking returns FlyToCluster
+        canvas.world_map.center_lat_lon = (-6.2088, 106.8456);
+        canvas.world_map.zoom_level = 3.0;
+        let xf0 = crate::core::gis::GlobeScreenTransform::from_view(
+            rect,
+            canvas.world_map.center_lat_lon.0,
+            canvas.world_map.center_lat_lon.1,
+            canvas.world_map.zoom_level,
+            &canvas.earth_world.camera,
+        );
+        let clusters = canvas.world_index.query_clusters(-85.0, 85.0, -180.0, 180.0, 3.0);
+        assert!(!clusters.is_empty());
+        let (cl_px, _, _) = xf0.project_lat_lon_elev(clusters[0].lat, clusters[0].lon, 0.0).unwrap();
+        canvas.last_globe_xform = Some(xf0);
+        assert!(matches!(
+            canvas.pick_world_building_or_cluster_at_screen(cl_px, rect),
+            Some(WorldPickOutcome::FlyToCluster { .. })
+        ));
+
+        // 2. LOD 1/2 city scale: clicking any 3D extruded neighbor massing triggers HydrateBuilding
+        let target_b = canvas.world_index.buildings[50].clone();
+        canvas.world_map.center_lat_lon = (target_b.lat, target_b.lon);
+        canvas.world_map.zoom_level = 16.5;
+        let xf1 = crate::core::gis::GlobeScreenTransform::from_view(
+            rect,
+            canvas.world_map.center_lat_lon.0,
+            canvas.world_map.center_lat_lon.1,
+            canvas.world_map.zoom_level,
+            &canvas.earth_world.camera,
+        );
+        let (roof_px, _, _) = xf1.project_lat_lon_elev(target_b.lat, target_b.lon, target_b.total_height_m).unwrap();
+        canvas.last_globe_xform = Some(xf1);
+        assert_eq!(
+            canvas.pick_world_building_or_cluster_at_screen(roof_px, rect),
+            Some(WorldPickOutcome::HydrateBuilding(target_b.rel_path.clone()))
+        );
+
+        // 3. Interactive "Place on Earth" pinning + HUD zero-overflow across Desktop & Mobile
+        let staging_rel = canvas.world_index.buildings[0].rel_path.clone();
+        canvas.placing_unlocated_rel_path = Some(staging_rel.clone());
+        canvas.placing_heading_deg = 45.0;
+        spatial.mobile_deck_pinned = true;
+        for win_w in [1200.0_f32, 390.0] {
+            let ctx = egui::Context::default();
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 820.0))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            // Renders both Top-Center Active Placement Pill and single Unified Dynamic Island
+            assert_eq!(spatial.hud_rects.len(), 2);
+            for r in &spatial.hud_rects {
+                assert!(r.right() <= win_w + 1.0 && r.left() >= -1.0);
+            }
+        }
+
+        assert!(canvas.world_index.pin_building_at(&staging_rel, -0.9730, 116.7090, 45.0));
+        assert_eq!(canvas.world_index.unlocated_count(), 19);
     }
 }

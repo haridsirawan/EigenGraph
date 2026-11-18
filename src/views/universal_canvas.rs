@@ -488,6 +488,21 @@ pub struct UniversalCanvasState {
     // Phase 55: Direct BIM authoring & command emission straight onto Earth 3D
     pub earth_bim_author: EarthBimAuthorConfig,
     pub pending_earth_bim_commands: Vec<crate::core::BimCommand>,
+    // Phase 57: Planetary Digital Twin Multi-Building World Registry, HLOD & Unlocated Placement
+    pub world_index: crate::core::gis::WorldSpatialIndex,
+    pub active_world_project_rel_path: Option<String>,
+    pub placing_unlocated_rel_path: Option<String>,
+    pub placing_heading_deg: f64,
+    pub placing_hover_lat_lon: Option<(f64, f64)>,
+    pub clicked_world_building_rel_path: Option<String>,
+    pub pending_world_pin_event: Option<(String, f64, f64, f64)>,
+}
+
+/// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WorldPickOutcome {
+    FlyToCluster { lat: f64, lon: f64, label: String },
+    HydrateBuilding(String),
 }
 
 impl Default for UniversalCanvasState {
@@ -555,6 +570,13 @@ impl Default for UniversalCanvasState {
             spatial_pick_seq: 0,
             earth_bim_author: EarthBimAuthorConfig::default(),
             pending_earth_bim_commands: Vec::new(),
+            world_index: crate::core::gis::WorldSpatialIndex::default(),
+            active_world_project_rel_path: None,
+            placing_unlocated_rel_path: None,
+            placing_heading_deg: 0.0,
+            placing_hover_lat_lon: None,
+            clicked_world_building_rel_path: None,
+            pending_world_pin_event: None,
         }
     }
 }
@@ -2489,6 +2511,9 @@ impl UniversalCanvasState {
         let world_to_screen = |w: [f64; 2]| self.world_to_screen(rect, w);
         if self.show_grid && self.world_map.zoom_level >= 15.5 {
             self.paint_grid(&painter, rect, theme, &world_to_screen);
+        }
+        if self.globe_mode {
+            self.paint_planetary_world_buildings(&painter, rect, theme);
         }
         if self.show_bim_base_layer {
             self.paint_bim_base_layer(
@@ -4528,6 +4553,54 @@ impl UniversalCanvasState {
             }
         };
 
+        // Phase 57: Interactive "Place on Earth" Ghost Footprint mode for unlocated models
+        if self.globe_mode && self.placing_unlocated_rel_path.is_some() {
+            if let Some(hover) = response.hover_pos() {
+                let (lat, lon, hit) = self.screen_to_lat_lon_with_hit(hover, rect);
+                self.placing_hover_lat_lon = if hit { Some((lat, lon)) } else { None };
+                self.cursor_lat_lon = (lat, lon);
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Q)) {
+                self.placing_heading_deg = (self.placing_heading_deg - 15.0).rem_euclid(360.0);
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::E)) {
+                self.placing_heading_deg = (self.placing_heading_deg + 15.0).rem_euclid(360.0);
+            }
+            if response.secondary_clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.placing_unlocated_rel_path = None;
+                self.placing_hover_lat_lon = None;
+                return;
+            }
+            if response.clicked_by(egui::PointerButton::Primary) {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    let (lat, lon, hit) = self.screen_to_lat_lon_with_hit(pos, rect);
+                    if hit {
+                        if let Some(rel) = self.placing_unlocated_rel_path.take() {
+                            let hdg = self.placing_heading_deg;
+                            self.world_index.pin_building_at(&rel, lat, lon, hdg);
+                            if self.active_world_project_rel_path.as_deref() == Some(rel.as_str()) {
+                                self.ground_origin_lat_lon = (lat, lon);
+                                self.ground_origin_anchored = true;
+                            }
+                            self.pending_world_pin_event = Some((rel.clone(), lat, lon, hdg));
+                            self.status_message = Some(format!(
+                                "Pinned building '{}' onto Earth @ ({:.4}°, {:.4}°), heading {:.0}°",
+                                rel.split('/').next_back().unwrap_or(&rel),
+                                lat,
+                                lon,
+                                hdg
+                            ));
+                        }
+                        self.placing_hover_lat_lon = None;
+                    }
+                }
+            } else if response.dragged_by(egui::PointerButton::Primary) {
+                let delta = response.drag_delta();
+                self.orbit_globe_by_pixels(rect, delta, alt_held, dt);
+            }
+            return;
+        }
+
         // Phase 55: Direct 3D BIM Placement (Column / Beam / Wall / Footing) straight onto Earth 3D surface
         if self.globe_mode && self.earth_bim_author.active_tool != EarthBimTool::None {
             let bim_snap = |uc: &Self, raw: [f64; 2], anchor_start: Option<[f64; 2]>| -> [f64; 2] {
@@ -4790,8 +4863,27 @@ impl UniversalCanvasState {
                         self.last_picked_bim_element = None;
                         self.highlighted_bim_element = None;
                         if picked.is_none() {
-                            let (lat, lon, hit) = self.screen_to_lat_lon_with_hit(pos, rect);
-                            self.last_picked_earth_lat_lon = if hit { Some((lat, lon)) } else { None };
+                            if let Some(outcome) = self.pick_world_building_or_cluster_at_screen(pos, rect) {
+                                match outcome {
+                                    WorldPickOutcome::FlyToCluster { lat, lon, label } => {
+                                        self.earth_world.start_fly_to(
+                                            &self.world_map,
+                                            lat,
+                                            lon,
+                                            13.5,
+                                            &label,
+                                        );
+                                        self.last_picked_earth_lat_lon = Some((lat, lon));
+                                    }
+                                    WorldPickOutcome::HydrateBuilding(rel) => {
+                                        self.clicked_world_building_rel_path = Some(rel);
+                                        self.last_picked_earth_lat_lon = None;
+                                    }
+                                }
+                            } else {
+                                let (lat, lon, hit) = self.screen_to_lat_lon_with_hit(pos, rect);
+                                self.last_picked_earth_lat_lon = if hit { Some((lat, lon)) } else { None };
+                            }
                         } else {
                             self.last_picked_earth_lat_lon = None;
                         }
@@ -5427,9 +5519,7 @@ impl UniversalCanvasState {
             if let Some(ref xf) = self.last_globe_xform {
                 let lift_scale = if self.world_map.zoom_level < 14.5 { 8.0 } else { 1.0 };
                 let proj_mm = |x_mm: f64, y_mm: f64, elev_m: f64| -> Option<Pos2> {
-                    let ll = SlippyMapState::world_mm_to_lat_lon(self.ground_origin_lat_lon, [x_mm, y_mm]);
-                    xf.project_lat_lon_elev(ll.0, ll.1, elev_m * lift_scale)
-                        .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
+                    self.project_active_bim_mm(xf, x_mm, y_mm, elev_m, lift_scale)
                 };
                 let lens_color = |kind: crate::core::BimElementKind,
                                   id: usize,
@@ -5940,9 +6030,7 @@ impl UniversalCanvasState {
             if let Some(ref xf) = self.last_globe_xform {
                 let lift_scale = if self.world_map.zoom_level < 14.5 { 8.0 } else { 1.0 };
                 let proj_mm = |x_mm: f64, y_mm: f64, elev_m: f64| -> Option<Pos2> {
-                    let ll = SlippyMapState::world_mm_to_lat_lon(self.ground_origin_lat_lon, [x_mm, y_mm]);
-                    xf.project_lat_lon_elev(ll.0, ll.1, elev_m * lift_scale)
-                        .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
+                    self.project_active_bim_mm(xf, x_mm, y_mm, elev_m, lift_scale)
                 };
 
                 let isolate = self.earth_bim_author.isolate_active_story;
@@ -6123,6 +6211,418 @@ impl UniversalCanvasState {
                 .collect();
             if point_in_poly(pos, &pts) {
                 return Some((crate::core::BimElementKind::Slab, sl.id));
+            }
+        }
+        None
+    }
+
+    /// Projects local active-building `(x_mm, y_mm, elev_m)` onto Earth 3D applying active heading rotation cleanly.
+    pub fn project_active_bim_mm(
+        &self,
+        xf: &GlobeScreenTransform,
+        x_mm: f64,
+        y_mm: f64,
+        elev_m: f64,
+        lift_scale: f64,
+    ) -> Option<Pos2> {
+        let heading = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let (rx_mm, ry_mm) = if heading.abs() > 1e-3 {
+            let rad = heading.to_radians();
+            let (s, c) = (rad.sin(), rad.cos());
+            (x_mm * c - y_mm * s, x_mm * s + y_mm * c)
+        } else {
+            (x_mm, y_mm)
+        };
+        let ll = SlippyMapState::world_mm_to_lat_lon(self.ground_origin_lat_lon, [rx_mm, ry_mm]);
+        xf.project_lat_lon_elev(ll.0, ll.1, elev_m * lift_scale)
+            .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
+    }
+
+    /// Computes conservative `(min_lat, max_lat, min_lon, max_lon)` visible across `xform.rect`.
+    pub fn visible_geo_bbox(&self, xform: &GlobeScreenTransform) -> (f64, f64, f64, f64) {
+        if self.world_map.zoom_level < 4.5 {
+            return (-85.0, 85.0, -180.0, 180.0);
+        }
+        let mut min_lat = 85.0_f64;
+        let mut max_lat = -85.0_f64;
+        let mut min_lon = 180.0_f64;
+        let mut max_lon = -180.0_f64;
+        let mut hits = 0usize;
+        for gy in 0..=4 {
+            let fy = gy as f32 * 0.25;
+            for gx in 0..=4 {
+                let fx = gx as f32 * 0.25;
+                let sp = Pos2::new(
+                    xform.rect.min.x + xform.rect.width() * fx,
+                    xform.rect.min.y + xform.rect.height() * fy,
+                );
+                let (la, lo, hit) = xform.screen_to_lat_lon(sp);
+                if hit {
+                    hits += 1;
+                    min_lat = min_lat.min(la);
+                    max_lat = max_lat.max(la);
+                    min_lon = min_lon.min(lo);
+                    max_lon = max_lon.max(lo);
+                }
+            }
+        }
+        if hits < 6 || (max_lon - min_lon) > 160.0 {
+            return (-85.0, 85.0, -180.0, 180.0);
+        }
+        let pad = if self.world_map.zoom_level < 10.0 { 0.35 } else { 0.04 };
+        (
+            (min_lat - pad).clamp(-85.0, 85.0),
+            (max_lat + pad).clamp(-85.0, 85.0),
+            min_lon - pad,
+            max_lon + pad,
+        )
+    }
+
+    /// Renders all visible Vault Geo-BIM projects simultaneously on Earth 3D across LOD 0/1/2
+    /// plus interactive cursor-tracked ghost footprint when placing an unlocated model.
+    pub fn paint_planetary_world_buildings(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        theme: &MacTheme,
+    ) {
+        if self.world_index.buildings.is_empty() && self.placing_unlocated_rel_path.is_none() {
+            return;
+        }
+        let Some(ref xf) = self.last_globe_xform else {
+            return;
+        };
+        let clip_painter = painter.with_clip_rect(rect);
+        let (min_lat, max_lat, min_lon, max_lon) = self.visible_geo_bbox(xf);
+
+        // LOD 0: Continental / Regional Cluster Beacons (`zoom < 8.5`)
+        if self.world_map.zoom_level < 8.5 {
+            let clusters = self.world_index.query_clusters(
+                min_lat,
+                max_lat,
+                min_lon,
+                max_lon,
+                self.world_map.zoom_level,
+            );
+            for cl in clusters.into_iter().take(120) {
+                let Some((sp, _, vis)) = xf.project_lat_lon_elev(cl.lat, cl.lon, 0.0) else {
+                    continue;
+                };
+                if !vis || !rect.expand(36.0).contains(sp) {
+                    continue;
+                }
+                let is_staging = cl.unlocated_count > 0 && cl.unlocated_count == cl.count;
+                let col = if is_staging {
+                    theme.accent_orange
+                } else if cl.min_ari < 0.72 || cl.max_dcr >= 0.90 {
+                    theme.accent_red
+                } else {
+                    theme.accent_blue
+                };
+                let r = if cl.count > 100 {
+                    15.0
+                } else if cl.count > 10 {
+                    12.5
+                } else {
+                    10.0
+                };
+                clip_painter.circle_filled(sp, r + 3.0, col.gamma_multiply(0.28));
+                clip_painter.circle_filled(sp, r, col);
+                clip_painter.circle_stroke(sp, r, Stroke::new(1.5, Color32::WHITE));
+                let num_lbl = if cl.count >= 1000 {
+                    format!("{:.1}k", cl.count as f64 / 1000.0)
+                } else {
+                    format!("{}", cl.count)
+                };
+                clip_painter.text(
+                    sp,
+                    Align2::CENTER_CENTER,
+                    num_lbl,
+                    egui::FontId::proportional(9.5),
+                    Color32::WHITE,
+                );
+                if r >= 11.0 || self.world_map.zoom_level >= 5.0 {
+                    clip_painter.text(
+                        sp + Vec2::new(0.0, r + 4.0),
+                        Align2::CENTER_TOP,
+                        &cl.label,
+                        egui::FontId::proportional(9.5),
+                        Color32::WHITE,
+                    );
+                }
+            }
+        } else {
+            // LOD 1 / 2: Simultaneous 2.5D / 3D City Extruded Massing across visible neighbor buildings
+            let lift_scale = if self.world_map.zoom_level < 14.5 { 6.0 } else { 1.0 };
+            let visible = self.world_index.query_visible_indices(
+                min_lat,
+                max_lat,
+                min_lon,
+                max_lon,
+                xf.center_lat_deg,
+                xf.center_lon_deg,
+                450,
+            );
+            for idx in visible {
+                let b = &self.world_index.buildings[idx];
+                if self.active_world_project_rel_path.as_deref() == Some(b.rel_path.as_str()) {
+                    continue;
+                }
+                let hull_mm = b.rotated_footprint_world_mm();
+                let mut base_pts = Vec::with_capacity(hull_mm.len());
+                let mut roof_pts = Vec::with_capacity(hull_mm.len());
+                let top_elev = b.total_height_m * lift_scale;
+                let mut ok = true;
+                for pt_mm in &hull_mm {
+                    let ll = SlippyMapState::world_mm_to_lat_lon((b.lat, b.lon), *pt_mm);
+                    if let (Some((bp, _, v0)), Some((tp, _, v1))) = (
+                        xf.project_lat_lon_elev(ll.0, ll.1, 0.0),
+                        xf.project_lat_lon_elev(ll.0, ll.1, top_elev),
+                    ) {
+                        if !v0 || !v1 {
+                            ok = false;
+                            break;
+                        }
+                        base_pts.push(bp);
+                        roof_pts.push(tp);
+                    } else {
+                        ok = false;
+                        break;
+                    }
+                }
+                if !ok || roof_pts.len() < 3 {
+                    continue;
+                }
+                if !roof_pts.iter().any(|p| rect.expand(45.0).contains(*p))
+                    && !base_pts.iter().any(|p| rect.expand(45.0).contains(*p))
+                {
+                    continue;
+                }
+
+                let base_col = if b.is_unlocated() {
+                    Color32::from_rgb(245, 158, 11)
+                } else {
+                    match self.earth_bim_author.active_lens {
+                        EarthBimLens::Clean => Color32::from_rgb(96, 165, 250),
+                        EarthBimLens::DcrHeatmap => {
+                            if b.max_dcr >= 0.85 {
+                                theme.accent_red
+                            } else if b.max_dcr >= 0.65 {
+                                theme.accent_orange
+                            } else {
+                                theme.accent_green
+                            }
+                        }
+                        EarthBimLens::AriRedundancy => {
+                            if b.min_ari < 0.70 {
+                                theme.accent_red
+                            } else if b.min_ari < 0.85 {
+                                theme.accent_orange
+                            } else {
+                                Color32::from_rgb(16, 185, 129)
+                            }
+                        }
+                        EarthBimLens::MomentStress => Color32::from_rgb(129, 140, 248),
+                        EarthBimLens::Erection4D => Color32::from_rgb(56, 189, 248),
+                    }
+                };
+                let side_fill = base_col.gamma_multiply(0.38);
+                let roof_fill = base_col.gamma_multiply(0.62);
+                let edge_stroke = Stroke::new(1.1, base_col.gamma_multiply(0.95));
+                for i in 0..base_pts.len() {
+                    let ni = (i + 1) % base_pts.len();
+                    clip_painter.add(egui::Shape::convex_polygon(
+                        vec![base_pts[i], base_pts[ni], roof_pts[ni], roof_pts[i]],
+                        side_fill,
+                        edge_stroke,
+                    ));
+                }
+                clip_painter.add(egui::Shape::convex_polygon(
+                    roof_pts.clone(),
+                    roof_fill,
+                    Stroke::new(1.4, Color32::WHITE.gamma_multiply(0.75)),
+                ));
+
+                if self.world_map.zoom_level >= 14.8 {
+                    let rc = roof_pts
+                        .iter()
+                        .fold(Vec2::ZERO, |acc, p| acc + p.to_vec2())
+                        / (roof_pts.len() as f32);
+                    let lbl = if b.is_unlocated() {
+                        format!("{} [Staging]", b.name)
+                    } else {
+                        b.name.clone()
+                    };
+                    clip_painter.text(
+                        Pos2::new(rc.x, rc.y - 6.0),
+                        Align2::CENTER_BOTTOM,
+                        lbl,
+                        egui::FontId::proportional(9.5),
+                        Color32::WHITE,
+                    );
+                }
+            }
+        }
+
+        // Interactive "Place on Earth" translucent ghost footprint following cursor
+        if let (Some(ref rel), Some((hlat, hlon))) =
+            (&self.placing_unlocated_rel_path, self.placing_hover_lat_lon)
+        {
+            let (hull_m, height_m) = if let Some(b) = self.world_index.get(rel) {
+                (b.footprint_local_m.clone(), b.total_height_m)
+            } else {
+                (crate::core::gis::WorldBuildingProxy::default_footprint_m(), 14.0)
+            };
+            let rad = self.placing_heading_deg.to_radians();
+            let (sh, ch) = (rad.sin(), rad.cos());
+            let mut bpts = Vec::with_capacity(hull_m.len());
+            let mut rpts = Vec::with_capacity(hull_m.len());
+            for [xm, ym] in &hull_m {
+                let rx_mm = (xm * ch - ym * sh) * 1000.0;
+                let ry_mm = (xm * sh + ym * ch) * 1000.0;
+                let ll = SlippyMapState::world_mm_to_lat_lon((hlat, hlon), [rx_mm, ry_mm]);
+                if let (Some((bp, _, true)), Some((rp, _, true))) = (
+                    xf.project_lat_lon_elev(ll.0, ll.1, 0.0),
+                    xf.project_lat_lon_elev(ll.0, ll.1, height_m),
+                ) {
+                    bpts.push(bp);
+                    rpts.push(rp);
+                }
+            }
+            if bpts.len() >= 3 && rpts.len() == bpts.len() {
+                let ghost_stroke = Stroke::new(1.8, Color32::from_rgb(0, 240, 255));
+                for i in 0..bpts.len() {
+                    let ni = (i + 1) % bpts.len();
+                    clip_painter.add(egui::Shape::convex_polygon(
+                        vec![bpts[i], bpts[ni], rpts[ni], rpts[i]],
+                        Color32::from_rgba_unmultiplied(0, 240, 255, 50),
+                        ghost_stroke,
+                    ));
+                }
+                clip_painter.add(egui::Shape::convex_polygon(
+                    rpts.clone(),
+                    Color32::from_rgba_unmultiplied(0, 240, 255, 85),
+                    ghost_stroke,
+                ));
+                if let Some((cp, _, true)) = xf.project_lat_lon_elev(hlat, hlon, height_m + 1.5) {
+                    clip_painter.text(
+                        cp,
+                        Align2::CENTER_BOTTOM,
+                        format!("Place Here ({hlat:.4}°, {hlon:.4}° | Hdg {:.0}°)", self.placing_heading_deg),
+                        egui::FontId::monospace(10.0),
+                        Color32::from_rgb(0, 240, 255),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
+    pub fn pick_world_building_or_cluster_at_screen(
+        &self,
+        pos: Pos2,
+        rect: Rect,
+    ) -> Option<WorldPickOutcome> {
+        if self.world_index.buildings.is_empty() || !rect.contains(pos) {
+            return None;
+        }
+        let xf = self.last_globe_xform.as_ref()?;
+        let (min_lat, max_lat, min_lon, max_lon) = self.visible_geo_bbox(xf);
+
+        if self.world_map.zoom_level < 8.5 {
+            let clusters = self.world_index.query_clusters(
+                min_lat,
+                max_lat,
+                min_lon,
+                max_lon,
+                self.world_map.zoom_level,
+            );
+            for cl in clusters {
+                if let Some((sp, _, true)) = xf.project_lat_lon_elev(cl.lat, cl.lon, 0.0) {
+                    if pos.distance(sp) <= 20.0 {
+                        if cl.count == 1 {
+                            return Some(WorldPickOutcome::HydrateBuilding(cl.primary_rel_path));
+                        } else {
+                            return Some(WorldPickOutcome::FlyToCluster {
+                                lat: cl.lat,
+                                lon: cl.lon,
+                                label: cl.label,
+                            });
+                        }
+                    }
+                }
+            }
+            return None;
+        }
+
+        let lift_scale = if self.world_map.zoom_level < 14.5 { 6.0 } else { 1.0 };
+        let point_in_poly = |pt: Pos2, poly: &[Pos2]| -> bool {
+            if poly.len() < 3 {
+                return false;
+            }
+            let mut inside = false;
+            let mut j = poly.len() - 1;
+            for i in 0..poly.len() {
+                let pi = poly[i];
+                let pj = poly[j];
+                if ((pi.y > pt.y) != (pj.y > pt.y))
+                    && (pt.x < (pj.x - pi.x) * (pt.y - pi.y) / ((pj.y - pi.y) + 1e-6) + pi.x)
+                {
+                    inside = !inside;
+                }
+                j = i;
+            }
+            inside
+        };
+
+        let visible = self.world_index.query_visible_indices(
+            min_lat,
+            max_lat,
+            min_lon,
+            max_lon,
+            xf.center_lat_deg,
+            xf.center_lon_deg,
+            450,
+        );
+        for idx in visible {
+            let b = &self.world_index.buildings[idx];
+            if self.active_world_project_rel_path.as_deref() == Some(b.rel_path.as_str()) {
+                continue;
+            }
+            let hull_mm = b.rotated_footprint_world_mm();
+            let mut base_pts = Vec::with_capacity(hull_mm.len());
+            let mut roof_pts = Vec::with_capacity(hull_mm.len());
+            let top_elev = b.total_height_m * lift_scale;
+            let mut ok = true;
+            for pt_mm in &hull_mm {
+                let ll = SlippyMapState::world_mm_to_lat_lon((b.lat, b.lon), *pt_mm);
+                if let (Some((bp, _, true)), Some((tp, _, true))) = (
+                    xf.project_lat_lon_elev(ll.0, ll.1, 0.0),
+                    xf.project_lat_lon_elev(ll.0, ll.1, top_elev),
+                ) {
+                    base_pts.push(bp);
+                    roof_pts.push(tp);
+                } else {
+                    ok = false;
+                    break;
+                }
+            }
+            if !ok || roof_pts.len() < 3 {
+                continue;
+            }
+            if point_in_poly(pos, &roof_pts) {
+                return Some(WorldPickOutcome::HydrateBuilding(b.rel_path.clone()));
+            }
+            for i in 0..base_pts.len() {
+                let ni = (i + 1) % base_pts.len();
+                if point_in_poly(pos, &[base_pts[i], base_pts[ni], roof_pts[ni], roof_pts[i]]) {
+                    return Some(WorldPickOutcome::HydrateBuilding(b.rel_path.clone()));
+                }
             }
         }
         None
