@@ -485,12 +485,12 @@ impl App for EigenGraphApp {
         if !ctx.egui_wants_keyboard_input() {
             if self.spatial_workspace.spatial_mode_enabled {
                 if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
-                    self.spatial_workspace.agent_panel_open =
-                        !self.spatial_workspace.agent_panel_open;
-                    self.spatial_workspace.command_bar_expanded =
-                        self.spatial_workspace.agent_panel_open;
-                    if self.spatial_workspace.agent_panel_open {
+                    let next = !self.spatial_workspace.command_bar_expanded;
+                    self.spatial_workspace.command_bar_expanded = next;
+                    if next {
                         self.spatial_workspace.request_focus_command = true;
+                    } else {
+                        self.spatial_workspace.collapse_dynamic_island();
                     }
                 }
                 if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
@@ -506,12 +506,14 @@ impl App for EigenGraphApp {
                         self.spatial_workspace.history_popover_open = false;
                     } else if self.spatial_workspace.vault_path_popover_open {
                         self.spatial_workspace.vault_path_popover_open = false;
+                    } else if self.spatial_workspace.vault_drawer_open {
+                        self.spatial_workspace.vault_drawer_open = false;
                     } else if self.spatial_workspace.active_overlay_pillar.is_some() {
                         self.spatial_workspace.active_overlay_pillar = None;
                     } else if !self.spatial_workspace.command_input.is_empty() {
                         self.spatial_workspace.command_input.clear();
                     } else if self.spatial_workspace.command_bar_expanded {
-                        self.spatial_workspace.command_bar_expanded = false;
+                        self.spatial_workspace.collapse_dynamic_island();
                     } else if !self.spatial_workspace.popup_pinned {
                         self.spatial_workspace.selected_target = None;
                         self.universal_canvas.highlighted_bim_element = None;
@@ -816,9 +818,9 @@ impl App for EigenGraphApp {
 }
 
 impl EigenGraphApp {
-    /// Phase 46/47: Renders the Full-Viewport Spatial Earth & BIM Workspace alongside
-    /// the collapsible Google Antigravity-style AI Assistant Side Panel, Smart Element Pop-Up,
-    /// and on-demand engineering module overlays.
+    /// Phase 48: Renders a true 100% Full-Viewport Spatial Earth & BIM Canvas with zero side panels,
+    /// anchored by the hover-expandable Floating Dynamic Island, Smart Context Element Pop-Up,
+    /// and on-demand engineering module overlay sheets.
     fn render_spatial_mode_shell(
         &mut self,
         ui: &mut egui::Ui,
@@ -827,9 +829,6 @@ impl EigenGraphApp {
         is_mobile: bool,
     ) {
         use crate::views::spatial_workspace::{SpatialCanvasMode, SpatialLens};
-
-        self.spatial_workspace
-            .sync_auto_open_for_viewport(ctx.content_rect().width());
 
         let modal_open = self.show_settings
             || self.show_vault_startup_modal
@@ -847,19 +846,6 @@ impl EigenGraphApp {
             | SpatialLens::BendingMoment => NavigationPillar::AnalysisSimulation,
             SpatialLens::Erection4D => NavigationPillar::TimeScheduling,
         };
-
-        let mut side_panel_actions = self.spatial_workspace.render_antigravity_side_panel(
-            ui,
-            ctx,
-            &self.theme,
-            &mut self.universal_canvas,
-            &mut self.build_view,
-            &mut self.ai_assistant_view,
-            &self.members,
-            &self.projects,
-            &mut self.db_components,
-            &self.personal_vault_projects,
-        );
 
         CentralPanel::default()
             .frame(
@@ -911,8 +897,7 @@ impl EigenGraphApp {
             &mut self.db_components,
             &self.personal_vault_projects,
         );
-        side_panel_actions.merge(hud_actions);
-        self.apply_spatial_hud_actions(side_panel_actions, workspace_snapshot);
+        self.apply_spatial_hud_actions(hud_actions, workspace_snapshot);
 
         // On-demand floating engineering module sheet summoned via `/vault`, `/cost`, `/analysis`, etc.
         if let Some(overlay_pillar) = self.spatial_workspace.active_overlay_pillar {

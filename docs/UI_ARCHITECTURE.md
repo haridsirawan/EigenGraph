@@ -1,0 +1,22 @@
+# EigenGraph Spatial UI Architecture Contract (North Star Specification)
+
+To maintain consistent product direction across all future phases (`v0.4.8+`), EigenGraph enforces four strict UI/UX boundaries in **Spatial Mode**:
+
+1. **100% Full-Viewport Earth & BIM Canvas**:
+   - No permanent docked sidebars, side panels (`Panel::right` / `Panel::left`), or multi-row fixed toolbars may compress the interactive viewport in Spatial Mode.
+   - Users always start directly on the edge-to-edge 3D Earth Globe / BIM spatial viewport.
+
+2. **Single Hover-Expandable Floating Dynamic Island (`src/views/spatial_workspace.rs`)**:
+   - **Idle State**: Remains a compact, translucent bottom-center capsule showing only workspace status (`EigenAI`, connected Vault status dot, selected `@Target`, active model badge) so ~97% of the viewport remains open canvas.
+   - **Hover / Engaged State**: Moving the cursor over the Dynamic Island (with edge hysteresis), focusing the composer, or pressing `Cmd/Ctrl+K` smoothly expands it upward to expose:
+     - **Vault Workspace Controls**: `+ Add Folder (Vault)` folder mounting, direct save-to-Vault, and expandable Vault file explorer.
+     - **Contextual AI Controls**: `+ Add Context (@)` picker, AI Model selector (`EigenAI Pro`, `Gemini 2.5 Flash`, `Gemini Live Stream`), Execution Mode (`Planning` / `Fast`), conversation history, and collapsible floating chat drawer.
+     - **Manual Drawing & Sculpting Commands (`SpatialManualTool`)**: Direct 1-click toggles for `Orbit`, `Column`, `Beam`, `Wall`, `Footing`, `Line`, `Rect`, `Measure`, and `Terraform`. Selecting a manual tool immediately prepares the canvas and folds open popovers back down when the pointer returns to Earth.
+     - **Slash Command Palette (`/`)**: Full command access to views, structural lenses, and on-demand engineering sheets.
+
+3. **Click-to-Inspect Smart Element Pop-Up**:
+   - Element properties (`ResizeColumn`, `ResizeRun`, `ResizeWall`, `ResizeFooting`), FEM stress/utilization (`DCR%`, `ARI`, `SVD`, `N-1`), 5D/6D metrics, and element-scoped `@Element` AI prompts appear exclusively in a compact translucent pop-up when an element or Earth coordinate is clicked.
+
+4. **On-Demand Heavy Engineering Sheets & Engine Growth**:
+   - Detailed multi-table engineering workspaces (`/vault`..`/report`) open strictly as transient translucent modal sheets (`Esc` to close), keeping `/classic` as an explicit opt-in fallback.
+   - Future phases (such as live Gemini API execution, async FEM/ARI tool calling, Planning diff review cards, and Vault AI thread persistence) must execute **inside the Dynamic Island and Smart Pop-Up** without introducing new permanent panels or toolbars.

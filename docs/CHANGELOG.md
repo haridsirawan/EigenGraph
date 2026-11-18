@@ -7,6 +7,22 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.4.8] - 2026-11-18 — Phase 48: True Full-Canvas Architecture Lock & Hover-Expandable Floating Dynamic Island
+
+### Added & Changed
+- **Removed Docked Right Side Panel — Back to 100% Unobstructed Earth & BIM Canvas (`src/app.rs`, `src/views/spatial_workspace.rs`)**:
+  - Removed the docked right-hand sidebar and top-right launcher chrome from Spatial Mode so the 3D Google Earth / BIM viewport occupies 100% of the viewport permanently.
+- **Hover-Expandable Floating Dynamic Island (`src/views/spatial_workspace.rs`)**:
+  - Upgraded `render_dynamic_island` into an animated hover-responsive capsule (`animate_bool` with hysteresis grace zone) that remains a slim bottom pill when pointer is on the canvas, and automatically expands smoothly upward on hover (or tap/Cmd+K/focus) to surface:
+    1. **`+ Add Folder (Vault)` & Vault Explorer Drawer** (OS folder picker / Web File System Access & IndexedDB binding, save-to-Vault, and project file `@` attachment).
+    2. **`+ Add Context` (`@`)** searchable picker & removable context chips (`@Selected`, `@Earth`, `@BIM`, `@FEM/ARI`, `@4D/5D Cost`, `@Vault`, and local disk files).
+    3. **AI Model & Planning Mode Selector** (`EigenAI Pro`, `Gemini 2.5 Flash`, `Gemini Live Stream` + `Planning` / `Fast` + floating chat thread & conversation history).
+    4. **Direct Manual Drawing Commands (`SpatialManualTool`)**: One-click `Orbit`, `Column`, `Beam`, `Wall`, `Footing`, `Line`, `Rect`, `Measure`, and `Terraform` actions that switch tools immediately and fold away popovers as the cursor moves back onto the canvas to draw.
+- **Architectural Direction Specification (`docs/UI_ARCHITECTURE.md`)**:
+  - Codified the spatial UI contract (100% canvas, single hover Dynamic Island, click-to-inspect Smart Pop-Up, on-demand overlays) to keep future phases aligned.
+
+---
+
 ## [v0.4.7] - 2026-11-18 — Phase 47: Google Antigravity AI Assistant Panel UI (`Add Folder -> Vault` & `Add Context`) + Earth Zoom Sensitivity Calibration
 
 ### Added & Changed

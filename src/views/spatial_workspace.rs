@@ -606,7 +606,204 @@ pub struct SpatialHudActions {
     pub pick_local_context_file: bool,
 }
 
-/// Complete state for the Phase 46/47 Antigravity Spatial Workspace & AI Assistant Panel UI.
+/// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpatialManualTool {
+    OrbitPan,
+    Column,
+    Beam,
+    Wall,
+    Footing,
+    Line2D,
+    Rect2D,
+    Measure,
+    Terraform,
+}
+
+impl SpatialManualTool {
+    pub const ALL: &'static [Self] = &[
+        Self::OrbitPan,
+        Self::Column,
+        Self::Beam,
+        Self::Wall,
+        Self::Footing,
+        Self::Line2D,
+        Self::Rect2D,
+        Self::Measure,
+        Self::Terraform,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::OrbitPan => "Orbit",
+            Self::Column => "Column",
+            Self::Beam => "Beam",
+            Self::Wall => "Wall",
+            Self::Footing => "Footing",
+            Self::Line2D => "Line",
+            Self::Rect2D => "Rect",
+            Self::Measure => "Measure",
+            Self::Terraform => "Terraform",
+        }
+    }
+
+    pub fn tooltip(self) -> &'static str {
+        match self {
+            Self::OrbitPan => "Orbit Earth / Navigate 3D scene & select elements",
+            Self::Column => "Place manual structural Column (click ground in 3D BIM)",
+            Self::Beam => "Draw manual structural Beam (click start & end in 3D BIM)",
+            Self::Wall => "Draw manual shear/partition Wall (click start & end in 3D BIM)",
+            Self::Footing => "Place manual isolated Footing on ground origin",
+            Self::Line2D => "Draw 2D vector CAD line segment on Earth / Plan",
+            Self::Rect2D => "Draw 2D rectangular boundary / slab outline on Earth / Plan",
+            Self::Measure => "Measure geodesic distance across Earth / site coordinates",
+            Self::Terraform => "Cycle 3D Earth sculpting & megaproject brush (Uplift / Carve / Seawall / Bridge)",
+        }
+    }
+
+    pub fn icon(self) -> AppIcon {
+        match self {
+            Self::OrbitPan => AppIcon::CursorPan,
+            Self::Column => AppIcon::Column,
+            Self::Beam => AppIcon::Beam,
+            Self::Wall => AppIcon::Wall,
+            Self::Footing => AppIcon::Slab,
+            Self::Line2D => AppIcon::LineSeg,
+            Self::Rect2D => AppIcon::RectShape,
+            Self::Measure => AppIcon::DimensionRuler,
+            Self::Terraform => AppIcon::Mountain,
+        }
+    }
+
+    pub fn is_active(
+        self,
+        canvas_mode: SpatialCanvasMode,
+        universal_canvas: &UniversalCanvasState,
+        build_view: &BuildView,
+    ) -> bool {
+        match self {
+            Self::OrbitPan => {
+                !universal_canvas.measure_active
+                    && build_view.ground_author_tool == Ground3DAuthorTool::Orbit
+                    && universal_canvas.active_tool == UniversalCanvasTool::SelectPan
+            }
+            Self::Column => {
+                canvas_mode == SpatialCanvasMode::Bim3D
+                    && build_view.ground_author_tool == Ground3DAuthorTool::Column
+            }
+            Self::Beam => {
+                canvas_mode == SpatialCanvasMode::Bim3D
+                    && build_view.ground_author_tool == Ground3DAuthorTool::Beam
+            }
+            Self::Wall => {
+                canvas_mode == SpatialCanvasMode::Bim3D
+                    && build_view.ground_author_tool == Ground3DAuthorTool::Wall
+            }
+            Self::Footing => {
+                canvas_mode == SpatialCanvasMode::Bim3D
+                    && build_view.ground_author_tool == Ground3DAuthorTool::Footing
+            }
+            Self::Line2D => {
+                canvas_mode != SpatialCanvasMode::Bim3D
+                    && universal_canvas.active_tool == UniversalCanvasTool::Line
+            }
+            Self::Rect2D => {
+                canvas_mode != SpatialCanvasMode::Bim3D
+                    && universal_canvas.active_tool == UniversalCanvasTool::Rectangle
+            }
+            Self::Measure => universal_canvas.measure_active,
+            Self::Terraform => universal_canvas.active_tool.is_earth_tool(),
+        }
+    }
+
+    pub fn apply(
+        self,
+        spatial: &mut SpatialWorkspaceState,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+    ) -> SpatialHudActions {
+        let mut actions = SpatialHudActions::default();
+        universal_canvas.measure_active = false;
+        match self {
+            Self::OrbitPan => {
+                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
+                spatial.push_trace("Navigation & Select mode", true);
+            }
+            Self::Column => {
+                spatial.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                build_view.ground_author_tool = Ground3DAuthorTool::Column;
+                universal_canvas.ground_origin_anchored = true;
+                actions.fit_camera = true;
+                spatial.push_trace("Manual Draw: Column (click canvas)", true);
+            }
+            Self::Beam => {
+                spatial.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                build_view.ground_author_tool = Ground3DAuthorTool::Beam;
+                universal_canvas.ground_origin_anchored = true;
+                actions.fit_camera = true;
+                spatial.push_trace("Manual Draw: Beam (click 2 pts)", true);
+            }
+            Self::Wall => {
+                spatial.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                build_view.ground_author_tool = Ground3DAuthorTool::Wall;
+                universal_canvas.ground_origin_anchored = true;
+                actions.fit_camera = true;
+                spatial.push_trace("Manual Draw: Wall (click 2 pts)", true);
+            }
+            Self::Footing => {
+                spatial.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                build_view.ground_author_tool = Ground3DAuthorTool::Footing;
+                universal_canvas.ground_origin_anchored = true;
+                actions.fit_camera = true;
+                spatial.push_trace("Manual Draw: Footing (click canvas)", true);
+            }
+            Self::Line2D => {
+                if spatial.active_canvas_mode == SpatialCanvasMode::Bim3D {
+                    spatial.active_canvas_mode = SpatialCanvasMode::EarthPlan2D;
+                    universal_canvas.globe_mode = false;
+                }
+                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.active_tool = UniversalCanvasTool::Line;
+                spatial.push_trace("Manual Draw: 2D Line segment", true);
+            }
+            Self::Rect2D => {
+                if spatial.active_canvas_mode == SpatialCanvasMode::Bim3D {
+                    spatial.active_canvas_mode = SpatialCanvasMode::EarthPlan2D;
+                    universal_canvas.globe_mode = false;
+                }
+                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.active_tool = UniversalCanvasTool::Rectangle;
+                spatial.push_trace("Manual Draw: 2D Rectangle boundary", true);
+            }
+            Self::Measure => {
+                universal_canvas.measure_active = true;
+                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
+                spatial.push_trace("Geodesic Measure active (click points)", true);
+            }
+            Self::Terraform => {
+                spatial.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                universal_canvas.globe_mode = true;
+                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                let next_tool = match universal_canvas.active_tool {
+                    UniversalCanvasTool::EarthUplift => UniversalCanvasTool::EarthCarve,
+                    UniversalCanvasTool::EarthCarve => UniversalCanvasTool::EarthSeawall,
+                    UniversalCanvasTool::EarthSeawall => UniversalCanvasTool::EarthBridge,
+                    _ => UniversalCanvasTool::EarthUplift,
+                };
+                universal_canvas.active_tool = next_tool;
+                spatial.push_trace(
+                    format!("Earth Brush: {}", next_tool.short_label()),
+                    true,
+                );
+            }
+        }
+        actions
+    }
+}
+
+/// Complete state for the Phase 48 Full-Canvas + Hover Dynamic Island UI.
 pub struct SpatialWorkspaceState {
     pub spatial_mode_enabled: bool,
     pub active_canvas_mode: SpatialCanvasMode,
@@ -615,8 +812,8 @@ pub struct SpatialWorkspaceState {
     pub popup_pinned: bool,
     pub popup_tab: SmartPopupTab,
     pub command_bar_expanded: bool,
-    pub agent_panel_open: bool,
-    panel_auto_initialized: bool,
+    pub dynamic_island_rect: Rect,
+    pub island_expanded_prev: bool,
     pub agent_mode: AgentExecutionMode,
     pub agent_model: AgentModelChoice,
     pub attached_contexts: Vec<AiContextAttachment>,
@@ -664,8 +861,8 @@ impl Default for SpatialWorkspaceState {
             popup_pinned: false,
             popup_tab: SmartPopupTab::Properties,
             command_bar_expanded: false,
-            agent_panel_open: false,
-            panel_auto_initialized: false,
+            dynamic_island_rect: Rect::NOTHING,
+            island_expanded_prev: false,
             agent_mode: AgentExecutionMode::Planning,
             agent_model: AgentModelChoice::EigenAiProFem,
             attached_contexts: Vec::new(),
@@ -687,7 +884,7 @@ impl Default for SpatialWorkspaceState {
             request_focus_command: false,
             active_overlay_pillar: None,
             recent_trace_chips: vec![AgentTraceChip {
-                label: "Earth Globe Ready • Add Vault Folder or @ Context".to_string(),
+                label: "Earth Globe Ready • Hover Dynamic Island for Vault, AI & Draw".to_string(),
                 ok: true,
             }],
             last_uc_pick_seq: 0,
@@ -709,12 +906,32 @@ impl Default for SpatialWorkspaceState {
 }
 
 impl SpatialWorkspaceState {
-    /// Automatically opens the desktop right-hand Antigravity Agent Panel on wide screens once.
-    pub fn sync_auto_open_for_viewport(&mut self, vp_width: f32) {
-        if !self.panel_auto_initialized {
-            self.agent_panel_open = vp_width >= 900.0;
-            self.panel_auto_initialized = true;
-        }
+    /// Returns true when the Floating Dynamic Island is hovered or has an active composer/popover.
+    pub fn is_dynamic_island_expanded(&self, ctx: &egui::Context) -> bool {
+        let pointer_pos = ctx.input(|i| i.pointer.hover_pos());
+        let hover_margin = if self.island_expanded_prev { 18.0 } else { 4.0 };
+        let hovered_island = self.dynamic_island_rect.is_positive()
+            && pointer_pos.is_some_and(|p| {
+                self.dynamic_island_rect.expand(hover_margin).contains(p)
+            });
+        let engaged = self.composer_had_focus
+            || !self.command_input.trim().is_empty()
+            || self.context_picker_open
+            || self.vault_drawer_open
+            || self.vault_path_popover_open
+            || self.history_popover_open
+            || self.command_bar_expanded;
+        hovered_island || engaged
+    }
+
+    /// Collapses any pinned Dynamic Island drawers/popovers so moving cursor to Earth folds it back.
+    pub fn collapse_dynamic_island(&mut self) {
+        self.command_bar_expanded = false;
+        self.context_picker_open = false;
+        self.vault_drawer_open = false;
+        self.vault_path_popover_open = false;
+        self.history_popover_open = false;
+        self.composer_had_focus = false;
     }
 
     /// Attaches a context source into the AI composer strip without duplicates.
@@ -744,8 +961,8 @@ impl SpatialWorkspaceState {
             size_bytes: content.len(),
             snippet,
         });
-        self.agent_panel_open = true;
         self.request_focus_command = true;
+        self.command_bar_expanded = true;
         self.push_trace(format!("Attached context @{filename}"), true);
     }
 
@@ -1283,11 +1500,10 @@ impl SpatialWorkspaceState {
                 "/vault" => self.open_module_overlay(NavigationPillar::MyLibrary),
                 "/add-folder" | "/vault-folder" => {
                     actions.add_vault_folder = true;
-                    self.agent_panel_open = true;
+                    self.vault_drawer_open = true;
                     self.push_trace("Choose local folder as Engineering Vault", true);
                 }
                 "/context" | "/add-context" => {
-                    self.agent_panel_open = true;
                     self.context_picker_open = true;
                     self.push_trace("Opened @ Add Context picker", true);
                 }
@@ -1612,12 +1828,11 @@ impl SpatialWorkspaceState {
         )
     }
 
-    /// Renders all Antigravity floating HUD layers with live connected Engineering Vault awareness:
-    /// 1. Minimal Top-Left Identity & Mode Capsule
-    /// 2. Top-Right Vault / Agent Launcher Capsule (when right Antigravity Panel is collapsed)
-    /// 3. Conditional Top-Center Lens / 4D Day Pill (only when active)
-    /// 4. Smart Context Pop-Up Inspector (only when an element or Earth location is clicked)
-    /// 5. Mobile Antigravity Agent Sheet (when opened on `< 760px` screens) or Collapsed Floating Command Bar
+    /// Renders all Floating HUD layers over the 100% Full-Canvas workspace (ZERO side panels):
+    /// 1. Minimal Top-Left Identity & View Mode Capsule
+    /// 2. Conditional Top-Center Active Lens / Tool Pill (only when non-Orbit/Clean)
+    /// 3. Smart Element Pop-Up Inspector (only when an element or Earth location is clicked)
+    /// 4. Hover-Expandable Bottom-Center Dynamic Island (Vault, Context, AI Selector, Manual Draw & Chat)
     #[allow(clippy::too_many_arguments)]
     pub fn render_hud_overlays_with_vault(
         &mut self,
@@ -1636,10 +1851,8 @@ impl SpatialWorkspaceState {
 
         let vp = MacTheme::viewport_size(ctx);
         let is_mobile = vp.x < MacTheme::MOBILE_BREAKPOINT;
-        let is_compact_panel = vp.x < 760.0;
-        let vault_status = crate::core::InternalVault::connection_status();
 
-        // 1. Top-Left Minimal Antigravity Capsule
+        // 1. Top-Left Minimal Capsule (always unobtrusive on the pure canvas)
         let top_left_resp = Area::new(Id::new("antigravity_top_left_capsule"))
             .order(Order::Foreground)
             .anchor(Align2::LEFT_TOP, Vec2::new(12.0, 12.0))
@@ -1658,7 +1871,6 @@ impl SpatialWorkspaceState {
                         );
                         ui.add_space(4.0);
 
-                        // Cycle Earth 3D / BIM 3D / Plan 2D with 1 click
                         let mode_lbl = self.active_canvas_mode.label();
                         if icons::icon_button(
                             ui,
@@ -1709,91 +1921,14 @@ impl SpatialWorkspaceState {
             });
         self.hud_rects.push(top_left_resp.response.rect);
 
-        // 1b. Top-Right Vault & Agent Launcher Capsule (shown when Antigravity side panel is collapsed)
-        if !self.agent_panel_open {
-            let launcher_offset = if is_mobile {
-                Vec2::new(-10.0, 52.0)
-            } else {
-                Vec2::new(-12.0, 12.0)
-            };
-            let top_right_resp = Area::new(Id::new("antigravity_top_right_launcher"))
-                .order(Order::Foreground)
-                .anchor(Align2::RIGHT_TOP, launcher_offset)
-                .show(ctx, |ui| {
-                    Self::antigravity_glass_frame(theme, 20, Margin::symmetric(10, 5)).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            if vault_status.connected {
-                                let label = if is_mobile {
-                                    "Vault".to_string()
-                                } else {
-                                    format!("Vault: {}", vault_status.vault_name)
-                                };
-                                if icons::icon_button(
-                                    ui,
-                                    AppIcon::Folder,
-                                    label,
-                                    10.5,
-                                    theme.accent_green,
-                                    theme.accent_green.gamma_multiply(0.14),
-                                    Stroke::new(1.0, theme.accent_green.gamma_multiply(0.4)),
-                                    CornerRadius::same(12),
-                                    Vec2::new(0.0, 22.0),
-                                )
-                                .on_hover_text("Open Engineering Vault workspace inside Antigravity panel")
-                                .clicked()
-                                {
-                                    self.agent_panel_open = true;
-                                    self.vault_drawer_open = true;
-                                }
-                            } else if icons::icon_button(
-                                ui,
-                                AppIcon::Folder,
-                                "+ Add Folder",
-                                10.5,
-                                theme.text_primary,
-                                theme.bg_card,
-                                Stroke::new(1.0, theme.border_subtle),
-                                CornerRadius::same(12),
-                                Vec2::new(0.0, 22.0),
-                            )
-                            .on_hover_text("Select a folder to connect as your Engineering Vault")
-                            .clicked()
-                            {
-                                actions.add_vault_folder = true;
-                                self.agent_panel_open = true;
-                            }
-
-                            if icons::icon_button(
-                                ui,
-                                AppIcon::Sparkles,
-                                if is_mobile { "AI" } else { "EigenAI Panel" },
-                                10.5,
-                                Color32::WHITE,
-                                theme.accent_blue,
-                                Stroke::NONE,
-                                CornerRadius::same(12),
-                                Vec2::new(0.0, 22.0),
-                            )
-                            .on_hover_text("Open Antigravity AI Assistant Side Panel (Cmd/Ctrl+K)")
-                            .clicked()
-                            {
-                                self.agent_panel_open = true;
-                                self.request_focus_command = true;
-                            }
-                        });
-                    });
-                });
-            self.hud_rects.push(top_right_resp.response.rect);
-        }
-
-        // 2. Conditional Top-Center Active Lens / 4D Timeline Pill (hidden in Clean mode)
+        // 2. Conditional Top-Center Active Lens / Manual Tool Pill (hidden in Clean + Orbit mode)
         if self.active_lens != SpatialLens::Clean
             || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
             || universal_canvas.active_tool != UniversalCanvasTool::SelectPan
             || universal_canvas.measure_active
         {
             let top_center_offset = if is_mobile {
-                Vec2::new(0.0, 92.0)
+                Vec2::new(0.0, 52.0)
             } else {
                 Vec2::new(0.0, 12.0)
             };
@@ -1849,7 +1984,7 @@ impl SpatialWorkspaceState {
                                 Stroke::NONE,
                                 CornerRadius::same(8),
                                 Vec2::splat(20.0),
-                                "Reset active lens & tool",
+                                "Reset active lens & manual tool",
                             )
                             .clicked()
                             {
@@ -1868,7 +2003,7 @@ impl SpatialWorkspaceState {
             self.hud_rects.push(pill_resp.response.rect);
         }
 
-        // 3. Smart Element Pop-Up Inspector (ONLY visible when user clicked a Column, Beam, Wall, Footing, or Earth Site)
+        // 3. Smart Element Pop-Up Inspector (ONLY visible when an element or Earth site is clicked)
         if let Some(target) = self.selected_target {
             let popup_actions = self.render_smart_element_popup(
                 ctx,
@@ -1886,116 +2021,22 @@ impl SpatialWorkspaceState {
             actions.merge(popup_actions);
         }
 
-        // 4. Antigravity Mobile Overlay Agent Drawer (< 760px) OR Collapsed Bottom-Center Floating Quick Bar
-        if self.agent_panel_open && is_compact_panel {
-            let drawer_w = (vp.x - 16.0).clamp(240.0, 440.0);
-            let drawer_h = (vp.y * 0.78).clamp(320.0, 620.0);
-            let drawer_resp = Area::new(Id::new("antigravity_mobile_agent_drawer"))
-                .order(Order::Foreground)
-                .anchor(Align2::CENTER_BOTTOM, Vec2::new(0.0, -8.0))
-                .constrain(true)
-                .show(ctx, |ui| {
-                    let panel_bg = if theme.is_dark() {
-                        Color32::from_rgb(19, 23, 32)
-                    } else {
-                        theme.bg_sidebar
-                    };
-                    Frame::new()
-                        .fill(panel_bg)
-                        .corner_radius(CornerRadius::same(16))
-                        .stroke(Stroke::new(1.1, theme.accent_blue.gamma_multiply(0.45)))
-                        .inner_margin(Margin::same(10))
-                        .show(ui, |ui| {
-                            ui.set_width((drawer_w - 22.0).max(200.0));
-                            ui.set_max_width((drawer_w - 22.0).max(200.0));
-                            ui.set_max_height(drawer_h);
-                            let sub = self.render_antigravity_agent_panel_ui(
-                                ui,
-                                theme,
-                                universal_canvas,
-                                build_view,
-                                ai_assistant,
-                                members,
-                                projects,
-                                db_components,
-                                vault_projects,
-                                drawer_h - 20.0,
-                            );
-                            actions.merge(sub);
-                        });
-                });
-            self.hud_rects.push(drawer_resp.response.rect);
-        } else if !self.agent_panel_open {
-            let bar_actions = self.render_antigravity_command_dock(
-                ctx,
-                theme,
-                universal_canvas,
-                build_view,
-                ai_assistant,
-                members,
-                projects,
-                db_components,
-                vp,
-                is_mobile,
-            );
-            actions.merge(bar_actions);
-        }
+        // 4. Unified Hover-Expandable Floating Dynamic Island
+        let island_actions = self.render_dynamic_island(
+            ctx,
+            theme,
+            universal_canvas,
+            build_view,
+            ai_assistant,
+            members,
+            projects,
+            db_components,
+            vault_projects,
+            vp,
+            is_mobile,
+        );
+        actions.merge(island_actions);
 
-        actions
-    }
-
-    /// Renders the docked Google Antigravity-style right sidebar AI panel on desktop/tablet (`>= 760px`).
-    #[allow(clippy::too_many_arguments)]
-    pub fn render_antigravity_side_panel(
-        &mut self,
-        ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        theme: &MacTheme,
-        universal_canvas: &mut UniversalCanvasState,
-        build_view: &mut BuildView,
-        ai_assistant: &mut AiAssistantView,
-        members: &[StructuralMember],
-        projects: &[ProjectItem],
-        db_components: &mut Vec<DatabaseComponent>,
-        vault_projects: &[crate::core::vault::PersonalVaultProjectEntry],
-    ) -> SpatialHudActions {
-        let mut actions = SpatialHudActions::default();
-        let vp = MacTheme::viewport_size(ctx);
-        if !self.agent_panel_open || vp.x < 760.0 {
-            return actions;
-        }
-        let panel_bg = if theme.is_dark() {
-            Color32::from_rgb(19, 23, 32)
-        } else {
-            theme.bg_sidebar
-        };
-        let default_w = (vp.x * 0.30).clamp(330.0, 396.0);
-        egui::Panel::right("antigravity_agent_side_panel")
-            .resizable(true)
-            .default_size(default_w)
-            .size_range(310.0..=490.0)
-            .frame(
-                Frame::new()
-                    .fill(panel_bg)
-                    .stroke(Stroke::new(1.0, theme.border_subtle))
-                    .inner_margin(Margin::symmetric(12, 10)),
-            )
-            .show(ui, |ui| {
-                let avail_h = (vp.y - 24.0).max(320.0);
-                let sub = self.render_antigravity_agent_panel_ui(
-                    ui,
-                    theme,
-                    universal_canvas,
-                    build_view,
-                    ai_assistant,
-                    members,
-                    projects,
-                    db_components,
-                    vault_projects,
-                    avail_h,
-                );
-                actions.merge(sub);
-            });
         actions
     }
 
@@ -3123,7 +3164,6 @@ impl SpatialWorkspaceState {
             .clicked()
             {
                 self.attach_context(AiContextAttachment::SelectedElement);
-                self.agent_panel_open = true;
                 self.command_bar_expanded = true;
                 ai_assistant.execute_prompt(
                     &query,
@@ -3150,7 +3190,6 @@ impl SpatialWorkspaceState {
         .clicked()
         {
             self.attach_context(AiContextAttachment::SelectedElement);
-            self.agent_panel_open = true;
             self.command_bar_expanded = true;
             self.request_focus_command = true;
         }
@@ -3204,7 +3243,8 @@ impl SpatialWorkspaceState {
                 .id_salt(salt)
                 .max_height(max_h)
                 .show(ui, |ui| {
-                    let btn_w = (pal_w - 14.0).max(140.0);
+                    let btn_w = (pal_w - 24.0).max(120.0);
+                    ui.set_width(btn_w);
                     ui.set_max_width(btn_w);
                     let needle = q.strip_prefix('/').unwrap_or(&q);
                     for spec in SLASH_COMMANDS {
@@ -3889,594 +3929,12 @@ impl SpatialWorkspaceState {
         actions
     }
 
-    /// Complete Google Antigravity-style AI Assistant Panel rendered inside either desktop
-    /// `Panel::right` or responsive mobile bottom sheet.
+    /// Renders the interactive Hover-Expandable Floating Dynamic Island at bottom-center:
+    /// - Compact Idle Pill when pointer is away on the Earth/BIM canvas (0 side panels)
+    /// - Smooth Hover-Expanded Dynamic Island exposing Vault `+ Add Folder`, `+ Add Context (@)`,
+    ///   AI Model & Mode Switcher, Manual Drawing Commands, `/` Palette, Chat Drawer & Composer.
     #[allow(clippy::too_many_arguments)]
-    pub fn render_antigravity_agent_panel_ui(
-        &mut self,
-        ui: &mut Ui,
-        theme: &MacTheme,
-        universal_canvas: &mut UniversalCanvasState,
-        build_view: &mut BuildView,
-        ai_assistant: &mut AiAssistantView,
-        members: &[StructuralMember],
-        projects: &[ProjectItem],
-        db_components: &mut Vec<DatabaseComponent>,
-        vault_projects: &[crate::core::vault::PersonalVaultProjectEntry],
-        avail_height: f32,
-    ) -> SpatialHudActions {
-        let mut actions = SpatialHudActions::default();
-        let panel_w = ui.available_width().max(220.0);
-        ui.set_max_width(panel_w);
-        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-
-        // 1. Top Antigravity Panel Header Bar (+ New Chat, History, Collapse)
-        ui.horizontal(|ui| {
-            icons::icon_label(
-                ui,
-                AppIcon::Sparkles,
-                14.5,
-                theme.accent_blue,
-                &self.conversation_title,
-                12.5,
-                theme.text_primary,
-                true,
-            );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if icons::icon_only_button(
-                    ui,
-                    AppIcon::Close,
-                    theme.text_secondary,
-                    Color32::TRANSPARENT,
-                    Stroke::NONE,
-                    CornerRadius::same(6),
-                    Vec2::splat(22.0),
-                    "Collapse Antigravity AI Panel",
-                )
-                .clicked()
-                {
-                    self.agent_panel_open = false;
-                }
-                if icons::icon_only_button(
-                    ui,
-                    AppIcon::SlidersPanel,
-                    theme.text_secondary,
-                    Color32::TRANSPARENT,
-                    Stroke::NONE,
-                    CornerRadius::same(6),
-                    Vec2::splat(22.0),
-                    "Switch to Classic 15-Pillar Workspace (/classic)",
-                )
-                .clicked()
-                {
-                    actions.switch_to_classic_ui = true;
-                }
-                if icons::icon_only_button(
-                    ui,
-                    AppIcon::Clock,
-                    if self.history_popover_open {
-                        theme.accent_blue
-                    } else {
-                        theme.text_secondary
-                    },
-                    Color32::TRANSPARENT,
-                    Stroke::NONE,
-                    CornerRadius::same(6),
-                    Vec2::splat(22.0),
-                    "Toggle Conversation History",
-                )
-                .clicked()
-                {
-                    self.history_popover_open = !self.history_popover_open;
-                }
-                if icons::icon_only_button(
-                    ui,
-                    AppIcon::Plus,
-                    theme.text_primary,
-                    theme.bg_card,
-                    Stroke::new(0.8, theme.border_subtle),
-                    CornerRadius::same(6),
-                    Vec2::splat(22.0),
-                    "New Conversation",
-                )
-                .clicked()
-                {
-                    self.start_new_conversation(ai_assistant);
-                }
-            });
-        });
-        ui.add_space(6.0);
-
-        if self.history_popover_open {
-            Frame::new()
-                .fill(theme.bg_card)
-                .corner_radius(CornerRadius::same(10))
-                .stroke(Stroke::new(1.0, theme.border_card))
-                .inner_margin(Margin::same(8))
-                .show(ui, |ui| {
-                    ui.set_width((panel_w - 18.0).max(160.0));
-                    ui.label(
-                        RichText::new("Recent Agent Sessions")
-                            .size(10.5)
-                            .strong()
-                            .color(theme.text_secondary),
-                    );
-                    ui.add_space(4.0);
-                    if self.conversation_archives.is_empty() {
-                        ui.label(
-                            RichText::new("No archived sessions yet. Click + to start a new thread.")
-                                .size(10.0)
-                                .color(theme.text_muted),
-                        );
-                    } else {
-                        let mut restore_idx = None;
-                        for (idx, thr) in self.conversation_archives.iter().enumerate().rev() {
-                            if ui
-                                .button(
-                                    RichText::new(format!(
-                                        "{} ({} msgs)",
-                                        thr.title,
-                                        thr.messages.len()
-                                    ))
-                                    .size(10.5)
-                                    .color(theme.text_primary),
-                                )
-                                .clicked()
-                            {
-                                restore_idx = Some(idx);
-                            }
-                        }
-                        if let Some(idx) = restore_idx {
-                            let chosen = self.conversation_archives.remove(idx);
-                            self.conversation_title = chosen.title;
-                            ai_assistant.chat_history = chosen.messages;
-                            self.turn_metadata = chosen.turn_meta;
-                            self.history_popover_open = false;
-                        }
-                    }
-                });
-            ui.add_space(6.0);
-        }
-
-        // 2. Vault Workspace Header Card (`+ Add Folder` -> Engineering Vault)
-        let vault_act = self.render_vault_workspace_bar(ui, theme, vault_projects, panel_w);
-        actions.merge(vault_act);
-        ui.add_space(6.0);
-
-        let slash_mode = self.command_input.trim_start().starts_with('/');
-        let attached_h = if self.attached_contexts.is_empty() { 0.0 } else { 32.0 };
-        let popover_h = if self.context_picker_open || slash_mode {
-            215.0
-        } else {
-            0.0
-        };
-        let vault_extra_h = if self.vault_drawer_open { 145.0 } else { 0.0 }
-            + if self.vault_path_popover_open { 72.0 } else { 0.0 };
-        let stream_h = (avail_height - 255.0 - attached_h - popover_h - vault_extra_h).clamp(95.0, 480.0);
-
-        // 3. Scrollable Antigravity Chat Thread & Welcome Empty State
-        let mut quick_prompt: Option<String> = None;
-        ScrollArea::vertical()
-            .id_salt("antigravity_side_panel_chat_scroll")
-            .max_height(stream_h)
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                let inner_w = (panel_w - 8.0).max(160.0);
-                ui.set_width(inner_w);
-                ui.set_max_width(inner_w);
-
-                if ai_assistant.chat_history.len() <= 1 {
-                    let hero_bg = if theme.is_dark() {
-                        Color32::from_rgb(24, 30, 44)
-                    } else {
-                        theme.bg_hero
-                    };
-                    Frame::new()
-                        .fill(hero_bg)
-                        .corner_radius(CornerRadius::same(12))
-                        .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.35)))
-                        .inner_margin(Margin::same(12))
-                        .show(ui, |ui| {
-                            ui.set_width((inner_w - 24.0).max(150.0));
-                            icons::icon_label(
-                                ui,
-                                AppIcon::Sparkles,
-                                15.0,
-                                theme.accent_blue,
-                                "Antigravity Agent Workspace",
-                                12.5,
-                                theme.text_primary,
-                                true,
-                            );
-                            ui.add_space(4.0);
-                            ui.label(
-                                RichText::new(
-                                    "Ask about any Earth site, structural column/beam, FEM/ARI check, or your connected Engineering Vault.",
-                                )
-                                .size(11.0)
-                                .color(theme.text_secondary),
-                            );
-                            ui.add_space(8.0);
-                            let starter_w = (inner_w - 28.0).max(140.0);
-                            for (ico, label, prompt_cmd) in [
-                                (AppIcon::Globe, "Fly to Jakarta & inspect seismic hazard", "/fly jakarta"),
-                                (AppIcon::Cube3D, "Build 3-bay 2-story concrete portal frame", "build portal 3x2 6m 4m"),
-                                (AppIcon::Bolt, "Evaluate FEM stiffness & ARI redundancy", "screen ari"),
-                                (AppIcon::Folder, "Inspect connected Vault & project files", "inspect vault"),
-                            ] {
-                                if icons::icon_button(
-                                    ui,
-                                    ico,
-                                    label,
-                                    10.5,
-                                    theme.text_primary,
-                                    theme.bg_card,
-                                    Stroke::new(0.8, theme.border_subtle),
-                                    CornerRadius::same(8),
-                                    Vec2::new(starter_w, 25.0),
-                                )
-                                .clicked()
-                                {
-                                    quick_prompt = Some(prompt_cmd.to_string());
-                                }
-                                ui.add_space(3.0);
-                            }
-                        });
-                    ui.add_space(8.0);
-                }
-
-                for (idx, msg) in ai_assistant.chat_history.iter().enumerate() {
-                    let meta = self.turn_metadata.iter().find(|m| m.msg_index == idx);
-                    if msg.is_user {
-                        let user_bg = if theme.is_dark() {
-                            Color32::from_rgb(33, 42, 60)
-                        } else {
-                            theme.accent_blue.gamma_multiply(0.12)
-                        };
-                        Frame::new()
-                            .fill(user_bg)
-                            .corner_radius(CornerRadius::same(11))
-                            .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.32)))
-                            .inner_margin(Margin::symmetric(10, 8))
-                            .show(ui, |ui| {
-                                ui.set_width((inner_w - 24.0).max(140.0));
-                                if let Some(m) = meta {
-                                    if !m.context_chips.is_empty() {
-                                        ui.horizontal_wrapped(|ui| {
-                                            for chip in &m.context_chips {
-                                                icons::pill_badge(
-                                                    ui,
-                                                    AppIcon::Target,
-                                                    chip.clone(),
-                                                    theme.accent_blue,
-                                                );
-                                            }
-                                        });
-                                        ui.add_space(4.0);
-                                    }
-                                }
-                                ui.label(
-                                    RichText::new(&msg.message)
-                                        .size(11.5)
-                                        .color(theme.text_primary),
-                                );
-                            });
-                    } else {
-                        Frame::new()
-                            .fill(theme.bg_card)
-                            .corner_radius(CornerRadius::same(11))
-                            .stroke(Stroke::new(1.0, theme.border_subtle))
-                            .inner_margin(Margin::symmetric(10, 8))
-                            .show(ui, |ui| {
-                                ui.set_width((inner_w - 24.0).max(140.0));
-                                if let Some(m) = meta {
-                                    if !m.trace_steps.is_empty() {
-                                        ui.horizontal_wrapped(|ui| {
-                                            for st in &m.trace_steps {
-                                                icons::pill_badge(
-                                                    ui,
-                                                    AppIcon::CheckCircle,
-                                                    st.clone(),
-                                                    theme.accent_green,
-                                                );
-                                            }
-                                        });
-                                        ui.add_space(4.0);
-                                    }
-                                }
-                                ui.label(
-                                    RichText::new(&msg.message)
-                                        .size(11.2)
-                                        .color(theme.text_primary),
-                                );
-                            });
-                    }
-                    ui.add_space(6.0);
-                }
-            });
-
-        if let Some(qp) = quick_prompt {
-            let sub = self.execute_spatial_input(
-                &qp,
-                universal_canvas,
-                build_view,
-                ai_assistant,
-                members,
-                projects,
-                db_components,
-            );
-            actions.merge(sub);
-        }
-
-        ui.add_space(5.0);
-
-        // 4. Contextual Pickers above Composer (`/` Slash Commands OR `@ Add Context`)
-        if slash_mode {
-            let sub = self.render_slash_palette_box(
-                ui,
-                theme,
-                universal_canvas,
-                build_view,
-                ai_assistant,
-                members,
-                projects,
-                db_components,
-                (panel_w - 4.0).max(180.0),
-                175.0,
-                "antigravity_panel_slash_scroll",
-            );
-            actions.merge(sub);
-            ui.add_space(5.0);
-        } else if self.context_picker_open {
-            let sub = self.render_context_picker_popover(
-                ui,
-                theme,
-                &build_view.bim_bus.project,
-                vault_projects,
-                panel_w,
-            );
-            actions.merge(sub);
-            ui.add_space(5.0);
-        }
-
-        // 5. Active Attached Context Chips Row
-        if !self.attached_contexts.is_empty() {
-            let mut detach_key: Option<String> = None;
-            ui.horizontal_wrapped(|ui| {
-                for att in &self.attached_contexts {
-                    let lbl = att.chip_label(&build_view.bim_bus.project, self.selected_target);
-                    let key = att.dedup_key();
-                    if icons::icon_button(
-                        ui,
-                        att.icon(),
-                        format!("{lbl} ×"),
-                        9.8,
-                        theme.accent_blue,
-                        theme.accent_blue.gamma_multiply(0.14),
-                        Stroke::new(0.8, theme.accent_blue.gamma_multiply(0.45)),
-                        CornerRadius::same(10),
-                        Vec2::new(0.0, 20.0),
-                    )
-                    .on_hover_text("Click to remove context attachment")
-                    .clicked()
-                    {
-                        detach_key = Some(key);
-                    }
-                }
-            });
-            if let Some(k) = detach_key {
-                self.detach_context(&k);
-            }
-            ui.add_space(4.0);
-        }
-
-        // 6. Signature Antigravity Rounded Composer Card
-        let composer_bg = if theme.is_dark() {
-            Color32::from_rgb(26, 31, 44)
-        } else {
-            theme.bg_card
-        };
-        let composer_stroke = if self.composer_had_focus {
-            Stroke::new(1.3, theme.accent_blue.gamma_multiply(0.72))
-        } else {
-            Stroke::new(1.0, theme.border_card)
-        };
-        Frame::new()
-            .fill(composer_bg)
-            .corner_radius(CornerRadius::same(14))
-            .stroke(composer_stroke)
-            .inner_margin(Margin::symmetric(10, 8))
-            .show(ui, |ui| {
-                let comp_w = (panel_w - 24.0).max(160.0);
-                ui.set_width(comp_w);
-                ui.set_max_width(comp_w);
-
-                // Quick context mention strip when element selected on canvas
-                if self.selected_target.is_some()
-                    && !self
-                        .attached_contexts
-                        .contains(&AiContextAttachment::SelectedElement)
-                {
-                    if let Some(mention) =
-                        self.active_context_mention(&build_view.bim_bus.project)
-                    {
-                        if icons::icon_button(
-                            ui,
-                            AppIcon::Plus,
-                            format!("Attach {mention}"),
-                            9.8,
-                            theme.accent_blue,
-                            theme.accent_blue.gamma_multiply(0.12),
-                            Stroke::new(0.8, theme.accent_blue.gamma_multiply(0.35)),
-                            CornerRadius::same(8),
-                            Vec2::new(0.0, 19.0),
-                        )
-                        .clicked()
-                        {
-                            self.attach_context(AiContextAttachment::SelectedElement);
-                        }
-                        ui.add_space(4.0);
-                    }
-                }
-
-                let bare_enter_pressed = self.composer_had_focus
-                    && !slash_mode
-                    && ui.ctx().input(|i| !i.modifiers.shift)
-                    && ui.ctx().input_mut(|i| {
-                        i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                    });
-
-                let edit_resp = ui.add(
-                    egui::TextEdit::multiline(&mut self.command_input)
-                        .desired_width(comp_w)
-                        .desired_rows(2)
-                        .frame(Frame::NONE)
-                        .hint_text("Ask anything, @ to add context, / for workflows"),
-                );
-                self.composer_had_focus = edit_resp.has_focus();
-                if std::mem::take(&mut self.request_focus_command) {
-                    edit_resp.request_focus();
-                }
-
-                // Auto-open `@ Add Context` picker when typing `@` at tail of composer input
-                let cur_len = self.command_input.len();
-                if cur_len > self.last_command_len && self.command_input.ends_with('@') {
-                    self.context_picker_open = true;
-                }
-                self.last_command_len = cur_len;
-
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if icons::icon_button(
-                        ui,
-                        if self.context_picker_open {
-                            AppIcon::Close
-                        } else {
-                            AppIcon::Plus
-                        },
-                        "Add Context",
-                        10.0,
-                        if self.context_picker_open {
-                            Color32::WHITE
-                        } else {
-                            theme.text_secondary
-                        },
-                        if self.context_picker_open {
-                            theme.accent_blue
-                        } else {
-                            theme.bg_sidebar
-                        },
-                        Stroke::new(0.8, theme.border_subtle),
-                        CornerRadius::same(8),
-                        Vec2::new(0.0, 22.0),
-                    )
-                    .on_hover_text("Attach selected element, BIM, FEM, Vault file, or local file (@)")
-                    .clicked()
-                    {
-                        self.context_picker_open = !self.context_picker_open;
-                    }
-
-                    if icons::icon_button(
-                        ui,
-                        AppIcon::ChevronDown,
-                        self.agent_mode.label(),
-                        10.0,
-                        theme.text_primary,
-                        theme.bg_sidebar,
-                        Stroke::new(0.8, theme.border_subtle),
-                        CornerRadius::same(8),
-                        Vec2::new(0.0, 22.0),
-                    )
-                    .on_hover_text(self.agent_mode.description())
-                    .clicked()
-                    {
-                        self.agent_mode = self.agent_mode.next();
-                    }
-
-                    if panel_w >= 335.0 {
-                        if icons::icon_button(
-                            ui,
-                            AppIcon::Bot,
-                            self.agent_model.short_label(),
-                            9.8,
-                            theme.text_secondary,
-                            theme.bg_sidebar,
-                            Stroke::new(0.8, theme.border_subtle),
-                            CornerRadius::same(8),
-                            Vec2::new(0.0, 22.0),
-                        )
-                        .on_hover_text(format!("Model: {} (click to cycle)", self.agent_model.label()))
-                        .clicked()
-                        {
-                            self.agent_model = self.agent_model.next();
-                        }
-                    }
-
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let has_text = !self.command_input.trim().is_empty();
-                        let send_clicked = icons::icon_only_button(
-                            ui,
-                            AppIcon::ArrowRight,
-                            Color32::WHITE,
-                            if has_text {
-                                theme.accent_blue
-                            } else {
-                                theme.accent_blue.gamma_multiply(0.38)
-                            },
-                            Stroke::NONE,
-                            CornerRadius::same(11),
-                            Vec2::splat(24.0),
-                            "Send Prompt (Enter)",
-                        )
-                        .clicked();
-
-                        if icons::icon_button(
-                            ui,
-                            AppIcon::Menu,
-                            "/",
-                            10.0,
-                            theme.text_secondary,
-                            theme.bg_sidebar,
-                            Stroke::new(0.8, theme.border_subtle),
-                            CornerRadius::same(7),
-                            Vec2::new(22.0, 22.0),
-                        )
-                        .on_hover_text("Toggle Slash Command Palette")
-                        .clicked()
-                        {
-                            if self.command_input.trim_start().starts_with('/') {
-                                self.command_input.clear();
-                            } else {
-                                self.command_input = "/".to_string();
-                                self.context_picker_open = false;
-                                self.request_focus_command = true;
-                            }
-                        }
-
-                        if (bare_enter_pressed || send_clicked) && has_text {
-                            let submitted = std::mem::take(&mut self.command_input);
-                            self.last_command_len = 0;
-                            let sub = self.execute_spatial_input(
-                                &submitted,
-                                universal_canvas,
-                                build_view,
-                                ai_assistant,
-                                members,
-                                projects,
-                                db_components,
-                            );
-                            actions.merge(sub);
-                        }
-                    });
-                });
-            });
-
-        actions
-    }
-
-    /// Slim collapsed bottom-center Antigravity AI launcher capsule (rendered when Side Panel is closed).
-    #[allow(clippy::too_many_arguments)]
-    fn render_antigravity_command_dock(
+    fn render_dynamic_island(
         &mut self,
         ctx: &egui::Context,
         theme: &MacTheme,
@@ -4486,16 +3944,32 @@ impl SpatialWorkspaceState {
         members: &[StructuralMember],
         projects: &[ProjectItem],
         db_components: &mut Vec<DatabaseComponent>,
+        vault_projects: &[crate::core::vault::PersonalVaultProjectEntry],
         vp: Vec2,
         is_mobile: bool,
     ) -> SpatialHudActions {
         let mut actions = SpatialHudActions::default();
-        let dock_w = if is_mobile {
-            (vp.x - 20.0).clamp(240.0, 420.0)
-        } else {
-            (vp.x - 40.0).clamp(360.0, 680.0)
-        };
         let slash_mode = self.command_input.trim_start().starts_with('/');
+        let vault_status = crate::core::InternalVault::connection_status();
+
+        let should_expand = self.is_dynamic_island_expanded(ctx);
+        self.island_expanded_prev = should_expand;
+        let expand_t = ctx.animate_bool(
+            Id::new("eigengraph_dynamic_island_expand"),
+            should_expand,
+        );
+
+        let compact_w = if is_mobile {
+            (vp.x - 24.0).clamp(240.0, 340.0)
+        } else {
+            390.0_f32.min((vp.x - 40.0).max(260.0))
+        };
+        let expanded_w = if is_mobile {
+            (vp.x - 16.0).clamp(240.0, 420.0)
+        } else {
+            (vp.x * 0.62).clamp(520.0, 720.0)
+        };
+        let dock_w = egui::lerp(compact_w..=expanded_w, expand_t);
 
         let dock_resp = Area::new(Id::new("antigravity_ai_command_dock"))
             .order(Order::Foreground)
@@ -4504,11 +3978,18 @@ impl SpatialWorkspaceState {
             .show(ctx, |ui| {
                 ui.set_width(dock_w);
                 ui.set_max_width(dock_w);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+
                 ui.vertical(|ui| {
-                    // A. Compact Antigravity Execution Trace Chips above the dock
-                    if !self.recent_trace_chips.is_empty() && !slash_mode {
+                    // A. Subtle execution trace badge above the Dynamic Island when idle
+                    if !should_expand && !self.recent_trace_chips.is_empty() && !slash_mode {
                         ui.horizontal_wrapped(|ui| {
-                            for chip in self.recent_trace_chips.iter().rev().take(if is_mobile { 1 } else { 2 }) {
+                            for chip in self
+                                .recent_trace_chips
+                                .iter()
+                                .rev()
+                                .take(if is_mobile { 1 } else { 2 })
+                            {
                                 let col = if chip.ok {
                                     theme.accent_green
                                 } else {
@@ -4544,7 +4025,172 @@ impl SpatialWorkspaceState {
                         ui.add_space(5.0);
                     }
 
-                    // B. Slash Command Autocomplete Palette (shown whenever user types `/`)
+                    if !should_expand {
+                        // B1. COMPACT IDLE DYNAMIC ISLAND PILL (automatically grows on cursor hover)
+                        let pill_frame = Self::antigravity_glass_frame(
+                            theme,
+                            24,
+                            Margin::symmetric(12, 7),
+                        )
+                        .show(ui, |ui| {
+                            let cap_w = (dock_w - 26.0).max(180.0);
+                            ui.set_width(cap_w);
+                            ui.set_max_width(cap_w);
+                            ui.horizontal(|ui| {
+                                icons::icon_label(
+                                    ui,
+                                    AppIcon::Sparkles,
+                                    14.0,
+                                    theme.accent_blue,
+                                    "EigenAI",
+                                    12.0,
+                                    theme.text_primary,
+                                    true,
+                                );
+
+                                let vault_col = if vault_status.connected {
+                                    theme.accent_green
+                                } else {
+                                    theme.text_muted
+                                };
+                                let vault_badge = if vault_status.connected {
+                                    if is_mobile {
+                                        "Vault".to_string()
+                                    } else {
+                                        format!("Vault: {}", vault_status.vault_name)
+                                    }
+                                } else {
+                                    "+ Vault".to_string()
+                                };
+                                icons::pill_badge(ui, AppIcon::Folder, vault_badge, vault_col);
+
+                                if let Some(mention) =
+                                    self.active_context_mention(&build_view.bim_bus.project)
+                                {
+                                    if !is_mobile {
+                                        icons::pill_badge(
+                                            ui,
+                                            AppIcon::Target,
+                                            mention,
+                                            theme.accent_blue,
+                                        );
+                                    }
+                                }
+
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    ui.label(
+                                        RichText::new(if is_mobile { "Tap" } else { "Hover" })
+                                            .size(10.0)
+                                            .color(theme.text_muted),
+                                    );
+                                    ui.label(
+                                        RichText::new(self.agent_model.short_label())
+                                            .size(10.0)
+                                            .color(theme.accent_blue),
+                                    );
+                                });
+                            });
+                        });
+                        if pill_frame.response.interact(egui::Sense::click()).clicked() {
+                            self.command_bar_expanded = true;
+                            self.request_focus_command = true;
+                        }
+                        return;
+                    }
+
+                    // B2. HOVER-EXPANDED FLOATING DYNAMIC ISLAND
+                    // Popover drawers sit cleanly inside top of the expanding island
+                    if self.history_popover_open {
+                        Frame::new()
+                            .fill(theme.bg_card)
+                            .corner_radius(CornerRadius::same(12))
+                            .stroke(Stroke::new(1.0, theme.border_card))
+                            .inner_margin(Margin::same(10))
+                            .show(ui, |ui| {
+                                let hw = (dock_w - 22.0).max(180.0);
+                                ui.set_width(hw);
+                                ui.set_max_width(hw);
+                                ui.horizontal(|ui| {
+                                    icons::icon_label(
+                                        ui,
+                                        AppIcon::Clock,
+                                        12.5,
+                                        theme.accent_blue,
+                                        "Recent Agent Sessions",
+                                        11.0,
+                                        theme.text_primary,
+                                        true,
+                                    );
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        if icons::icon_only_button(
+                                            ui,
+                                            AppIcon::Close,
+                                            theme.text_secondary,
+                                            Color32::TRANSPARENT,
+                                            Stroke::NONE,
+                                            CornerRadius::same(6),
+                                            Vec2::splat(18.0),
+                                            "Close history",
+                                        )
+                                        .clicked()
+                                        {
+                                            self.history_popover_open = false;
+                                        }
+                                    });
+                                });
+                                ui.add_space(4.0);
+                                if self.conversation_archives.is_empty() {
+                                    ui.label(
+                                        RichText::new(
+                                            "No archived chats yet. Click + to start a new thread.",
+                                        )
+                                        .size(10.0)
+                                        .color(theme.text_muted),
+                                    );
+                                } else {
+                                    let mut restore_idx = None;
+                                    for (idx, thr) in
+                                        self.conversation_archives.iter().enumerate().rev()
+                                    {
+                                        if ui
+                                            .button(
+                                                RichText::new(format!(
+                                                    "{} ({} msgs)",
+                                                    thr.title,
+                                                    thr.messages.len()
+                                                ))
+                                                .size(10.5)
+                                                .color(theme.text_primary),
+                                            )
+                                            .clicked()
+                                        {
+                                            restore_idx = Some(idx);
+                                        }
+                                    }
+                                    if let Some(idx) = restore_idx {
+                                        let chosen = self.conversation_archives.remove(idx);
+                                        self.conversation_title = chosen.title;
+                                        ai_assistant.chat_history = chosen.messages;
+                                        self.turn_metadata = chosen.turn_meta;
+                                        self.history_popover_open = false;
+                                        self.command_bar_expanded = true;
+                                    }
+                                }
+                            });
+                        ui.add_space(6.0);
+                    }
+
+                    if self.vault_drawer_open || self.vault_path_popover_open {
+                        let vault_act = self.render_vault_workspace_bar(
+                            ui,
+                            theme,
+                            vault_projects,
+                            dock_w - 4.0,
+                        );
+                        actions.merge(vault_act);
+                        ui.add_space(6.0);
+                    }
+
                     if slash_mode {
                         let sub = self.render_slash_palette_box(
                             ui,
@@ -4556,40 +4202,297 @@ impl SpatialWorkspaceState {
                             projects,
                             db_components,
                             (dock_w - 24.0).max(200.0),
-                            (vp.y * 0.34).clamp(150.0, 260.0),
+                            (vp.y * 0.30).clamp(140.0, 230.0),
                             "antigravity_slash_palette_scroll",
+                        );
+                        actions.merge(sub);
+                        ui.add_space(6.0);
+                    } else if self.context_picker_open {
+                        let sub = self.render_context_picker_popover(
+                            ui,
+                            theme,
+                            &build_view.bim_bus.project,
+                            vault_projects,
+                            dock_w - 4.0,
                         );
                         actions.merge(sub);
                         ui.add_space(6.0);
                     }
 
-                    // C. Main Antigravity Command & AI Input Capsule
-                    Self::antigravity_glass_frame(theme, 24, Margin::symmetric(12, 7)).show(ui, |ui| {
-                        let cap_w = (dock_w - 28.0).max(200.0);
-                        ui.set_width(cap_w);
-                        ui.set_max_width(cap_w);
-                        ui.horizontal(|ui| {
-                            if icons::icon_only_button(
-                                ui,
-                                AppIcon::Sparkles,
-                                theme.accent_blue,
-                                theme.accent_blue.gamma_multiply(0.14),
-                                Stroke::NONE,
-                                CornerRadius::same(10),
-                                Vec2::splat(26.0),
-                                "Expand Antigravity Agent Side Panel",
-                            )
-                            .clicked()
-                            {
-                                self.agent_panel_open = true;
-                                self.request_focus_command = true;
-                            }
+                    if self.command_bar_expanded && !slash_mode {
+                        let chat_h = (vp.y * 0.25).clamp(110.0, 210.0);
+                        Self::antigravity_glass_frame(theme, 16, Margin::same(10)).show(ui, |ui| {
+                            let chat_w = (dock_w - 24.0).max(190.0);
+                            ui.set_width(chat_w);
+                            ui.set_max_width(chat_w);
+                            ui.horizontal(|ui| {
+                                icons::icon_label(
+                                    ui,
+                                    AppIcon::Bot,
+                                    14.0,
+                                    theme.accent_blue,
+                                    &self.conversation_title,
+                                    12.0,
+                                    theme.text_primary,
+                                    true,
+                                );
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if icons::icon_only_button(
+                                        ui,
+                                        AppIcon::Close,
+                                        theme.text_secondary,
+                                        Color32::TRANSPARENT,
+                                        Stroke::NONE,
+                                        CornerRadius::same(6),
+                                        Vec2::splat(20.0),
+                                        "Collapse Chat Drawer",
+                                    )
+                                    .clicked()
+                                    {
+                                        self.command_bar_expanded = false;
+                                    }
+                                    if icons::icon_button(
+                                        ui,
+                                        AppIcon::Wrench,
+                                        "Auto-Repair ARI",
+                                        9.8,
+                                        Color32::WHITE,
+                                        theme.accent_green,
+                                        Stroke::NONE,
+                                        CornerRadius::same(6),
+                                        Vec2::new(0.0, 20.0),
+                                    )
+                                    .clicked()
+                                    {
+                                        actions.run_auto_repair = true;
+                                        self.push_trace("Auto-Repaired Critical Members", true);
+                                    }
+                                    if icons::icon_only_button(
+                                        ui,
+                                        AppIcon::Plus,
+                                        theme.text_primary,
+                                        theme.bg_card,
+                                        Stroke::new(0.8, theme.border_subtle),
+                                        CornerRadius::same(6),
+                                        Vec2::splat(20.0),
+                                        "New Chat",
+                                    )
+                                    .clicked()
+                                    {
+                                        self.start_new_conversation(ai_assistant);
+                                    }
+                                });
+                            });
+                            ui.add_space(4.0);
+                            ScrollArea::vertical()
+                                .id_salt("antigravity_chat_scroll")
+                                .max_height(chat_h)
+                                .stick_to_bottom(true)
+                                .show(ui, |ui| {
+                                    let inner_w = (chat_w - 14.0).max(160.0);
+                                    ui.set_max_width(inner_w);
+                                    for (idx, msg) in
+                                        ai_assistant.chat_history.iter().enumerate()
+                                    {
+                                        let meta =
+                                            self.turn_metadata.iter().find(|m| m.msg_index == idx);
+                                        if msg.is_user {
+                                            Frame::new()
+                                                .fill(if theme.is_dark() {
+                                                    Color32::from_rgb(33, 42, 60)
+                                                } else {
+                                                    theme.accent_blue.gamma_multiply(0.12)
+                                                })
+                                                .corner_radius(CornerRadius::same(10))
+                                                .stroke(Stroke::new(
+                                                    1.0,
+                                                    theme.accent_blue.gamma_multiply(0.32),
+                                                ))
+                                                .inner_margin(Margin::symmetric(10, 6))
+                                                .show(ui, |ui| {
+                                                    ui.set_width(
+                                                        (inner_w - 14.0).max(140.0),
+                                                    );
+                                                    if let Some(m) = meta {
+                                                        if !m.context_chips.is_empty() {
+                                                            ui.horizontal_wrapped(|ui| {
+                                                                for chip in &m.context_chips {
+                                                                    icons::pill_badge(
+                                                                        ui,
+                                                                        AppIcon::Target,
+                                                                        chip.clone(),
+                                                                        theme.accent_blue,
+                                                                    );
+                                                                }
+                                                            });
+                                                            ui.add_space(3.0);
+                                                        }
+                                                    }
+                                                    ui.label(
+                                                        RichText::new(&msg.message)
+                                                            .size(11.2)
+                                                            .color(theme.text_primary),
+                                                    );
+                                                });
+                                        } else {
+                                            Frame::new()
+                                                .fill(theme.bg_card)
+                                                .corner_radius(CornerRadius::same(10))
+                                                .stroke(Stroke::new(1.0, theme.border_subtle))
+                                                .inner_margin(Margin::symmetric(10, 6))
+                                                .show(ui, |ui| {
+                                                    ui.set_width(
+                                                        (inner_w - 14.0).max(140.0),
+                                                    );
+                                                    if let Some(m) = meta {
+                                                        if !m.trace_steps.is_empty() {
+                                                            ui.horizontal_wrapped(|ui| {
+                                                                for st in &m.trace_steps {
+                                                                    icons::pill_badge(
+                                                                        ui,
+                                                                        AppIcon::CheckCircle,
+                                                                        st.clone(),
+                                                                        theme.accent_green,
+                                                                    );
+                                                                }
+                                                            });
+                                                            ui.add_space(3.0);
+                                                        }
+                                                    }
+                                                    ui.label(
+                                                        RichText::new(&msg.message)
+                                                            .size(11.0)
+                                                            .color(theme.text_primary),
+                                                    );
+                                                });
+                                        }
+                                        ui.add_space(4.0);
+                                    }
+                                });
+                        });
+                        ui.add_space(6.0);
+                    }
 
-                            if !is_mobile {
+                    // C. MAIN EXPANDED DYNAMIC ISLAND COMMAND & FEATURE DECK
+                    Self::antigravity_glass_frame(theme, 20, Margin::symmetric(12, 9)).show(
+                        ui,
+                        |ui| {
+                            let cap_w = (dock_w - 28.0).max(200.0);
+                            ui.set_width(cap_w);
+                            ui.set_max_width(cap_w);
+
+                            // Row 1: Vault (`+ Add Folder`), `+ Add Context`, AI Model/Mode, Chat & Close
+                            ui.horizontal_wrapped(|ui| {
+                                if vault_status.connected {
+                                    if icons::icon_button(
+                                        ui,
+                                        AppIcon::Folder,
+                                        if is_mobile {
+                                            "Vault".to_string()
+                                        } else {
+                                            format!("Vault: {}", vault_status.vault_name)
+                                        },
+                                        10.0,
+                                        theme.accent_green,
+                                        theme.accent_green.gamma_multiply(0.14),
+                                        Stroke::new(
+                                            0.8,
+                                            theme.accent_green.gamma_multiply(0.42),
+                                        ),
+                                        CornerRadius::same(8),
+                                        Vec2::new(0.0, 22.0),
+                                    )
+                                    .on_hover_text("Browse Vault files & folder settings")
+                                    .clicked()
+                                    {
+                                        self.vault_drawer_open = !self.vault_drawer_open;
+                                        self.context_picker_open = false;
+                                    }
+                                }
                                 if icons::icon_button(
                                     ui,
-                                    AppIcon::Plus,
-                                    "Context",
+                                    AppIcon::Folder,
+                                    if vault_status.connected {
+                                        "Switch Vault"
+                                    } else {
+                                        "+ Add Folder (Vault)"
+                                    },
+                                    10.0,
+                                    if vault_status.connected {
+                                        theme.text_secondary
+                                    } else {
+                                        Color32::WHITE
+                                    },
+                                    if vault_status.connected {
+                                        theme.bg_card
+                                    } else {
+                                        theme.accent_blue
+                                    },
+                                    Stroke::new(0.8, theme.border_subtle),
+                                    CornerRadius::same(8),
+                                    Vec2::new(0.0, 22.0),
+                                )
+                                .on_hover_text("Select local folder to mount as Engineering Vault")
+                                .clicked()
+                                {
+                                    actions.add_vault_folder = true;
+                                }
+
+                                if icons::icon_button(
+                                    ui,
+                                    if self.context_picker_open {
+                                        AppIcon::Close
+                                    } else {
+                                        AppIcon::Plus
+                                    },
+                                    "Add Context",
+                                    10.0,
+                                    if self.context_picker_open {
+                                        Color32::WHITE
+                                    } else {
+                                        theme.text_primary
+                                    },
+                                    if self.context_picker_open {
+                                        theme.accent_blue
+                                    } else {
+                                        theme.bg_card
+                                    },
+                                    Stroke::new(0.8, theme.border_subtle),
+                                    CornerRadius::same(8),
+                                    Vec2::new(0.0, 22.0),
+                                )
+                                .on_hover_text(
+                                    "Attach element, Earth site, BIM, FEM, Vault file, or disk file (@)",
+                                )
+                                .clicked()
+                                {
+                                    self.context_picker_open = !self.context_picker_open;
+                                }
+
+                                if icons::icon_button(
+                                    ui,
+                                    AppIcon::Bot,
+                                    self.agent_model.short_label(),
+                                    10.0,
+                                    theme.text_primary,
+                                    theme.bg_card,
+                                    Stroke::new(0.8, theme.border_subtle),
+                                    CornerRadius::same(8),
+                                    Vec2::new(0.0, 22.0),
+                                )
+                                .on_hover_text(format!(
+                                    "AI Model: {} (click to cycle)",
+                                    self.agent_model.label()
+                                ))
+                                .clicked()
+                                {
+                                    self.agent_model = self.agent_model.next();
+                                }
+
+                                if icons::icon_button(
+                                    ui,
+                                    AppIcon::ChevronDown,
+                                    self.agent_mode.label(),
                                     10.0,
                                     theme.text_secondary,
                                     theme.bg_card,
@@ -4597,97 +4500,303 @@ impl SpatialWorkspaceState {
                                     CornerRadius::same(8),
                                     Vec2::new(0.0, 22.0),
                                 )
-                                .on_hover_text("Open Antigravity Panel & @ Add Context Picker")
+                                .on_hover_text(self.agent_mode.description())
                                 .clicked()
                                 {
-                                    self.agent_panel_open = true;
-                                    self.context_picker_open = true;
+                                    self.agent_mode = self.agent_mode.next();
                                 }
-                            }
 
-                            if let Some(mention) =
-                                self.active_context_mention(&build_view.bim_bus.project)
-                            {
-                                if !is_mobile {
-                                    icons::pill_badge(
+                                if icons::icon_only_button(
+                                    ui,
+                                    AppIcon::CommentNote,
+                                    if self.command_bar_expanded {
+                                        theme.accent_blue
+                                    } else {
+                                        theme.text_secondary
+                                    },
+                                    theme.bg_card,
+                                    Stroke::new(0.8, theme.border_subtle),
+                                    CornerRadius::same(8),
+                                    Vec2::splat(22.0),
+                                    "Toggle AI Chat Drawer",
+                                )
+                                .clicked()
+                                {
+                                    self.command_bar_expanded = !self.command_bar_expanded;
+                                }
+
+                                if icons::icon_only_button(
+                                    ui,
+                                    AppIcon::Clock,
+                                    if self.history_popover_open {
+                                        theme.accent_blue
+                                    } else {
+                                        theme.text_secondary
+                                    },
+                                    theme.bg_card,
+                                    Stroke::new(0.8, theme.border_subtle),
+                                    CornerRadius::same(8),
+                                    Vec2::splat(22.0),
+                                    "Conversation History",
+                                )
+                                .clicked()
+                                {
+                                    self.history_popover_open = !self.history_popover_open;
+                                }
+
+                                if is_mobile || self.command_bar_expanded || self.context_picker_open || self.vault_drawer_open {
+                                    if icons::icon_only_button(
                                         ui,
-                                        AppIcon::Target,
-                                        mention,
-                                        theme.accent_blue,
-                                    );
+                                        AppIcon::Close,
+                                        theme.text_secondary,
+                                        Color32::TRANSPARENT,
+                                        Stroke::NONE,
+                                        CornerRadius::same(8),
+                                        Vec2::splat(22.0),
+                                        "Collapse Dynamic Island",
+                                    )
+                                    .clicked()
+                                    {
+                                        self.collapse_dynamic_island();
+                                    }
                                 }
-                            }
+                            });
 
-                            let trailing_reserve = if is_mobile { 70.0 } else { 76.0 };
-                            let input_w = (ui.available_width() - trailing_reserve).max(90.0);
-                            let edit_resp = ui.add(
-                                egui::TextEdit::singleline(&mut self.command_input)
-                                    .desired_width(input_w)
-                                    .frame(Frame::NONE)
-                                    .hint_text("Ask EigenAI, fly to a city, or type / for commands..."),
-                            );
-                            if std::mem::take(&mut self.request_focus_command) {
-                                edit_resp.request_focus();
-                            }
+                            ui.add_space(5.0);
 
-                            let enter_submit = edit_resp.lost_focus()
-                                && ui.input(|i| i.key_pressed(egui::Key::Enter));
-
-                            if icons::icon_button(
-                                ui,
-                                AppIcon::Menu,
-                                "/",
-                                11.0,
-                                theme.text_secondary,
-                                theme.bg_card,
-                                Stroke::new(1.0, theme.border_subtle),
-                                CornerRadius::same(8),
-                                Vec2::new(24.0, 24.0),
-                            )
-                            .on_hover_text("Browse slash commands (/earth, /3d, /cost, /analysis...)")
-                            .clicked()
-                            {
-                                if self.command_input.trim_start().starts_with('/') {
-                                    self.command_input.clear();
-                                } else {
-                                    self.command_input = "/".to_string();
-                                    self.request_focus_command = true;
-                                }
-                            }
-
-                            let send_clicked = icons::icon_only_button(
-                                ui,
-                                AppIcon::ArrowRight,
-                                Color32::WHITE,
-                                theme.accent_blue,
-                                Stroke::NONE,
-                                CornerRadius::same(10),
-                                Vec2::splat(26.0),
-                                "Execute Command or AI Prompt",
-                            )
-                            .clicked();
-
-                            if (enter_submit || send_clicked) && !self.command_input.trim().is_empty()
-                            {
-                                let submitted = std::mem::take(&mut self.command_input);
-                                if !submitted.trim_start().starts_with('/') {
-                                    self.agent_panel_open = true;
-                                }
-                                let sub_actions = self.execute_spatial_input(
-                                    &submitted,
-                                    universal_canvas,
-                                    build_view,
-                                    ai_assistant,
-                                    members,
-                                    projects,
-                                    db_components,
+                            // Row 2: Manual Drawing & Earth Sculpting Commands
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(
+                                    RichText::new("Draw:")
+                                        .size(9.8)
+                                        .strong()
+                                        .color(theme.text_muted),
                                 );
-                                actions.merge(sub_actions);
+                                for tool in SpatialManualTool::ALL {
+                                    let active = tool.is_active(
+                                        self.active_canvas_mode,
+                                        universal_canvas,
+                                        build_view,
+                                    );
+                                    if icons::icon_button(
+                                        ui,
+                                        tool.icon(),
+                                        tool.label(),
+                                        9.8,
+                                        if active {
+                                            Color32::WHITE
+                                        } else {
+                                            theme.text_secondary
+                                        },
+                                        if active {
+                                            if *tool == SpatialManualTool::OrbitPan {
+                                                theme.accent_blue
+                                            } else {
+                                                theme.accent_orange
+                                            }
+                                        } else {
+                                            theme.bg_card
+                                        },
+                                        Stroke::new(0.8, theme.border_subtle),
+                                        CornerRadius::same(8),
+                                        Vec2::new(0.0, 21.0),
+                                    )
+                                    .on_hover_text(tool.tooltip())
+                                    .clicked()
+                                    {
+                                        let sub =
+                                            tool.apply(self, universal_canvas, build_view);
+                                        actions.merge(sub);
+                                        // Fold popovers so moving cursor to Earth lets user draw right away
+                                        self.collapse_dynamic_island();
+                                    }
+                                }
+                            });
+
+                            // Row 3: Attached `@Context` Chips (if any)
+                            if !self.attached_contexts.is_empty() {
+                                ui.add_space(5.0);
+                                let mut detach_key: Option<String> = None;
+                                ui.horizontal_wrapped(|ui| {
+                                    for att in &self.attached_contexts {
+                                        let lbl = att.chip_label(
+                                            &build_view.bim_bus.project,
+                                            self.selected_target,
+                                        );
+                                        let key = att.dedup_key();
+                                        if icons::icon_button(
+                                            ui,
+                                            att.icon(),
+                                            format!("{lbl} ×"),
+                                            9.8,
+                                            theme.accent_blue,
+                                            theme.accent_blue.gamma_multiply(0.14),
+                                            Stroke::new(
+                                                0.8,
+                                                theme.accent_blue.gamma_multiply(0.45),
+                                            ),
+                                            CornerRadius::same(10),
+                                            Vec2::new(0.0, 20.0),
+                                        )
+                                        .on_hover_text("Click to detach context")
+                                        .clicked()
+                                        {
+                                            detach_key = Some(key);
+                                        }
+                                    }
+                                });
+                                if let Some(k) = detach_key {
+                                    self.detach_context(&k);
+                                }
                             }
-                        });
-                    });
+
+                            ui.add_space(5.0);
+
+                            // Row 4: Prompt & `/` Slash Command Composer
+                            Frame::new()
+                                .fill(theme.bg_card)
+                                .corner_radius(CornerRadius::same(12))
+                                .stroke(Stroke::new(
+                                    1.0,
+                                    if self.composer_had_focus {
+                                        theme.accent_blue.gamma_multiply(0.68)
+                                    } else {
+                                        theme.border_subtle
+                                    },
+                                ))
+                                .inner_margin(Margin::symmetric(10, 6))
+                                .show(ui, |ui| {
+                                    let row_w = (cap_w - 22.0).max(160.0);
+                                    ui.set_width(row_w);
+                                    ui.horizontal(|ui| {
+                                        if let Some(mention) =
+                                            self.active_context_mention(&build_view.bim_bus.project)
+                                        {
+                                            if !is_mobile {
+                                                if icons::icon_button(
+                                                    ui,
+                                                    AppIcon::Target,
+                                                    mention,
+                                                    9.5,
+                                                    theme.accent_blue,
+                                                    theme.accent_blue.gamma_multiply(0.14),
+                                                    Stroke::NONE,
+                                                    CornerRadius::same(8),
+                                                    Vec2::new(0.0, 20.0),
+                                                )
+                                                .on_hover_text("Attach selected canvas item as @Context")
+                                                .clicked()
+                                                {
+                                                    self.attach_context(
+                                                        AiContextAttachment::SelectedElement,
+                                                    );
+                                                }
+                                            }
+                                        }
+
+                                        let bare_enter = self.composer_had_focus
+                                            && !slash_mode
+                                            && ui.ctx().input(|i| !i.modifiers.shift)
+                                            && ui.ctx().input_mut(|i| {
+                                                i.consume_key(
+                                                    egui::Modifiers::NONE,
+                                                    egui::Key::Enter,
+                                                )
+                                            });
+
+                                        let trailing_reserve = 66.0;
+                                        let input_w =
+                                            (ui.available_width() - trailing_reserve).max(60.0);
+                                        let edit_resp = ui.add(
+                                            egui::TextEdit::singleline(&mut self.command_input)
+                                                .desired_width(input_w)
+                                                .frame(Frame::NONE)
+                                                .hint_text(
+                                                    "Ask EigenAI, @ context, or / commands...",
+                                                ),
+                                        );
+                                        self.composer_had_focus = edit_resp.has_focus();
+                                        if std::mem::take(&mut self.request_focus_command) {
+                                            edit_resp.request_focus();
+                                        }
+
+                                        let cur_len = self.command_input.len();
+                                        if cur_len > self.last_command_len
+                                            && self.command_input.ends_with('@')
+                                        {
+                                            self.context_picker_open = true;
+                                        }
+                                        self.last_command_len = cur_len;
+
+                                        let enter_singleline = edit_resp.lost_focus()
+                                            && ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                                        if ui
+                                            .add_sized(
+                                                Vec2::new(24.0, 23.0),
+                                                egui::Button::new(
+                                                    RichText::new("/")
+                                                        .size(11.5)
+                                                        .strong()
+                                                        .color(theme.text_secondary),
+                                                )
+                                                .fill(theme.bg_sidebar)
+                                                .stroke(Stroke::new(0.8, theme.border_subtle))
+                                                .corner_radius(CornerRadius::same(7)),
+                                            )
+                                            .on_hover_text("Browse slash commands (/earth, /3d, /vault...)")
+                                            .clicked()
+                                        {
+                                            if self.command_input.trim_start().starts_with('/') {
+                                                self.command_input.clear();
+                                            } else {
+                                                self.command_input = "/".to_string();
+                                                self.context_picker_open = false;
+                                                self.request_focus_command = true;
+                                            }
+                                        }
+
+                                        let has_text = !self.command_input.trim().is_empty();
+                                        let send_clicked = icons::icon_only_button(
+                                            ui,
+                                            AppIcon::ArrowRight,
+                                            Color32::WHITE,
+                                            if has_text {
+                                                theme.accent_blue
+                                            } else {
+                                                theme.accent_blue.gamma_multiply(0.45)
+                                            },
+                                            Stroke::NONE,
+                                            CornerRadius::same(9),
+                                            Vec2::splat(24.0),
+                                            "Execute Command or AI Prompt",
+                                        )
+                                        .clicked();
+
+                                        if (bare_enter || enter_singleline || send_clicked)
+                                            && has_text
+                                        {
+                                            let submitted = std::mem::take(&mut self.command_input);
+                                            self.last_command_len = 0;
+                                            let sub = self.execute_spatial_input(
+                                                &submitted,
+                                                universal_canvas,
+                                                build_view,
+                                                ai_assistant,
+                                                members,
+                                                projects,
+                                                db_components,
+                                            );
+                                            actions.merge(sub);
+                                        }
+                                    });
+                                });
+                        },
+                    );
                 });
             });
+
+        self.dynamic_island_rect = dock_resp.response.rect;
         self.hud_rects.push(dock_resp.response.rect);
 
         actions
@@ -4997,17 +5106,10 @@ mod tests {
     }
 
     #[test]
-    fn test_phase47_antigravity_side_panel_and_drawer_responsive_zero_overflow() {
+    fn test_phase48_dynamic_island_hover_expand_and_responsive_zero_overflow() {
         let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
-        for win_w in [1280.0_f32, 840.0, 390.0] {
+        for win_w in [1280.0_f32, 840.0, 700.0, 390.0] {
             let mut spatial = SpatialWorkspaceState::default();
-            spatial.agent_panel_open = true;
-            spatial.context_picker_open = true;
-            spatial.vault_drawer_open = true;
-            spatial.vault_path_popover_open = true;
-            spatial.attach_context(AiContextAttachment::BimGeometry);
-            spatial.attach_context(AiContextAttachment::EarthSite);
-
             let mut canvas = UniversalCanvasState::default();
             canvas.is_frozen = false;
             let mut build = BuildView::default();
@@ -5020,25 +5122,19 @@ mod tests {
             let mut db_components = Vec::new();
             let ctx = egui::Context::default();
 
-            for _ in 0..2 {
-                let input = egui::RawInput {
+            let mut run_frame = |pointer: Option<egui::Pos2>,
+                             spatial: &mut SpatialWorkspaceState,
+                             canvas: &mut UniversalCanvasState,
+                             build: &mut BuildView,
+                             ai: &mut AiAssistantView| {
+                let mut input = egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 840.0))),
                     ..Default::default()
                 };
+                if let Some(pos) = pointer {
+                    input.events.push(egui::Event::PointerMoved(pos));
+                }
                 let mut out = ctx.run_ui(input, |ui| {
-                    let ui_ctx = ui.ctx().clone();
-                    let _ = spatial.render_antigravity_side_panel(
-                        ui,
-                        &ui_ctx,
-                        &theme,
-                        &mut canvas,
-                        &mut build,
-                        &mut ai,
-                        &members,
-                        &projects,
-                        &mut db_components,
-                        &[],
-                    );
                     egui::CentralPanel::default()
                         .frame(Frame::new().fill(theme.bg_canvas))
                         .show(ui, |ui| {
@@ -5052,11 +5148,11 @@ mod tests {
                             );
                         });
                     let _ = spatial.render_hud_overlays_with_vault(
-                        &ui_ctx,
+                        ui.ctx(),
                         &theme,
-                        &mut canvas,
-                        &mut build,
-                        &mut ai,
+                        canvas,
+                        build,
+                        ai,
                         &members,
                         &projects,
                         &mut db_components,
@@ -5064,15 +5160,106 @@ mod tests {
                     );
                 });
                 out.textures_delta.clear();
-            }
+            };
 
+            // 1. Pointer away on canvas -> compact idle Dynamic Island pill
+            run_frame(
+                Some(egui::Pos2::new(100.0, 100.0)),
+                &mut spatial,
+                &mut canvas,
+                &mut build,
+                &mut ai,
+            );
+            assert!(!spatial.island_expanded_prev);
+            let idle_rect = spatial.dynamic_island_rect;
+            assert!(idle_rect.is_positive());
+
+            // 2. Hover onto Dynamic Island -> automatically expands to show Vault, Context, AI & Draw controls
+            run_frame(
+                Some(idle_rect.center()),
+                &mut spatial,
+                &mut canvas,
+                &mut build,
+                &mut ai,
+            );
+            assert!(
+                spatial.island_expanded_prev,
+                "Dynamic Island should expand immediately on cursor hover at width {win_w}"
+            );
+            let hovered_rect = spatial.dynamic_island_rect;
+            assert!(
+                hovered_rect.height() >= idle_rect.height(),
+                "Expanded Dynamic Island must grow upward cleanly"
+            );
+
+            // 3. Pin chat + context + Vault drawers open across multiple frames until full animation width and confirm zero overflow
+            spatial.command_bar_expanded = true;
+            spatial.context_picker_open = true;
+            spatial.vault_drawer_open = true;
+            spatial.attach_context(AiContextAttachment::BimGeometry);
+            for _ in 0..8 {
+                run_frame(
+                    Some(hovered_rect.center()),
+                    &mut spatial,
+                    &mut canvas,
+                    &mut build,
+                    &mut ai,
+                );
+            }
             for r in &spatial.hud_rects {
                 assert!(
                     r.right() <= win_w + 1.0 && r.left() >= -1.0,
-                    "Antigravity HUD rect {r:?} overflowed viewport width {win_w}"
+                    "Dynamic Island HUD rect {r:?} overflowed viewport width {win_w}"
                 );
             }
+
+            // 4. Unpin and move cursor back to canvas -> Dynamic Island folds back to compact pill
+            spatial.collapse_dynamic_island();
+            run_frame(
+                Some(egui::Pos2::new(60.0, 60.0)),
+                &mut spatial,
+                &mut canvas,
+                &mut build,
+                &mut ai,
+            );
+            assert!(!spatial.island_expanded_prev);
         }
+    }
+
+    #[test]
+    fn test_phase48_manual_draw_commands_from_dynamic_island() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+
+        let _ = SpatialManualTool::Column.apply(&mut spatial, &mut canvas, &mut build);
+        assert_eq!(spatial.active_canvas_mode, SpatialCanvasMode::Bim3D);
+        assert_eq!(build.ground_author_tool, Ground3DAuthorTool::Column);
+        assert!(SpatialManualTool::Column.is_active(
+            spatial.active_canvas_mode,
+            &canvas,
+            &build
+        ));
+
+        let _ = SpatialManualTool::Line2D.apply(&mut spatial, &mut canvas, &mut build);
+        assert_eq!(spatial.active_canvas_mode, SpatialCanvasMode::EarthPlan2D);
+        assert_eq!(canvas.active_tool, UniversalCanvasTool::Line);
+        assert!(!canvas.globe_mode);
+
+        let _ = SpatialManualTool::Measure.apply(&mut spatial, &mut canvas, &mut build);
+        assert!(canvas.measure_active);
+
+        let _ = SpatialManualTool::Terraform.apply(&mut spatial, &mut canvas, &mut build);
+        assert_eq!(spatial.active_canvas_mode, SpatialCanvasMode::EarthGlobe);
+        assert!(canvas.globe_mode);
+        assert!(canvas.active_tool.is_earth_tool());
+
+        let _ = SpatialManualTool::OrbitPan.apply(&mut spatial, &mut canvas, &mut build);
+        assert!(SpatialManualTool::OrbitPan.is_active(
+            spatial.active_canvas_mode,
+            &canvas,
+            &build
+        ));
     }
 
     #[test]
@@ -5110,7 +5297,7 @@ mod tests {
             &projects,
             &mut db_components,
         );
-        assert!(spatial.context_picker_open && spatial.agent_panel_open);
+        assert!(spatial.context_picker_open);
         assert!(!ctx_act.add_vault_folder);
 
         let _ = spatial.execute_spatial_input(
