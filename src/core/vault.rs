@@ -676,16 +676,19 @@ impl InternalVault {
             }
             let root = Self::vault_root_dir();
             let mut out = Vec::new();
-            let scan_dirs = [
-                ("Projects", root.join("Projects")),
-                ("KnowledgeBase", root.join("KnowledgeBase")),
-                ("Exports", root.join("Exports")),
-                ("Columns", root.join("Columns")),
-                ("Beams", root.join("Beams")),
-                ("Walls", root.join("Walls")),
-                ("Slabs", root.join("Slabs")),
-                ("Vault Root", root.clone()),
-            ];
+            let mut scan_dirs: Vec<(String, PathBuf)> = vec![("Vault Root".to_string(), root.clone())];
+            if let Ok(top_entries) = std::fs::read_dir(&root) {
+                for entry in top_entries.flatten() {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        if let Some(dname) = p.file_name().and_then(|s| s.to_str()) {
+                            if !dname.starts_with('.') {
+                                scan_dirs.push((dname.to_string(), p));
+                            }
+                        }
+                    }
+                }
+            }
             for (cat, dir) in scan_dirs {
                 let Ok(entries) = std::fs::read_dir(&dir) else {
                     continue;
@@ -1988,6 +1991,151 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
             let root = Self::vault_root_dir();
             Self::save_markdown_note_at(&root, title, &final_body)
         }
+    }
+
+    /// Creates an Obsidian-style custom subfolder with a starter `_index.md` note on native & WASM IndexedDB.
+    pub fn create_vault_subfolder(folder_name: &str) -> Result<String, String> {
+        let clean: String = folder_name
+            .trim()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .collect();
+        if clean.is_empty() {
+            return Err("Subfolder name cannot be empty.".to_string());
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let rel = format!("{clean}/_index.md");
+            let body = format!("# {clean}\n\nStructured EigenGraph Vault folder.\n");
+            crate::core::web_bridge::vault_write_file(&rel, &body);
+            Ok(rel)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let root = Self::vault_root_dir();
+            Self::create_vault_subfolder_at(&root, &clean)
+        }
+    }
+
+    /// Native helper to create a custom subfolder under an explicit Vault root.
+    pub fn create_vault_subfolder_at(root: &Path, clean_folder: &str) -> Result<String, String> {
+        let dir = root.join(clean_folder);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed creating subfolder {clean_folder}: {e}"))?;
+        let rel = format!("{clean_folder}/_index.md");
+        let idx = dir.join("_index.md");
+        if !idx.exists() {
+            std::fs::write(
+                &idx,
+                format!("# {clean_folder}\n\nStructured EigenGraph Vault folder.\n"),
+            )
+            .map_err(|e| format!("Failed initializing {rel}: {e}"))?;
+        }
+        Ok(rel)
+    }
+
+    /// Safely deletes a Vault file by normalized relative path across Native & WASM IndexedDB.
+    pub fn delete_vault_context_file(rel_path: &str) -> Result<(), String> {
+        let norm = rel_path.replace('\\', "/");
+        if norm.is_empty() || norm.contains("..") {
+            return Err("Invalid relative Vault path.".to_string());
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::core::web_bridge::vault_delete_file(&norm);
+            Ok(())
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let root = Self::vault_root_dir();
+            Self::delete_vault_context_file_at(&root, &norm)
+        }
+    }
+
+    /// Native helper to delete a relative Vault file safely under an explicit Vault root.
+    pub fn delete_vault_context_file_at(root: &Path, rel_path: &str) -> Result<(), String> {
+        let norm = rel_path.replace('\\', "/");
+        if norm.is_empty() || norm.contains("..") {
+            return Err("Invalid relative Vault path.".to_string());
+        }
+        let mut target = root.to_path_buf();
+        for seg in norm.split('/').filter(|s| !s.is_empty()) {
+            target.push(seg);
+        }
+        if target.exists() && target.is_file() {
+            std::fs::remove_file(&target)
+                .map_err(|e| format!("Failed deleting {norm}: {e}"))?;
+            Ok(())
+        } else {
+            Err(format!("Vault file '{norm}' not found."))
+        }
+    }
+
+    /// Safely renames or moves a Vault file within the same directory/subfolder across Native & WASM.
+    pub fn rename_vault_file(old_rel: &str, new_name: &str) -> Result<String, String> {
+        let norm_old = old_rel.replace('\\', "/");
+        if norm_old.is_empty() || norm_old.contains("..") {
+            return Err("Invalid source Vault path.".to_string());
+        }
+        let trimmed = new_name.trim().replace('\\', "/");
+        if trimmed.is_empty() || trimmed.contains("..") {
+            return Err("Invalid target filename.".to_string());
+        }
+        let clean_name: String = trimmed
+            .rsplit('/')
+            .next()
+            .unwrap_or(&trimmed)
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if clean_name.is_empty() {
+            return Err("Target filename cannot be empty.".to_string());
+        }
+        let new_rel = if let Some((dir, _)) = norm_old.rsplit_once('/') {
+            format!("{dir}/{clean_name}")
+        } else {
+            clean_name
+        };
+        if new_rel == norm_old {
+            return Ok(new_rel);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let content = crate::core::web_bridge::vault_read_file(&norm_old)
+                .ok_or_else(|| format!("Vault file '{norm_old}' unavailable in browser cache."))?;
+            crate::core::web_bridge::vault_write_file(&new_rel, &content);
+            crate::core::web_bridge::vault_delete_file(&norm_old);
+            Ok(new_rel)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let root = Self::vault_root_dir();
+            Self::rename_vault_file_at(&root, &norm_old, &new_rel)
+        }
+    }
+
+    /// Native helper to rename a Vault file safely under an explicit Vault root.
+    pub fn rename_vault_file_at(root: &Path, norm_old: &str, new_rel: &str) -> Result<String, String> {
+        let mut src = root.to_path_buf();
+        for seg in norm_old.split('/').filter(|s| !s.is_empty()) {
+            src.push(seg);
+        }
+        let mut dst = root.to_path_buf();
+        for seg in new_rel.split('/').filter(|s| !s.is_empty()) {
+            dst.push(seg);
+        }
+        if let Some(parent) = dst.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::rename(&src, &dst)
+            .map_err(|e| format!("Failed renaming {norm_old} -> {new_rel}: {e}"))?;
+        Ok(new_rel.to_string())
     }
 }
 

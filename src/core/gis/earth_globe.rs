@@ -1388,15 +1388,6 @@ impl PlanetaryWorldState {
             }
         }
 
-        // Attribution micro-label (bottom-right)
-        gp.text(
-            Pos2::new(rect.max.x - 10.0, rect.max.y - 6.0),
-            Align2::RIGHT_BOTTOM,
-            format!("EigenEarth 3D • {}", world_map.tile_provider.attribution_text()),
-            FontId::proportional(9.5),
-            Color32::from_rgba_unmultiplied(203, 213, 225, 180),
-        );
-
         xform
     }
 

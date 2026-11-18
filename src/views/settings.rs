@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — Phase 52 Unified Growing Dynamic Island, Mobile Expander, Esc Orbit Reset, Precision 2D CAD & Gemini 2.5 Pro Sheets",
+                        "v{} — Phase 53 Unified Earth Site in Dynamic Island, Clean Canvas Corners, LIFO Undo/Redo, Vault Organizer & Story/Slab Studio",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)

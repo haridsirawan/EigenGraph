@@ -750,6 +750,7 @@ pub enum BimElementKind {
     Run,
     Wall,
     Footing,
+    Slab,
 }
 
 /// Complete Relational BIM Project Model with Transactional Undo/Redo History.

@@ -1309,6 +1309,21 @@ impl UniversalCanvasState {
         self.measure_points_lat_lon.clear();
     }
 
+    /// Computes live geodesic measurement summary: `(polyline_m, optional_polygon_area_m2, vertex_count)`.
+    pub fn geodesic_measure_summary(&self) -> (f64, Option<f64>, usize) {
+        let total_m = crate::core::gis::SlippyMapState::geodetic_polyline_length_m(
+            &self.measure_points_lat_lon,
+        );
+        let area_m2 = if self.measure_area_mode && self.measure_points_lat_lon.len() >= 3 {
+            Some(crate::core::gis::SlippyMapState::geodetic_polygon_area_m2(
+                &self.measure_points_lat_lon,
+            ))
+        } else {
+            None
+        };
+        (total_m, area_m2, self.measure_points_lat_lon.len())
+    }
+
     /// Adds a precision parametric 2D Line anchored at `(0, 0)` with exact length `length_m` and azimuth `angle_deg`.
     pub fn commit_parametric_2d_line(
         &mut self,

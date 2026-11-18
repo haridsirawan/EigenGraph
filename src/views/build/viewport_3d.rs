@@ -1123,8 +1123,31 @@ impl BuildView {
                                                 best_w = Some((d, w.id));
                                             }
                                         }
-                                        if let Some((_, wid)) = best_w {
+                                         if let Some((_, wid)) = best_w {
                                             picked_bim = Some((crate::core::BimElementKind::Wall, wid));
+                                        } else {
+                                            let mut best_slab: Option<(f32, usize)> = None;
+                                            for sl in &self.bim_bus.project.slabs {
+                                                if sl.boundary.is_empty() {
+                                                    continue;
+                                                }
+                                                let n = sl.boundary.len() as f64;
+                                                let cx = sl.boundary.iter().map(|p| p.0).sum::<f64>() / n;
+                                                let cy = sl.boundary.iter().map(|p| p.1).sum::<f64>() / n;
+                                                let elev = self.bim_bus.project.level_elevation(sl.level_id) as f32 * 0.001;
+                                                let (sp, _) = project_3d(
+                                                    cx as f32 * 0.001 + offset_x,
+                                                    elev,
+                                                    cy as f32 * 0.001 + offset_z,
+                                                );
+                                                let d = mpos.distance(sp);
+                                                if d <= 26.0 && best_slab.is_none_or(|(bd, _)| d < bd) {
+                                                    best_slab = Some((d, sl.id));
+                                                }
+                                            }
+                                            if let Some((_, sid)) = best_slab {
+                                                picked_bim = Some((crate::core::BimElementKind::Slab, sid));
+                                            }
                                         }
                                     }
                                 }

@@ -96,6 +96,13 @@ impl SmartPopupTab {
     }
 }
 
+/// Domain provenance used to maintain chronological LIFO Undo/Redo across 3D BIM & 2D Canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpatialUndoDomain {
+    Bim3D,
+    Canvas2D,
+}
+
 /// Element or Earth location targeted by a spatial click on the full canvas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SmartSelectionTarget {
@@ -103,6 +110,7 @@ pub enum SmartSelectionTarget {
     Beam(usize),
     Wall(usize),
     Footing(usize),
+    Slab(usize),
     SketchEntity(usize),
     EarthSite { lat: f64, lon: f64 },
 }
@@ -260,6 +268,12 @@ impl AiContextAttachment {
                     .find(|f| f.id == id)
                     .map(|f| format!("@{}", f.name))
                     .unwrap_or_else(|| format!("@Footing#{id}")),
+                Some(SmartSelectionTarget::Slab(id)) => project
+                    .slabs
+                    .iter()
+                    .find(|s| s.id == id)
+                    .map(|s| format!("@{}", s.name))
+                    .unwrap_or_else(|| format!("@Slab#{id}")),
                 Some(SmartSelectionTarget::EarthSite { lat, lon }) => {
                     format!("@Earth({lat:.2},{lon:.2})")
                 }
@@ -1092,6 +1106,15 @@ pub struct SpatialWorkspaceState {
     pub draw_2d_radius_m: f64,
     pub sketch_edit_color: [u8; 3],
     pub sketch_edit_width: f32,
+    // Phase 53: Chronological mixed Undo/Redo, Story/Slab authoring, & Obsidian Vault organizer
+    pub undo_timeline: Vec<SpatialUndoDomain>,
+    pub redo_timeline: Vec<SpatialUndoDomain>,
+    last_bim_undo_len: usize,
+    last_uc_undo_len: usize,
+    pub active_story_idx: usize,
+    pub vault_filter_query: String,
+    pub vault_new_folder_name: String,
+    pub vault_rename_target: Option<(String, String)>,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -1169,12 +1192,21 @@ impl Default for SpatialWorkspaceState {
             draw_2d_radius_m: 3.0,
             sketch_edit_color: [59, 130, 246],
             sketch_edit_width: 2.2,
+            undo_timeline: Vec::new(),
+            redo_timeline: Vec::new(),
+            last_bim_undo_len: 0,
+            last_uc_undo_len: 0,
+            active_story_idx: 0,
+            vault_filter_query: String::new(),
+            vault_new_folder_name: String::new(),
+            vault_rename_target: None,
         }
     }
 }
 
 impl SpatialWorkspaceState {
-    /// Returns true when the Floating Dynamic Island is hovered or has an active composer/popover.
+    /// Returns true when the Floating Dynamic Island is hovered, has an active composer/popover,
+    /// or displays the active Earth Site Location card.
     pub fn is_dynamic_island_expanded(&self, ctx: &egui::Context) -> bool {
         let pointer_pos = ctx.input(|i| i.pointer.hover_pos());
         let hover_margin = if self.island_expanded_prev { 18.0 } else { 4.0 };
@@ -1191,6 +1223,7 @@ impl SpatialWorkspaceState {
             || self.api_key_popover_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
+            || matches!(self.selected_target, Some(SmartSelectionTarget::EarthSite { .. }))
             || self.command_bar_expanded;
         hovered_island || engaged
     }
@@ -1205,6 +1238,191 @@ impl SpatialWorkspaceState {
         self.api_key_popover_open = false;
         self.mobile_deck_pinned = false;
         self.composer_had_focus = false;
+        if matches!(self.selected_target, Some(SmartSelectionTarget::EarthSite { .. })) {
+            self.selected_target = None;
+        }
+    }
+
+    /// Records new undo push events from either BIM or 2D Canvas in strict chronological LIFO order.
+    pub fn observe_undo_stacks(&mut self, bim_undo_len: usize, uc_undo_len: usize) {
+        if bim_undo_len > self.last_bim_undo_len {
+            let delta = bim_undo_len - self.last_bim_undo_len;
+            for _ in 0..delta {
+                self.undo_timeline.push(SpatialUndoDomain::Bim3D);
+            }
+            self.redo_timeline.clear();
+        }
+        if uc_undo_len > self.last_uc_undo_len {
+            let delta = uc_undo_len - self.last_uc_undo_len;
+            for _ in 0..delta {
+                self.undo_timeline.push(SpatialUndoDomain::Canvas2D);
+            }
+            self.redo_timeline.clear();
+        }
+        self.last_bim_undo_len = bim_undo_len;
+        self.last_uc_undo_len = uc_undo_len;
+    }
+
+    /// Synchronizes undo baseline counters after commit/undo/redo so no spurious growth is logged.
+    pub fn sync_undo_baseline(&mut self, bim_undo_len: usize, uc_undo_len: usize) {
+        self.last_bim_undo_len = bim_undo_len;
+        self.last_uc_undo_len = uc_undo_len;
+    }
+
+    /// Resolves the most recent domain to undo chronologically (LIFO) across BIM & 2D Canvas.
+    pub fn pop_undo_domain(
+        &mut self,
+        bim_undo_len: usize,
+        uc_undo_len: usize,
+    ) -> Option<SpatialUndoDomain> {
+        while let Some(dom) = self.undo_timeline.pop() {
+            match dom {
+                SpatialUndoDomain::Bim3D if bim_undo_len > 0 => {
+                    self.redo_timeline.push(SpatialUndoDomain::Bim3D);
+                    return Some(SpatialUndoDomain::Bim3D);
+                }
+                SpatialUndoDomain::Canvas2D if uc_undo_len > 0 => {
+                    self.redo_timeline.push(SpatialUndoDomain::Canvas2D);
+                    return Some(SpatialUndoDomain::Canvas2D);
+                }
+                _ => {}
+            }
+        }
+        if bim_undo_len > 0 {
+            self.redo_timeline.push(SpatialUndoDomain::Bim3D);
+            Some(SpatialUndoDomain::Bim3D)
+        } else if uc_undo_len > 0 {
+            self.redo_timeline.push(SpatialUndoDomain::Canvas2D);
+            Some(SpatialUndoDomain::Canvas2D)
+        } else {
+            None
+        }
+    }
+
+    /// Resolves the next domain to redo chronologically (LIFO) across BIM & 2D Canvas.
+    pub fn pop_redo_domain(
+        &mut self,
+        bim_redo_len: usize,
+        uc_redo_len: usize,
+    ) -> Option<SpatialUndoDomain> {
+        while let Some(dom) = self.redo_timeline.pop() {
+            match dom {
+                SpatialUndoDomain::Bim3D if bim_redo_len > 0 => {
+                    self.undo_timeline.push(SpatialUndoDomain::Bim3D);
+                    return Some(SpatialUndoDomain::Bim3D);
+                }
+                SpatialUndoDomain::Canvas2D if uc_redo_len > 0 => {
+                    self.undo_timeline.push(SpatialUndoDomain::Canvas2D);
+                    return Some(SpatialUndoDomain::Canvas2D);
+                }
+                _ => {}
+            }
+        }
+        if bim_redo_len > 0 {
+            self.undo_timeline.push(SpatialUndoDomain::Bim3D);
+            Some(SpatialUndoDomain::Bim3D)
+        } else if uc_redo_len > 0 {
+            self.undo_timeline.push(SpatialUndoDomain::Canvas2D);
+            Some(SpatialUndoDomain::Canvas2D)
+        } else {
+            None
+        }
+    }
+
+    /// Resolves sorted active story `(base_level_id, top_level_id, label, count)` for manual BIM placement.
+    pub fn active_base_and_top_levels(&self, project: &BimProject) -> (usize, usize, String, usize) {
+        let mut lvls = project.levels.clone();
+        lvls.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
+        if lvls.is_empty() {
+            return (1, 1, "Level 1".to_string(), 1);
+        }
+        let idx = self.active_story_idx.min(lvls.len().saturating_sub(1));
+        let base = &lvls[idx];
+        let top = lvls.get(idx + 1).unwrap_or(base);
+        (
+            base.id,
+            top.id,
+            format!("{} ({:.1}m)", base.name, base.elevation_mm * 0.001),
+            lvls.len(),
+        )
+    }
+
+    /// Adds a new floor story `3500 mm` above the highest existing BIM level and selects it.
+    pub fn add_story_above_top(&mut self, build_view: &mut BuildView) -> Result<String, String> {
+        let mut lvls = build_view.bim_bus.project.levels.clone();
+        lvls.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
+        let max_elev = lvls.last().map(|l| l.elevation_mm).unwrap_or(0.0);
+        let next_num = lvls.len() + 1;
+        let msg = build_view.bim_bus.execute(BimCommand::AddLevel {
+            name: format!("Level {next_num}"),
+            elevation_mm: max_elev + 3500.0,
+        })?;
+        self.active_story_idx = lvls.len().saturating_sub(1);
+        self.push_trace(msg.clone(), true);
+        Ok(msg)
+    }
+
+    /// Creates a structural concrete slab on the target elevated story spanning project extents.
+    pub fn add_slab_at_active_story(&mut self, build_view: &mut BuildView) -> Result<String, String> {
+        let mut lvls = build_view.bim_bus.project.levels.clone();
+        lvls.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
+        let level_id = if lvls.is_empty() {
+            1
+        } else {
+            let idx = (self.active_story_idx + 1).min(lvls.len() - 1);
+            lvls[idx].id
+        };
+        let (min_x, max_x, min_y, max_y) =
+            if let Some((pmin, pmax)) = build_view.bim_bus.project.plan_extents_mm() {
+                if (pmax[0] - pmin[0]).abs() < 800.0 || (pmax[1] - pmin[1]).abs() < 800.0 {
+                    (-4000.0, 4000.0, -3000.0, 3000.0)
+                } else {
+                    (pmin[0], pmax[0], pmin[1], pmax[1])
+                }
+            } else {
+                (-4000.0, 4000.0, -3000.0, 3000.0)
+            };
+        let msg = build_view.bim_bus.execute(BimCommand::AddSlab {
+            level_id,
+            boundary: vec![
+                crate::core::P2(min_x, min_y),
+                crate::core::P2(max_x, min_y),
+                crate::core::P2(max_x, max_y),
+                crate::core::P2(min_x, max_y),
+            ],
+            openings: Vec::new(),
+            thickness_mm: 180.0,
+            is_roof: false,
+            roof_slope_deg: 0.0,
+        })?;
+        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+        self.push_trace(msg.clone(), true);
+        Ok(msg)
+    }
+
+    /// Applies an instant 3D BIM camera orientation preset (`iso`, `top`, `front`).
+    pub fn apply_camera_preset(&mut self, build_view: &mut BuildView, preset: &str) {
+        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+        match preset {
+            "top" => {
+                build_view.cam_yaw = 0.0;
+                build_view.cam_pitch = 1.48;
+                build_view.perspective = false;
+                self.push_trace("Camera Preset: Plan Top", true);
+            }
+            "front" => {
+                build_view.cam_yaw = 0.0;
+                build_view.cam_pitch = 0.04;
+                build_view.perspective = false;
+                self.push_trace("Camera Preset: Front Elevation", true);
+            }
+            _ => {
+                build_view.cam_yaw = 0.68;
+                build_view.cam_pitch = 0.44;
+                build_view.perspective = true;
+                self.push_trace("Camera Preset: Isometric 3D", true);
+            }
+        }
     }
 
     /// Returns true if any manual 3D authoring, 2D CAD drawing, or geodesic measure tool is currently active.
@@ -1881,6 +2099,7 @@ impl SpatialWorkspaceState {
             BimElementKind::Run => SmartSelectionTarget::Beam(id),
             BimElementKind::Wall => SmartSelectionTarget::Wall(id),
             BimElementKind::Footing => SmartSelectionTarget::Footing(id),
+            BimElementKind::Slab => SmartSelectionTarget::Slab(id),
         }
     }
 
@@ -1907,6 +2126,11 @@ impl SpatialWorkspaceState {
                 .iter()
                 .find(|f| f.id == id)
                 .map(|f| format!("@{}", f.name)),
+            SmartSelectionTarget::Slab(id) => project
+                .slabs
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| format!("@{}", s.name)),
             SmartSelectionTarget::SketchEntity(id) => Some(format!("@Entity#{id}")),
             SmartSelectionTarget::EarthSite { lat, lon } => {
                 Some(format!("@Site({lat:.2},{lon:.2})"))
@@ -2222,6 +2446,75 @@ impl SpatialWorkspaceState {
                 }
             }
             return actions;
+        }
+
+        // 1b. Smart Local Imperative Routing when offline or explicit workspace imperatives are requested
+        if lower == "undo" {
+            actions.undo = true;
+            return actions;
+        } else if lower == "redo" {
+            actions.redo = true;
+            return actions;
+        } else if lower == "focus 3d" || lower == "open 3d" || lower == "bim 3d" {
+            self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+            actions.fit_camera = true;
+            self.push_trace("Switched to 3D BIM Viewport", true);
+            return actions;
+        } else if lower == "iso view" || lower == "isometric view" {
+            self.apply_camera_preset(build_view, "iso");
+            actions.fit_camera = true;
+            return actions;
+        } else if lower == "top view" || lower == "plan view" {
+            self.apply_camera_preset(build_view, "top");
+            actions.fit_camera = true;
+            return actions;
+        } else if lower == "front view" || lower == "elevation view" {
+            self.apply_camera_preset(build_view, "front");
+            actions.fit_camera = true;
+            return actions;
+        } else if lower == "add story" || lower == "add level" || lower == "new story" {
+            if self.add_story_above_top(build_view).is_ok() {
+                actions.sync_fem_and_earth = true;
+                actions.fit_camera = true;
+            }
+            return actions;
+        } else if lower == "add slab" || lower == "create slab" {
+            if self.add_slab_at_active_story(build_view).is_ok() {
+                actions.sync_fem_and_earth = true;
+                actions.fit_camera = true;
+            }
+            return actions;
+        } else if let Some(target_sheet) = lower.strip_prefix("open ") {
+            let pillar_opt = if target_sheet.contains("analysis") || target_sheet.contains("fem") {
+                Some(NavigationPillar::AnalysisSimulation)
+            } else if target_sheet.contains("sched") || target_sheet.contains("4d") {
+                Some(NavigationPillar::TimeScheduling)
+            } else if target_sheet.contains("budget") || target_sheet.contains("cost") || target_sheet.contains("boq") {
+                Some(NavigationPillar::CostBudgeting)
+            } else if target_sheet.contains("sustain") || target_sheet.contains("carbon") || target_sheet.contains("6d") {
+                Some(NavigationPillar::SustainabilityEnergy)
+            } else if target_sheet.contains("safety") || target_sheet.contains("8d") {
+                Some(NavigationPillar::SafetyHealth)
+            } else if target_sheet.contains("report") || target_sheet.contains("pbg") {
+                Some(NavigationPillar::ReportPublishing)
+            } else if target_sheet.contains("vault") {
+                Some(NavigationPillar::MyLibrary)
+            } else {
+                None
+            };
+            if let Some(p) = pillar_opt {
+                if self.agent_mode == AgentExecutionMode::Planning && self.agent_model != AgentModelChoice::EigenAiProFem {
+                    self.queue_planning_proposal(
+                        format!("Open {} Sheet", p.clean_name()),
+                        "Review sheet navigation request before opening floating panel.",
+                        format!("OPEN_SHEET({})", p.clean_name()),
+                        vec![PlannedProposalAction::OpenSheet(p)],
+                    );
+                } else {
+                    self.open_module_overlay(p);
+                }
+                return actions;
+            }
         }
 
         // 2. Direct Earth Place Navigation if query matches a city or lat,lon cleanly
@@ -2565,6 +2858,13 @@ impl SpatialWorkspaceState {
                     f.name, f.width_mm, f.length_mm, f.thickness_mm
                 ))
             }
+            SmartSelectionTarget::Slab(id) => {
+                let s = project.slabs.iter().find(|s| s.id == id)?;
+                Some(format!(
+                    "Slab {} (t={:.0}mm, level=#{}, openings={})",
+                    s.name, s.thickness_mm, s.level_id, s.openings.len()
+                ))
+            }
             SmartSelectionTarget::EarthSite { lat, lon } => {
                 let site = compute_site_environmental_coupling(lat, lon, &universal_canvas.earth_world);
                 Some(format!(
@@ -2703,10 +3003,8 @@ impl SpatialWorkspaceState {
                                                 .suffix("mm"),
                                         );
                                         if ui.small_button("Place @(X,Y)").clicked() {
-                                            let mut lvls = build_view.bim_bus.project.levels.clone();
-                                            lvls.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
-                                            let base_id = lvls.first().map(|l| l.id).unwrap_or(1);
-                                            let top_id = lvls.get(1).map(|l| l.id).unwrap_or(base_id);
+                                            let (base_id, top_id, _, _) =
+                                                self.active_base_and_top_levels(&build_view.bim_bus.project);
                                             let w = build_view.author_col_width_mm.clamp(150.0, 2000.0);
                                             let d = build_view.author_col_depth_mm.clamp(150.0, 2000.0);
                                             if let Ok(msg) = build_view.bim_bus.execute(BimCommand::AddColumn {
@@ -2758,9 +3056,8 @@ impl SpatialWorkspaceState {
                                                 let rad = self.manual_polar_deg.to_radians();
                                                 let end_x = start_mm[0] + self.manual_polar_len_m * 1000.0 * rad.cos();
                                                 let end_y = start_mm[1] + self.manual_polar_len_m * 1000.0 * rad.sin();
-                                                let mut lvls = build_view.bim_bus.project.levels.clone();
-                                                lvls.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
-                                                let base_id = lvls.first().map(|l| l.id).unwrap_or(1);
+                                                let (base_id, _, _, _) =
+                                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
                                                 let bw = build_view.author_beam_width_mm.clamp(120.0, 1500.0);
                                                 let bd = build_view.author_beam_depth_mm.clamp(150.0, 2500.0);
                                                 if let Ok(msg) = build_view.bim_bus.execute(crate::core::BimCommand::AddBeamRun {
@@ -2807,9 +3104,8 @@ impl SpatialWorkspaceState {
                                                 let rad = self.manual_polar_deg.to_radians();
                                                 let end_x = start_mm[0] + self.manual_polar_len_m * 1000.0 * rad.cos();
                                                 let end_y = start_mm[1] + self.manual_polar_len_m * 1000.0 * rad.sin();
-                                                let mut lvls = build_view.bim_bus.project.levels.clone();
-                                                lvls.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
-                                                let base_id = lvls.first().map(|l| l.id).unwrap_or(1);
+                                                let (base_id, _, _, _) =
+                                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
                                                 let wt = build_view.author_wall_thickness_mm.clamp(80.0, 1200.0);
                                                 if let Ok(msg) = build_view.bim_bus.execute(crate::core::BimCommand::AddWall {
                                                     base_level_id: base_id,
@@ -2846,9 +3142,8 @@ impl SpatialWorkspaceState {
                                                 .suffix("mm"),
                                         );
                                         if ui.small_button("Place @(X,Y)").clicked() {
-                                            let mut lvls = build_view.bim_bus.project.levels.clone();
-                                            lvls.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
-                                            let base_id = lvls.first().map(|l| l.id).unwrap_or(1);
+                                            let (base_id, _, _, _) =
+                                                self.active_base_and_top_levels(&build_view.bim_bus.project);
                                             let fs = build_view.author_footing_size_mm.clamp(400.0, 6000.0);
                                             if let Ok(msg) = build_view.bim_bus.execute(BimCommand::AddFooting {
                                                 level_id: base_id,
@@ -2864,6 +3159,32 @@ impl SpatialWorkspaceState {
                                         }
                                     }
                                     Ground3DAuthorTool::Orbit => {}
+                                }
+                                let (_, _, story_lbl, lvl_cnt) =
+                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
+                                if ui
+                                    .small_button(format!("Story: {story_lbl}"))
+                                    .on_hover_text("Cycle active base level for placement")
+                                    .clicked()
+                                {
+                                    self.active_story_idx = (self.active_story_idx + 1) % lvl_cnt.max(1);
+                                }
+                                if ui
+                                    .small_button("+ Story")
+                                    .on_hover_text("Add upper floor story (+3.5m) via undoable BimCommand")
+                                    .clicked()
+                                    && self.add_story_above_top(build_view).is_ok()
+                                {
+                                    actions.sync_fem_and_earth = true;
+                                    actions.fit_camera = true;
+                                }
+                                if ui
+                                    .small_button("+ Slab")
+                                    .on_hover_text("Add structural concrete floor slab on active upper level")
+                                    .clicked()
+                                    && self.add_slab_at_active_story(build_view).is_ok()
+                                {
+                                    actions.sync_fem_and_earth = true;
                                 }
                                 ui.label(
                                     RichText::new("(Esc: Orbit)")
@@ -2961,10 +3282,28 @@ impl SpatialWorkspaceState {
                                 }
                             }
                             if universal_canvas.measure_active {
+                                let (dist_m, area_opt, pts_n) =
+                                    universal_canvas.geodesic_measure_summary();
+                                let measure_lbl = if let Some(area_m2) = area_opt {
+                                    format!(
+                                        "Measure: {:.0} m² ({:.2} ha) • {:.1} m",
+                                        area_m2,
+                                        area_m2 / 10_000.0,
+                                        dist_m
+                                    )
+                                } else if pts_n >= 2 {
+                                    if dist_m >= 1000.0 {
+                                        format!("Measure: {:.2} km ({pts_n} pts)", dist_m / 1000.0)
+                                    } else {
+                                        format!("Measure: {dist_m:.1} m ({pts_n} pts)")
+                                    }
+                                } else {
+                                    "Geodesic Measure".to_string()
+                                };
                                 icons::pill_badge(
                                     ui,
                                     AppIcon::DimensionRuler,
-                                    "Geodesic Measure",
+                                    measure_lbl,
                                     theme.accent_green,
                                 );
                                 if !universal_canvas.measure_points_lat_lon.is_empty()
@@ -3001,22 +3340,24 @@ impl SpatialWorkspaceState {
             self.hud_rects.push(pill_resp.response.rect);
         }
 
-        // 3. Smart Element Pop-Up Inspector (ONLY visible when an element or Earth site is clicked)
+        // 3. Smart Element Pop-Up Inspector (for structural elements & 2D CAD; EarthSite now lives in Dynamic Island)
         if let Some(target) = self.selected_target {
-            let popup_actions = self.render_smart_element_popup(
-                ctx,
-                theme,
-                target,
-                universal_canvas,
-                build_view,
-                ai_assistant,
-                members,
-                projects,
-                db_components,
-                vp,
-                is_mobile,
-            );
-            actions.merge(popup_actions);
+            if !matches!(target, SmartSelectionTarget::EarthSite { .. }) {
+                let popup_actions = self.render_smart_element_popup(
+                    ctx,
+                    theme,
+                    target,
+                    universal_canvas,
+                    build_view,
+                    ai_assistant,
+                    members,
+                    projects,
+                    db_components,
+                    vp,
+                    is_mobile,
+                );
+                actions.merge(popup_actions);
+            }
         }
 
         // 4. Unified Hover-Expandable Floating Dynamic Island
@@ -3326,6 +3667,22 @@ impl SpatialWorkspaceState {
                     (format!("Footing #{id}"), "Removed or missing".to_string(), AppIcon::Slab)
                 }
             }
+            SmartSelectionTarget::Slab(id) => {
+                if let Some(s) = project.slabs.iter().find(|s| s.id == id) {
+                    (
+                        s.name.clone(),
+                        format!(
+                            "Structural {} • t={:.0} mm • {} opening(s)",
+                            if s.is_roof { "Roof" } else { "Slab" },
+                            s.thickness_mm,
+                            s.openings.len()
+                        ),
+                        AppIcon::Slab,
+                    )
+                } else {
+                    (format!("Slab #{id}"), "Removed or missing".to_string(), AppIcon::Slab)
+                }
+            }
             SmartSelectionTarget::SketchEntity(id) => (
                 format!("CAD Sketch #{id}"),
                 "2D Vector Annotation Entity".to_string(),
@@ -3337,6 +3694,233 @@ impl SpatialWorkspaceState {
                 AppIcon::Globe,
             ),
         }
+    }
+
+    /// Renders the interactive Earth Site Location inspector & build actions cleanly inside Dynamic Island.
+    #[allow(clippy::too_many_arguments)]
+    fn render_earth_site_inspector_strip(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        lat: f64,
+        lon: f64,
+        panel_w: f32,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+    ) -> SpatialHudActions {
+        let mut actions = SpatialHudActions::default();
+        let picked_site =
+            compute_site_environmental_coupling(lat, lon, &universal_canvas.earth_world);
+
+        Frame::new()
+            .fill(Color32::TRANSPARENT)
+            .inner_margin(Margin::symmetric(2, 4))
+            .show(ui, |ui| {
+                let sw = (panel_w - 10.0).max(160.0);
+                ui.set_width(sw);
+                ui.set_max_width(sw);
+                ui.horizontal(|ui| {
+                    icons::icon_label(
+                        ui,
+                        AppIcon::Globe,
+                        13.0,
+                        theme.accent_blue,
+                        format!("Earth Site Location ({lat:.4}°, {lon:.4}°)"),
+                        11.0,
+                        theme.text_primary,
+                        true,
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if icons::icon_only_button(
+                            ui,
+                            AppIcon::Close,
+                            theme.text_secondary,
+                            Color32::TRANSPARENT,
+                            Stroke::NONE,
+                            CornerRadius::same(6),
+                            Vec2::splat(18.0),
+                            "Dismiss Earth Site Location",
+                        )
+                        .clicked()
+                        {
+                            self.selected_target = None;
+                            universal_canvas.last_picked_earth_lat_lon = None;
+                        }
+                    });
+                });
+                ui.add_space(3.0);
+                ui.horizontal_wrapped(|ui| {
+                    icons::pill_badge(
+                        ui,
+                        AppIcon::MapPin,
+                        format!("Elev {:+.1} m", picked_site.elevation_m),
+                        theme.accent_blue,
+                    );
+                    icons::pill_badge(
+                        ui,
+                        AppIcon::Bolt,
+                        format!(
+                            "Ss {:.2}g / S1 {:.2}g",
+                            picked_site.seismic_pga_ss_g, picked_site.seismic_pga_s1_g
+                        ),
+                        theme.accent_orange,
+                    );
+                    icons::pill_badge(
+                        ui,
+                        AppIcon::Globe,
+                        format!("Wind {:.1} m/s", picked_site.design_wind_ms),
+                        theme.accent_blue,
+                    );
+                    icons::pill_badge(
+                        ui,
+                        AppIcon::AlertTriangle,
+                        format!("Flood {:.0}%", picked_site.flood_risk_index * 100.0),
+                        if picked_site.flood_risk_index > 0.55 {
+                            theme.accent_red
+                        } else {
+                            theme.accent_green
+                        },
+                    );
+                    ui.label(
+                        RichText::new(&picked_site.recommended_soil_class)
+                            .size(9.8)
+                            .color(theme.text_secondary),
+                    );
+                });
+                ui.label(
+                    RichText::new(picked_site.foundation_advisory)
+                        .size(9.6)
+                        .color(theme.text_muted),
+                );
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    if icons::icon_button(
+                        ui,
+                        AppIcon::MapPin,
+                        "Anchor Site Here",
+                        9.8,
+                        Color32::WHITE,
+                        theme.accent_blue,
+                        Stroke::NONE,
+                        CornerRadius::same(7),
+                        Vec2::new(0.0, 22.0),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.ground_origin_lat_lon = (lat, lon);
+                        universal_canvas.ground_origin_anchored = true;
+                        universal_canvas
+                            .earth_world
+                            .start_fly_to(&universal_canvas.world_map, lat, lon, 16.5, "Anchored Site");
+                        self.push_trace(format!("Site anchored @ {lat:.3}°, {lon:.3}°"), true);
+                    }
+                    if icons::icon_button(
+                        ui,
+                        AppIcon::Column,
+                        "Anchor & Build Here",
+                        9.8,
+                        Color32::WHITE,
+                        theme.accent_green,
+                        Stroke::NONE,
+                        CornerRadius::same(7),
+                        Vec2::new(0.0, 22.0),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.ground_origin_lat_lon = (lat, lon);
+                        universal_canvas.ground_origin_anchored = true;
+                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                        if build_view.bim_bus.project.is_empty() {
+                            build_view.ground_author_tool = Ground3DAuthorTool::Column;
+                        }
+                        actions.anchor_and_build_site = Some((lat, lon));
+                        self.push_trace(format!("Anchored & Opened 3D BIM @ {lat:.3}°, {lon:.3}°"), true);
+                    }
+                    if icons::icon_button(
+                        ui,
+                        AppIcon::Grid,
+                        "Build 3x2 Portal",
+                        9.8,
+                        Color32::WHITE,
+                        theme.accent_orange,
+                        Stroke::NONE,
+                        CornerRadius::same(7),
+                        Vec2::new(0.0, 22.0),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.ground_origin_lat_lon = (lat, lon);
+                        universal_canvas.ground_origin_anchored = true;
+                        if let Ok(msg) = build_view
+                            .bim_bus
+                            .execute_natural_language("portal 3x2 @6m 2floors")
+                        {
+                            self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                            actions.sync_fem_and_earth = true;
+                            actions.fit_camera = true;
+                            self.push_trace(msg, true);
+                        }
+                    }
+                    if icons::icon_button(
+                        ui,
+                        AppIcon::Building,
+                        "Load BIMCraft Sample",
+                        9.8,
+                        theme.text_primary,
+                        theme.bg_card,
+                        Stroke::new(0.9, theme.border_subtle),
+                        CornerRadius::same(7),
+                        Vec2::new(0.0, 22.0),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.ground_origin_lat_lon = (lat, lon);
+                        universal_canvas.ground_origin_anchored = true;
+                        actions.load_sample_building = true;
+                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                    }
+                    if !build_view.bim_bus.project.is_empty()
+                        && icons::icon_button(
+                            ui,
+                            AppIcon::Building,
+                            "Focus 3D BIM",
+                            9.8,
+                            Color32::WHITE,
+                            theme.accent_blue,
+                            Stroke::NONE,
+                            CornerRadius::same(7),
+                            Vec2::new(0.0, 22.0),
+                        )
+                        .clicked()
+                    {
+                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                        actions.fit_camera = true;
+                        self.push_trace("Focused 3D BIM Viewport", true);
+                    }
+                    if icons::icon_button(
+                        ui,
+                        AppIcon::Bolt,
+                        "Sync Site Seismic",
+                        9.8,
+                        theme.accent_orange,
+                        theme.bg_card,
+                        Stroke::new(0.9, theme.accent_orange.gamma_multiply(0.45)),
+                        CornerRadius::same(7),
+                        Vec2::new(0.0, 22.0),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.ground_origin_lat_lon = (lat, lon);
+                        universal_canvas.ground_origin_anchored = true;
+                        actions.apply_site_seismic = true;
+                        self.push_trace(
+                            format!("Synced Earth Site Ss={:.2}g, Wind={:.0} m/s", picked_site.seismic_pga_ss_g, picked_site.design_wind_ms),
+                            true,
+                        );
+                    }
+                });
+            });
+        actions
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4368,6 +4952,85 @@ impl SpatialWorkspaceState {
                     }
                 }
             }
+            SmartSelectionTarget::Slab(slab_id) => {
+                let slab_opt = build_view
+                    .bim_bus
+                    .project
+                    .slabs
+                    .iter()
+                    .find(|s| s.id == slab_id)
+                    .cloned();
+                let Some(slab) = slab_opt else {
+                    ui.label("Slab/Roof not found in active model.");
+                    return actions;
+                };
+                let area_mm2 = {
+                    let n = slab.boundary.len();
+                    let mut sum = 0.0_f64;
+                    for i in 0..n {
+                        let a = slab.boundary[i];
+                        let b = slab.boundary[(i + 1) % n];
+                        sum += a.0 * b.1 - b.0 * a.1;
+                    }
+                    0.5 * sum.abs()
+                };
+                let area_m2 = area_mm2 * 1e-6;
+                let vol_m3 = area_m2 * (slab.thickness_mm * 0.001);
+                let elev_m = build_view.bim_bus.project.level_elevation(slab.level_id) * 0.001;
+                match self.popup_tab {
+                    SmartPopupTab::Properties => {
+                        Self::render_kv_row(ui, theme, "Level Elevation", &format!("{elev_m:.2} m"), theme.text_primary);
+                        Self::render_kv_row(ui, theme, "Thickness", &format!("{:.0} mm", slab.thickness_mm), theme.accent_blue);
+                        Self::render_kv_row(ui, theme, "Footprint Area", &format!("{area_m2:.2} m²"), theme.accent_green);
+                        Self::render_kv_row(ui, theme, "Shaft Openings", &format!("{}", slab.openings.len()), theme.text_secondary);
+                        ui.add_space(6.0);
+                        if icons::icon_button(
+                            ui,
+                            AppIcon::Trash,
+                            "Delete Slab (Undoable)",
+                            10.5,
+                            theme.accent_red,
+                            theme.accent_red.gamma_multiply(0.12),
+                            Stroke::new(0.9, theme.accent_red.gamma_multiply(0.45)),
+                            CornerRadius::same(8),
+                            Vec2::new(ui.available_width(), 26.0),
+                        )
+                        .clicked()
+                        {
+                            if let Ok(msg) = build_view.bim_bus.execute(BimCommand::DeleteElement {
+                                element_id: slab_id,
+                            }) {
+                                actions.sync_fem_and_earth = true;
+                                self.selected_target = None;
+                                universal_canvas.highlighted_bim_element = None;
+                                self.push_trace(msg, true);
+                            }
+                        }
+                    }
+                    SmartPopupTab::Calculations => {
+                        let sw_kpa = 24.0 * (slab.thickness_mm * 0.001);
+                        let est_factored_kpa = 1.2 * (sw_kpa + 1.5) + 1.6 * 2.5;
+                        Self::render_kv_row(ui, theme, "Self-Weight (DL)", &format!("{sw_kpa:.2} kPa"), theme.text_primary);
+                        Self::render_kv_row(ui, theme, "Factored Qu (1.2D+1.6L)", &format!("{est_factored_kpa:.2} kPa"), theme.accent_orange);
+                    }
+                    SmartPopupTab::Lifecycle5D6D => {
+                        let co2_kg = vol_m3 * 305.0;
+                        Self::render_kv_row(ui, theme, "Concrete Volume", &format!("{vol_m3:.2} m³"), theme.text_primary);
+                        Self::render_kv_row(ui, theme, "Embodied Carbon", &format!("{co2_kg:.1} kgCO₂e"), theme.accent_green);
+                    }
+                    SmartPopupTab::AskAi => {
+                        self.render_popup_ai_actions(
+                            ui,
+                            theme,
+                            &slab.name,
+                            ai_assistant,
+                            members,
+                            projects,
+                            db_components,
+                        );
+                    }
+                }
+            }
         }
 
         actions
@@ -4804,6 +5467,39 @@ impl SpatialWorkspaceState {
                             }
                         });
                     });
+                    ui.add_space(3.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.vault_filter_query)
+                                .desired_width((inner_w * 0.44).max(95.0))
+                                .hint_text("Filter vault files..."),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.vault_new_folder_name)
+                                .desired_width((inner_w * 0.34).max(80.0))
+                                .hint_text("New subfolder..."),
+                        );
+                        if ui
+                            .small_button("+ Folder")
+                            .on_hover_text("Create organized subfolder inside active Vault")
+                            .clicked()
+                            && !self.vault_new_folder_name.trim().is_empty()
+                        {
+                            match crate::core::InternalVault::create_vault_subfolder(
+                                &self.vault_new_folder_name,
+                            ) {
+                                Ok(rel) => {
+                                    self.vault_feedback = Some(format!("Created subfolder note '{rel}'."));
+                                    self.vault_new_folder_name.clear();
+                                    actions.refresh_vault = true;
+                                    self.push_trace(format!("Created folder -> {rel}"), true);
+                                }
+                                Err(err) => {
+                                    self.vault_feedback = Some(err);
+                                }
+                            }
+                        }
+                    });
                     if self.vault_note_composer_open {
                         ui.add_space(4.0);
                         Frame::new()
@@ -4918,6 +5614,9 @@ impl SpatialWorkspaceState {
                                 });
                                 if self.preview_note_editing {
                                     ui.add_space(2.0);
+                                    if ui.small_button("+ Insert Vault Context").clicked() {
+                                        note_body.push_str("\n\n- Backlink: [[Engineering Design Reference]]\n");
+                                    }
                                     ui.add(
                                         egui::TextEdit::multiline(&mut note_body)
                                             .desired_rows(3)
@@ -4933,6 +5632,36 @@ impl SpatialWorkspaceState {
                                 }
                             });
                     }
+                    if let Some((old_rel, mut rename_draft)) = self.vault_rename_target.clone() {
+                        ui.add_space(3.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Rename:").size(9.5).color(theme.text_muted));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut rename_draft)
+                                    .desired_width((inner_w * 0.5).max(110.0)),
+                            );
+                            if ui.small_button("Apply").clicked() {
+                                match crate::core::InternalVault::rename_vault_file(
+                                    &old_rel,
+                                    &rename_draft,
+                                ) {
+                                    Ok(new_rel) => {
+                                        self.vault_feedback = Some(format!("Renamed -> {new_rel}"));
+                                        self.vault_rename_target = None;
+                                        actions.refresh_vault = true;
+                                    }
+                                    Err(err) => {
+                                        self.vault_feedback = Some(err);
+                                    }
+                                }
+                            } else if ui.small_button("Cancel").clicked() {
+                                self.vault_rename_target = None;
+                            } else {
+                                self.vault_rename_target = Some((old_rel, rename_draft));
+                            }
+                        });
+                    }
+                    let fq = self.vault_filter_query.trim().to_lowercase();
                     ScrollArea::vertical()
                         .id_salt("antigravity_vault_explorer_scroll")
                         .max_height(132.0)
@@ -4946,6 +5675,12 @@ impl SpatialWorkspaceState {
                                 );
                             }
                             for proj in vault_projects.iter().take(10) {
+                                if !fq.is_empty()
+                                    && !proj.name.to_lowercase().contains(&fq)
+                                    && !proj.rel_path.to_lowercase().contains(&fq)
+                                {
+                                    continue;
+                                }
                                 ui.horizontal(|ui| {
                                     if ui
                                         .small_button("@")
@@ -4970,10 +5705,25 @@ impl SpatialWorkspaceState {
                                     {
                                         actions.open_vault_project = Some(proj.clone());
                                     }
+                                    if ui.small_button("Ren").on_hover_text("Rename file").clicked() {
+                                        self.vault_rename_target = Some((proj.rel_path.clone(), proj.name.clone()));
+                                    }
+                                    if ui.small_button("Del").on_hover_text("Delete Vault file").clicked()
+                                        && crate::core::InternalVault::delete_vault_context_file(&proj.rel_path).is_ok()
+                                    {
+                                        self.vault_feedback = Some(format!("Deleted {}", proj.name));
+                                        actions.refresh_vault = true;
+                                    }
                                 });
                             }
-                            for vf in vault_files.iter().take(12) {
+                            for vf in vault_files.iter().take(16) {
                                 if vault_projects.iter().any(|p| p.rel_path == vf.rel_path) {
+                                    continue;
+                                }
+                                if !fq.is_empty()
+                                    && !vf.name.to_lowercase().contains(&fq)
+                                    && !vf.category.to_lowercase().contains(&fq)
+                                {
                                     continue;
                                 }
                                 ui.horizontal(|ui| {
@@ -5005,6 +5755,15 @@ impl SpatialWorkspaceState {
                                             )
                                             .unwrap_or_else(|| "(Binary or empty file)".to_string());
                                         self.previewed_vault_note = Some((vf.rel_path.clone(), preview));
+                                    }
+                                    if ui.small_button("Ren").on_hover_text("Rename Vault file").clicked() {
+                                        self.vault_rename_target = Some((vf.rel_path.clone(), vf.name.clone()));
+                                    }
+                                    if ui.small_button("Del").on_hover_text("Delete Vault file").clicked()
+                                        && crate::core::InternalVault::delete_vault_context_file(&vf.rel_path).is_ok()
+                                    {
+                                        self.vault_feedback = Some(format!("Deleted {}", vf.name));
+                                        actions.refresh_vault = true;
                                     }
                                 });
                             }
@@ -5391,6 +6150,19 @@ impl SpatialWorkspaceState {
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
                     ui.set_max_width(cap_w);
+                    if let Some(SmartSelectionTarget::EarthSite { lat, lon }) = self.selected_target {
+                        let site_actions = self.render_earth_site_inspector_strip(
+                            ui,
+                            theme,
+                            lat,
+                            lon,
+                            cap_w,
+                            universal_canvas,
+                            build_view,
+                        );
+                        actions.merge(site_actions);
+                        ui.separator();
+                    }
                     if self.history_popover_open {
                         Frame::new()
                             .fill(Color32::TRANSPARENT)
@@ -6173,6 +6945,44 @@ impl SpatialWorkspaceState {
                                     }
                                 }
 
+                                if ui.small_button("Iso").on_hover_text("3D Isometric Camera").clicked() {
+                                    self.apply_camera_preset(build_view, "iso");
+                                    actions.fit_camera = true;
+                                }
+                                if ui.small_button("Top").on_hover_text("3D Plan Top Camera").clicked() {
+                                    self.apply_camera_preset(build_view, "top");
+                                    actions.fit_camera = true;
+                                }
+                                if ui.small_button("Front").on_hover_text("3D Elevation Camera").clicked() {
+                                    self.apply_camera_preset(build_view, "front");
+                                    actions.fit_camera = true;
+                                }
+                                let (_, _, story_lbl, lvl_cnt) =
+                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
+                                if ui
+                                    .small_button(format!("Story: {story_lbl}"))
+                                    .on_hover_text("Cycle active placement floor level")
+                                    .clicked()
+                                {
+                                    self.active_story_idx = (self.active_story_idx + 1) % lvl_cnt.max(1);
+                                }
+                                if ui
+                                    .small_button("+ Story")
+                                    .on_hover_text("Add upper floor story (+3.5m)")
+                                    .clicked()
+                                    && self.add_story_above_top(build_view).is_ok()
+                                {
+                                    actions.sync_fem_and_earth = true;
+                                    actions.fit_camera = true;
+                                }
+                                if ui
+                                    .small_button("+ Slab")
+                                    .on_hover_text("Add structural concrete floor slab")
+                                    .clicked()
+                                    && self.add_slab_at_active_story(build_view).is_ok()
+                                {
+                                    actions.sync_fem_and_earth = true;
+                                }
                                 if ui.small_button("Fit").clicked() {
                                     actions.fit_camera = true;
                                 }
@@ -7659,5 +8469,162 @@ mod tests {
         assert!(!canvas.measure_active);
         canvas.clear_measure();
         assert!(canvas.measure_points_lat_lon.is_empty());
+    }
+
+    #[test]
+    fn test_phase53_earth_site_in_dynamic_island_no_top_right_popup_and_zero_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        spatial.selected_target = Some(SmartSelectionTarget::EarthSite {
+            lat: -6.2088,
+            lon: 106.8456,
+        });
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+
+        for win_w in [1100.0_f32, 390.0] {
+            let ctx = egui::Context::default();
+            for _ in 0..5 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 820.0))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            // EarthSite expands inside the ONE Dynamic Island (NO separate top-right Smart Pop-Up rect)
+            assert_eq!(spatial.hud_rects.len(), 1);
+            assert!(spatial.is_dynamic_island_expanded(&ctx));
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Dynamic Island with Earth Site Location {r:?} overflowed viewport {win_w}"
+            );
+        }
+
+        // Collapsing dismisses EarthSite smoothly back to idle pill
+        spatial.collapse_dynamic_island();
+        assert!(spatial.selected_target.is_none());
+    }
+
+    #[test]
+    fn test_phase53_lifo_undo_story_slab_camera_and_measure_summary() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut build = BuildView::default();
+        let mut canvas = UniversalCanvasState::default();
+
+        // 1. Chronological LIFO Undo/Redo across BIM 3D & 2D Canvas
+        spatial.observe_undo_stacks(build.bim_bus.undo_stack.len(), canvas.undo_stack.len());
+        let _ = build
+            .bim_bus
+            .execute_natural_language("portal 2x1 @6m 1floors")
+            .unwrap();
+        spatial.observe_undo_stacks(build.bim_bus.undo_stack.len(), canvas.undo_stack.len());
+        let eid = canvas.commit_parametric_2d_line(6.0, 0.0, "2D", "Drafting");
+        spatial.observe_undo_stacks(build.bim_bus.undo_stack.len(), canvas.undo_stack.len());
+
+        assert_eq!(
+            spatial.pop_undo_domain(build.bim_bus.undo_stack.len(), canvas.undo_stack.len()),
+            Some(SpatialUndoDomain::Canvas2D)
+        );
+        assert!(canvas.undo());
+        assert!(canvas.entity_summary(eid).is_none());
+        assert_eq!(
+            spatial.pop_undo_domain(build.bim_bus.undo_stack.len(), canvas.undo_stack.len()),
+            Some(SpatialUndoDomain::Bim3D)
+        );
+
+        // 2. Story increment, Slab authoring, Slab selection mention, & Camera presets
+        assert!(spatial.add_story_above_top(&mut build).is_ok());
+        assert!(spatial.add_slab_at_active_story(&mut build).is_ok());
+        let slab_id = build.bim_bus.project.slabs.last().unwrap().id;
+        spatial.selected_target = Some(SmartSelectionTarget::Slab(slab_id));
+        assert!(spatial
+            .active_context_mention(&build.bim_bus.project)
+            .unwrap()
+            .contains("Slab"));
+
+        spatial.apply_camera_preset(&mut build, "top");
+        assert!(!build.perspective);
+        spatial.apply_camera_preset(&mut build, "iso");
+        assert!(build.perspective);
+
+        // 3. Geodesic measure summary & local action routing
+        canvas.measure_active = true;
+        canvas.measure_points_lat_lon.push((-6.20, 106.84));
+        canvas.measure_points_lat_lon.push((-6.21, 106.85));
+        let (dist_m, _, pts_n) = canvas.geodesic_measure_summary();
+        assert_eq!(pts_n, 2);
+        assert!(dist_m > 1000.0);
+
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let _ = spatial.execute_spatial_input(
+            "open scheduling",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(
+            spatial.active_overlay_pillar == Some(NavigationPillar::TimeScheduling)
+                || !spatial.pending_proposals.is_empty()
+        );
+    }
+
+    #[test]
+    fn test_phase53_vault_subfolder_rename_and_delete() {
+        let _guard = crate::core::vault::TEST_VAULT_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let temp_vault = std::env::temp_dir().join(format!(
+            "eigengraph_phase53_vault_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp_vault);
+        crate::core::InternalVault::set_runtime_vault_dir(temp_vault.clone());
+
+        let sub_rel = crate::core::InternalVault::create_vault_subfolder_at(&temp_vault, "Site_Data")
+            .expect("Subfolder should create starter note");
+        assert_eq!(sub_rel, "Site_Data/_index.md");
+        assert!(temp_vault.join("Site_Data/_index.md").exists());
+
+        let renamed = crate::core::InternalVault::rename_vault_file_at(
+            &temp_vault,
+            "Site_Data/_index.md",
+            "Site_Data/Geotech_Overview.md",
+        )
+        .expect("Should rename file cleanly");
+        assert_eq!(renamed, "Site_Data/Geotech_Overview.md");
+        assert!(temp_vault.join("Site_Data/Geotech_Overview.md").exists());
+
+        crate::core::InternalVault::delete_vault_context_file_at(
+            &temp_vault,
+            "Site_Data/Geotech_Overview.md",
+        )
+        .expect("Should delete file cleanly");
+        assert!(!temp_vault.join("Site_Data/Geotech_Overview.md").exists());
+
+        crate::core::InternalVault::reset_runtime_vault_dir();
+        let _ = std::fs::remove_dir_all(&temp_vault);
     }
 }

@@ -519,7 +519,12 @@ impl App for EigenGraphApp {
             }
         }
 
-        // Global Ctrl/Cmd+K or F1 shortcuts
+        self.spatial_workspace.observe_undo_stacks(
+            self.build_view.bim_bus.undo_stack.len(),
+            self.universal_canvas.undo_stack.len(),
+        );
+
+        // Global Ctrl/Cmd+K, F1, or Esc shortcuts
         if !ctx.egui_wants_keyboard_input() {
             if self.spatial_workspace.spatial_mode_enabled {
                 if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
@@ -564,6 +569,12 @@ impl App for EigenGraphApp {
                             &mut self.build_view,
                             &mut self.universal_canvas,
                         );
+                    } else if matches!(
+                        self.spatial_workspace.selected_target,
+                        Some(crate::views::spatial_workspace::SmartSelectionTarget::EarthSite { .. })
+                    ) {
+                        self.spatial_workspace.selected_target = None;
+                        self.universal_canvas.last_picked_earth_lat_lon = None;
                     } else if !self.spatial_workspace.popup_pinned {
                         self.spatial_workspace.selected_target = None;
                         self.universal_canvas.highlighted_bim_element = None;
@@ -880,6 +891,34 @@ impl EigenGraphApp {
     ) {
         use crate::views::spatial_workspace::{SpatialCanvasMode, SpatialLens};
 
+        if !ctx.egui_wants_keyboard_input() {
+            if ctx.input(|i| i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z)) {
+                let dom = self.spatial_workspace.pop_undo_domain(
+                    self.build_view.bim_bus.undo_stack.len(),
+                    self.universal_canvas.undo_stack.len(),
+                );
+                if dom.is_some() {
+                    let mut undo_act = crate::views::spatial_workspace::SpatialHudActions::default();
+                    undo_act.undo = true;
+                    self.apply_spatial_hud_actions_with_domain(undo_act, dom, workspace_snapshot);
+                }
+            } else if ctx.input(|i| {
+                i.modifiers.command
+                    && ((i.modifiers.shift && i.key_pressed(egui::Key::Z))
+                        || i.key_pressed(egui::Key::Y))
+            }) {
+                let dom = self.spatial_workspace.pop_redo_domain(
+                    self.build_view.bim_bus.redo_stack.len(),
+                    self.universal_canvas.redo_stack.len(),
+                );
+                if dom.is_some() {
+                    let mut redo_act = crate::views::spatial_workspace::SpatialHudActions::default();
+                    redo_act.redo = true;
+                    self.apply_spatial_hud_actions_with_domain(redo_act, dom, workspace_snapshot);
+                }
+            }
+        }
+
         let modal_open = self.show_settings
             || self.show_vault_startup_modal
             || self.universal_canvas.import_json_open
@@ -1010,6 +1049,15 @@ impl EigenGraphApp {
     fn apply_spatial_hud_actions(
         &mut self,
         hud_actions: crate::views::spatial_workspace::SpatialHudActions,
+        workspace_snapshot: &crate::views::universal_canvas::WorkspaceCanvasSettings,
+    ) {
+        self.apply_spatial_hud_actions_with_domain(hud_actions, None, workspace_snapshot);
+    }
+
+    fn apply_spatial_hud_actions_with_domain(
+        &mut self,
+        hud_actions: crate::views::spatial_workspace::SpatialHudActions,
+        forced_domain: Option<crate::views::spatial_workspace::SpatialUndoDomain>,
         workspace_snapshot: &crate::views::universal_canvas::WorkspaceCanvasSettings,
     ) {
         if hud_actions.load_sample_building {
@@ -1274,24 +1322,62 @@ impl EigenGraphApp {
             );
         }
         if hud_actions.undo {
-            if let Some(msg) = self.build_view.bim_bus.undo() {
-                self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
-                self.sync_bim_to_fem();
-                self.sync_earth_maps();
-                self.spatial_workspace.push_trace(msg, true);
-            } else if self.universal_canvas.undo() {
-                self.spatial_workspace.push_trace("Undid 2D canvas action", true);
+            let domain = forced_domain.or_else(|| {
+                self.spatial_workspace.pop_undo_domain(
+                    self.build_view.bim_bus.undo_stack.len(),
+                    self.universal_canvas.undo_stack.len(),
+                )
+            });
+            match domain {
+                Some(crate::views::spatial_workspace::SpatialUndoDomain::Canvas2D) => {
+                    if self.universal_canvas.undo() {
+                        self.spatial_workspace.push_trace("Undid 2D canvas action", true);
+                    }
+                }
+                _ => {
+                    if let Some(msg) = self.build_view.bim_bus.undo() {
+                        self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+                        self.sync_bim_to_fem();
+                        self.sync_earth_maps();
+                        self.spatial_workspace.push_trace(msg, true);
+                    } else if self.universal_canvas.undo() {
+                        self.spatial_workspace.push_trace("Undid 2D canvas action", true);
+                    }
+                }
             }
+            self.spatial_workspace.sync_undo_baseline(
+                self.build_view.bim_bus.undo_stack.len(),
+                self.universal_canvas.undo_stack.len(),
+            );
         }
         if hud_actions.redo {
-            if let Some(msg) = self.build_view.bim_bus.redo() {
-                self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
-                self.sync_bim_to_fem();
-                self.sync_earth_maps();
-                self.spatial_workspace.push_trace(msg, true);
-            } else if self.universal_canvas.redo() {
-                self.spatial_workspace.push_trace("Redid 2D canvas action", true);
+            let domain = forced_domain.or_else(|| {
+                self.spatial_workspace.pop_redo_domain(
+                    self.build_view.bim_bus.redo_stack.len(),
+                    self.universal_canvas.redo_stack.len(),
+                )
+            });
+            match domain {
+                Some(crate::views::spatial_workspace::SpatialUndoDomain::Canvas2D) => {
+                    if self.universal_canvas.redo() {
+                        self.spatial_workspace.push_trace("Redid 2D canvas action", true);
+                    }
+                }
+                _ => {
+                    if let Some(msg) = self.build_view.bim_bus.redo() {
+                        self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+                        self.sync_bim_to_fem();
+                        self.sync_earth_maps();
+                        self.spatial_workspace.push_trace(msg, true);
+                    } else if self.universal_canvas.redo() {
+                        self.spatial_workspace.push_trace("Redid 2D canvas action", true);
+                    }
+                }
             }
+            self.spatial_workspace.sync_undo_baseline(
+                self.build_view.bim_bus.undo_stack.len(),
+                self.universal_canvas.undo_stack.len(),
+            );
         }
     }
 

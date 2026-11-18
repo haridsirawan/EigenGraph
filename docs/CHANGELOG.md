@@ -7,6 +7,26 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.5.3] - 2026-11-18 — Phase 53: Earth Site Inside Dynamic Island, Pure Earth Corners, LIFO Undo/Redo, Vault Organizer & Story/Slab Studio
+
+### Added & Changed
+- **Unified Earth Site Location Strip Inside Dynamic Island & Watermark-Free Earth Corners (`src/views/spatial_workspace.rs`, `src/core/gis/earth_globe.rs`, `src/core/gis/map_widget.rs`, `docs/UI_ARCHITECTURE.md`)**:
+  - Moved `EarthSite` telemetry (`Ground Elevation`, `Seismic Hazard Ss/S1`, `Design Wind Speed`, `Flood Risk Index`, `Soil Class`) and quick site actions (`Anchor Site Here`, `Anchor & Build Here`, `Build 3x2 Portal`, `Load BIMCraft Sample`, `Focus 3D BIM`, `Sync Site Seismic`) directly into the single growing Dynamic Island (`render_earth_site_inspector_strip`), eliminating the separate top-right popup box when clicking Earth locations.
+  - Removed the bottom-right `EigenEarth 3D • Tiles © Esri World Imagery` attribution micro-label across both 3D Earth Globe and 2D Slippy Map viewports so all four canvas corners remain completely unobstructed.
+- **Keyboard `Cmd/Ctrl+Z` & `Cmd/Ctrl+Shift+Z / Y` + Chronological LIFO Undo/Redo (`src/app.rs`, `src/views/spatial_workspace.rs`)**:
+  - Wired global Spatial Mode `Cmd/Ctrl+Z` (Undo) and `Cmd/Ctrl+Shift+Z` / `Cmd/Ctrl+Y` (Redo) shortcuts when keyboard focus is outside text inputs.
+  - Added `SpatialUndoDomain` chronological LIFO history (`observe_undo_stacks`, `pop_undo_domain`, `pop_redo_domain`) so Undo/Redo always reverses the most recent BIM 3D or 2D CAD action across domains accurately.
+- **Obsidian-Style Vault Subfolder & File Management (`src/core/vault.rs`, `src/views/spatial_workspace.rs`)**:
+  - Expanded `InternalVault` directory scanning to discover custom user subfolders alongside structured folders on Native & WASM IndexedDB, and added `create_vault_subfolder`, `rename_vault_file`, and `delete_vault_context_file`.
+  - Added Vault search filter, `+ Folder` creator, inline `Ren` / `Del` actions, and `+ Insert Vault Context` backlink helper inside the Dynamic Island Vault drawer.
+- **Active Story Selector, `Slab` Authoring/Inspection & 3D Camera Presets (`src/core/bim.rs`, `src/views/build/viewport_3d.rs`, `src/views/spatial_workspace.rs`)**:
+  - Added `Story` floor selector, `+ Story` (`AddLevel +3.5m`), and `+ Slab` (`AddSlab`) controls inside the Active Tool Pill and Dynamic Island Hover Extension Strip, plus `Iso`, `Top`, and `Front` 3D camera presets.
+  - Added `BimElementKind::Slab` 3D ray picking and `SmartSelectionTarget::Slab(id)` inspector (`Level Elevation`, `Thickness`, `Footprint Area`, `Embodied Carbon`, and undoable delete).
+- **Offline `EigenAI Pro` Imperative Routing & Live `Geodesic Measure` Readout (`src/views/universal_canvas.rs`, `src/views/spatial_workspace.rs`)**:
+  - Added `geodesic_measure_summary` live distance (`m`/`km`) and polygon area (`m²`/`ha`) display inside the Active Tool Pill, plus offline imperative routing (`open <sheet>`, `add story`, `add slab`, `iso/top/front view`, `focus 3d`, `undo/redo`).
+
+---
+
 ## [v0.5.2] - 2026-11-18 — Phase 52: Unified Growing Dynamic Island, Mobile Expander, Esc Orbit Reset, Precision 2D CAD & Gemini 2.5 Pro Sheets
 
 ### Added & Changed

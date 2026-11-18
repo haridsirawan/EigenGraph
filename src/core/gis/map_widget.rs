@@ -1309,16 +1309,6 @@ impl SlippyMapState {
                 self.render_scale_bar(painter, rect, theme);
             }
         }
-
-        // Subtle basemap attribution badge (bottom-right)
-        let attr_text = self.tile_provider.attribution_text();
-        painter.text(
-            Pos2::new(rect.max.x - 10.0, rect.max.y - 6.0),
-            egui::Align2::RIGHT_BOTTOM,
-            attr_text,
-            FontId::proportional(9.5),
-            theme.text_muted.gamma_multiply(0.85),
-        );
     }
 
     fn render_cartographic_basemap(
