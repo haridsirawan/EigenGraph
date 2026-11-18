@@ -1944,9 +1944,29 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
     /// Saves an Obsidian-style Markdown engineering note inside `KnowledgeBase/<stem>.md`
     /// under an explicit Vault directory root.
     pub fn save_markdown_note_at(root: &Path, title: &str, body: &str) -> Result<String, String> {
-        let dir = root.join("KnowledgeBase");
+        Self::save_markdown_note_in_folder_at(root, "KnowledgeBase", title, body)
+    }
+
+    /// Saves an Obsidian-style Markdown engineering note into a custom sanitized subfolder `<folder>/<stem>.md`.
+    pub fn save_markdown_note_in_folder_at(
+        root: &Path,
+        folder: &str,
+        title: &str,
+        body: &str,
+    ) -> Result<String, String> {
+        let clean_folder: String = folder
+            .trim()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .collect();
+        let target_folder = if clean_folder.is_empty() {
+            "KnowledgeBase"
+        } else {
+            clean_folder.as_str()
+        };
+        let dir = root.join(target_folder);
         std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed creating KnowledgeBase directory: {e}"))?;
+            .map_err(|e| format!("Failed creating {target_folder} directory: {e}"))?;
         let clean: String = title
             .trim()
             .trim_end_matches(".md")
@@ -1954,7 +1974,7 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
             .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
             .collect();
         let stem = if clean.is_empty() { "Engineering_Note" } else { clean.as_str() };
-        let rel = format!("KnowledgeBase/{stem}.md");
+        let rel = format!("{target_folder}/{stem}.md");
         let target = dir.join(format!("{stem}.md"));
         let final_body = if body.trim().is_empty() {
             format!("# {}\n\nCreated in EigenGraph Obsidian Vault.\n", title.trim())
@@ -1966,8 +1986,22 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
         Ok(rel)
     }
 
-    /// Saves an Obsidian-style Markdown note inside `KnowledgeBase/` for the active Vault.
-    pub fn save_markdown_note(title: &str, body: &str) -> Result<String, String> {
+    /// Saves an Obsidian-style Markdown note inside `<folder>/` for the active Vault (Native + WASM).
+    pub fn save_markdown_note_in_folder(
+        folder: &str,
+        title: &str,
+        body: &str,
+    ) -> Result<String, String> {
+        let clean_folder: String = folder
+            .trim()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .collect();
+        let target_folder = if clean_folder.is_empty() {
+            "KnowledgeBase"
+        } else {
+            clean_folder.as_str()
+        };
         let final_body = if body.trim().is_empty() {
             format!("# {}\n\nCreated in EigenGraph Obsidian Vault.\n", title.trim())
         } else {
@@ -1982,15 +2016,87 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
                 .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
                 .collect();
             let stem = if clean.is_empty() { "Engineering_Note" } else { clean.as_str() };
-            let rel = format!("KnowledgeBase/{stem}.md");
+            let rel = format!("{target_folder}/{stem}.md");
             crate::core::web_bridge::vault_write_file(&rel, &final_body);
             Ok(rel)
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
             let root = Self::vault_root_dir();
-            Self::save_markdown_note_at(&root, title, &final_body)
+            Self::save_markdown_note_in_folder_at(&root, target_folder, title, &final_body)
         }
+    }
+
+    /// Saves an Obsidian-style Markdown note inside `KnowledgeBase/` for the active Vault.
+    pub fn save_markdown_note(title: &str, body: &str) -> Result<String, String> {
+        Self::save_markdown_note_in_folder("KnowledgeBase", title, body)
+    }
+
+    /// Lists available Vault subfolders (combining standard Obsidian taxonomy + user subfolders).
+    pub fn list_vault_subfolders() -> Vec<String> {
+        let mut folders = vec![
+            "KnowledgeBase".to_string(),
+            "Calculations".to_string(),
+            "Site_Data".to_string(),
+            "Projects".to_string(),
+        ];
+        for vf in Self::list_vault_context_files(48) {
+            if vf.category != "Vault Root" && !folders.contains(&vf.category) {
+                folders.push(vf.category);
+            }
+        }
+        folders
+    }
+
+    /// Builds a structured civil & structural engineering Markdown audit dossier for Vault archiving.
+    pub fn build_engineering_audit_markdown(
+        project: &crate::core::BimProject,
+        members: &[StructuralMember],
+        lat: f64,
+        lon: f64,
+        elev_m: f64,
+        ss_g: f64,
+        wind_ms: f64,
+    ) -> String {
+        let min_ari = members.iter().map(|m| m.ari).fold(1.0_f64, f64::min);
+        let max_dcr = members.iter().map(|m| m.utilization * 100.0).fold(0.0_f64, f64::max);
+        let crit_cnt = members.iter().filter(|m| m.is_critical || m.ari < 0.70).count();
+        let mut out = format!(
+            "# Engineering Structural & Earth Audit: {}\n\n\
+             ## 1. Site & Geohazard Telemetry\n\
+             - Coordinates: ({lat:.4} deg, {lon:.4} deg)\n\
+             - Ground Elevation: {elev_m:+.1} m ASL\n\
+             - Seismic Ss: {ss_g:.2} g\n\
+             - Design Wind Speed: {wind_ms:.1} m/s\n\n\
+             ## 2. BIM & FEM Summary\n\
+             - Levels: {} | Columns: {} | Beams: {} | Walls: {} | Slabs: {} | Footings: {}\n\
+             - Active FEM Members: {} | Max DCR: {:.1}% | Min ARI: {:.3} | Critical Elements: {}\n\n\
+             ## 3. Priority Member Diagnostics\n",
+            project.project_name,
+            project.levels.len(),
+            project.columns.len(),
+            project.runs.len(),
+            project.walls.len(),
+            project.slabs.len(),
+            project.footings.len(),
+            members.len(),
+            max_dcr,
+            min_ari,
+            crit_cnt,
+        );
+        let mut sorted: Vec<&StructuralMember> = members.iter().collect();
+        sorted.sort_by(|a, b| b.utilization.total_cmp(&a.utilization));
+        for m in sorted.into_iter().take(8) {
+            out.push_str(&format!(
+                "- **{}** ({}) — DCR {:.1}%, ARI {:.3}{}\n",
+                m.name,
+                m.section,
+                m.utilization * 100.0,
+                m.ari,
+                if m.is_critical || m.ari < 0.70 { " [CRITICAL]" } else { "" }
+            ));
+        }
+        out
     }
 
     /// Creates an Obsidian-style custom subfolder with a starter `_index.md` note on native & WASM IndexedDB.

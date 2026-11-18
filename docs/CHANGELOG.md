@@ -7,6 +7,31 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.5.4] - 2026-11-18 — Phase 54: Essential Restructured Dynamic Island, Structural Health Triage, Enriched Gemini BIM IDs, Wall Openings, 2D Slab Picking & Vault Multi-Folder Notes
+
+### Added & Changed
+- **Essential, User-Friendly Restructured Dynamic Island (`src/views/spatial_workspace.rs`, `docs/UI_ARCHITECTURE.md`)**:
+  - Simplified the Resting Dock Row 1 so when an Obsidian Vault is connected only `Vault: <name>` appears (moving `Switch` inside the Vault drawer), reducing idle capsule width and visual noise.
+  - Reorganized the expanded Hover Extension Deck into four clean, mode-aware layers:
+    1. **Structural Health HUD** (when BIM/FEM elements exist): live `C / B • Max DCR % • Min ARI • Crit` metrics with 1-click **`Inspect Worst`** bottleneck focus and **`Auto-Repair`**.
+    2. **Core Quick Controls**: `Undo`, `Redo`, `View (Earth 3D / BIM 3D / Plan 2D)`, `Fit`, `Export`, `IFC4`, `Audit .md`, `API Key`, `Settings`, and a collapsible **`More Tools ▼/▲`** toggle (`hover_more_tools_open`).
+    3. **Context-Aware Mode Studio Bar**: adapts cleanly to `BIM 3D` (`Iso`, `Top`, `Front`, `Story`, `+ Story`, `+ Slab`, `Clean / DCR% / ARI / Moment / 4D`), `Plan 2D` (`Ortho`, `Grid`, `Freehand`, `Circle`, `Dim`, `Note`, `BoxSel`, `Erase`), or `Earth 3D` (`Map BG`, `Grid`, `Uplift`, `Carve`, `Seawall`).
+    4. **Extended Drawer (`More Tools`)**: keeps 11 secondary 2D CAD / Earth / Export utilities tucked behind an opt-in expander for a cleaner everyday workflow.
+- **Structural Health Triage & Live Cursor Telemetry (`src/views/spatial_workspace.rs`)**:
+  - Added `structural_health_summary` to rank the worst `utilization` / critical `StructuralMember` dynamically and resolve `Inspect Worst` directly to the governing `Column` or `Beam`.
+  - Added live cursor world coordinates `@ (x.xx, y.yy) m` (`hover_3d_ground_snap_mm`) and geographic coordinates `@ lat°, lon°` (`cursor_lat_lon`) inside the floating Active Tool Pill.
+- **Enriched Gemini AI Payload & Story/Slab Directives (`src/views/spatial_workspace.rs`)**:
+  - Added `format_critical_bim_context` to inject exact top-6 critical `Column #id (WxD mm)` and `Beam #id (bxh mm)` identifiers, `DCR%`, `ARI`, and slab counts into `build_enriched_context_payload` (`BimGeometry` / `FemRedundancy`) and the Spatial Gemini system prompt.
+  - Added `[[ADD_STORY]]` / `[[ADD_LEVEL]]` and `[[ADD_SLAB]]` directive parsing and undoable proposal execution via `PlannedProposalAction::{AddStory, AddSlab}`.
+- **`Wall` Opening Authoring & 2D Plan `Slab` Picking (`src/views/spatial_workspace.rs`, `src/views/universal_canvas.rs`)**:
+  - Added 1-click **`+ Door (900x2100)`** (`OpeningKind::SingleDoor`) and **`+ Window (1800x1400)`** (`OpeningKind::CasementWindow`, sill `900 mm`) CSG controls (`BimCommand::AddOpening`) inside the `Wall` Smart Pop-Up Properties tab.
+  - Added Stage 5 polygon point-in-polygon hit detection (`BimElementKind::Slab`) inside `UniversalCanvasState::pick_bim_element_at_screen` for 2D Plan selection.
+- **Vault Multi-Folder Note Target, `Audit .md` Dossier & `IFC4` Export (`src/core/vault.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Added `list_vault_subfolders`, `save_markdown_note_in_folder`, `save_markdown_note_in_folder_at`, and `build_engineering_audit_markdown` in `InternalVault`.
+  - Added target subfolder selection (`vault_note_folder`) in the Vault `+ Note (.md)` composer plus direct **`Audit .md`** Vault archiving and **`IFC4`** spatial `.ifc` export actions (`SpatialHudActions`).
+
+---
+
 ## [v0.5.3] - 2026-11-18 — Phase 53: Earth Site Inside Dynamic Island, Pure Earth Corners, LIFO Undo/Redo, Vault Organizer & Story/Slab Studio
 
 ### Added & Changed

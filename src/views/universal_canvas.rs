@@ -5231,7 +5231,37 @@ impl UniversalCanvasState {
                 best_ft = Some((d, f.id));
             }
         }
-        best_ft.map(|(_, id)| (crate::core::BimElementKind::Footing, id))
+        if let Some((_, id)) = best_ft {
+            return Some((crate::core::BimElementKind::Footing, id));
+        }
+
+        // 5. Floor Slabs / Roofs (reverse order prefers top-most/latest slab in 2D plan)
+        for sl in bim_project.slabs.iter().rev() {
+            if sl.boundary.len() < 3 {
+                continue;
+            }
+            let pts: Vec<Pos2> = sl
+                .boundary
+                .iter()
+                .map(|p| self.world_to_screen(rect, [p.0, p.1]))
+                .collect();
+            let mut inside = false;
+            let mut j = pts.len() - 1;
+            for i in 0..pts.len() {
+                let pi = pts[i];
+                let pj = pts[j];
+                if ((pi.y > pos.y) != (pj.y > pos.y))
+                    && (pos.x < (pj.x - pi.x) * (pos.y - pi.y) / ((pj.y - pi.y) + 1e-6) + pi.x)
+                {
+                    inside = !inside;
+                }
+                j = i;
+            }
+            if inside {
+                return Some((crate::core::BimElementKind::Slab, sl.id));
+            }
+        }
+        None
     }
 
     #[allow(clippy::too_many_arguments)]

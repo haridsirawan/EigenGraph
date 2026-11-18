@@ -1088,6 +1088,71 @@ impl EigenGraphApp {
                 workspace_snapshot.clone(),
             );
         }
+        if hud_actions.export_ifc4 {
+            let ifc = self.build_view.bim_bus.project.export_ifc4_spatial();
+            let raw_name = if self.build_view.bim_bus.project.project_name.trim().is_empty() {
+                "EigenGraph_BIM".to_string()
+            } else {
+                self.build_view
+                    .bim_bus
+                    .project
+                    .project_name
+                    .trim()
+                    .chars()
+                    .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                    .collect()
+            };
+            let fname = format!("{raw_name}.ifc");
+            match crate::core::web_bridge::save_text_file(&fname, &ifc, "text/plain;charset=utf-8") {
+                Ok(_) => {
+                    self.spatial_workspace.push_trace(format!("Exported IFC4 ({fname})"), true);
+                }
+                Err(err) => {
+                    self.spatial_workspace.push_trace(err, false);
+                }
+            }
+        }
+        if hud_actions.save_audit_note {
+            let (lat, lon) = self.universal_canvas.ground_origin_lat_lon;
+            let site = crate::core::compute_site_environmental_coupling(
+                lat,
+                lon,
+                &self.universal_canvas.earth_world,
+            );
+            let md = crate::core::InternalVault::build_engineering_audit_markdown(
+                &self.build_view.bim_bus.project,
+                &self.members,
+                lat,
+                lon,
+                f64::from(site.elevation_m),
+                f64::from(site.seismic_pga_ss_g),
+                f64::from(site.design_wind_ms),
+            );
+            let folder = if self.spatial_workspace.vault_note_folder.trim().is_empty() {
+                "KnowledgeBase"
+            } else {
+                self.spatial_workspace.vault_note_folder.trim()
+            };
+            let stem = format!(
+                "Audit_{}",
+                if self.build_view.bim_bus.project.project_name.trim().is_empty() {
+                    "EigenGraph"
+                } else {
+                    self.build_view.bim_bus.project.project_name.trim()
+                }
+            );
+            match crate::core::InternalVault::save_markdown_note_in_folder(folder, &stem, &md) {
+                Ok(rel) => {
+                    self.spatial_workspace.vault_feedback = Some(format!("Saved Audit -> {rel}"));
+                    self.spatial_workspace.previewed_vault_note = Some((rel.clone(), md));
+                    self.spatial_workspace.vault_drawer_open = true;
+                    self.spatial_workspace.push_trace(format!("Saved {rel}"), true);
+                }
+                Err(err) => {
+                    self.spatial_workspace.vault_feedback = Some(err);
+                }
+            }
+        }
         if hud_actions.toggle_theme {
             let next_mode = if self.theme.is_dark() {
                 crate::theme::ThemeMode::EngineeringLight
