@@ -7,6 +7,25 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.5.2] - 2026-11-18 — Phase 52: Unified Growing Dynamic Island, Mobile Expander, Esc Orbit Reset, Precision 2D CAD & Gemini 2.5 Pro Sheets
+
+### Added & Changed
+- **Unified Single Growing Dynamic Island & Mobile Touch Expander (`src/views/spatial_workspace.rs`, `docs/UI_ARCHITECTURE.md`)**:
+  - Consolidated the resting 3-row dock, hover extension deck (`Undo / Redo`, `View`, `API Key`, `Settings`, `Grid`, `Map BG`, `Ortho`, structural lenses, and `More Draw`), and interactive drawers (`Vault`, `@ Context`, `/ Slash`, `History`, `Chat`) into **one single continuous outer `antigravity_glass_frame`** separated cleanly by hairline dividers so hovering expands the capsule itself rather than stacking two boxes.
+  - Added a mobile/touch `Deck` toggle (`mobile_deck_pinned`) on viewports `< 640px` so touchscreen users can expand and collapse Dynamic Island without pointer hover.
+- **Deterministic `Esc` Priority & Orbit Fallback (`src/app.rs`, `src/views/spatial_workspace.rs`)**:
+  - Updated Spatial Mode `Esc` handling to dismiss `api_key_popover_open` and reset active manual BIM authoring, 2D CAD drawing, and `Geodesic Measure` tools back to `Orbit / SelectPan` (`has_active_manual_tool` / `reset_manual_tools_to_orbit`).
+- **Upgraded `SketchEntity` Smart Pop-Up & Precision 2D Drafting Controls (`src/views/universal_canvas.rs`, `src/views/spatial_workspace.rs`)**:
+  - Upgraded `SmartSelectionTarget::SketchEntity(id)` with computed geometry metrics (`Length`, `Area`, `Radius`), stroke width and RGB color presets (`update_entity_style`), `Duplicate (+500mm)`, and `Delete Entity (Undoable)`.
+  - Added parametric numeric drafting inputs (`L / Angle` for `Line`, `W / H` for `Rectangle`, `R` for `Circle`, and `Clear` for `Geodesic Measure`) inside the top Active Tool Pill.
+- **3D Grid & Earth Map Backdrop Toggles + `EarthSite` Focus 3D BIM (`src/views/build/mod.rs`, `src/views/build/viewport_3d.rs`)**:
+  - Added `Grid` (`show_grid`) and `Map BG` (`show_3d_map_backdrop`) toggles to the Dynamic Island expansion strip and added `Focus 3D BIM` on `EarthSite` Smart Pop-Ups when a BIM model is present.
+- **Gemini 2.5 Pro 2400-Token Budget, Native Timeout & `[[OPEN_SHEET:...]]` (`src/core/web_bridge.rs`, `src/views/spatial_workspace.rs`)**:
+  - Added `build_gemini_generate_content_payload_for_model` raising `maxOutputTokens` to `2400` for Gemini Pro models (`1400` otherwise) plus a `35s` `--max-time` guard on native `curl` calls.
+  - Added `GeminiDirective::OpenSheet(NavigationPillar)` parsed from `[[OPEN_SHEET:...]]` tags and routed through `PlannedProposalAction::OpenSheet`.
+
+---
+
 ## [v0.5.1] - 2026-11-18 — Phase 51: Screenshot-Matched 3-Row Dynamic Island, Hover Extended Draw & Undo Deck, 3D BIM-on-Globe & Gemini 2.5 Pro
 
 ### Added & Changed

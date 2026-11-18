@@ -538,6 +538,8 @@ impl App for EigenGraphApp {
                 if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                     if self.show_settings {
                         self.show_settings = false;
+                    } else if self.spatial_workspace.api_key_popover_open {
+                        self.spatial_workspace.api_key_popover_open = false;
                     } else if self.spatial_workspace.context_picker_open {
                         self.spatial_workspace.context_picker_open = false;
                     } else if self.spatial_workspace.history_popover_open {
@@ -550,8 +552,18 @@ impl App for EigenGraphApp {
                         self.spatial_workspace.active_overlay_pillar = None;
                     } else if !self.spatial_workspace.command_input.is_empty() {
                         self.spatial_workspace.command_input.clear();
-                    } else if self.spatial_workspace.command_bar_expanded {
+                    } else if self.spatial_workspace.command_bar_expanded
+                        || self.spatial_workspace.mobile_deck_pinned
+                    {
                         self.spatial_workspace.collapse_dynamic_island();
+                    } else if self.spatial_workspace.has_active_manual_tool(
+                        &self.build_view,
+                        &self.universal_canvas,
+                    ) {
+                        self.spatial_workspace.reset_manual_tools_to_orbit(
+                            &mut self.build_view,
+                            &mut self.universal_canvas,
+                        );
                     } else if !self.spatial_workspace.popup_pinned {
                         self.spatial_workspace.selected_target = None;
                         self.universal_canvas.highlighted_bim_element = None;

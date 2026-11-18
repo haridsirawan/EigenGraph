@@ -543,22 +543,24 @@ impl BuildView {
         let offset_z = center_3d.2 - 4.5;
 
         // 2. 3D Earth World Map & Geodetic Ground Plane (`y = 0.0`) rendered BEFORE strokes and 3D BIM geometry
-        self.render_3d_earth_ground_map(
-            ui.ctx(),
-            &painter,
-            rect,
-            theme,
-            universal_canvas,
-            center_3d,
-            base_scale_unit,
-            cam_yaw,
-            cam_pitch,
-            cam_zoom,
-            cam_pan,
-            is_persp,
-            d_cam,
-            &project_3d,
-        );
+        if self.show_3d_map_backdrop {
+            self.render_3d_earth_ground_map(
+                ui.ctx(),
+                &painter,
+                rect,
+                theme,
+                universal_canvas,
+                center_3d,
+                base_scale_unit,
+                cam_yaw,
+                cam_pitch,
+                cam_zoom,
+                cam_pan,
+                is_persp,
+                d_cam,
+                &project_3d,
+            );
+        }
 
         // Ground-plane / Active Datum inverse raycast closure (`y = datum_y_m`)
         let cos_y = cam_yaw.cos();

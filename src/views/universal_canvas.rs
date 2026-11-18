@@ -1186,6 +1186,211 @@ impl UniversalCanvasState {
         true
     }
 
+    /// Computes engineering summary metrics for a single 2D CAD sketch entity by ID.
+    pub fn entity_summary(&self, id: usize) -> Option<(&'static str, f64, f64, f64, String, [u8; 3], f32)> {
+        let ent = self.entities.iter().find(|e| e.id == id)?;
+        let (kind_label, length_m, area_m2, radius_m, detail) = match &ent.kind {
+            CanvasShapeKind::Line { start_mm, end_mm } => {
+                let dx = (end_mm[0] - start_mm[0]) * 0.001;
+                let dy = (end_mm[1] - start_mm[1]) * 0.001;
+                let len = dx.hypot(dy);
+                (
+                    "Line Segment",
+                    len,
+                    0.0,
+                    0.0,
+                    format!(
+                        "({:.2}, {:.2}) -> ({:.2}, {:.2}) m",
+                        start_mm[0] * 0.001,
+                        start_mm[1] * 0.001,
+                        end_mm[0] * 0.001,
+                        end_mm[1] * 0.001
+                    ),
+                )
+            }
+            CanvasShapeKind::Rectangle { min_mm, max_mm } => {
+                let w = (max_mm[0] - min_mm[0]).abs() * 0.001;
+                let h = (max_mm[1] - min_mm[1]).abs() * 0.001;
+                ("Rectangle", 2.0 * (w + h), w * h, 0.0, format!("{w:.2}m x {h:.2}m"))
+            }
+            CanvasShapeKind::Circle { center_mm, radius_mm } => {
+                let r = (*radius_mm).abs() * 0.001;
+                (
+                    "Circle",
+                    2.0 * std::f64::consts::PI * r,
+                    std::f64::consts::PI * r * r,
+                    r,
+                    format!(
+                        "Center ({:.2}, {:.2}) m",
+                        center_mm[0] * 0.001,
+                        center_mm[1] * 0.001
+                    ),
+                )
+            }
+            CanvasShapeKind::Dimension { start_mm, end_mm } => {
+                let len =
+                    ((end_mm[0] - start_mm[0]) * 0.001).hypot((end_mm[1] - start_mm[1]) * 0.001);
+                ("Dimension", len, 0.0, 0.0, format!("Span {len:.3} m"))
+            }
+            CanvasShapeKind::Freehand { points_mm } => {
+                let mut len = 0.0;
+                for w in points_mm.windows(2) {
+                    len += ((w[1][0] - w[0][0]) * 0.001).hypot((w[1][1] - w[0][1]) * 0.001);
+                }
+                ("Polyline", len, 0.0, 0.0, format!("{} vertices", points_mm.len()))
+            }
+            CanvasShapeKind::Callout { pos_mm, text } => (
+                "Annotation Callout",
+                0.0,
+                0.0,
+                0.0,
+                format!(
+                    "{} @ ({:.2}, {:.2}) m",
+                    text,
+                    pos_mm[0] * 0.001,
+                    pos_mm[1] * 0.001
+                ),
+            ),
+        };
+        Some((
+            kind_label,
+            length_m,
+            area_m2,
+            radius_m,
+            detail,
+            ent.color_rgb,
+            ent.stroke_width,
+        ))
+    }
+
+    /// Updates stroke width and RGB color for a single CAD sketch entity with undo support.
+    pub fn update_entity_style(&mut self, id: usize, color_rgb: [u8; 3], stroke_width: f32) -> bool {
+        if !self.entities.iter().any(|e| e.id == id) {
+            return false;
+        }
+        self.push_undo();
+        if let Some(ent) = self.entities.iter_mut().find(|e| e.id == id) {
+            ent.color_rgb = color_rgb;
+            ent.stroke_width = stroke_width.clamp(0.8, 12.0);
+        }
+        true
+    }
+
+    /// Duplicates a specific CAD sketch entity with `(dx_mm, dy_mm)` offset and undo support.
+    pub fn duplicate_offset_entity(&mut self, id: usize, dx_mm: f64, dy_mm: f64) -> Option<usize> {
+        let idx = self.entities.iter().position(|e| e.id == id)?;
+        self.push_undo();
+        let mut cloned = self.entities[idx].clone();
+        Self::translate_kind(&mut cloned.kind, dx_mm, dy_mm);
+        let new_id = self.next_entity_id;
+        self.next_entity_id += 1;
+        cloned.id = new_id;
+        self.entities.push(cloned);
+        self.set_single_selection(Some(new_id));
+        Some(new_id)
+    }
+
+    /// Deletes a specific CAD sketch entity by ID with undo support.
+    pub fn delete_entity_by_id(&mut self, id: usize) -> bool {
+        let Some(pos) = self.entities.iter().position(|e| e.id == id) else {
+            return false;
+        };
+        self.push_undo();
+        self.entities.remove(pos);
+        self.selected_entity_ids.retain(|&eid| eid != id);
+        if self.selected_entity_id == Some(id) {
+            self.selected_entity_id = self.selected_entity_ids.first().copied();
+        }
+        true
+    }
+
+    /// Clears recorded geodesic measurement vertices.
+    pub fn clear_measure(&mut self) {
+        self.measure_points_lat_lon.clear();
+    }
+
+    /// Adds a precision parametric 2D Line anchored at `(0, 0)` with exact length `length_m` and azimuth `angle_deg`.
+    pub fn commit_parametric_2d_line(
+        &mut self,
+        length_m: f64,
+        angle_deg: f64,
+        pillar_badge: &str,
+        pillar_name: &str,
+    ) -> usize {
+        self.push_undo();
+        let len_mm = length_m.abs().max(0.1) * 1000.0;
+        let rad = angle_deg.to_radians();
+        let id = self.next_entity_id;
+        self.next_entity_id += 1;
+        self.entities.push(CanvasEntity {
+            id,
+            pillar_badge: pillar_badge.to_string(),
+            pillar_name: pillar_name.to_string(),
+            kind: CanvasShapeKind::Line {
+                start_mm: [0.0, 0.0],
+                end_mm: [len_mm * rad.cos(), len_mm * rad.sin()],
+            },
+            color_rgb: [59, 130, 246],
+            stroke_width: 2.2,
+        });
+        self.set_single_selection(Some(id));
+        id
+    }
+
+    /// Adds a precision parametric 2D Rectangle centered at the origin with `width_m` x `height_m`.
+    pub fn commit_parametric_2d_rect(
+        &mut self,
+        width_m: f64,
+        height_m: f64,
+        pillar_badge: &str,
+        pillar_name: &str,
+    ) -> usize {
+        self.push_undo();
+        let hw = width_m.abs().max(0.1) * 500.0;
+        let hh = height_m.abs().max(0.1) * 500.0;
+        let id = self.next_entity_id;
+        self.next_entity_id += 1;
+        self.entities.push(CanvasEntity {
+            id,
+            pillar_badge: pillar_badge.to_string(),
+            pillar_name: pillar_name.to_string(),
+            kind: CanvasShapeKind::Rectangle {
+                min_mm: [-hw, -hh],
+                max_mm: [hw, hh],
+            },
+            color_rgb: [16, 185, 129],
+            stroke_width: 2.2,
+        });
+        self.set_single_selection(Some(id));
+        id
+    }
+
+    /// Adds a precision parametric 2D Circle centered at the origin with `radius_m`.
+    pub fn commit_parametric_2d_circle(
+        &mut self,
+        radius_m: f64,
+        pillar_badge: &str,
+        pillar_name: &str,
+    ) -> usize {
+        self.push_undo();
+        let r_mm = radius_m.abs().max(0.1) * 1000.0;
+        let id = self.next_entity_id;
+        self.next_entity_id += 1;
+        self.entities.push(CanvasEntity {
+            id,
+            pillar_badge: pillar_badge.to_string(),
+            pillar_name: pillar_name.to_string(),
+            kind: CanvasShapeKind::Circle {
+                center_mm: [0.0, 0.0],
+                radius_mm: r_mm,
+            },
+            color_rgb: [249, 115, 22],
+            stroke_width: 2.2,
+        });
+        self.set_single_selection(Some(id));
+        id
+    }
+
     /// Rotates the selected entities (or latest entity) around each entity centroid by `angle_deg` degrees with undo support.
     pub fn rotate_selected_or_last(&mut self, angle_deg: f64) -> bool {
         let indices = self.target_entity_indices();

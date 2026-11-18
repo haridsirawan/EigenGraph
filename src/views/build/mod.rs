@@ -316,6 +316,8 @@ pub struct BuildView {
     // Phase 46: Spatial Fullscreen BIM Picking State
     pub last_spatial_bim_pick: Option<(crate::core::BimElementKind, usize)>,
     pub spatial_pick_seq: u64,
+    // Phase 52: Optional 3D Earth Map Backdrop toggle for uncluttered clean BIM inspection
+    pub show_3d_map_backdrop: bool,
 }
 
 impl Default for BuildView {
@@ -440,6 +442,7 @@ impl Default for BuildView {
             requested_analysis_jump: None,
             last_spatial_bim_pick: None,
             spatial_pick_seq: 0,
+            show_3d_map_backdrop: true,
         }
     }
 }

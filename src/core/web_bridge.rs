@@ -782,6 +782,16 @@ pub fn build_gemini_generate_content_payload(
     system_prompt: &str,
     history_turns: &[(bool, String)],
 ) -> serde_json::Value {
+    build_gemini_generate_content_payload_for_model(system_prompt, history_turns, "gemini-2.5-flash")
+}
+
+/// Builds a multi-turn Google Gemini `generateContent` payload tuned per model family
+/// (allocating extra output token budget for `gemini-2.5-pro` reasoning overhead).
+pub fn build_gemini_generate_content_payload_for_model(
+    system_prompt: &str,
+    history_turns: &[(bool, String)],
+    model_id: &str,
+) -> serde_json::Value {
     let mut contents = Vec::new();
     let tail_start = history_turns.len().saturating_sub(10);
     for (is_user, text) in &history_turns[tail_start..] {
@@ -800,6 +810,11 @@ pub fn build_gemini_generate_content_payload(
             "parts": [{ "text": "Analyze the active EigenGraph workspace." }]
         }));
     }
+    let max_output_tokens = if model_id.to_ascii_lowercase().contains("pro") {
+        2400
+    } else {
+        1400
+    };
     serde_json::json!({
         "system_instruction": {
             "parts": [{ "text": system_prompt }]
@@ -807,7 +822,7 @@ pub fn build_gemini_generate_content_payload(
         "contents": contents,
         "generationConfig": {
             "temperature": 0.25,
-            "maxOutputTokens": 1200
+            "maxOutputTokens": max_output_tokens
         }
     })
 }
@@ -829,7 +844,11 @@ pub fn gemini_send_conversation(
         model_id.trim().to_string()
     };
     let req_id = NEXT_GEMINI_REQ_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let body = build_gemini_generate_content_payload(system_prompt, history_turns);
+    let body = build_gemini_generate_content_payload_for_model(
+        system_prompt,
+        history_turns,
+        &clean_model,
+    );
     let payload_str = body.to_string();
 
     #[cfg(target_arch = "wasm32")]
@@ -905,6 +924,8 @@ pub fn gemini_send_conversation(
             let outcome: Result<String, String> = (|| {
                 let mut child = Command::new("curl")
                     .arg("-sS")
+                    .arg("--max-time")
+                    .arg("35")
                     .arg("-X")
                     .arg("POST")
                     .arg("-H")

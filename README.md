@@ -23,7 +23,7 @@
 
 ## 🏛️ Overview
 
-**EigenGraph** (`EigenGraph/EigenGraph`) is a client-side **WebAssembly + WebGL2** 10D BIM and structural mechanics workstation compiled cleanly from Rust (`v0.5.1`, Phase 51 Screenshot-Matched 3-Row Dynamic Island Resting Dock with Rich Hover Extension Deck — Undo/Redo, View Mode, Lenses, Settings & Extended Draw Tools — plus 3D BIM Silhouette on Earth Globe, Gemini 2.5 Flash/Pro & Streamlined Settings) and deployed automatically to **Cloudflare Workers**.
+**EigenGraph** (`EigenGraph/EigenGraph`) is a client-side **WebAssembly + WebGL2** 10D BIM and structural mechanics workstation compiled cleanly from Rust (`v0.5.2`, Phase 52 Unified Single Growing Dynamic Island, Mobile Touch Expander, Esc Orbit Reset, Precision 2D CAD Controls, Grid & Map Backdrop Toggles, Gemini 2.5 Pro 2400-Token Budget & `[[OPEN_SHEET:...]]` Actions) and deployed automatically to **Cloudflare Workers**.
 
 ### 15 Engineering Modules
 1. **📁 Vault** — Project records, parametric component catalog, interactive HTML5 3D viewer & Markdown dossier browser downloads.

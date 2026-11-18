@@ -337,6 +337,7 @@ pub enum PlannedProposalAction {
         depth_mm: f64,
     },
     ApplySiteSeismic,
+    OpenSheet(NavigationPillar),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,7 +359,7 @@ pub struct PlannedAgentProposal {
 }
 
 /// Structured bracket directive optionally emitted by Gemini API responses
-/// (`[[FLY:...]]`, `[[BIM:...]]`, `[[REPAIR]]`, `[[ARI_AUDIT]]`, `[[RESIZE_COL:...]]`, `[[RESIZE_BEAM:...]]`, `[[ADD_COL:...]]`, `[[APPLY_SITE_SEISMIC]]`).
+/// (`[[FLY:...]]`, `[[BIM:...]]`, `[[REPAIR]]`, `[[ARI_AUDIT]]`, `[[RESIZE_COL:...]]`, `[[RESIZE_BEAM:...]]`, `[[ADD_COL:...]]`, `[[APPLY_SITE_SEISMIC]]`, `[[OPEN_SHEET:...]]`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum GeminiDirective {
     Fly { lat: f64, lon: f64, zoom: f64 },
@@ -369,6 +370,7 @@ pub enum GeminiDirective {
     ResizeBeam { id: usize, b_mm: f64, h_mm: f64 },
     AddColumn { x_mm: f64, y_mm: f64, w_mm: f64, d_mm: f64 },
     ApplySiteSeismic,
+    OpenSheet(NavigationPillar),
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -447,6 +449,44 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::Repair);
             } else if upper == "ARI_AUDIT" || upper == "ARI" {
                 directives.push(GeminiDirective::AriAudit);
+            } else if upper.starts_with("OPEN_SHEET:") {
+                let sheet_key = upper[11..].trim();
+                let pillar = if sheet_key.contains("VAULT") || sheet_key.contains("LIBRARY") {
+                    Some(NavigationPillar::MyLibrary)
+                } else if sheet_key.contains("AGENT") || sheet_key.contains("FIRM") {
+                    Some(NavigationPillar::AiAgent)
+                } else if sheet_key.contains("PLAN") || sheet_key.contains("1D") || sheet_key.contains("GIS") {
+                    Some(NavigationPillar::ResearchConcept)
+                } else if sheet_key.contains("DRAFT") || sheet_key.contains("2D") || sheet_key.contains("DED") {
+                    Some(NavigationPillar::ParametricDED)
+                } else if sheet_key.contains("GEOM") || sheet_key.contains("BIM") || sheet_key.contains("3D") {
+                    Some(NavigationPillar::GeometryAssembly)
+                } else if sheet_key.contains("ANALY") || sheet_key.contains("FEM") || sheet_key.contains("SIM") {
+                    Some(NavigationPillar::AnalysisSimulation)
+                } else if sheet_key.contains("SCHED") || sheet_key.contains("4D") {
+                    Some(NavigationPillar::TimeScheduling)
+                } else if sheet_key.contains("BUDGET") || sheet_key.contains("COST") || sheet_key.contains("5D") {
+                    Some(NavigationPillar::CostBudgeting)
+                } else if sheet_key.contains("SUST") || sheet_key.contains("CARBON") || sheet_key.contains("6D") {
+                    Some(NavigationPillar::SustainabilityEnergy)
+                } else if sheet_key.contains("FACIL") || sheet_key.contains("TWIN") || sheet_key.contains("7D") {
+                    Some(NavigationPillar::FacilityManagement)
+                } else if sheet_key.contains("SAFE") || sheet_key.contains("RISK") || sheet_key.contains("8D") {
+                    Some(NavigationPillar::SafetyHealth)
+                } else if sheet_key.contains("CONST") || sheet_key.contains("LEAN") || sheet_key.contains("9D") {
+                    Some(NavigationPillar::LeanConstruction)
+                } else if sheet_key.contains("AUTO") || sheet_key.contains("DFMA") || sheet_key.contains("10D") {
+                    Some(NavigationPillar::IndustrializedAutomation)
+                } else if sheet_key.contains("PRED") || sheet_key.contains("AGING") {
+                    Some(NavigationPillar::Prediction)
+                } else if sheet_key.contains("REP") || sheet_key.contains("PUB") {
+                    Some(NavigationPillar::ReportPublishing)
+                } else {
+                    None
+                };
+                if let Some(p) = pillar {
+                    directives.push(GeminiDirective::OpenSheet(p));
+                }
             }
             cursor = &after_start[end + 2..];
         } else {
@@ -1043,6 +1083,15 @@ pub struct SpatialWorkspaceState {
     pub edit_is_structural: bool,
     pub edit_profile_name: String,
     pub active_4d_day: u32,
+    // Phase 52: Mobile/touch island pin toggle, precision 2D draw drafts, & 2D entity style editor
+    pub mobile_deck_pinned: bool,
+    pub draw_2d_len_m: f64,
+    pub draw_2d_deg: f64,
+    pub draw_2d_rect_w_m: f64,
+    pub draw_2d_rect_h_m: f64,
+    pub draw_2d_radius_m: f64,
+    pub sketch_edit_color: [u8; 3],
+    pub sketch_edit_width: f32,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -1112,6 +1161,14 @@ impl Default for SpatialWorkspaceState {
             edit_is_structural: true,
             edit_profile_name: "RC 400x400".to_string(),
             active_4d_day: 90,
+            mobile_deck_pinned: false,
+            draw_2d_len_m: 6.0,
+            draw_2d_deg: 0.0,
+            draw_2d_rect_w_m: 8.0,
+            draw_2d_rect_h_m: 5.0,
+            draw_2d_radius_m: 3.0,
+            sketch_edit_color: [59, 130, 246],
+            sketch_edit_width: 2.2,
         }
     }
 }
@@ -1133,6 +1190,7 @@ impl SpatialWorkspaceState {
             || self.history_popover_open
             || self.api_key_popover_open
             || self.gemini_inflight_req_id.is_some()
+            || self.mobile_deck_pinned
             || self.command_bar_expanded;
         hovered_island || engaged
     }
@@ -1145,7 +1203,33 @@ impl SpatialWorkspaceState {
         self.vault_path_popover_open = false;
         self.history_popover_open = false;
         self.api_key_popover_open = false;
+        self.mobile_deck_pinned = false;
         self.composer_had_focus = false;
+    }
+
+    /// Returns true if any manual 3D authoring, 2D CAD drawing, or geodesic measure tool is currently active.
+    pub fn has_active_manual_tool(
+        &self,
+        build_view: &BuildView,
+        universal_canvas: &UniversalCanvasState,
+    ) -> bool {
+        build_view.ground_author_tool != Ground3DAuthorTool::Orbit
+            || build_view.pending_3d_start_mm.is_some()
+            || universal_canvas.active_tool != UniversalCanvasTool::SelectPan
+            || universal_canvas.measure_active
+    }
+
+    /// Resets any active manual BIM/2D CAD/Measure tool cleanly back to pointer Orbit / Select-Pan.
+    pub fn reset_manual_tools_to_orbit(
+        &mut self,
+        build_view: &mut BuildView,
+        universal_canvas: &mut UniversalCanvasState,
+    ) {
+        build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+        build_view.pending_3d_start_mm = None;
+        universal_canvas.active_tool = UniversalCanvasTool::SelectPan;
+        universal_canvas.measure_active = false;
+        self.push_trace("Returned to pointer Orbit / Select", true);
     }
 
     /// Attaches a context source into the AI composer strip without duplicates.
@@ -1423,6 +1507,10 @@ impl SpatialWorkspaceState {
                     out.sync_fem_and_earth = true;
                     self.push_trace("Coupled Earth Site Seismic & Wind Loads to FEM", true);
                 }
+                PlannedProposalAction::OpenSheet(pillar) => {
+                    self.open_module_overlay(*pillar);
+                    self.push_trace(format!("Opened {} Sheet", pillar.clean_name()), true);
+                }
             }
         }
         self.sessions_dirty = true;
@@ -1540,6 +1628,9 @@ impl SpatialWorkspaceState {
                                 }
                             }
                             GeminiDirective::ApplySiteSeismic => PlannedProposalAction::ApplySiteSeismic,
+                            GeminiDirective::OpenSheet(pillar) => {
+                                PlannedProposalAction::OpenSheet(*pillar)
+                            }
                         })
                         .collect();
                     let preview: String = directives
@@ -1559,6 +1650,9 @@ impl SpatialWorkspaceState {
                                 format!("AddCol({x_mm:.0},{y_mm:.0},{w_mm:.0}x{d_mm:.0})")
                             }
                             GeminiDirective::ApplySiteSeismic => "SyncSiteSeismic".to_string(),
+                            GeminiDirective::OpenSheet(pillar) => {
+                                format!("OpenSheet({})", pillar.clean_name())
+                            }
                         })
                         .collect::<Vec<_>>()
                         .join(" + ");
@@ -2281,7 +2375,7 @@ impl SpatialWorkspaceState {
                  Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s. \
                  Active BIM elements={}, FEM members={}. \
                  To propose workspace actions, you may append bracket directives: \
-                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[ARI_AUDIT]].",
+                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[ARI_AUDIT]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
                 site.elevation_m,
                 site.seismic_pga_ss_g,
                 site.design_wind_ms,
@@ -2783,6 +2877,88 @@ impl SpatialWorkspaceState {
                                     format!("Tool: {}", universal_canvas.active_tool.short_label()),
                                     theme.accent_orange,
                                 );
+                                match universal_canvas.active_tool {
+                                    UniversalCanvasTool::Line => {
+                                        ui.label(RichText::new("L:").size(9.8).color(theme.text_muted));
+                                        ui.add(
+                                            egui::DragValue::new(&mut self.draw_2d_len_m)
+                                                .range(0.1..=250.0)
+                                                .speed(0.25)
+                                                .suffix("m"),
+                                        );
+                                        ui.label(RichText::new("@").size(9.8).color(theme.text_muted));
+                                        ui.add(
+                                            egui::DragValue::new(&mut self.draw_2d_deg)
+                                                .range(-180.0..=180.0)
+                                                .speed(1.0)
+                                                .suffix("°"),
+                                        );
+                                        if ui.small_button("Add Line").clicked() {
+                                            let eid = universal_canvas.commit_parametric_2d_line(
+                                                self.draw_2d_len_m,
+                                                self.draw_2d_deg,
+                                                "2D",
+                                                "Drafting",
+                                            );
+                                            self.selected_target = Some(SmartSelectionTarget::SketchEntity(eid));
+                                            self.push_trace(
+                                                format!("Added 2D Line {:.2}m @ {:.0}°", self.draw_2d_len_m, self.draw_2d_deg),
+                                                true,
+                                            );
+                                        }
+                                    }
+                                    UniversalCanvasTool::Rectangle => {
+                                        ui.label(RichText::new("W:").size(9.8).color(theme.text_muted));
+                                        ui.add(
+                                            egui::DragValue::new(&mut self.draw_2d_rect_w_m)
+                                                .range(0.2..=250.0)
+                                                .speed(0.25)
+                                                .suffix("m"),
+                                        );
+                                        ui.label(RichText::new("H:").size(9.8).color(theme.text_muted));
+                                        ui.add(
+                                            egui::DragValue::new(&mut self.draw_2d_rect_h_m)
+                                                .range(0.2..=250.0)
+                                                .speed(0.25)
+                                                .suffix("m"),
+                                        );
+                                        if ui.small_button("Add Rect").clicked() {
+                                            let eid = universal_canvas.commit_parametric_2d_rect(
+                                                self.draw_2d_rect_w_m,
+                                                self.draw_2d_rect_h_m,
+                                                "2D",
+                                                "Drafting",
+                                            );
+                                            self.selected_target = Some(SmartSelectionTarget::SketchEntity(eid));
+                                            self.push_trace(
+                                                format!("Added 2D Rect {:.2}x{:.2}m", self.draw_2d_rect_w_m, self.draw_2d_rect_h_m),
+                                                true,
+                                            );
+                                        }
+                                    }
+                                    UniversalCanvasTool::Circle => {
+                                        ui.label(RichText::new("R:").size(9.8).color(theme.text_muted));
+                                        ui.add(
+                                            egui::DragValue::new(&mut self.draw_2d_radius_m)
+                                                .range(0.1..=150.0)
+                                                .speed(0.2)
+                                                .suffix("m"),
+                                        );
+                                        if ui.small_button("Add Circle").clicked() {
+                                            let eid = universal_canvas.commit_parametric_2d_circle(
+                                                self.draw_2d_radius_m,
+                                                "2D",
+                                                "Drafting",
+                                            );
+                                            self.selected_target = Some(SmartSelectionTarget::SketchEntity(eid));
+                                            self.push_trace(
+                                                format!("Added 2D Circle R={:.2}m", self.draw_2d_radius_m),
+                                                true,
+                                            );
+                                        }
+                                    }
+                                    _ => {}
+                                }
                             }
                             if universal_canvas.measure_active {
                                 icons::pill_badge(
@@ -2791,6 +2967,12 @@ impl SpatialWorkspaceState {
                                     "Geodesic Measure",
                                     theme.accent_green,
                                 );
+                                if !universal_canvas.measure_points_lat_lon.is_empty()
+                                    && ui.small_button("Clear").clicked()
+                                {
+                                    universal_canvas.clear_measure();
+                                    self.push_trace("Cleared geodesic measurement points", true);
+                                }
                             }
                             if icons::icon_only_button(
                                 ui,
@@ -2876,6 +3058,12 @@ impl SpatialWorkspaceState {
         // Sync editable draft inputs lazily when selection changes
         if self.last_loaded_target != Some(target) {
             self.sync_edit_draft_from_target(target, &build_view.bim_bus.project);
+            if let SmartSelectionTarget::SketchEntity(eid) = target {
+                if let Some((_, _, _, _, _, col, sw)) = universal_canvas.entity_summary(eid) {
+                    self.sketch_edit_color = col;
+                    self.sketch_edit_width = sw;
+                }
+            }
             self.last_loaded_target = Some(target);
         }
 
@@ -3310,6 +3498,25 @@ impl SpatialWorkspaceState {
                         actions.load_sample_building = true;
                         self.active_canvas_mode = SpatialCanvasMode::Bim3D;
                     }
+                    if !build_view.bim_bus.project.is_empty()
+                        && icons::icon_button(
+                            ui,
+                            AppIcon::Building,
+                            "Focus 3D BIM",
+                            10.5,
+                            Color32::WHITE,
+                            theme.accent_blue,
+                            Stroke::NONE,
+                            CornerRadius::same(7),
+                            Vec2::new(0.0, 26.0),
+                        )
+                        .on_hover_text("Switch directly to interactive 3D BIM viewport centered on active model")
+                        .clicked()
+                    {
+                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                        actions.fit_camera = true;
+                        self.push_trace("Focused 3D BIM Viewport", true);
+                    }
                     if icons::icon_button(
                         ui,
                         AppIcon::Bolt,
@@ -3335,33 +3542,166 @@ impl SpatialWorkspaceState {
                 });
             }
             SmartSelectionTarget::SketchEntity(id) => {
-                Self::render_kv_row(
-                    ui,
-                    theme,
-                    "Entity ID",
-                    &format!("#{id}"),
-                    theme.accent_blue,
-                );
-                ui.add_space(6.0);
-                if icons::icon_button(
-                    ui,
-                    AppIcon::Building,
-                    "Promote to 3D BIM",
-                    10.5,
-                    Color32::WHITE,
-                    theme.accent_blue,
-                    Stroke::NONE,
-                    CornerRadius::same(7),
-                    Vec2::new(0.0, 26.0),
-                )
-                .clicked()
+                if let Some((kind_lbl, len_m, area_m2, rad_m, detail, _, _)) =
+                    universal_canvas.entity_summary(id)
                 {
-                    let (w, r, s) =
-                        universal_canvas.promote_selection_to_bim(&mut build_view.bim_bus.project);
-                    if w + r + s > 0 {
-                        actions.sync_fem_and_earth = true;
-                        self.push_trace(format!("Promoted +{w}W +{r}B +{s}S to BIM"), true);
+                    Self::render_kv_row(ui, theme, "Entity Type", kind_lbl, theme.accent_blue);
+                    Self::render_kv_row(ui, theme, "Geometry", &detail, theme.text_primary);
+                    if len_m > 0.001 {
+                        Self::render_kv_row(
+                            ui,
+                            theme,
+                            "Length / Perimeter",
+                            &format!("{len_m:.3} m"),
+                            theme.accent_green,
+                        );
                     }
+                    if area_m2 > 0.0001 {
+                        Self::render_kv_row(
+                            ui,
+                            theme,
+                            "Enclosed Area",
+                            &format!("{area_m2:.2} m²"),
+                            theme.accent_orange,
+                        );
+                    }
+                    if rad_m > 0.0001 {
+                        Self::render_kv_row(
+                            ui,
+                            theme,
+                            "Radius",
+                            &format!("{rad_m:.3} m"),
+                            theme.text_secondary,
+                        );
+                    }
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Stroke (px):").size(10.5).color(theme.text_secondary));
+                        ui.add(
+                            egui::DragValue::new(&mut self.sketch_edit_width)
+                                .range(0.8..=12.0)
+                                .speed(0.1),
+                        );
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new("Color:").size(10.5).color(theme.text_secondary));
+                        for (lbl, rgb) in [
+                            ("Blue", [59, 130, 246]),
+                            ("Green", [16, 185, 129]),
+                            ("Orange", [249, 115, 22]),
+                            ("Violet", [168, 85, 247]),
+                        ] {
+                            let active_c = self.sketch_edit_color == rgb;
+                            let sw_col = Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new(lbl).size(9.5).color(Color32::WHITE),
+                                    )
+                                    .min_size(Vec2::new(0.0, 21.0))
+                                    .fill(sw_col)
+                                    .stroke(if active_c {
+                                        Stroke::new(1.5, Color32::WHITE)
+                                    } else {
+                                        Stroke::NONE
+                                    })
+                                    .corner_radius(CornerRadius::same(6)),
+                                )
+                                .clicked()
+                            {
+                                self.sketch_edit_color = rgb;
+                            }
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if icons::icon_button(
+                            ui,
+                            AppIcon::CheckCircle,
+                            "Apply Style",
+                            10.0,
+                            Color32::WHITE,
+                            theme.accent_green,
+                            Stroke::NONE,
+                            CornerRadius::same(7),
+                            Vec2::new(0.0, 24.0),
+                        )
+                        .clicked()
+                        && universal_canvas.update_entity_style(
+                            id,
+                            self.sketch_edit_color,
+                            self.sketch_edit_width,
+                        )
+                        {
+                            self.push_trace(format!("Updated 2D CAD #{id} style"), true);
+                        }
+                        if icons::icon_button(
+                            ui,
+                            AppIcon::Layers,
+                            "Duplicate (+500mm)",
+                            10.0,
+                            theme.text_primary,
+                            theme.bg_card,
+                            Stroke::new(0.9, theme.border_subtle),
+                            CornerRadius::same(7),
+                            Vec2::new(0.0, 24.0),
+                        )
+                        .clicked()
+                        {
+                            if let Some(new_id) =
+                                universal_canvas.duplicate_offset_entity(id, 500.0, 500.0)
+                            {
+                                self.selected_target = Some(SmartSelectionTarget::SketchEntity(new_id));
+                                self.push_trace(format!("Duplicated CAD #{id} -> #{new_id}"), true);
+                            }
+                        }
+                        if icons::icon_button(
+                            ui,
+                            AppIcon::Building,
+                            "Promote to 3D BIM",
+                            10.0,
+                            Color32::WHITE,
+                            theme.accent_blue,
+                            Stroke::NONE,
+                            CornerRadius::same(7),
+                            Vec2::new(0.0, 24.0),
+                        )
+                        .clicked()
+                        {
+                            let (w, r, s) =
+                                universal_canvas.promote_selection_to_bim(&mut build_view.bim_bus.project);
+                            if w + r + s > 0 {
+                                actions.sync_fem_and_earth = true;
+                                self.push_trace(format!("Promoted +{w}W +{r}B +{s}S to BIM"), true);
+                            }
+                        }
+                    });
+                    ui.add_space(4.0);
+                    if icons::icon_button(
+                        ui,
+                        AppIcon::Trash,
+                        "Delete Entity (Undoable)",
+                        10.0,
+                        theme.accent_red,
+                        theme.accent_red.gamma_multiply(0.12),
+                        Stroke::new(0.9, theme.accent_red.gamma_multiply(0.45)),
+                        CornerRadius::same(7),
+                        Vec2::new(ui.available_width(), 24.0),
+                    )
+                    .clicked()
+                    && universal_canvas.delete_entity_by_id(id)
+                    {
+                        self.selected_target = None;
+                        self.push_trace(format!("Deleted 2D CAD entity #{id}"), true);
+                    }
+                } else {
+                    Self::render_kv_row(
+                        ui,
+                        theme,
+                        "Entity ID",
+                        &format!("#{id} (Removed)"),
+                        theme.text_muted,
+                    );
                 }
             }
             SmartSelectionTarget::Column(col_id) => {
@@ -4178,9 +4518,12 @@ impl SpatialWorkspaceState {
         let q = self.command_input.trim().to_lowercase();
         let mut queued_cmd: Option<String> = None;
 
-        Self::antigravity_glass_frame(theme, 12, Margin::same(9)).show(ui, |ui| {
-            ui.set_width(pal_w);
-            ui.set_max_width(pal_w);
+        Frame::new()
+            .fill(Color32::TRANSPARENT)
+            .inner_margin(Margin::symmetric(2, 4))
+            .show(ui, |ui| {
+                ui.set_width(pal_w);
+                ui.set_max_width(pal_w);
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
             ui.horizontal(|ui| {
                 icons::icon_label(
@@ -4269,25 +4612,11 @@ impl SpatialWorkspaceState {
         let status = crate::core::InternalVault::connection_status();
         let vault_files = crate::core::InternalVault::list_vault_context_files(18);
 
-        let card_bg = if theme.is_dark() {
-            Color32::from_rgb(25, 31, 44)
-        } else {
-            theme.bg_card
-        };
         Frame::new()
-            .fill(card_bg)
-            .corner_radius(CornerRadius::same(10))
-            .stroke(Stroke::new(
-                1.0,
-                if status.connected {
-                    theme.accent_green.gamma_multiply(0.35)
-                } else {
-                    theme.border_card
-                },
-            ))
-            .inner_margin(Margin::symmetric(10, 7))
+            .fill(Color32::TRANSPARENT)
+            .inner_margin(Margin::symmetric(2, 4))
             .show(ui, |ui| {
-                let inner_w = (panel_w - 22.0).max(180.0);
+                let inner_w = (panel_w - 10.0).max(160.0);
                 ui.set_width(inner_w);
                 ui.set_max_width(inner_w);
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
@@ -4700,16 +5029,10 @@ impl SpatialWorkspaceState {
         let q = self.context_search_query.trim().to_lowercase();
 
         Frame::new()
-            .fill(if theme.is_dark() {
-                Color32::from_rgb(24, 30, 42)
-            } else {
-                theme.bg_card
-            })
-            .corner_radius(CornerRadius::same(12))
-            .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.45)))
-            .inner_margin(Margin::same(9))
+            .fill(Color32::TRANSPARENT)
+            .inner_margin(Margin::symmetric(2, 4))
             .show(ui, |ui| {
-                let box_w = (panel_w - 22.0).max(160.0);
+                let box_w = (panel_w - 10.0).max(160.0);
                 ui.set_width(box_w);
                 ui.set_max_width(box_w);
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
@@ -5052,22 +5375,28 @@ impl SpatialWorkspaceState {
                         ui.add_space(5.0);
                     }
 
-                    // B. HOVER-EXPANDED EXTENSION DECK & POPOVERS (hidden when resting so idle matches screenshot)
+                    // B. ONE UNIFIED GROWING DYNAMIC ISLAND (morphs seamlessly upward when hovered or expanded)
+                    Self::antigravity_glass_frame(theme, 20, Margin::symmetric(12, 9)).show(
+                        ui,
+                        |ui| {
+                            let cap_w = (dock_w - 28.0).max(200.0);
+                            ui.set_width(cap_w);
+                            ui.set_max_width(cap_w);
+
                     if should_expand {
                     ScrollArea::vertical()
                         .id_salt("dynamic_island_expand_scroll")
+                        .max_width(cap_w)
                         .max_height((vp.y * 0.54).clamp(170.0, 440.0))
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
-                    ui.set_max_width((dock_w - 12.0).max(190.0));
+                    ui.set_max_width(cap_w);
                     if self.history_popover_open {
                         Frame::new()
-                            .fill(theme.bg_card)
-                            .corner_radius(CornerRadius::same(12))
-                            .stroke(Stroke::new(1.0, theme.border_card))
-                            .inner_margin(Margin::same(10))
+                            .fill(Color32::TRANSPARENT)
+                            .inner_margin(Margin::symmetric(2, 4))
                             .show(ui, |ui| {
-                                let hw = (dock_w - 22.0).max(180.0);
+                                let hw = (cap_w - 10.0).max(160.0);
                                 ui.set_width(hw);
                                 ui.set_max_width(hw);
                                 ui.horizontal(|ui| {
@@ -5137,17 +5466,15 @@ impl SpatialWorkspaceState {
                                     }
                                 }
                             });
-                        ui.add_space(6.0);
+                        ui.separator();
                     }
 
                     if self.api_key_popover_open {
                         Frame::new()
-                            .fill(theme.bg_card)
-                            .corner_radius(CornerRadius::same(12))
-                            .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.55)))
-                            .inner_margin(Margin::same(10))
+                            .fill(Color32::TRANSPARENT)
+                            .inner_margin(Margin::symmetric(2, 4))
                             .show(ui, |ui| {
-                                let kw = (dock_w - 22.0).max(180.0);
+                                let kw = (cap_w - 10.0).max(160.0);
                                 ui.set_width(kw);
                                 ui.set_max_width(kw);
                                 ui.horizontal(|ui| {
@@ -5245,7 +5572,7 @@ impl SpatialWorkspaceState {
                                         .color(theme.text_muted),
                                 );
                             });
-                        ui.add_space(6.0);
+                        ui.separator();
                     }
 
                     if self.vault_drawer_open || self.vault_path_popover_open {
@@ -5253,10 +5580,10 @@ impl SpatialWorkspaceState {
                             ui,
                             theme,
                             vault_projects,
-                            dock_w - 4.0,
+                            cap_w,
                         );
                         actions.merge(vault_act);
-                        ui.add_space(6.0);
+                        ui.separator();
                     }
 
                     if slash_mode {
@@ -5269,28 +5596,31 @@ impl SpatialWorkspaceState {
                             members,
                             projects,
                             db_components,
-                            (dock_w - 24.0).max(200.0),
+                            (cap_w - 4.0).max(170.0),
                             (vp.y * 0.30).clamp(140.0, 230.0),
                             "antigravity_slash_palette_scroll",
                         );
                         actions.merge(sub);
-                        ui.add_space(6.0);
+                        ui.separator();
                     } else if self.context_picker_open {
                         let sub = self.render_context_picker_popover(
                             ui,
                             theme,
                             &build_view.bim_bus.project,
                             vault_projects,
-                            dock_w - 4.0,
+                            cap_w,
                         );
                         actions.merge(sub);
-                        ui.add_space(6.0);
+                        ui.separator();
                     }
 
                     if self.command_bar_expanded && !slash_mode {
                         let chat_h = (vp.y * if is_mobile { 0.22 } else { 0.25 }).clamp(90.0, 210.0);
-                        Self::antigravity_glass_frame(theme, 16, Margin::same(10)).show(ui, |ui| {
-                            let chat_w = (dock_w - 24.0).max(190.0);
+                        Frame::new()
+                            .fill(Color32::TRANSPARENT)
+                            .inner_margin(Margin::symmetric(2, 4))
+                            .show(ui, |ui| {
+                            let chat_w = (cap_w - 10.0).max(170.0);
                             ui.set_width(chat_w);
                             ui.set_max_width(chat_w);
                             ui.horizontal(|ui| {
@@ -5594,14 +5924,17 @@ impl SpatialWorkspaceState {
                                     }
                                 });
                         });
-                        ui.add_space(6.0);
+                        ui.separator();
                     }
 
-                    // Hover-Only Workspace Deck: Undo/Redo, View Mode, Key/Settings, Structural Lenses & Extended Draw Tools
-                    Self::antigravity_glass_frame(theme, 16, Margin::symmetric(10, 7)).show(
-                        ui,
-                        |ui| {
-                            let deck_w = (dock_w - 22.0).max(190.0);
+                    // Hover-Only Workspace Extension Strip inside the SAME growing Dynamic Island
+                            Frame::new()
+                                .fill(Color32::TRANSPARENT)
+                                .inner_margin(Margin::symmetric(2, 4))
+                                .show(
+                                ui,
+                                |ui| {
+                            let deck_w = (cap_w - 10.0).max(170.0);
                             ui.set_width(deck_w);
                             ui.set_max_width(deck_w);
 
@@ -5754,6 +6087,60 @@ impl SpatialWorkspaceState {
                                     universal_canvas.ortho_mode = !universal_canvas.ortho_mode;
                                 }
 
+                                let grid_on = build_view.show_grid;
+                                if icons::icon_button(
+                                    ui,
+                                    AppIcon::Grid,
+                                    if grid_on { "Grid ON" } else { "Grid OFF" },
+                                    9.8,
+                                    if grid_on {
+                                        Color32::WHITE
+                                    } else {
+                                        theme.text_secondary
+                                    },
+                                    if grid_on {
+                                        theme.accent_blue
+                                    } else {
+                                        theme.bg_card
+                                    },
+                                    Stroke::new(0.8, theme.border_subtle),
+                                    CornerRadius::same(7),
+                                    Vec2::new(0.0, 21.0),
+                                )
+                                .on_hover_text("Toggle structural & 2D CAD grid lines")
+                                .clicked()
+                                {
+                                    let next_grid = !build_view.show_grid;
+                                    build_view.show_grid = next_grid;
+                                    universal_canvas.show_grid = next_grid;
+                                }
+
+                                let map_on = build_view.show_3d_map_backdrop;
+                                if icons::icon_button(
+                                    ui,
+                                    AppIcon::Globe,
+                                    if map_on { "Map BG ON" } else { "Map BG OFF" },
+                                    9.8,
+                                    if map_on {
+                                        Color32::WHITE
+                                    } else {
+                                        theme.text_secondary
+                                    },
+                                    if map_on {
+                                        theme.accent_green
+                                    } else {
+                                        theme.bg_card
+                                    },
+                                    Stroke::new(0.8, theme.border_subtle),
+                                    CornerRadius::same(7),
+                                    Vec2::new(0.0, 21.0),
+                                )
+                                .on_hover_text("Toggle geodetic Earth backdrop beneath 3D BIM model")
+                                .clicked()
+                                {
+                                    build_view.show_3d_map_backdrop = !build_view.show_3d_map_backdrop;
+                                }
+
                                 for (lens, lbl) in [
                                     (SpatialLens::Clean, "Clean"),
                                     (SpatialLens::DcrHeatmap, "DCR%"),
@@ -5763,8 +6150,7 @@ impl SpatialWorkspaceState {
                                 ] {
                                     let active_l = self.active_lens == lens;
                                     if ui
-                                        .add_sized(
-                                            Vec2::new(0.0, 21.0),
+                                        .add(
                                             egui::Button::new(
                                                 RichText::new(lbl).size(9.8).color(if active_l {
                                                     Color32::WHITE
@@ -5772,6 +6158,7 @@ impl SpatialWorkspaceState {
                                                     theme.text_secondary
                                                 }),
                                             )
+                                            .min_size(Vec2::new(0.0, 21.0))
                                             .fill(if active_l {
                                                 theme.accent_blue
                                             } else {
@@ -5855,18 +6242,13 @@ impl SpatialWorkspaceState {
                         },
                     );
                         });
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
                     }
 
-                    // C. RESTING & HOVER DYNAMIC ISLAND BASE DOCK (matches uploaded screenshot layout!)
-                    Self::antigravity_glass_frame(theme, 20, Margin::symmetric(12, 9)).show(
-                        ui,
-                        |ui| {
-                            let cap_w = (dock_w - 28.0).max(200.0);
-                            ui.set_width(cap_w);
-                            ui.set_max_width(cap_w);
-
-                            // Row 1: Vault (`+ Add Folder`), `+ Add Context`, AI Model/Mode, Chat & Close
+                            // Resting 3-Row Dynamic Island Base Dock (seamlessly inside ONE growing capsule)
+                            // Row 1: Vault (`+ Add Folder`), `+ Add Context`, AI Model/Mode, Chat & Mobile Deck Toggle
                             ui.horizontal_wrapped(|ui| {
                                 if vault_status.connected {
                                     if icons::icon_button(
@@ -5993,11 +6375,31 @@ impl SpatialWorkspaceState {
                                     self.history_popover_open = !self.history_popover_open;
                                 }
 
+                                if is_mobile && !should_expand {
+                                    if icons::icon_button(
+                                        ui,
+                                        AppIcon::Layers,
+                                        "Deck",
+                                        9.8,
+                                        theme.accent_blue,
+                                        theme.accent_blue.gamma_multiply(0.14),
+                                        Stroke::new(0.8, theme.accent_blue.gamma_multiply(0.42)),
+                                        CornerRadius::same(8),
+                                        Vec2::new(0.0, 22.0),
+                                    )
+                                    .on_hover_text("Expand Dynamic Island controls for touch devices")
+                                    .clicked()
+                                    {
+                                        self.mobile_deck_pinned = true;
+                                    }
+                                }
+
                                 if should_expand
                                     && (is_mobile
                                         || self.command_bar_expanded
                                         || self.context_picker_open
-                                        || self.vault_drawer_open)
+                                        || self.vault_drawer_open
+                                        || self.mobile_deck_pinned)
                                 {
                                     if icons::icon_only_button(
                                         ui,
@@ -7096,5 +7498,166 @@ mod tests {
         }
         assert!(spatial.island_expanded_prev);
         assert!(hover_rect.height() > rest_rect.height());
+    }
+
+    #[test]
+    fn test_phase52_single_dynamic_island_frame_and_mobile_toggle() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+
+        // Mobile viewport (< 640px): starts compact, expands smoothly in ONE single outer capsule when `mobile_deck_pinned` is toggled
+        let mut rest_mobile = Rect::NOTHING;
+        for _ in 0..4 {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(390.0, 844.0))),
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                let _ = spatial.render_hud_overlays(
+                    ui.ctx(),
+                    &theme,
+                    &mut canvas,
+                    &mut build,
+                    &mut ai,
+                    &members,
+                    &projects,
+                    &mut db_components,
+                );
+            });
+            out.textures_delta.clear();
+            rest_mobile = spatial.dynamic_island_rect;
+        }
+        assert!(!spatial.island_expanded_prev);
+        assert!(rest_mobile.width() <= 386.0);
+
+        spatial.mobile_deck_pinned = true;
+        assert!(spatial.is_dynamic_island_expanded(&ctx));
+        let mut exp_mobile = Rect::NOTHING;
+        for _ in 0..5 {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(390.0, 844.0))),
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                let _ = spatial.render_hud_overlays(
+                    ui.ctx(),
+                    &theme,
+                    &mut canvas,
+                    &mut build,
+                    &mut ai,
+                    &members,
+                    &projects,
+                    &mut db_components,
+                );
+            });
+            out.textures_delta.clear();
+            exp_mobile = spatial.dynamic_island_rect;
+        }
+        assert!(spatial.island_expanded_prev);
+        assert!(exp_mobile.height() > rest_mobile.height());
+        assert!(exp_mobile.width() <= 386.0);
+
+        spatial.collapse_dynamic_island();
+        assert!(!spatial.mobile_deck_pinned);
+    }
+
+    #[test]
+    fn test_phase52_sketch_entity_edit_delete_and_open_sheet_directive() {
+        let mut canvas = UniversalCanvasState::default();
+        let initial_cnt = canvas.entities.len();
+        let line_id = canvas.commit_parametric_2d_line(6.0, 0.0, "2D", "Drafting");
+        assert_eq!(canvas.entities.len(), initial_cnt + 1);
+        let (_, len_m, _, _, _, _, _) = canvas.entity_summary(line_id).expect("line summary");
+        assert!((len_m - 6.0).abs() < 1e-6);
+
+        let rect_id = canvas.commit_parametric_2d_rect(8.0, 5.0, "2D", "Drafting");
+        let (_, _, area_m2, _, _, _, _) = canvas.entity_summary(rect_id).expect("rect summary");
+        assert!((area_m2 - 40.0).abs() < 1e-6);
+
+        let circ_id = canvas.commit_parametric_2d_circle(3.0, "2D", "Drafting");
+        let (_, _, _, rad_m, _, _, _) = canvas.entity_summary(circ_id).expect("circle summary");
+        assert!((rad_m - 3.0).abs() < 1e-6);
+
+        assert!(canvas.update_entity_style(line_id, [16, 185, 129], 4.5));
+        let (_, _, _, _, _, col, sw) = canvas.entity_summary(line_id).unwrap();
+        assert_eq!(col, [16, 185, 129]);
+        assert!((sw - 4.5).abs() < 1e-4);
+
+        let dup_id = canvas.duplicate_offset_entity(line_id, 500.0, 500.0).expect("duplicate");
+        assert_ne!(dup_id, line_id);
+        assert!(canvas.delete_entity_by_id(dup_id));
+        assert!(canvas.entity_summary(dup_id).is_none());
+        canvas.undo();
+        assert!(canvas.entity_summary(dup_id).is_some());
+
+        let (clean, directives) = parse_gemini_action_directives(
+            "Open the phased schedule and FEM checks. [[OPEN_SHEET:Scheduling]] [[OPEN_SHEET:Analysis]]",
+        );
+        assert_eq!(clean, "Open the phased schedule and FEM checks.");
+        assert_eq!(
+            directives,
+            vec![
+                GeminiDirective::OpenSheet(NavigationPillar::TimeScheduling),
+                GeminiDirective::OpenSheet(NavigationPillar::AnalysisSimulation),
+            ]
+        );
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let _ = spatial.apply_proposal_actions(
+            &[PlannedProposalAction::OpenSheet(NavigationPillar::TimeScheduling)],
+            &mut canvas,
+            &mut build,
+            &mut ai,
+        );
+        assert_eq!(spatial.active_overlay_pillar, Some(NavigationPillar::TimeScheduling));
+    }
+
+    #[test]
+    fn test_phase52_gemini_pro_payload_and_escape_reset() {
+        let history = vec![(true, "Inspect buckling safety factor.".to_string())];
+        let pro_payload = crate::core::web_bridge::build_gemini_generate_content_payload_for_model(
+            "Sys",
+            &history,
+            "gemini-2.5-pro",
+        );
+        assert_eq!(pro_payload["generationConfig"]["maxOutputTokens"], 2400);
+
+        let flash_payload =
+            crate::core::web_bridge::build_gemini_generate_content_payload_for_model(
+                "Sys",
+                &history,
+                "gemini-2.5-flash",
+            );
+        assert_eq!(flash_payload["generationConfig"]["maxOutputTokens"], 1400);
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut build = BuildView::default();
+        let mut canvas = UniversalCanvasState::default();
+        assert!(build.show_3d_map_backdrop);
+
+        build.ground_author_tool = Ground3DAuthorTool::Beam;
+        build.pending_3d_start_mm = Some([1000.0, 2000.0]);
+        canvas.active_tool = UniversalCanvasTool::Line;
+        canvas.measure_active = true;
+        canvas.measure_points_lat_lon.push((-6.2, 106.8));
+
+        assert!(spatial.has_active_manual_tool(&build, &canvas));
+        spatial.reset_manual_tools_to_orbit(&mut build, &mut canvas);
+        assert!(!spatial.has_active_manual_tool(&build, &canvas));
+        assert_eq!(build.ground_author_tool, Ground3DAuthorTool::Orbit);
+        assert!(build.pending_3d_start_mm.is_none());
+        assert_eq!(canvas.active_tool, UniversalCanvasTool::SelectPan);
+        assert!(!canvas.measure_active);
+        canvas.clear_measure();
+        assert!(canvas.measure_points_lat_lon.is_empty());
     }
 }
