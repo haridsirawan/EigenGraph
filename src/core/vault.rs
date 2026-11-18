@@ -52,6 +52,14 @@ pub struct PersonalVaultProjectEntry {
     pub updated_label: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaultContextFileEntry {
+    pub name: String,
+    pub category: String,
+    pub rel_path: String,
+    pub size_bytes: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaultBackendKind {
     Unbound,
@@ -378,7 +386,9 @@ impl InternalVault {
                     path.display()
                 ));
             }
-            Self::set_custom_vault_dir(path)
+            let connected = Self::set_custom_vault_dir(path)?;
+            let _ = Self::ensure_subdirectories();
+            Ok(connected)
         }
     }
 
@@ -627,6 +637,129 @@ impl InternalVault {
             std::fs::read_to_string(&entry.abs_path)
                 .map_err(|e| format!("Failed to read {}: {}", entry.abs_path, e))
         }
+    }
+
+    /// Lists files inside the connected personal Vault across categories for AI Context attachment.
+    pub fn list_vault_context_files(limit: usize) -> Vec<VaultContextFileEntry> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            return crate::core::web_bridge::vault_list_files()
+                .into_iter()
+                .filter(|f| {
+                    let b = f.rel_path.rsplit('/').next().unwrap_or(&f.rel_path);
+                    !b.starts_with('.')
+                        && b != "_VAULT_NOTICE.txt"
+                        && b != "BACA_SAYA_JANGAN_HAPUS.txt"
+                        && b != "README_DO_NOT_DELETE.txt"
+                })
+                .take(limit)
+                .map(|f| {
+                    let name = f
+                        .rel_path
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(&f.rel_path)
+                        .to_string();
+                    VaultContextFileEntry {
+                        name,
+                        category: f.category,
+                        rel_path: f.rel_path,
+                        size_bytes: f.size_bytes,
+                    }
+                })
+                .collect();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if !Self::has_connected_vault() {
+                return Vec::new();
+            }
+            let root = Self::vault_root_dir();
+            let mut out = Vec::new();
+            let scan_dirs = [
+                ("Projects", root.join("Projects")),
+                ("KnowledgeBase", root.join("KnowledgeBase")),
+                ("Exports", root.join("Exports")),
+                ("Columns", root.join("Columns")),
+                ("Beams", root.join("Beams")),
+                ("Walls", root.join("Walls")),
+                ("Slabs", root.join("Slabs")),
+                ("Vault Root", root.clone()),
+            ];
+            for (cat, dir) in scan_dirs {
+                let Ok(entries) = std::fs::read_dir(&dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if !p.is_file() {
+                        continue;
+                    }
+                    let Some(fname) = p.file_name().and_then(|s| s.to_str()) else {
+                        continue;
+                    };
+                    if fname.starts_with('.')
+                        || fname == "_VAULT_NOTICE.txt"
+                        || fname == "BACA_SAYA_JANGAN_HAPUS.txt"
+                        || fname == "README_DO_NOT_DELETE.txt"
+                        || fname == "active_live_project.json"
+                    {
+                        continue;
+                    }
+                    let lower = fname.to_lowercase();
+                    if !(lower.ends_with(".eigen")
+                        || lower.ends_with(".json")
+                        || lower.ends_with(".md")
+                        || lower.ends_with(".txt")
+                        || lower.ends_with(".csv")
+                        || lower.ends_with(".ifc"))
+                    {
+                        continue;
+                    }
+                    let size_bytes = std::fs::metadata(&p).map(|m| m.len() as usize).unwrap_or(0);
+                    let rel_path = if cat == "Vault Root" {
+                        fname.to_string()
+                    } else {
+                        format!("{cat}/{fname}")
+                    };
+                    out.push(VaultContextFileEntry {
+                        name: fname.to_string(),
+                        category: cat.to_string(),
+                        rel_path,
+                        size_bytes,
+                    });
+                    if out.len() >= limit {
+                        break;
+                    }
+                }
+                if out.len() >= limit {
+                    break;
+                }
+            }
+            out.sort_by(|a, b| a.rel_path.to_lowercase().cmp(&b.rel_path.to_lowercase()));
+            out.truncate(limit);
+            out
+        }
+    }
+
+    /// Reads a UTF-8 excerpt of a Vault file by relative path safely (no parent-directory escapes).
+    pub fn read_vault_context_snippet(rel_path: &str, max_chars: usize) -> Option<String> {
+        let norm = rel_path.replace('\\', "/");
+        if norm.is_empty() || norm.contains("..") {
+            return None;
+        }
+        #[cfg(target_arch = "wasm32")]
+        let raw = crate::core::web_bridge::vault_read_file(&norm)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let raw = {
+            let mut target = Self::vault_root_dir();
+            for seg in norm.split('/').filter(|s| !s.is_empty()) {
+                target.push(seg);
+            }
+            std::fs::read_to_string(target).ok()?
+        };
+        let snippet: String = raw.chars().take(max_chars).collect();
+        Some(snippet)
     }
 
     /// Saves a full serialized workspace JSON string (`UnifiedWorkspaceArchive`) into `Projects/`.

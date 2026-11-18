@@ -236,7 +236,15 @@
           try {
             const sub = folder ? await dirHandle.getDirectoryHandle(folder, { create: false }) : dirHandle;
             for await (const [name, handle] of sub.entries()) {
-              if (handle.kind === "file" && (name.endsWith(".eigen") || name.endsWith(".json") || name.endsWith(".txt"))) {
+              if (
+                handle.kind === "file"
+                && (name.endsWith(".eigen")
+                  || name.endsWith(".json")
+                  || name.endsWith(".txt")
+                  || name.endsWith(".md")
+                  || name.endsWith(".csv")
+                  || name.endsWith(".ifc"))
+              ) {
                 const f = await handle.getFile();
                 if (f.size <= 8 * 1024 * 1024) {
                   const text = await f.text();
@@ -558,6 +566,21 @@
           const out = pendingPickedFileJson;
           pendingPickedFileJson = "";
           return out || "";
+        },
+        listCachedFilesJson: () => {
+          const items = [];
+          for (const [relPath, entry] of fileCache.entries()) {
+            const norm = String(relPath || "").replace(/\\/g, "/");
+            const parts = norm.split("/");
+            const category = parts.length > 1 ? parts[0] : "Vault Root";
+            items.push({
+              rel_path: norm,
+              category,
+              size_bytes: entry && typeof entry.content === "string" ? entry.content.length : 0
+            });
+          }
+          items.sort((a, b) => a.rel_path.localeCompare(b.rel_path));
+          return JSON.stringify(items);
         }
       };
 

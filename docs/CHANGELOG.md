@@ -7,6 +7,25 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.4.7] - 2026-11-18 — Phase 47: Google Antigravity AI Assistant Panel UI (`Add Folder -> Vault` & `Add Context`) + Earth Zoom Sensitivity Calibration
+
+### Added & Changed
+- **Google Antigravity-Style AI Assistant Side Panel (`src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Redesigned the spatial AI assistant into a collapsible right-hand **Antigravity Agent Side Panel** on desktop/tablet (`>= 760px`) and adaptive overlay sheet on narrow mobile (`< 760px`), retaining the slim bottom command launcher & top-right toggle capsule when collapsed so the Earth & BIM viewport remains 100% unobstructed on demand.
+  - Built an authentic Antigravity composer and turn UX: top session header (`+` New Chat, History thread archive switcher, Classic mode switcher, Collapse toggle), Planning/Fast mode switch (`AgentExecutionMode`), Engine Model selector (`EigenAI Pro • FEM+ARI`, `Gemini 2.5 Flash`, `Gemini Live Stream`), multi-line Enter-to-send / Shift+Enter composer, starter empty-state hero cards, and turn-level `@Context` chips + Thought/Execution step trace pills.
+- **Direct `+ Add Folder` Engineering Vault Binding & Vault Explorer (`src/views/spatial_workspace.rs`, `src/core/vault.rs`, `src/core/web_bridge.rs`, `index.html`, `src/app.rs`)**:
+  - Embedded a live **Vault Workspace Header** directly inside the AI Assistant panel with a one-click **`+ Add Folder`** action invoking the OS directory picker (`pick_folder_native` + `InternalVault::connect_existing_vault`) on desktop or File System Access (`window.showDirectoryPicker`) / Browser IndexedDB on WebAssembly.
+  - Added an inline collapsible **Vault Files Explorer** listing `.eigen` projects and `.json/.md/.txt/.csv/.ifc` Vault documents (`InternalVault::list_vault_context_files`) for 1-click canvas loading, direct save-to-Vault, or `@` context attachment.
+- **Interactive `+ Add Context` (`@`) Mention System (`src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Added searchable `+ Add Context` picker (triggered from button, typing `@`, or `/context`) supporting live workspace domains (`@Selected`, `@Earth Site`, `@BIM Model`, `@FEM & ARI`, `@4D/5D Cost`, `@Vault Folder`), individual Vault files, and local disk file attachments (`trigger_file_picker` -> `LocalFile`), rendered as dismissible context chips above the composer and injected into agent reasoning.
+
+### Fixed
+- **3D Earth Globe Zoom & Drag Sensitivity Spike (`src/core/gis/earth_globe.rs`, `src/views/universal_canvas.rs`, `src/views/build/viewport_3d.rs`)**:
+  - Replaced the horizon-limb square-root approximation in `GlobeScreenTransform::deg_per_pixel()` with exact tangent-plane perspective scaling `(d_surf / f_px) * (180 / pi)` plus tilt foreshortening compensation (`deg_per_pixel_y()`), eliminating the 25x–340x pan oversensitivity bug when zooming into city and site scales.
+  - Added zoom-tapered wheel/pinch zoom (`zoom_delta()` support), two-pass exact ray-sphere cursor anchoring (`apply_globe_zoom_at_screen`) for both zoom-in and zoom-out, and automatic suppression of inertial coasting above street/site zoom (`zoom >= 11.0`).
+
+---
+
 ## [v0.4.6] - 2026-11-18 — Phase 46: Antigravity Spatial Canvas Mode, Unified Slash Command Palette (`/`) & Smart Context Pop-Up Inspector
 
 ### Added & Changed

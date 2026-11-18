@@ -3881,13 +3881,82 @@ impl UniversalCanvasState {
         )
     }
 
+    fn apply_globe_zoom_at_screen(&mut self, rect: Rect, raw_dz: f32, focus_pos: Option<Pos2>) {
+        let z_curr = self.world_map.zoom_level;
+        // Gently taper scroll/pinch increment when zoomed close to city/site scale
+        let zoom_taper = 1.0 - ((z_curr - 8.0) / 22.0).clamp(0.0, 0.42);
+        let dz = (raw_dz * zoom_taper).clamp(-0.28, 0.28);
+        if dz.abs() <= 1e-5 {
+            return;
+        }
+
+        self.earth_world.camera.fly_to = None;
+        self.earth_world.camera.angular_vel_lat = 0.0;
+        self.earth_world.camera.angular_vel_lon = 0.0;
+
+        let pre_hit = focus_pos.map(|pos| {
+            let pre_xf = self
+                .last_globe_xform
+                .as_ref()
+                .filter(|x| x.rect == rect)
+                .cloned()
+                .unwrap_or_else(|| {
+                    GlobeScreenTransform::from_view(
+                        rect,
+                        self.world_map.center_lat_lon.0,
+                        self.world_map.center_lat_lon.1,
+                        self.world_map.zoom_level,
+                        &self.earth_world.camera,
+                    )
+                });
+            (pos, pre_xf.screen_to_lat_lon(pos))
+        });
+
+        let old_center = self.world_map.center_lat_lon;
+        self.world_map.zoom_level = (self.world_map.zoom_level + dz).clamp(1.0, 20.5);
+
+        if let Some((pos, (lat_before, lon_before, hit_before))) = pre_hit {
+            if hit_before {
+                let post_xf = GlobeScreenTransform::from_view(
+                    rect,
+                    old_center.0,
+                    old_center.1,
+                    self.world_map.zoom_level,
+                    &self.earth_world.camera,
+                );
+                let (lat_after, lon_after, hit_after) = post_xf.screen_to_lat_lon(pos);
+                if hit_after {
+                    let max_step_deg = (post_xf.d_surf * 65.0).clamp(1e-4, 18.0);
+                    let dlat = (lat_before - lat_after).clamp(-max_step_deg, max_step_deg);
+                    let mut dlon = lon_before - lon_after;
+                    if dlon > 180.0 {
+                        dlon -= 360.0;
+                    } else if dlon < -180.0 {
+                        dlon += 360.0;
+                    }
+                    let dlon = dlon.clamp(-max_step_deg * 1.4, max_step_deg * 1.4);
+                    self.world_map
+                        .set_center((old_center.0 + dlat).clamp(-85.0, 85.0), old_center.1 + dlon);
+                }
+            }
+        }
+
+        self.last_globe_xform = Some(GlobeScreenTransform::from_view(
+            rect,
+            self.world_map.center_lat_lon.0,
+            self.world_map.center_lat_lon.1,
+            self.world_map.zoom_level,
+            &self.earth_world.camera,
+        ));
+    }
+
     fn orbit_globe_by_pixels(&mut self, rect: Rect, delta: Vec2, alt_held: bool, dt: f32) {
         self.earth_world.camera.fly_to = None;
         if alt_held {
             self.earth_world.camera.tilt_deg =
-                (self.earth_world.camera.tilt_deg - delta.y * 0.35).clamp(0.0, 65.0);
+                (self.earth_world.camera.tilt_deg - delta.y * 0.30).clamp(0.0, 65.0);
             self.earth_world.camera.heading_deg =
-                (self.earth_world.camera.heading_deg + delta.x * 0.45).rem_euclid(360.0);
+                (self.earth_world.camera.heading_deg + delta.x * 0.38).rem_euclid(360.0);
             self.earth_world.camera.angular_vel_lat = 0.0;
             self.earth_world.camera.angular_vel_lon = 0.0;
             return;
@@ -3906,7 +3975,8 @@ impl UniversalCanvasState {
                     &self.earth_world.camera,
                 )
             });
-        let dpp = xform.deg_per_pixel();
+        let dpp_x = xform.deg_per_pixel();
+        let dpp_y = xform.deg_per_pixel_y();
         let cos_lat = self
             .world_map
             .center_lat_lon
@@ -3916,16 +3986,32 @@ impl UniversalCanvasState {
             .abs()
             .max(0.25);
         let hr = self.earth_world.camera.heading_deg.to_radians() as f64;
-        let dx_east = delta.x as f64 * hr.cos() - delta.y as f64 * hr.sin();
-        let dy_north = -(delta.x as f64 * hr.sin() + delta.y as f64 * hr.cos());
-        let dlon = -dx_east * dpp / cos_lat;
-        let dlat = -dy_north * dpp;
+        let dx_h = (delta.x as f64) * dpp_x;
+        let dy_h = -(delta.y as f64) * dpp_y;
+        let d_east = dx_h * hr.cos() + dy_h * hr.sin();
+        let d_north = -dx_h * hr.sin() + dy_h * hr.cos();
+        let dlon = -d_east / cos_lat;
+        let dlat = -d_north;
         let nlat = (self.world_map.center_lat_lon.0 + dlat).clamp(-85.0, 85.0);
         let nlon = self.world_map.center_lat_lon.1 + dlon;
         self.world_map.set_center(nlat, nlon);
-        let inv_dt = 1.0 / dt.max(0.008);
-        self.earth_world.camera.angular_vel_lat = (dlat as f32 * inv_dt * 0.35).clamp(-65.0, 65.0);
-        self.earth_world.camera.angular_vel_lon = (dlon as f32 * inv_dt * 0.35).clamp(-85.0, 85.0);
+        self.last_globe_xform = Some(GlobeScreenTransform::from_view(
+            rect,
+            self.world_map.center_lat_lon.0,
+            self.world_map.center_lat_lon.1,
+            self.world_map.zoom_level,
+            &self.earth_world.camera,
+        ));
+        if self.world_map.zoom_level < 11.0 {
+            let inv_dt = 1.0 / dt.max(0.008);
+            self.earth_world.camera.angular_vel_lat =
+                (dlat as f32 * inv_dt * 0.28).clamp(-35.0, 35.0);
+            self.earth_world.camera.angular_vel_lon =
+                (dlon as f32 * inv_dt * 0.28).clamp(-45.0, 45.0);
+        } else {
+            self.earth_world.camera.angular_vel_lat = 0.0;
+            self.earth_world.camera.angular_vel_lon = 0.0;
+        }
     }
 
     fn handle_canvas_interaction(
@@ -3946,38 +4032,30 @@ impl UniversalCanvasState {
             return;
         }
 
-        // Scroll Wheel Zoom around cursor on 3D Globe or 2D World Map
+        // Scroll Wheel & Pinch Zoom around cursor on 3D Globe or 2D World Map
         if response.hovered() {
-            let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll_y.abs() > 0.2 {
+            let (scroll_y, pinch_factor) =
+                ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+            let pinch_dz = if (pinch_factor - 1.0).abs() > 0.002 {
+                pinch_factor.log2()
+            } else {
+                0.0
+            };
+            let wheel_dz = if scroll_y.abs() > 0.2 {
+                scroll_y * 0.0022
+            } else {
+                0.0
+            };
+            let raw_dz = wheel_dz + pinch_dz;
+            if raw_dz.abs() > 1e-4 {
                 if self.globe_mode {
-                    self.earth_world.camera.fly_to = None;
-                    let dz = scroll_y * 0.0028;
-                    if dz > 0.0 {
-                        if let Some(pos) = response.hover_pos() {
-                            let (hlat, hlon, hit) = self.screen_to_lat_lon_with_hit(pos, rect);
-                            if hit {
-                                let pull = (1.0 - 2.0_f64.powf(-(dz as f64))).clamp(0.0, 0.35);
-                                let mut dlon = hlon - self.world_map.center_lat_lon.1;
-                                if dlon > 180.0 {
-                                    dlon -= 360.0;
-                                } else if dlon < -180.0 {
-                                    dlon += 360.0;
-                                }
-                                let nlat = self.world_map.center_lat_lon.0
-                                    + (hlat - self.world_map.center_lat_lon.0) * pull;
-                                let nlon = self.world_map.center_lat_lon.1 + dlon * pull;
-                                self.world_map.set_center(nlat, nlon);
-                            }
-                        }
-                    }
-                    self.world_map.zoom_level = (self.world_map.zoom_level + dz).clamp(1.0, 20.5);
+                    self.apply_globe_zoom_at_screen(rect, raw_dz, response.hover_pos());
                 } else {
-                    self.world_map.zoom_at_screen_pos(
-                        scroll_y * 0.0028,
-                        response.hover_pos(),
-                        rect,
-                    );
+                    let zoom_taper =
+                        1.0 - ((self.world_map.zoom_level - 8.0) / 22.0).clamp(0.0, 0.42);
+                    let dz = (raw_dz * zoom_taper).clamp(-0.28, 0.28);
+                    self.world_map
+                        .zoom_at_screen_pos(dz, response.hover_pos(), rect);
                 }
             }
         }
@@ -6507,5 +6585,53 @@ mod tests {
         assert_eq!(restored.lifecycle_ops.daily_diary.entries.len(), 4);
         assert!(restored.lifecycle_ops.qa_qc.ncrs[0].closed);
         assert!(restored.lifecycle_ops.site_coupling.seismic_pga_ss_g >= 0.85);
+    }
+
+    #[test]
+    fn test_phase47_earth_zoom_drag_sensitivity_and_cursor_lock() {
+        let mut canvas = UniversalCanvasState::default();
+        canvas.globe_mode = true;
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        canvas.world_map.set_center(-6.2088, 106.8456);
+        canvas.world_map.zoom_level = 16.0;
+        canvas.last_globe_xform = Some(GlobeScreenTransform::from_view(
+            rect,
+            canvas.world_map.center_lat_lon.0,
+            canvas.world_map.center_lat_lon.1,
+            canvas.world_map.zoom_level,
+            &canvas.earth_world.camera,
+        ));
+
+        // 1. At zoom=16.0, dragging right by 20px keeps ground movement ~20px on screen (no oversensitivity)
+        let focus = Pos2::new(620.0, 360.0);
+        let (pin_lat, pin_lon, hit_pin) = canvas.screen_to_lat_lon_with_hit(focus, rect);
+        assert!(hit_pin);
+        canvas.orbit_globe_by_pixels(rect, Vec2::new(20.0, 0.0), false, 0.016);
+        // Inertia disabled above zoom 11.0 so site editing never slides after pointer release
+        assert_eq!(canvas.earth_world.camera.angular_vel_lat, 0.0);
+        assert_eq!(canvas.earth_world.camera.angular_vel_lon, 0.0);
+
+        let moved_xf = canvas.last_globe_xform.as_ref().unwrap();
+        let (after_drag_px, _, _) = moved_xf
+            .project_lat_lon_elev(pin_lat, pin_lon, 0.0)
+            .unwrap();
+        let shift_x = (after_drag_px.x - focus.x) as f64;
+        assert!(
+            (shift_x - 20.0).abs() < 2.0,
+            "20px globe drag at z=16.0 shifted point by {shift_x:.2}px instead of ~20px"
+        );
+
+        // 2. Cursor-anchored zoom at z=16.0 keeps the hovered Earth point under `focus`
+        let (hover_lat, hover_lon, _) = canvas.screen_to_lat_lon_with_hit(focus, rect);
+        canvas.apply_globe_zoom_at_screen(rect, 0.25, Some(focus));
+        let post_xf = canvas.last_globe_xform.as_ref().unwrap();
+        let (reproj, _, _) = post_xf
+            .project_lat_lon_elev(hover_lat, hover_lon, 0.0)
+            .unwrap();
+        let lock_err = (reproj - focus).length();
+        assert!(
+            lock_err < 2.0,
+            "Cursor-anchored Earth zoom drifted hover point by {lock_err:.2}px"
+        );
     }
 }

@@ -435,11 +435,23 @@ impl BuildView {
             }
 
             if response.hovered() {
-                let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
-                if scroll_y.abs() > 0.2 {
-                    let dz = scroll_y * 0.0028;
+                let (scroll_y, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+                let pinch_dz = if (pinch - 1.0).abs() > 0.002 {
+                    pinch.log2()
+                } else {
+                    0.0
+                };
+                let wheel_dz = if scroll_y.abs() > 0.2 {
+                    scroll_y * 0.0020
+                } else {
+                    0.0
+                };
+                let raw_dz = wheel_dz + pinch_dz;
+                if raw_dz.abs() > 1e-4 {
+                    let taper = 1.0 - ((universal_canvas.world_map.zoom_level - 8.0) / 22.0).clamp(0.0, 0.40);
+                    let dz = (raw_dz * taper).clamp(-0.28, 0.28);
                     universal_canvas.world_map.zoom_level =
-                        (universal_canvas.world_map.zoom_level + dz).clamp(1.2, 20.0);
+                        (universal_canvas.world_map.zoom_level + dz).clamp(1.2, 20.5);
                     if !raw_members.is_empty() {
                         self.cam_zoom = (self.cam_zoom * 2.0_f32.powf(dz)).clamp(0.20, 8.0);
                     }

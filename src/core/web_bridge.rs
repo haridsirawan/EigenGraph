@@ -71,6 +71,16 @@ pub struct ImportedFilePayload {
     pub content: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WebVaultFileMeta {
+    #[serde(default)]
+    pub rel_path: String,
+    #[serde(default)]
+    pub category: String,
+    #[serde(default)]
+    pub size_bytes: usize,
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 static PENDING_NATIVE_IMPORTED_FILE: std::sync::Mutex<Option<ImportedFilePayload>> =
     std::sync::Mutex::new(None);
@@ -128,6 +138,9 @@ mod js_vault {
 
         #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = pollPickedFileJson)]
         pub fn poll_picked_file_json() -> String;
+
+        #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = listCachedFilesJson)]
+        pub fn list_cached_files_json() -> String;
     }
 }
 
@@ -207,6 +220,18 @@ pub fn vault_read_file(rel_path: &str) -> Option<String> {
     {
         let _ = rel_path;
         None
+    }
+}
+
+pub fn vault_list_files() -> Vec<WebVaultFileMeta> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let raw = js_vault::list_cached_files_json();
+        serde_json::from_str::<Vec<WebVaultFileMeta>>(&raw).unwrap_or_default()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Vec::new()
     }
 }
 

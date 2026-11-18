@@ -438,9 +438,9 @@ impl GlobeScreenTransform {
     ) -> Self {
         let min_dim = rect.width().min(rect.height()).max(120.0) as f64;
         let f_px = min_dim * 2.15;
-        let z_clamped = (zoom_level as f64).clamp(1.0, 19.5);
+        let z_clamped = (zoom_level as f64).clamp(1.0, 20.5);
         // Calibrated so zoom=1.65 frames the full Earth limb at ~85% of viewport height and z=17.5 reaches ~0.4 m/px site scale
-        let d_surf = (4.15 / 2.0_f64.powf(z_clamped - 1.65)).max(1.2e-5);
+        let d_surf = (4.15 / 2.0_f64.powf(z_clamped - 1.65)).max(8.0e-6);
         let tilt_deg = if z_clamped < 2.2 {
             (camera.tilt_deg * ((z_clamped - 1.0) / 1.2).clamp(0.25, 1.0) as f32).clamp(0.0, 68.0)
         } else {
@@ -487,10 +487,17 @@ impl GlobeScreenTransform {
         (self.f_px / denom) as f32
     }
 
-    /// Approximate horizontal pan degrees per dragged pixel at current orbital altitude.
+    /// Exact horizontal pan degrees per dragged screen pixel at the current orbital surface distance.
+    /// Scales linearly with `d_surf / f_px` so surface drag stays 1:1 with the cursor across all zooms.
     pub fn deg_per_pixel(&self) -> f64 {
-        let r_limb = self.globe_limb_radius_px().max(24.0) as f64;
-        (115.0 / r_limb).clamp(0.00001, 0.85)
+        let raw = (self.d_surf / self.f_px.max(120.0)) * (180.0 / std::f64::consts::PI);
+        raw.clamp(1e-8, 0.45)
+    }
+
+    /// Vertical pan degrees per dragged pixel compensating oblique camera tilt foreshortening.
+    pub fn deg_per_pixel_y(&self) -> f64 {
+        let cos_tilt = self.tilt_rad.cos().max(0.32);
+        (self.deg_per_pixel() / cos_tilt).clamp(1e-8, 0.65)
     }
 
     fn world_to_tangent_h(&self, v: [f64; 3]) -> [f64; 3] {
@@ -1218,14 +1225,23 @@ impl PlanetaryWorldState {
                 world_map.set_center(world_map.center_lat_lon.0, next_lon);
                 need_repaint = true;
             }
-            if self.camera.angular_vel_lat.abs() > 0.05 || self.camera.angular_vel_lon.abs() > 0.05 {
+            let min_vel = (0.05 / 2.0_f32.powf((world_map.zoom_level - 2.0).max(0.0))).clamp(1e-6, 0.08);
+            if world_map.zoom_level >= 11.0 {
+                self.camera.angular_vel_lat = 0.0;
+                self.camera.angular_vel_lon = 0.0;
+            } else if self.camera.angular_vel_lat.abs() > min_vel
+                || self.camera.angular_vel_lon.abs() > min_vel
+            {
                 let nlat = world_map.center_lat_lon.0 + (self.camera.angular_vel_lat * dt) as f64;
                 let nlon = world_map.center_lat_lon.1 + (self.camera.angular_vel_lon * dt) as f64;
                 world_map.set_center(nlat, nlon);
-                let decay = (1.0 - dt * 5.2).max(0.0);
+                let decay = (1.0 - dt * 6.0).max(0.0);
                 self.camera.angular_vel_lat *= decay;
                 self.camera.angular_vel_lon *= decay;
                 need_repaint = true;
+            } else {
+                self.camera.angular_vel_lat = 0.0;
+                self.camera.angular_vel_lon = 0.0;
             }
         }
 
@@ -2120,5 +2136,42 @@ mod tests {
         let y0 = earth.vitals.year;
         earth.tick_simulation_years(3);
         assert_eq!(earth.vitals.year, y0 + 3);
+    }
+
+    #[test]
+    fn test_phase47_globe_drag_sensitivity_invariant_across_zoom() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        let cam = GlobeCamera {
+            tilt_deg: 20.0,
+            heading_deg: 0.0,
+            ..GlobeCamera::default()
+        };
+
+        // 1. Over +10 zoom levels (+1024x surface magnification), deg_per_pixel must shrink by ~1024x
+        let xf_low = GlobeScreenTransform::from_view(rect, 0.0, 100.0, 2.0, &cam);
+        let xf_mid = GlobeScreenTransform::from_view(rect, 0.0, 100.0, 12.0, &cam);
+        let xf_site = GlobeScreenTransform::from_view(rect, 0.0, 100.0, 18.0, &cam);
+
+        let ratio = xf_low.deg_per_pixel() / xf_mid.deg_per_pixel();
+        assert!(
+            (ratio - 1024.0).abs() < 2.0,
+            "deg_per_pixel must scale strictly as 2^-zoom: expected ~1024, got {ratio:.3}"
+        );
+        assert!(
+            xf_site.deg_per_pixel() < 5e-6 && xf_site.deg_per_pixel() > 1e-7,
+            "site-scale deg_per_pixel out of calibrated bounds: {}",
+            xf_site.deg_per_pixel()
+        );
+
+        // 2. A 24px equatorial pan at zoom 16.0 must displace screen projection by ~24px (1:1 feel)
+        let pan_px = 24.0_f64;
+        let xf_high = GlobeScreenTransform::from_view(rect, 0.0, 106.8456, 16.0, &cam);
+        let target_lon = 106.8456 + pan_px * xf_high.deg_per_pixel();
+        let (p_before, _, _) = xf_high.project_lat_lon_elev(0.0, target_lon, 0.0).unwrap();
+        let dx_from_center = (p_before.x - rect.center().x).abs() as f64;
+        assert!(
+            (dx_from_center - pan_px).abs() < 0.75,
+            "24px pan delta should equal ~24px on screen at z=16.0, got {dx_from_center:.2}px"
+        );
     }
 }

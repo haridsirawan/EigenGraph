@@ -1542,7 +1542,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — Phase 46 Antigravity Spatial Canvas Shell, Unified Command Palette (/) & Smart Element Pop-Up Inspector (74/74 Capabilities Active)",
+                        "v{} — Phase 47 Antigravity AI Assistant Side Panel (Vault Folder + @ Add Context) & Earth Zoom Calibration (74/74 Capabilities Active)",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)

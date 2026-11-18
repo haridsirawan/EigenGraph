@@ -485,9 +485,11 @@ impl App for EigenGraphApp {
         if !ctx.egui_wants_keyboard_input() {
             if self.spatial_workspace.spatial_mode_enabled {
                 if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
+                    self.spatial_workspace.agent_panel_open =
+                        !self.spatial_workspace.agent_panel_open;
                     self.spatial_workspace.command_bar_expanded =
-                        !self.spatial_workspace.command_bar_expanded;
-                    if self.spatial_workspace.command_bar_expanded {
+                        self.spatial_workspace.agent_panel_open;
+                    if self.spatial_workspace.agent_panel_open {
                         self.spatial_workspace.request_focus_command = true;
                     }
                 }
@@ -498,6 +500,12 @@ impl App for EigenGraphApp {
                 if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                     if self.show_settings {
                         self.show_settings = false;
+                    } else if self.spatial_workspace.context_picker_open {
+                        self.spatial_workspace.context_picker_open = false;
+                    } else if self.spatial_workspace.history_popover_open {
+                        self.spatial_workspace.history_popover_open = false;
+                    } else if self.spatial_workspace.vault_path_popover_open {
+                        self.spatial_workspace.vault_path_popover_open = false;
                     } else if self.spatial_workspace.active_overlay_pillar.is_some() {
                         self.spatial_workspace.active_overlay_pillar = None;
                     } else if !self.spatial_workspace.command_input.is_empty() {
@@ -606,7 +614,12 @@ impl App for EigenGraphApp {
             }
         }
         for payload in incoming_files {
-            self.handle_imported_file(payload);
+            if std::mem::take(&mut self.spatial_workspace.pending_context_file_pick) {
+                self.spatial_workspace
+                    .attach_local_file_context(payload.filename, &payload.content);
+            } else {
+                self.handle_imported_file(payload);
+            }
         }
 
         // Keep 2D/3D BIM models, analytical FEM members, and Research <-> Ground Earth map bidirectionally synced
@@ -803,8 +816,9 @@ impl App for EigenGraphApp {
 }
 
 impl EigenGraphApp {
-    /// Phase 46: Renders the zero-chrome Full-Viewport Spatial Earth & BIM Workspace alongside
-    /// the Antigravity AI Command Dock, Smart Context Element Pop-Up, and on-demand module overlays.
+    /// Phase 46/47: Renders the Full-Viewport Spatial Earth & BIM Workspace alongside
+    /// the collapsible Google Antigravity-style AI Assistant Side Panel, Smart Element Pop-Up,
+    /// and on-demand engineering module overlays.
     fn render_spatial_mode_shell(
         &mut self,
         ui: &mut egui::Ui,
@@ -813,6 +827,9 @@ impl EigenGraphApp {
         is_mobile: bool,
     ) {
         use crate::views::spatial_workspace::{SpatialCanvasMode, SpatialLens};
+
+        self.spatial_workspace
+            .sync_auto_open_for_viewport(ctx.content_rect().width());
 
         let modal_open = self.show_settings
             || self.show_vault_startup_modal
@@ -830,6 +847,19 @@ impl EigenGraphApp {
             | SpatialLens::BendingMoment => NavigationPillar::AnalysisSimulation,
             SpatialLens::Erection4D => NavigationPillar::TimeScheduling,
         };
+
+        let mut side_panel_actions = self.spatial_workspace.render_antigravity_side_panel(
+            ui,
+            ctx,
+            &self.theme,
+            &mut self.universal_canvas,
+            &mut self.build_view,
+            &mut self.ai_assistant_view,
+            &self.members,
+            &self.projects,
+            &mut self.db_components,
+            &self.personal_vault_projects,
+        );
 
         CentralPanel::default()
             .frame(
@@ -870,7 +900,7 @@ impl EigenGraphApp {
         self.spatial_workspace
             .sync_pick_events(&mut self.universal_canvas, &mut self.build_view);
 
-        let hud_actions = self.spatial_workspace.render_hud_overlays(
+        let hud_actions = self.spatial_workspace.render_hud_overlays_with_vault(
             ctx,
             &self.theme,
             &mut self.universal_canvas,
@@ -879,8 +909,10 @@ impl EigenGraphApp {
             &self.members,
             &self.projects,
             &mut self.db_components,
+            &self.personal_vault_projects,
         );
-        self.apply_spatial_hud_actions(hud_actions, workspace_snapshot);
+        side_panel_actions.merge(hud_actions);
+        self.apply_spatial_hud_actions(side_panel_actions, workspace_snapshot);
 
         // On-demand floating engineering module sheet summoned via `/vault`, `/cost`, `/analysis`, etc.
         if let Some(overlay_pillar) = self.spatial_workspace.active_overlay_pillar {
@@ -993,6 +1025,246 @@ impl EigenGraphApp {
                     message: format!("[Antigravity Auto-Repair]: {msg}"),
                     time: crate::core::web_bridge::unix_timestamp_label(),
                 });
+        }
+        if hud_actions.add_vault_folder {
+            #[cfg(target_arch = "wasm32")]
+            {
+                crate::core::web_bridge::vault_connect_existing();
+                self.spatial_workspace.vault_feedback = Some(
+                    "Opening browser folder picker (or IndexedDB Vault)...".to_string(),
+                );
+                self.spatial_workspace
+                    .push_trace("Choose local folder for Vault", true);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                if let Some(chosen) = crate::core::web_bridge::pick_folder_native(
+                    "Select Folder to Connect as EigenGraph Engineering Vault",
+                ) {
+                    let path = std::path::PathBuf::from(&chosen);
+                    match crate::core::InternalVault::connect_existing_vault(path) {
+                        Ok(connected) => {
+                            let s = connected.to_string_lossy().to_string();
+                            self.vault_path_input = s.clone();
+                            self.settings_view.vault_path_input = s;
+                            self.spatial_workspace.vault_inline_path = chosen;
+                            self.spatial_workspace.vault_feedback = None;
+                            self.spatial_workspace.vault_drawer_open = true;
+                            self.personal_vault_projects =
+                                crate::core::InternalVault::list_personal_vault_projects();
+                            self.show_vault_startup_modal = false;
+                            self.spatial_workspace
+                                .push_trace("Connected local Folder as Vault", true);
+                        }
+                        Err(err) => {
+                            self.spatial_workspace.vault_feedback = Some(err);
+                            self.spatial_workspace
+                                .push_trace("Vault folder connection failed", false);
+                        }
+                    }
+                } else {
+                    self.spatial_workspace.vault_path_popover_open = true;
+                }
+            }
+        }
+        if let Some(idb_name) = hud_actions.connect_indexeddb_vault {
+            crate::core::web_bridge::vault_connect_indexeddb(&idb_name);
+            self.personal_vault_projects =
+                crate::core::InternalVault::list_personal_vault_projects();
+            self.spatial_workspace.vault_path_popover_open = false;
+            self.spatial_workspace
+                .push_trace(format!("Connected Browser Vault '{idb_name}'"), true);
+        }
+        if let Some(path_str) = hud_actions.connect_vault_path {
+            let p = std::path::PathBuf::from(path_str.trim());
+            match crate::core::InternalVault::connect_existing_vault(p) {
+                Ok(connected) => {
+                    let s = connected.to_string_lossy().to_string();
+                    self.vault_path_input = s.clone();
+                    self.settings_view.vault_path_input = s;
+                    self.spatial_workspace.vault_feedback = None;
+                    self.spatial_workspace.vault_path_popover_open = false;
+                    self.spatial_workspace.vault_drawer_open = true;
+                    self.personal_vault_projects =
+                        crate::core::InternalVault::list_personal_vault_projects();
+                    self.show_vault_startup_modal = false;
+                    self.spatial_workspace
+                        .push_trace("Bound custom folder as Vault", true);
+                }
+                Err(err) => {
+                    self.spatial_workspace.vault_feedback = Some(err);
+                }
+            }
+        }
+        if let Some((dir_str, name_str)) = hud_actions.create_vault_path_and_name {
+            let base = std::path::PathBuf::from(dir_str.trim());
+            let clean_name = name_str.trim();
+            let target = if clean_name.is_empty()
+                || base.file_name().and_then(|s| s.to_str()) == Some(clean_name)
+            {
+                base
+            } else {
+                base.join(clean_name)
+            };
+            match crate::core::InternalVault::create_new_vault(
+                target,
+                Some(if clean_name.is_empty() {
+                    "EigenGraph_Vault".to_string()
+                } else {
+                    clean_name.to_string()
+                }),
+                false,
+            ) {
+                Ok(created) => {
+                    let s = created.to_string_lossy().to_string();
+                    self.vault_path_input = s.clone();
+                    self.settings_view.vault_path_input = s.clone();
+                    self.spatial_workspace.vault_inline_path = s;
+                    self.spatial_workspace.vault_feedback = None;
+                    self.spatial_workspace.vault_path_popover_open = false;
+                    self.spatial_workspace.vault_drawer_open = true;
+                    self.personal_vault_projects =
+                        crate::core::InternalVault::list_personal_vault_projects();
+                    self.show_vault_startup_modal = false;
+                    self.spatial_workspace
+                        .push_trace("Initialized new Engineering Vault", true);
+                }
+                Err(err) => {
+                    self.spatial_workspace.vault_feedback = Some(err);
+                }
+            }
+        }
+        if hud_actions.disconnect_vault {
+            let _ = crate::core::InternalVault::disconnect_vault();
+            self.personal_vault_projects.clear();
+            self.spatial_workspace.vault_drawer_open = false;
+            self.spatial_workspace.vault_path_popover_open = false;
+            self.spatial_workspace
+                .push_trace("Disconnected Engineering Vault", true);
+        }
+        if hud_actions.refresh_vault {
+            crate::core::web_bridge::vault_refresh();
+            self.personal_vault_projects =
+                crate::core::InternalVault::list_personal_vault_projects();
+            self.spatial_workspace.push_trace("Refreshed Vault index", true);
+        }
+        if hud_actions.save_active_to_vault {
+            self.sync_lifecycle_to_canvas();
+            let archive = self.universal_canvas.build_unified_archive(
+                &self.build_view.bim_bus.project,
+                &self.members,
+                &self.parametric_view.variables,
+                workspace_snapshot.clone(),
+            );
+            if let Ok(json) = archive.to_pretty_json() {
+                let raw_name = if self.build_view.bim_bus.project.project_name.trim().is_empty() {
+                    "Spatial_Earth_Project"
+                } else {
+                    self.build_view.bim_bus.project.project_name.trim()
+                };
+                let sanitized: String = raw_name
+                    .chars()
+                    .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                    .collect();
+                let filename = format!("{sanitized}.eigen.json");
+                match crate::core::InternalVault::save_project_archive_json(&filename, &json) {
+                    Ok(_) => {
+                        self.personal_vault_projects =
+                            crate::core::InternalVault::list_personal_vault_projects();
+                        self.spatial_workspace.vault_feedback =
+                            Some(format!("Saved '{filename}' into Vault."));
+                        self.spatial_workspace
+                            .push_trace(format!("Saved {filename} to Vault"), true);
+                    }
+                    Err(err) => {
+                        self.spatial_workspace.vault_feedback = Some(err);
+                    }
+                }
+            }
+        }
+        if let Some(entry) = hud_actions.open_vault_project {
+            self.open_vault_project_entry(entry);
+        }
+        if hud_actions.pick_local_context_file {
+            self.spatial_workspace.pending_context_file_pick = true;
+            crate::core::web_bridge::trigger_file_picker(
+                ".eigen,.json,.ifc,.csv,.md,.txt,.yaml,.yml",
+            );
+        }
+    }
+
+    fn open_vault_project_entry(&mut self, entry: crate::core::vault::PersonalVaultProjectEntry) {
+        match crate::core::InternalVault::load_personal_vault_raw(&entry) {
+            Ok(raw) => {
+                if let Ok(ws_cfg) = self.universal_canvas.apply_unified_archive(
+                    &raw,
+                    &mut self.build_view.bim_bus.project,
+                    &mut self.members,
+                    &mut self.parametric_view.variables,
+                ) {
+                    self.settings_view.apply_workspace_settings(
+                        &ws_cfg,
+                        &mut self.theme,
+                        &mut self.ai_assistant_view.is_visible,
+                    );
+                    self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+                    self.sync_bim_to_fem();
+                    self.build_view
+                        .fit_view_to_project(&mut self.universal_canvas, &self.members);
+                    self.sync_earth_maps();
+                    self.sync_lifecycle_from_canvas();
+                    let loaded_msg = format!(
+                        "Loaded workspace '{}' ({} BIM elements, {} drawings, {} FEM members) from Vault.",
+                        entry.name,
+                        self.build_view.bim_bus.project.element_count(),
+                        self.universal_canvas.entities.len(),
+                        self.members.len(),
+                    );
+                    self.my_project_view.export_success_msg = Some(loaded_msg.clone());
+                    self.active_pillar = NavigationPillar::GeometryAssembly;
+                    if self.spatial_workspace.spatial_mode_enabled {
+                        self.spatial_workspace.active_canvas_mode =
+                            crate::views::spatial_workspace::SpatialCanvasMode::Bim3D;
+                        self.spatial_workspace.active_overlay_pillar = None;
+                        self.spatial_workspace.push_trace(loaded_msg, true);
+                    }
+                } else {
+                    match crate::core::InternalVault::load_personal_vault_project_model(&entry) {
+                        Ok(model) => {
+                            self.members = model
+                                .elements
+                                .iter()
+                                .map(|el| StructuralMember {
+                                    id: el.id,
+                                    name: el.name.clone(),
+                                    section: el.section.name.clone(),
+                                    ..Default::default()
+                                })
+                                .collect();
+                            let legacy_msg = format!(
+                                "Loaded legacy structural model '{}' ({} nodes, {} elements) from personal Vault.",
+                                model.name,
+                                model.nodes.len(),
+                                model.elements.len()
+                            );
+                            self.my_project_view.export_success_msg = Some(legacy_msg.clone());
+                            self.active_pillar = NavigationPillar::GeometryAssembly;
+                            if self.spatial_workspace.spatial_mode_enabled {
+                                self.spatial_workspace.active_overlay_pillar = None;
+                                self.spatial_workspace.push_trace(legacy_msg, true);
+                            }
+                        }
+                        Err(err) => {
+                            self.my_project_view.export_success_msg =
+                                Some(format!("Failed to load Vault project: {}", err));
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                self.my_project_view.export_success_msg =
+                    Some(format!("Failed to read Vault file: {}", err));
+            }
         }
     }
 
@@ -1317,72 +1589,7 @@ impl EigenGraphApp {
                         self.universal_canvas.status_message.clone();
                 }
                 if let Some(entry) = self.my_project_view.pending_open_vault_project.take() {
-                    match crate::core::InternalVault::load_personal_vault_raw(&entry) {
-                        Ok(raw) => {
-                            if let Ok(ws_cfg) = self.universal_canvas.apply_unified_archive(
-                                &raw,
-                                &mut self.build_view.bim_bus.project,
-                                &mut self.members,
-                                &mut self.parametric_view.variables,
-                            ) {
-                                self.settings_view.apply_workspace_settings(
-                                    &ws_cfg,
-                                    &mut self.theme,
-                                    &mut self.ai_assistant_view.is_visible,
-                                );
-                                self.parametric_view.bim_bus.project =
-                                    self.build_view.bim_bus.project.clone();
-                                self.sync_bim_to_fem();
-                                self.build_view
-                                    .fit_view_to_project(&mut self.universal_canvas, &self.members);
-                                self.sync_earth_maps();
-                                self.sync_lifecycle_from_canvas();
-                                self.my_project_view.export_success_msg = Some(format!(
-                                    "Loaded workspace '{}' ({} BIM elements, {} drawings, {} FEM members) from Vault.",
-                                    entry.name,
-                                    self.build_view.bim_bus.project.element_count(),
-                                    self.universal_canvas.entities.len(),
-                                    self.members.len(),
-                                ));
-                                self.active_pillar = NavigationPillar::GeometryAssembly;
-                                if self.spatial_workspace.spatial_mode_enabled {
-                                    self.spatial_workspace.active_canvas_mode =
-                                        crate::views::spatial_workspace::SpatialCanvasMode::Bim3D;
-                                    self.spatial_workspace.active_overlay_pillar = None;
-                                }
-                            } else {
-                                match crate::core::InternalVault::load_personal_vault_project_model(&entry) {
-                                    Ok(model) => {
-                                        self.members = model
-                                            .elements
-                                            .iter()
-                                            .map(|el| StructuralMember {
-                                                id: el.id,
-                                                name: el.name.clone(),
-                                                section: el.section.name.clone(),
-                                                ..Default::default()
-                                            })
-                                            .collect();
-                                        self.my_project_view.export_success_msg = Some(format!(
-                                            "Loaded legacy structural model '{}' ({} nodes, {} elements) from personal Vault.",
-                                            model.name,
-                                            model.nodes.len(),
-                                            model.elements.len()
-                                        ));
-                                        self.active_pillar = NavigationPillar::GeometryAssembly;
-                                    }
-                                    Err(err) => {
-                                        self.my_project_view.export_success_msg =
-                                            Some(format!("Failed to load Vault project: {}", err));
-                                    }
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            self.my_project_view.export_success_msg =
-                                Some(format!("Failed to read Vault file: {}", err));
-                        }
-                    }
+                    self.open_vault_project_entry(entry);
                 }
             }
             NavigationPillar::AiAgent => {
