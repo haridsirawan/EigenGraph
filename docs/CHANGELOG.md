@@ -7,6 +7,23 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.5.1] - 2026-11-18 — Phase 51: Screenshot-Matched 3-Row Dynamic Island, Hover Extended Draw & Undo Deck, 3D BIM-on-Globe & Gemini 2.5 Pro
+
+### Added & Changed
+- **Dynamic Island Resting Layout & Hover Extension Deck (`src/views/spatial_workspace.rs`, `src/app.rs`, `docs/UI_ARCHITECTURE.md`)**:
+  - Updated the initial resting Dynamic Island to display the clean 3-row floating translucent capsule (`Vault / Switch Vault / + Add Context / Model / Mode / Chat / History`, `Draw: Orbit Column Beam Wall Footing Line Rect Measure Terraform`, and the Composer bar).
+  - Moving the cursor over Dynamic Island smoothly expands it upward to reveal the **Hover Extension Deck**: **Undo / Redo**, Canvas View switcher (`Earth 3D / BIM 3D / Plan 2D`), `API Key`, `Settings`, Structural Lenses (`Clean`, `DCR%`, `ARI`, `Moment`, `4D`), `Ortho`, `Fit`, `Export`, and **Extended Drawing Tools** (`Draw`, `Circle`, `Dim`, `Note`, `BoxSel`, `Erase`, `Uplift`, `Carve`, `Seawall`, `Bridge`, `CleanGrid`).
+- **Streamlined Settings Menu (`src/views/settings.rs`)**:
+  - Removed the `Future Roadmap` tab and legacy lock-queue UI from `Settings` so the menu opens straight into clean `Workspace Settings` and `About EigenGraph` tabs.
+- **3D BIM Silhouette Over Google Earth Globe (`src/views/universal_canvas.rs`)**:
+  - Projected 3D column heights and floor beams onto `GlobeScreenTransform::project_lat_lon_elev` when `globe_mode` and `ground_origin_anchored` are enabled.
+- **Real `Gemini 2.5 Pro` Support, Cancel Thinking & Obsidian Note Upgrades (`src/views/spatial_workspace.rs`)**:
+  - Updated `AgentModelChoice` to expose genuine `gemini-2.5-flash` and `gemini-2.5-pro` REST models, added a **Cancel** control on in-flight Gemini requests, added **Save Note** buttons on AI replies, and added inline **Edit / Save** support for Obsidian `KnowledgeBase/*.md` files.
+- **Precision Footing/Beam/Wall Placement & Undoable Element Delete (`src/views/spatial_workspace.rs`)**:
+  - Added `@(X,Y)` coordinate placement for `Footing`, polar `Length / Angle` span commit for `Beam` and `Wall`, and undoable `BimCommand::DeleteElement` buttons inside Element Smart Pop-Ups.
+
+---
+
 ## [v0.5.0] - 2026-11-18 — Phase 50: Pure Spatial Corners, Dynamic Island Settings/View Switcher, Multi-Turn Gemini AI & Live 3D Ghost Preview
 
 ### Added & Changed

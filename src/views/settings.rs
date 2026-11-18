@@ -1,8 +1,7 @@
-//! settings.rs — Workspace Settings, Design Standards & Centralized Feature Unlock Roadmap.
+//! settings.rs — Workspace Settings, Design Standards & Vault Connection Preferences.
 
-use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, ProgressBar, RichText, ScrollArea, Stroke, Ui, Vec2};
-use crate::core::DiskExporter;
-use crate::features::{FeatureRegistry, FeatureStatus};
+use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, Stroke, Ui, Vec2};
+use crate::features::FeatureRegistry;
 use crate::models::NavigationPillar;
 use crate::theme::MacTheme;
 use crate::ui_kit;
@@ -15,16 +14,7 @@ use crate::views::universal_canvas::{UniversalCanvasState, WorkspaceCanvasSettin
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsSubTab {
     WorkspaceSettings,
-    FutureRoadmap,
     About,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RegistryFilter {
-    All,
-    LockedOnly,
-    PrioritizedOnly,
-    ActiveOnly,
 }
 
 pub struct SettingsView {
@@ -37,10 +27,6 @@ pub struct SettingsView {
     pub freeze_by_default: bool,
     pub gemini_api_key: String,
     pub remember_gemini_key: bool,
-    pub registry_search: String,
-    pub registry_filter: RegistryFilter,
-    pub pillar_filter: Option<NavigationPillar>,
-    pub phase_filter: Option<&'static str>,
     pub export_feedback: Option<String>,
     pub vault_path_input: String,
     pub vault_new_name_input: String,
@@ -62,10 +48,6 @@ impl Default for SettingsView {
             enable_anti_leakage: true,
             gemini_api_key,
             remember_gemini_key,
-            registry_search: String::new(),
-            registry_filter: RegistryFilter::All,
-            pillar_filter: None,
-            phase_filter: None,
             export_feedback: None,
             vault_path_input: crate::core::InternalVault::default_vault_dir()
                 .to_string_lossy()
@@ -124,8 +106,7 @@ impl SettingsView {
         *ai_copilot_visible = settings.show_ai_copilot;
     }
 
-    /// Renders Consolidated Workspace Settings, Future Roadmap & About.
-    /// Returns `true` if the user clicked an Inspect action to jump straight to a domain workspace.
+    /// Renders Consolidated Workspace Settings & About.
     #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
@@ -136,11 +117,9 @@ impl SettingsView {
         bim_project: &BimProject,
         members: &[StructuralMember],
         variables: &[ParametricVariable],
-        registry: &mut FeatureRegistry,
-        active_pillar: &mut NavigationPillar,
+        _registry: &mut FeatureRegistry,
+        _active_pillar: &mut NavigationPillar,
     ) -> bool {
-        let mut requested_jump = false;
-
         ui_kit::subtab_bar(
             ui,
             theme,
@@ -148,7 +127,6 @@ impl SettingsView {
             &mut self.active_subtab,
             &[
                 (SettingsSubTab::WorkspaceSettings, "⚙️ Workspace Settings"),
-                (SettingsSubTab::FutureRoadmap, "🗺️ Future Roadmap"),
                 (SettingsSubTab::About, "ℹ️ About EigenGraph"),
             ],
         );
@@ -169,598 +147,12 @@ impl SettingsView {
                         variables,
                     );
                 }
-                SettingsSubTab::FutureRoadmap => {
-                    requested_jump = self.render_feature_registry(ui, theme, registry, active_pillar);
-                }
                 SettingsSubTab::About => {
                     self.render_about(ui, theme);
                 }
             });
 
-        requested_jump
-    }
-
-    fn render_feature_registry(
-        &mut self,
-        ui: &mut Ui,
-        theme: &MacTheme,
-        registry: &mut FeatureRegistry,
-        active_pillar: &mut NavigationPillar,
-    ) -> bool {
-        let mut jump_clicked = false;
-        let total = registry.total_count().max(1);
-        let active = registry.active_count();
-        let locked = registry.locked_count();
-        let prioritized = registry.prioritized_count();
-        let readiness_pct = (active as f32 / total as f32) * 100.0;
-
-        ui.label(
-            RichText::new("Centralized Feature Registry & Unlock Roadmap")
-                .size(18.0)
-                .strong()
-                .color(theme.text_primary),
-        );
-        ui.label(
-            RichText::new(
-                "Phase 31 locks all 15 workspace UI layouts across 74 capabilities. Queue locked modules below to target Phases 32–35 logic unlocks without layout churn.",
-            )
-            .size(12.0)
-            .color(theme.text_secondary),
-        );
-        ui.add_space(12.0);
-
-        // Responsive 4-card KPI strip
-        ui_kit::responsive_grid_n(ui, 4, 155.0, |ui, idx| match idx {
-            0 => ui_kit::stat_card(
-                ui,
-                theme,
-                "ACTIVE MODULES",
-                &format!("{active} / {total}"),
-                "Operational engineering capabilities",
-                theme.accent_green,
-            ),
-            1 => ui_kit::stat_card(
-                ui,
-                theme,
-                "LOCKED WORKSPACE SLOTS",
-                &format!("{locked}"),
-                "Frozen UI layouts awaiting logic unlock",
-                theme.accent_orange,
-            ),
-            2 => ui_kit::stat_card(
-                ui,
-                theme,
-                "PRIORITIZED FOR UNLOCK",
-                &format!("{prioritized}"),
-                "Flagged for next unlock sprint",
-                theme.accent_blue,
-            ),
-            _ => ui_kit::stat_card(
-                ui,
-                theme,
-                "SUITE READINESS",
-                &format!("{readiness_pct:.0}%"),
-                "Core + preview slot coverage",
-                theme.text_primary,
-            ),
-        });
-
-        ui.add_space(12.0);
-
-        // Action & filter toolbar
-        theme.card_frame().show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.registry_search)
-                        .hint_text("Search code, title, module, or pillar...")
-                        .desired_width(220.0),
-                );
-
-                for (filter, maybe_ico, label) in [
-                    (RegistryFilter::All, None, "All"),
-                    (RegistryFilter::LockedOnly, Some(crate::icons::AppIcon::Lock), "Locked Only"),
-                    (RegistryFilter::PrioritizedOnly, Some(crate::icons::AppIcon::Target), "Prioritized"),
-                    (RegistryFilter::ActiveOnly, Some(crate::icons::AppIcon::Unlock), "Active Only"),
-                ] {
-                    let selected = self.registry_filter == filter;
-                    let fill = if selected {
-                        theme.accent_blue
-                    } else {
-                        theme.bg_sidebar
-                    };
-                    let fg = if selected {
-                        Color32::WHITE
-                    } else {
-                        theme.text_secondary
-                    };
-                    let clicked = if let Some(ico) = maybe_ico {
-                        crate::icons::icon_button(
-                            ui,
-                            ico,
-                            label,
-                            11.0,
-                            fg,
-                            fill,
-                            Stroke::NONE,
-                            CornerRadius::same(6),
-                            Vec2::ZERO,
-                        )
-                        .clicked()
-                    } else {
-                        ui.add(
-                            egui::Button::new(RichText::new(label).size(11.0).color(fg))
-                                .fill(fill)
-                                .corner_radius(CornerRadius::same(6)),
-                        )
-                        .clicked()
-                    };
-                    if clicked {
-                        self.registry_filter = filter;
-                    }
-                }
-
-                let selected_pillar_label = match self.pillar_filter {
-                    Some(p) => p.clean_name().to_string(),
-                    None => "All 15 Pillars".to_string(),
-                };
-                egui::ComboBox::from_id_salt("settings_registry_pillar_filter")
-                    .selected_text(selected_pillar_label)
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_label(self.pillar_filter.is_none(), "All 15 Pillars")
-                            .clicked()
-                        {
-                            self.pillar_filter = None;
-                        }
-                        for &p in NavigationPillar::all() {
-                            let label = format!("{} {}", p.icon(), p.clean_name());
-                            if ui
-                                .selectable_label(self.pillar_filter == Some(p), label)
-                                .clicked()
-                            {
-                                self.pillar_filter = Some(p);
-                            }
-                        }
-                    });
-            });
-
-            ui.add_space(8.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    RichText::new("TARGET UNLOCK PHASE:")
-                        .size(10.5)
-                        .strong()
-                        .color(theme.text_muted),
-                );
-                let all_phases_sel = self.phase_filter.is_none();
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("All Phases").size(10.5).color(
-                            if all_phases_sel {
-                                Color32::WHITE
-                            } else {
-                                theme.text_secondary
-                            },
-                        ))
-                        .fill(if all_phases_sel {
-                            theme.accent_blue
-                        } else {
-                            theme.bg_sidebar
-                        })
-                        .corner_radius(CornerRadius::same(6)),
-                    )
-                    .clicked()
-                {
-                    self.phase_filter = None;
-                }
-                for &phase in FeatureRegistry::distinct_target_phases() {
-                    let count = registry.locked_by_phase_count(phase);
-                    let selected = self.phase_filter == Some(phase);
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new(format!("{phase} ({count})")).size(10.5).color(
-                                    if selected {
-                                        Color32::WHITE
-                                    } else {
-                                        theme.text_secondary
-                                    },
-                                ),
-                            )
-                            .fill(if selected {
-                                theme.accent_blue
-                            } else {
-                                theme.bg_sidebar
-                            })
-                            .corner_radius(CornerRadius::same(6)),
-                        )
-                        .clicked()
-                    {
-                        self.phase_filter = if selected { None } else { Some(phase) };
-                    }
-                }
-            });
-
-            ui.add_space(8.0);
-            ui.horizontal_wrapped(|ui| {
-                if crate::icons::icon_button(
-                    ui,
-                    crate::icons::AppIcon::Star,
-                    "Prioritize Phase 32",
-                    11.0,
-                    theme.accent_blue,
-                    theme.accent_blue.gamma_multiply(0.15),
-                    Stroke::NONE,
-                    CornerRadius::same(6),
-                    Vec2::ZERO,
-                )
-                .clicked()
-                {
-                    registry.prioritize_phase("Phase 32");
-                }
-
-                if crate::icons::icon_button(
-                    ui,
-                    crate::icons::AppIcon::Star,
-                    "Prioritize Phase 33",
-                    11.0,
-                    theme.accent_blue,
-                    theme.accent_blue.gamma_multiply(0.15),
-                    Stroke::NONE,
-                    CornerRadius::same(6),
-                    Vec2::ZERO,
-                )
-                .clicked()
-                {
-                    registry.prioritize_phase("Phase 33");
-                }
-
-                if crate::icons::icon_button(
-                    ui,
-                    crate::icons::AppIcon::Eraser,
-                    "Clear Queue Flags",
-                    11.0,
-                    theme.text_secondary,
-                    theme.bg_sidebar,
-                    Stroke::NONE,
-                    CornerRadius::same(6),
-                    Vec2::ZERO,
-                )
-                .clicked()
-                {
-                    registry.clear_all_priorities();
-                }
-
-                if crate::icons::icon_button(
-                    ui,
-                    crate::icons::AppIcon::Document,
-                    "Export Unlock Backlog (.md)",
-                    11.0,
-                    Color32::WHITE,
-                    theme.accent_green,
-                    Stroke::NONE,
-                    CornerRadius::same(6),
-                    Vec2::ZERO,
-                )
-                .clicked()
-                {
-                    let md = registry.export_unlock_backlog_markdown();
-                    match DiskExporter::write_export_file("EigenGraph_Unlock_Backlog.md", &md) {
-                        Ok(dest) => {
-                            self.export_feedback = Some(format!("Exported unlock backlog -> {dest}"));
-                        }
-                        Err(err) => {
-                            self.export_feedback = Some(format!("Export failed: {err}"));
-                        }
-                    }
-                }
-
-                if crate::icons::icon_button(
-                    ui,
-                    crate::icons::AppIcon::BoxPackage,
-                    "Export Unlock Roadmap (.json)",
-                    11.0,
-                    Color32::WHITE,
-                    theme.accent_blue,
-                    Stroke::NONE,
-                    CornerRadius::same(6),
-                    Vec2::ZERO,
-                )
-                .clicked()
-                {
-                    let json = registry.export_unlock_roadmap_json();
-                    match DiskExporter::write_export_file("EigenGraph_Unlock_Roadmap.json", &json) {
-                        Ok(dest) => {
-                            self.export_feedback = Some(format!("Exported structured JSON roadmap -> {dest}"));
-                        }
-                        Err(err) => {
-                            self.export_feedback = Some(format!("JSON export failed: {err}"));
-                        }
-                    }
-                }
-            });
-
-            if let Some(msg) = &self.export_feedback {
-                ui.add_space(6.0);
-                ui.label(RichText::new(msg).size(11.0).color(theme.accent_green));
-            }
-        });
-
-        ui.add_space(12.0);
-
-        // Domain Pillar Readiness Strip (Click to filter by pillar)
-        ui.label(
-            RichText::new("15-PILLAR READINESS COVERAGE (CLICK TO FILTER)")
-                .size(11.0)
-                .strong()
-                .color(theme.text_muted),
-        );
-        ui.add_space(6.0);
-
-        let all_pillars = NavigationPillar::all();
-        ui_kit::responsive_grid_n(ui, all_pillars.len(), 210.0, |ui, idx| {
-            let pillar = all_pillars[idx];
-            let (p_active, p_total) = registry.pillar_counts(pillar);
-            let frac = if p_total > 0 {
-                p_active as f32 / p_total as f32
-            } else {
-                0.0
-            };
-            let is_selected = self.pillar_filter == Some(pillar);
-            let stroke = if is_selected {
-                Stroke::new(1.5, theme.accent_blue)
-            } else {
-                Stroke::new(1.0, theme.border_subtle)
-            };
-
-            Frame::new()
-                .fill(if is_selected {
-                    theme.accent_blue.gamma_multiply(0.12)
-                } else {
-                    theme.bg_card
-                })
-                .corner_radius(CornerRadius::same(8))
-                .stroke(stroke)
-                .inner_margin(Margin::same(10))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!("{} {}", pillar.icon(), pillar.clean_name()))
-                                .size(11.5)
-                                .strong()
-                                .color(theme.text_primary),
-                        );
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(
-                                RichText::new(format!("{p_active}/{p_total}"))
-                                    .size(10.5)
-                                    .strong()
-                                    .color(theme.accent_green),
-                            );
-                        });
-                    });
-                    ui.add_space(4.0);
-                    ui.add(ProgressBar::new(frac).desired_height(5.0));
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        if ui
-                            .small_button(if is_selected { "Clear Filter" } else { "Filter" })
-                            .clicked()
-                        {
-                            self.pillar_filter = if is_selected { None } else { Some(pillar) };
-                        }
-                        if crate::icons::icon_button(
-                            ui,
-                            crate::icons::AppIcon::ArrowRight,
-                            "Open",
-                            10.0,
-                            theme.accent_blue,
-                            theme.bg_sidebar,
-                            Stroke::NONE,
-                            CornerRadius::same(4),
-                            Vec2::ZERO,
-                        )
-                        .clicked()
-                        {
-                            *active_pillar = pillar;
-                            jump_clicked = true;
-                        }
-                    });
-                });
-        });
-
-        ui.add_space(14.0);
-
-        // Capability Entries List
-        let q = self.registry_search.trim().to_lowercase();
-        ui.label(
-            RichText::new("CAPABILITY SLOTS & UNLOCK TARGETS")
-                .size(11.0)
-                .strong()
-                .color(theme.text_muted),
-        );
-        ui.add_space(6.0);
-
-        let mut shown_count = 0usize;
-        for entry in &mut registry.entries {
-            if let Some(pf) = self.pillar_filter {
-                if entry.pillar != pf {
-                    continue;
-                }
-            }
-            if let Some(phase_target) = self.phase_filter {
-                if !entry
-                    .status
-                    .target_phase()
-                    .is_some_and(|p| p.eq_ignore_ascii_case(phase_target))
-                {
-                    continue;
-                }
-            }
-            match self.registry_filter {
-                RegistryFilter::All => {}
-                RegistryFilter::LockedOnly => {
-                    if entry.status.is_active() {
-                        continue;
-                    }
-                }
-                RegistryFilter::PrioritizedOnly => {
-                    if entry.status.is_active() || !entry.prioritized {
-                        continue;
-                    }
-                }
-                RegistryFilter::ActiveOnly => {
-                    if !entry.status.is_active() {
-                        continue;
-                    }
-                }
-            }
-            if !q.is_empty() {
-                let hay = format!(
-                    "{} {} {} {} {}",
-                    entry.code,
-                    entry.title,
-                    entry.description,
-                    entry.module_hint,
-                    entry.pillar.clean_name()
-                )
-                .to_lowercase();
-                if !hay.contains(&q) {
-                    continue;
-                }
-            }
-
-            shown_count += 1;
-            let border = match entry.status {
-                FeatureStatus::Active => theme.border_subtle,
-                FeatureStatus::Locked { .. } if entry.prioritized => {
-                    theme.accent_blue.gamma_multiply(0.7)
-                }
-                FeatureStatus::Locked { .. } => theme.accent_orange.gamma_multiply(0.45),
-            };
-
-            Frame::new()
-                .fill(theme.bg_card)
-                .corner_radius(CornerRadius::same(10))
-                .stroke(Stroke::new(1.0, border))
-                .inner_margin(Margin::same(12))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(
-                            RichText::new(format!("[{}]", entry.code))
-                                .size(11.5)
-                                .strong()
-                                .color(theme.accent_blue),
-                        );
-                        ui.label(
-                            RichText::new(entry.title)
-                                .size(12.5)
-                                .strong()
-                                .color(theme.text_primary),
-                        );
-                        ui_kit::feature_status_badge(ui, theme, entry.status);
-
-                        Frame::new()
-                            .fill(theme.bg_sidebar)
-                            .corner_radius(CornerRadius::same(5))
-                            .inner_margin(Margin::symmetric(6, 2))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "{} {}",
-                                        entry.pillar.icon(),
-                                        entry.pillar.clean_name()
-                                    ))
-                                    .size(10.0)
-                                    .color(theme.text_secondary),
-                                );
-                            });
-                    });
-
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(entry.description)
-                            .size(11.5)
-                            .color(theme.text_secondary),
-                    );
-                    ui.add_space(4.0);
-
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(
-                            RichText::new(format!("Module: {}", entry.module_hint))
-                                .size(10.5)
-                                .color(theme.text_muted),
-                        );
-
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if crate::icons::icon_button(
-                                ui,
-                                crate::icons::AppIcon::ArrowRight,
-                                "Inspect Layout",
-                                10.5,
-                                theme.text_primary,
-                                theme.bg_sidebar,
-                                Stroke::NONE,
-                                CornerRadius::same(6),
-                                Vec2::ZERO,
-                            )
-                            .clicked()
-                            {
-                                *active_pillar = entry.pillar;
-                                jump_clicked = true;
-                            }
-
-                            if !entry.status.is_active() {
-                                let (ico, label) = if entry.prioritized {
-                                    (crate::icons::AppIcon::Target, "Prioritized for Unlock")
-                                } else {
-                                    (crate::icons::AppIcon::Star, "Queue for Unlock")
-                                };
-                                let fill = if entry.prioritized {
-                                    theme.accent_blue.gamma_multiply(0.25)
-                                } else {
-                                    theme.bg_sidebar
-                                };
-                                let fg = if entry.prioritized {
-                                    theme.accent_blue
-                                } else {
-                                    theme.text_secondary
-                                };
-                                if crate::icons::icon_button(
-                                    ui,
-                                    ico,
-                                    label,
-                                    10.5,
-                                    fg,
-                                    fill,
-                                    Stroke::NONE,
-                                    CornerRadius::same(6),
-                                    Vec2::ZERO,
-                                )
-                                .clicked()
-                                {
-                                    entry.prioritized = !entry.prioritized;
-                                }
-                            }
-                        });
-                    });
-                });
-            ui.add_space(8.0);
-        }
-
-        if shown_count == 0 {
-            theme.card_frame().show(ui, |ui| {
-                ui.label(
-                    RichText::new("No capabilities match the current filter criteria.")
-                        .size(12.0)
-                        .color(theme.text_muted),
-                );
-            });
-        }
-
-        jump_clicked
+        false
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1297,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — Phase 50 Multi-Turn Gemini AI, Pure Spatial Canvas, 3D Ghost Preview & Obsidian Vault Notes (74/74 Capabilities Active)",
+                        "v{} — Phase 51 Dynamic Island Resting/Hover Studio, Undo/Redo & Extended Draw Deck, BIM-on-Earth 3D & Gemini 2.5 Pro",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)

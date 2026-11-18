@@ -4879,6 +4879,54 @@ impl UniversalCanvasState {
                 }
             }
         }
+
+        // 6. Phase 51: 3D Extruded BIM Building Silhouette directly over Earth Globe Surface
+        if self.globe_mode && self.ground_origin_anchored && !bim_project.is_empty() {
+            if let Some(ref xf) = self.last_globe_xform {
+                let lift_scale = if self.world_map.zoom_level < 15.0 { 12.0 } else { 1.0 };
+                for col in &bim_project.columns {
+                    let base_ll = SlippyMapState::world_mm_to_lat_lon(
+                        self.ground_origin_lat_lon,
+                        [col.pos.0, col.pos.1],
+                    );
+                    let base_m = bim_project.level_elevation(col.base_level_id) * 0.001 * lift_scale;
+                    let top_m = bim_project.level_elevation(col.top_level_id) * 0.001 * lift_scale;
+                    if let (Some((p0, _, v0)), Some((p1, _, v1))) = (
+                        xf.project_lat_lon_elev(base_ll.0, base_ll.1, base_m),
+                        xf.project_lat_lon_elev(base_ll.0, base_ll.1, top_m),
+                    ) {
+                        if v0 && v1 && rect.expand(40.0).contains(p1) {
+                            clip_painter.line_segment(
+                                [p0, p1],
+                                Stroke::new(2.0, Color32::from_rgba_unmultiplied(56, 189, 248, 220)),
+                            );
+                        }
+                    }
+                }
+                for run in &bim_project.runs {
+                    let s_ll = SlippyMapState::world_mm_to_lat_lon(
+                        self.ground_origin_lat_lon,
+                        [run.start.0, run.start.1],
+                    );
+                    let e_ll = SlippyMapState::world_mm_to_lat_lon(
+                        self.ground_origin_lat_lon,
+                        [run.end.0, run.end.1],
+                    );
+                    let elev_m = bim_project.level_elevation(run.level_id) * 0.001 * lift_scale;
+                    if let (Some((p0, _, v0)), Some((p1, _, v1))) = (
+                        xf.project_lat_lon_elev(s_ll.0, s_ll.1, elev_m),
+                        xf.project_lat_lon_elev(e_ll.0, e_ll.1, elev_m),
+                    ) {
+                        if (v0 || v1) && (rect.expand(40.0).contains(p0) || rect.expand(40.0).contains(p1)) {
+                            clip_painter.line_segment(
+                                [p0, p1],
+                                Stroke::new(1.8, theme.accent_green.gamma_multiply(0.9)),
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Screen-space hit-testing against projected BIM Columns, Beams/Runs, Walls, and Footings.

@@ -1261,6 +1261,26 @@ impl EigenGraphApp {
                 true,
             );
         }
+        if hud_actions.undo {
+            if let Some(msg) = self.build_view.bim_bus.undo() {
+                self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+                self.sync_bim_to_fem();
+                self.sync_earth_maps();
+                self.spatial_workspace.push_trace(msg, true);
+            } else if self.universal_canvas.undo() {
+                self.spatial_workspace.push_trace("Undid 2D canvas action", true);
+            }
+        }
+        if hud_actions.redo {
+            if let Some(msg) = self.build_view.bim_bus.redo() {
+                self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+                self.sync_bim_to_fem();
+                self.sync_earth_maps();
+                self.spatial_workspace.push_trace(msg, true);
+            } else if self.universal_canvas.redo() {
+                self.spatial_workspace.push_trace("Redid 2D canvas action", true);
+            }
+        }
     }
 
     fn open_vault_project_entry(&mut self, entry: crate::core::vault::PersonalVaultProjectEntry) {
