@@ -337,11 +337,17 @@
         inp.style.display = "none";
         document.body.appendChild(inp);
         inp.addEventListener("change", async () => {
-          hideDirPickerOverlay();
           if (inp.files && inp.files.length > 0) {
+            hideDirPickerOverlay();
             await ingestDirectoryFileList(inp.files);
           } else {
+            showFirefoxFolderOverlay("Empty_Finder_Vault");
+            const msgEl = document.getElementById("eg_firefox_overlay_msg");
+            if (msgEl) {
+              msgEl.textContent = "Empty Finder folder detected (Firefox webkitdirectory ignores empty folders) — create a new Obsidian Vault below or choose a non-empty folder:";
+            }
             state.busy = false;
+            state.status_msg = "Selected Finder folder appears empty. Name your Vault in the overlay bar or use Create Vault.";
             persistSnapshot();
           }
           inp.value = "";
@@ -383,6 +389,7 @@
         ].join(";");
 
         const text = document.createElement("span");
+        text.id = "eg_firefox_overlay_msg";
         text.textContent = "Browser Vault Folder Picker (Firefox / Safari):";
         text.style.fontWeight = "600";
 
@@ -398,9 +405,42 @@
           "font-weight:600"
         ].join(";");
 
+        const nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.value = requestedName && requestedName !== "Local Browser Vault" ? requestedName : "EigenGraph_Vault";
+        nameInput.placeholder = "Vault Name";
+        nameInput.style.cssText = [
+          "background:rgba(15,23,42,0.9)",
+          "color:#f8fafc",
+          "border:1px solid rgba(148,163,184,0.35)",
+          "border-radius:8px",
+          "padding:5px 8px",
+          "font-size:12px",
+          "width:140px"
+        ].join(";");
+
+        const createBtn = document.createElement("button");
+        createBtn.type = "button";
+        createBtn.textContent = "Create Obsidian Vault";
+        createBtn.style.cssText = [
+          "cursor:pointer",
+          "background:#16a34a",
+          "color:#ffffff",
+          "border:none",
+          "padding:6px 10px",
+          "border-radius:8px",
+          "font-size:12px",
+          "font-weight:600"
+        ].join(";");
+        createBtn.onclick = () => {
+          hideDirPickerOverlay();
+          const nm = (nameInput.value || "EigenGraph_Vault").trim() || "EigenGraph_Vault";
+          void createNewVaultAsync(nm, true);
+        };
+
         const idbBtn = document.createElement("button");
         idbBtn.type = "button";
-        idbBtn.textContent = "Use Browser Storage";
+        idbBtn.textContent = "Use Existing Storage";
         idbBtn.style.cssText = [
           "cursor:pointer",
           "background:rgba(148,163,184,0.16)",
@@ -435,6 +475,8 @@
 
         bar.appendChild(text);
         bar.appendChild(label);
+        bar.appendChild(nameInput);
+        bar.appendChild(createBtn);
         bar.appendChild(idbBtn);
         bar.appendChild(cancelBtn);
         document.body.appendChild(bar);
@@ -891,6 +933,26 @@
           }
           items.sort((a, b) => a.rel_path.localeCompare(b.rel_path));
           return JSON.stringify(items);
+        },
+        saveGeminiKeyOptIn: (remember, apiKey) => {
+          try {
+            if (remember && apiKey && String(apiKey).trim().length > 0) {
+              window.localStorage.setItem("eigengraph_gemini_optin_v1", "1");
+              window.localStorage.setItem("eigengraph_gemini_key_v1", String(apiKey).trim());
+            } else {
+              window.localStorage.removeItem("eigengraph_gemini_optin_v1");
+              window.localStorage.removeItem("eigengraph_gemini_key_v1");
+            }
+          } catch (_) {}
+        },
+        loadGeminiKeyOptInJson: () => {
+          try {
+            const optIn = window.localStorage.getItem("eigengraph_gemini_optin_v1") === "1";
+            const key = optIn ? (window.localStorage.getItem("eigengraph_gemini_key_v1") || "") : "";
+            return JSON.stringify({ remember: optIn, api_key: key });
+          } catch (_) {
+            return JSON.stringify({ remember: false, api_key: "" });
+          }
         }
       };
 

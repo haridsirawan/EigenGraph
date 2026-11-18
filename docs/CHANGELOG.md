@@ -7,6 +7,24 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.5.0] - 2026-11-18 — Phase 50: Pure Spatial Corners, Dynamic Island Settings/View Switcher, Multi-Turn Gemini AI & Live 3D Ghost Preview
+
+### Added & Changed
+- **Pure Top-Left Spatial Canvas & Dynamic Island View/Settings Controls (`src/views/spatial_workspace.rs`, `docs/UI_ARCHITECTURE.md`)**:
+  - Removed the persistent top-left capsule (`EigenGraph | Earth 3D | /`) so all four canvas corners stay completely unobstructed in idle Spatial Mode.
+  - Added **Canvas View switcher (`Earth 3D` / `BIM 3D` / `Plan 2D`)** and a direct **Settings (`AppIcon::SettingsGear`)** button inside the hover-expanded Dynamic Island header, alongside mobile-clamped chat/drawer heights (`< 640px`).
+- **Multi-Turn Gemini AI Conversation, Extended Directives & Opt-In Device Key Security (`src/core/web_bridge.rs`, `src/views/spatial_workspace.rs`, `src/views/settings.rs`, `src/app.rs`, `index.html`)**:
+  - Upgraded `gemini_send_conversation` (`build_gemini_generate_content_payload`) to transmit recent multi-turn conversation history (`user`/`model` roles) across follow-up engineering queries.
+  - Added extended structured directives (`[[RESIZE_COL:id,w,d]]`, `[[RESIZE_BEAM:id,b,h]]`, `[[ADD_COL:x,y,w,d]]`, `[[APPLY_SITE_SEISMIC]]`) routed cleanly through `Planning` interactive confirmation cards or `Fast` execution.
+  - Added an **opt-in `"Remember key on this device"`** toggle synced between the Dynamic Island Key popover and Settings (`localStorage` on Web / isolated device config on Native; never serialized into `.eigen` exports).
+- **Obsidian Vault Markdown Notes & Firefox Empty-Folder Fix (`index.html`, `src/core/vault.rs`, `src/views/spatial_workspace.rs`)**:
+  - Fixed Mozilla Firefox / Safari macOS empty-folder selection in `<input webkitdirectory>` by keeping the native picker overlay open with inline Vault initialization when a selected folder returns `0` files.
+  - Added an Obsidian-style **`+ Note (.md)`** creator and inline Markdown previewer in the Dynamic Island Vault drawer for `KnowledgeBase/*.md` engineering design notes.
+- **Live 3D Wireframe Ghost Preview & Precision Placement (`src/views/build/viewport_3d.rs`, `src/views/spatial_workspace.rs`)**:
+  - Added live scaled 3D wireframe footprint extrusion previews for `Column`, `Footing`, `Beam`, and `Wall` tools matching the active precision dimensions before canvas click, plus direct `@(X, Y)` coordinate placement in the active tool pill and site seismic/wind hazard display on Footing Smart Pop-Ups.
+
+---
+
 ## [v0.4.9] - 2026-11-18 — Phase 49: Live Gemini API Dynamic Island, Planning Proposals & Cross-Browser Obsidian Vault
 
 ### Added & Changed

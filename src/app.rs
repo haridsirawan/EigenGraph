@@ -76,7 +76,7 @@ impl Default for EigenGraphApp {
         let _has_vault = crate::core::InternalVault::has_connected_vault();
         let personal_vault_projects = crate::core::InternalVault::list_personal_vault_projects();
         let mut universal_canvas = UniversalCanvasState::default();
-        let spatial_workspace = SpatialWorkspaceState::default();
+        let mut spatial_workspace = SpatialWorkspaceState::default();
         if spatial_workspace.spatial_mode_enabled {
             // Spatial full-viewport mode has no outer vertical page scroll conflict.
             universal_canvas.is_frozen = false;
@@ -94,6 +94,9 @@ impl Default for EigenGraphApp {
             research_view.slippy_map.zoom_level,
             research_view.slippy_map.tile_provider,
         );
+        let settings_view = SettingsView::default();
+        spatial_workspace.gemini_api_key_draft = settings_view.gemini_api_key.clone();
+        spatial_workspace.remember_gemini_key = settings_view.remember_gemini_key;
         Self {
             theme: MacTheme::default(),
             active_pillar: NavigationPillar::MyLibrary,
@@ -120,7 +123,7 @@ impl Default for EigenGraphApp {
             industrialized_view: IndustrializedView::default(),
             prediction_view: PredictionView::default(),
             results_view: ResultsView::default(),
-            settings_view: SettingsView::default(),
+            settings_view,
             universal_canvas,
             ai_assistant_view: AiAssistantView::default(),
             spatial_workspace,
@@ -455,9 +458,14 @@ impl App for EigenGraphApp {
             }
         }
         if self.show_settings {
-            if self.spatial_workspace.gemini_api_key_draft != self.settings_view.gemini_api_key {
+            if self.spatial_workspace.gemini_api_key_draft != self.settings_view.gemini_api_key
+                || self.spatial_workspace.remember_gemini_key
+                    != self.settings_view.remember_gemini_key
+            {
                 self.spatial_workspace.gemini_api_key_draft =
                     self.settings_view.gemini_api_key.clone();
+                self.spatial_workspace.remember_gemini_key =
+                    self.settings_view.remember_gemini_key;
             }
         }
         if self.spatial_workspace.sessions_dirty && crate::core::InternalVault::has_connected_vault()
@@ -938,9 +946,12 @@ impl EigenGraphApp {
             &self.personal_vault_projects,
         );
         if !self.show_settings
-            && self.settings_view.gemini_api_key != self.spatial_workspace.gemini_api_key_draft
+            && (self.settings_view.gemini_api_key != self.spatial_workspace.gemini_api_key_draft
+                || self.settings_view.remember_gemini_key
+                    != self.spatial_workspace.remember_gemini_key)
         {
             self.settings_view.gemini_api_key = self.spatial_workspace.gemini_api_key_draft.clone();
+            self.settings_view.remember_gemini_key = self.spatial_workspace.remember_gemini_key;
         }
         self.apply_spatial_hud_actions(hud_actions, workspace_snapshot);
 
@@ -1237,6 +1248,18 @@ impl EigenGraphApp {
             self.build_view
                 .fit_view_to_project(&mut self.universal_canvas, &self.members);
             self.sync_earth_maps();
+        }
+        if hud_actions.apply_site_seismic {
+            self.sync_site_coupling();
+            let coupling = self.universal_canvas.active_site_coupling();
+            self.sync_bim_to_fem();
+            self.spatial_workspace.push_trace(
+                format!(
+                    "Applied Earth Seismic Ss={:.2}g, Wind={:.0} m/s",
+                    coupling.seismic_pga_ss_g, coupling.design_wind_ms
+                ),
+                true,
+            );
         }
     }
 

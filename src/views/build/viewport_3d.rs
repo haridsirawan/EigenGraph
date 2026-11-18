@@ -772,40 +772,130 @@ impl BuildView {
             self.hover_3d_ground_snap_mm = None;
         }
 
-        // Render 3D Ground Authoring Reticle, Rubber-Band Preview & Geodesic Measurement Overlay
+        // Render 3D Ground Authoring Reticle, Live Wireframe Ghost Preview & Geodesic Measurement Overlay
         if let Some(snap_pt) = self.hover_3d_ground_snap_mm {
-            let (sp, _) = project_3d(
-                snap_pt[0] as f32 * 0.001 + offset_x,
-                datum_y_m + 0.02,
-                snap_pt[1] as f32 * 0.001 + offset_z,
-            );
+            let cx_m = snap_pt[0] as f32 * 0.001 + offset_x;
+            let cz_m = snap_pt[1] as f32 * 0.001 + offset_z;
+            let (sp, _) = project_3d(cx_m, datum_y_m + 0.02, cz_m);
             let reticle_col = Color32::from_rgb(0, 240, 255);
-            painter.circle_stroke(sp, 7.0, Stroke::new(1.8, reticle_col));
-            painter.text(
-                sp + Vec2::new(10.0, -10.0),
-                Align2::LEFT_BOTTOM,
-                format!(
+            let ghost_stroke = Stroke::new(1.5, Color32::from_rgba_unmultiplied(0, 240, 255, 195));
+            painter.circle_stroke(sp, 6.0, Stroke::new(1.8, reticle_col));
+
+            // Live 3D Wireframe Ghost Footprint matching active manual precision dimensions
+            match self.ground_author_tool {
+                Ground3DAuthorTool::Column => {
+                    let hw = (self.author_col_width_mm as f32 * 0.001) * 0.5;
+                    let hd = (self.author_col_depth_mm as f32 * 0.001) * 0.5;
+                    let h_col = 3.5_f32;
+                    let base = [
+                        project_3d(cx_m - hw, datum_y_m, cz_m - hd).0,
+                        project_3d(cx_m + hw, datum_y_m, cz_m - hd).0,
+                        project_3d(cx_m + hw, datum_y_m, cz_m + hd).0,
+                        project_3d(cx_m - hw, datum_y_m, cz_m + hd).0,
+                    ];
+                    let top = [
+                        project_3d(cx_m - hw, datum_y_m + h_col, cz_m - hd).0,
+                        project_3d(cx_m + hw, datum_y_m + h_col, cz_m - hd).0,
+                        project_3d(cx_m + hw, datum_y_m + h_col, cz_m + hd).0,
+                        project_3d(cx_m - hw, datum_y_m + h_col, cz_m + hd).0,
+                    ];
+                    for i in 0..4 {
+                        let next = (i + 1) % 4;
+                        painter.line_segment([base[i], base[next]], ghost_stroke);
+                        painter.line_segment([top[i], top[next]], ghost_stroke);
+                        painter.line_segment([base[i], top[i]], ghost_stroke);
+                    }
+                }
+                Ground3DAuthorTool::Footing => {
+                    let hs = (self.author_footing_size_mm as f32 * 0.001) * 0.5;
+                    let base = [
+                        project_3d(cx_m - hs, datum_y_m, cz_m - hs).0,
+                        project_3d(cx_m + hs, datum_y_m, cz_m - hs).0,
+                        project_3d(cx_m + hs, datum_y_m, cz_m + hs).0,
+                        project_3d(cx_m - hs, datum_y_m, cz_m + hs).0,
+                    ];
+                    let pad_top = [
+                        project_3d(cx_m - hs, datum_y_m - 0.45, cz_m - hs).0,
+                        project_3d(cx_m + hs, datum_y_m - 0.45, cz_m - hs).0,
+                        project_3d(cx_m + hs, datum_y_m - 0.45, cz_m + hs).0,
+                        project_3d(cx_m - hs, datum_y_m - 0.45, cz_m + hs).0,
+                    ];
+                    let foot_stroke = Stroke::new(1.5, theme.accent_green.gamma_multiply(0.85));
+                    for i in 0..4 {
+                        let next = (i + 1) % 4;
+                        painter.line_segment([base[i], base[next]], foot_stroke);
+                        painter.line_segment([pad_top[i], pad_top[next]], foot_stroke);
+                        painter.line_segment([base[i], pad_top[i]], foot_stroke);
+                    }
+                }
+                Ground3DAuthorTool::Beam | Ground3DAuthorTool::Wall | Ground3DAuthorTool::Orbit => {}
+            }
+
+            let dim_sub = match self.ground_author_tool {
+                Ground3DAuthorTool::Column => format!(
+                    "C{:.0}x{:.0} @ ({:.2}m, {:.2}m)",
+                    self.author_col_width_mm,
+                    self.author_col_depth_mm,
+                    snap_pt[0] * 0.001,
+                    snap_pt[1] * 0.001
+                ),
+                Ground3DAuthorTool::Footing => format!(
+                    "F{:.0}x{:.0} @ ({:.2}m, {:.2}m)",
+                    self.author_footing_size_mm,
+                    self.author_footing_size_mm,
+                    snap_pt[0] * 0.001,
+                    snap_pt[1] * 0.001
+                ),
+                _ => format!(
                     "{} ({:.2}m, {:.2}m)",
                     self.ground_author_tool.label(),
                     snap_pt[0] * 0.001,
                     snap_pt[1] * 0.001
                 ),
+            };
+            painter.text(
+                sp + Vec2::new(10.0, -10.0),
+                Align2::LEFT_BOTTOM,
+                dim_sub,
                 egui::FontId::monospace(10.0),
                 reticle_col,
             );
+
             if let Some(start_mm) = self.pending_3d_start_mm {
-                let (st_sp, _) = project_3d(
-                    start_mm[0] as f32 * 0.001 + offset_x,
-                    datum_y_m + 0.02,
-                    start_mm[1] as f32 * 0.001 + offset_z,
-                );
-                painter.line_segment([st_sp, sp], Stroke::new(2.4, theme.accent_orange));
+                let sx_m = start_mm[0] as f32 * 0.001 + offset_x;
+                let sz_m = start_mm[1] as f32 * 0.001 + offset_z;
+                let (st_sp, _) = project_3d(sx_m, datum_y_m + 0.02, sz_m);
+                painter.line_segment([st_sp, sp], Stroke::new(2.2, theme.accent_orange));
+
+                // Draw parallel offset corridor lines matching active beam width or wall thickness
+                let dx_m = cx_m - sx_m;
+                let dz_m = cz_m - sz_m;
+                let seg_len_m = dx_m.hypot(dz_m);
+                if seg_len_m > 0.05 {
+                    let nx = -dz_m / seg_len_m;
+                    let nz = dx_m / seg_len_m;
+                    let half_w_m = if self.ground_author_tool == Ground3DAuthorTool::Wall {
+                        (self.author_wall_thickness_mm as f32 * 0.001) * 0.5
+                    } else {
+                        (self.author_beam_width_mm as f32 * 0.001) * 0.5
+                    };
+                    let l1 = project_3d(sx_m + nx * half_w_m, datum_y_m + 0.02, sz_m + nz * half_w_m).0;
+                    let l2 = project_3d(cx_m + nx * half_w_m, datum_y_m + 0.02, cz_m + nz * half_w_m).0;
+                    let r1 = project_3d(sx_m - nx * half_w_m, datum_y_m + 0.02, sz_m - nz * half_w_m).0;
+                    let r2 = project_3d(cx_m - nx * half_w_m, datum_y_m + 0.02, cz_m - nz * half_w_m).0;
+                    let edge_col = Stroke::new(1.2, theme.accent_orange.gamma_multiply(0.65));
+                    painter.line_segment([l1, l2], edge_col);
+                    painter.line_segment([r1, r2], edge_col);
+                    painter.line_segment([l1, r1], edge_col);
+                    painter.line_segment([l2, r2], edge_col);
+                }
+
                 let len_m = (snap_pt[0] - start_mm[0]).hypot(snap_pt[1] - start_mm[1]) * 0.001;
                 let mid = Pos2::new(0.5 * (st_sp.x + sp.x), 0.5 * (st_sp.y + sp.y) - 10.0);
                 painter.text(
                     mid,
                     Align2::CENTER_BOTTOM,
-                    format!("L = {:.2} m", len_m),
+                    format!("L = {:.2} m ({:.0} mm)", len_m, len_m * 1000.0),
                     egui::FontId::monospace(10.5),
                     theme.accent_orange,
                 );

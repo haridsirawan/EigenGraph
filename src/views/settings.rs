@@ -36,6 +36,7 @@ pub struct SettingsView {
     pub enable_anti_leakage: bool,
     pub freeze_by_default: bool,
     pub gemini_api_key: String,
+    pub remember_gemini_key: bool,
     pub registry_search: String,
     pub registry_filter: RegistryFilter,
     pub pillar_filter: Option<NavigationPillar>,
@@ -49,6 +50,8 @@ pub struct SettingsView {
 
 impl Default for SettingsView {
     fn default() -> Self {
+        let (remember_gemini_key, gemini_api_key) =
+            crate::core::web_bridge::gemini_key_load_device_opt_in();
         Self {
             active_subtab: SettingsSubTab::WorkspaceSettings,
             freeze_by_default: true,
@@ -57,7 +60,8 @@ impl Default for SettingsView {
             solver_threads: 8,
             enable_svd_guard: true,
             enable_anti_leakage: true,
-            gemini_api_key: String::new(),
+            gemini_api_key,
+            remember_gemini_key,
             registry_search: String::new(),
             registry_filter: RegistryFilter::All,
             pillar_filter: None,
@@ -1137,14 +1141,24 @@ impl SettingsView {
             ui.add_space(8.0);
 
             ui.label(RichText::new("Google Gemini API Key:").size(12.5).color(theme.text_primary));
-            ui.add(
+            let key_resp = ui.add(
                 egui::TextEdit::singleline(&mut self.gemini_api_key)
                     .password(true)
                     .desired_width(ui.available_width().min(380.0)),
             );
+            let rem_resp = ui.checkbox(
+                &mut self.remember_gemini_key,
+                "Remember API key on this device (local storage only; never exported into .eigen archives)",
+            );
+            if rem_resp.changed() || (self.remember_gemini_key && key_resp.changed()) {
+                crate::core::web_bridge::gemini_key_save_device_opt_in(
+                    self.remember_gemini_key,
+                    &self.gemini_api_key,
+                );
+            }
             ui.label(
                 RichText::new(
-                    "Stored in-session for upcoming live LLM BIM tool orchestration (Feature AI-03).",
+                    "Powers live Gemini 2.5 Flash & Live Stream orchestration inside the Dynamic Island.",
                 )
                 .size(11.0)
                 .color(theme.text_muted),
@@ -1283,7 +1297,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — Phase 49 Live Gemini Dynamic Island, Planning Proposals & Cross-Browser Obsidian Vault (74/74 Capabilities Active)",
+                        "v{} — Phase 50 Multi-Turn Gemini AI, Pure Spatial Canvas, 3D Ghost Preview & Obsidian Vault Notes (74/74 Capabilities Active)",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)

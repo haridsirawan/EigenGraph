@@ -1937,6 +1937,58 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
             Self::load_ai_sessions_json_at(&root)
         }
     }
+
+    /// Saves an Obsidian-style Markdown engineering note inside `KnowledgeBase/<stem>.md`
+    /// under an explicit Vault directory root.
+    pub fn save_markdown_note_at(root: &Path, title: &str, body: &str) -> Result<String, String> {
+        let dir = root.join("KnowledgeBase");
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed creating KnowledgeBase directory: {e}"))?;
+        let clean: String = title
+            .trim()
+            .trim_end_matches(".md")
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .collect();
+        let stem = if clean.is_empty() { "Engineering_Note" } else { clean.as_str() };
+        let rel = format!("KnowledgeBase/{stem}.md");
+        let target = dir.join(format!("{stem}.md"));
+        let final_body = if body.trim().is_empty() {
+            format!("# {}\n\nCreated in EigenGraph Obsidian Vault.\n", title.trim())
+        } else {
+            body.to_string()
+        };
+        std::fs::write(&target, final_body)
+            .map_err(|e| format!("Failed writing Markdown note {rel}: {e}"))?;
+        Ok(rel)
+    }
+
+    /// Saves an Obsidian-style Markdown note inside `KnowledgeBase/` for the active Vault.
+    pub fn save_markdown_note(title: &str, body: &str) -> Result<String, String> {
+        let final_body = if body.trim().is_empty() {
+            format!("# {}\n\nCreated in EigenGraph Obsidian Vault.\n", title.trim())
+        } else {
+            body.to_string()
+        };
+        #[cfg(target_arch = "wasm32")]
+        {
+            let clean: String = title
+                .trim()
+                .trim_end_matches(".md")
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                .collect();
+            let stem = if clean.is_empty() { "Engineering_Note" } else { clean.as_str() };
+            let rel = format!("KnowledgeBase/{stem}.md");
+            crate::core::web_bridge::vault_write_file(&rel, &final_body);
+            Ok(rel)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let root = Self::vault_root_dir();
+            Self::save_markdown_note_at(&root, title, &final_body)
+        }
+    }
 }
 
 #[cfg(test)]

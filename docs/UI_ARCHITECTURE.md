@@ -3,14 +3,14 @@
 To maintain consistent product direction across all future phases (`v0.4.8+`), EigenGraph enforces four strict UI/UX boundaries in **Spatial Mode**:
 
 1. **100% Full-Viewport Earth & BIM Canvas**:
-   - No permanent docked sidebars, side panels (`Panel::right` / `Panel::left`), or multi-row fixed toolbars may compress the interactive viewport in Spatial Mode.
-   - Users always start directly on the edge-to-edge 3D Earth Globe / BIM spatial viewport.
+   - No permanent docked sidebars, side panels (`Panel::right` / `Panel::left`), multi-row fixed toolbars, or top-left corner chrome (`antigravity_top_left_capsule` removed in `v0.5.0`) may clutter the interactive viewport in Spatial Mode.
+   - Users always start directly on the edge-to-edge 3D Earth Globe / BIM spatial viewport with unobstructed corners.
 
 2. **Single Hover-Expandable Floating Dynamic Island (`src/views/spatial_workspace.rs`)**:
    - **Idle State**: Remains a compact, translucent bottom-center capsule showing only workspace status (`EigenAI`, connected Vault status dot, selected `@Target`, active model badge) so ~97% of the viewport remains open canvas.
    - **Hover / Engaged State**: Moving the cursor over the Dynamic Island (with edge hysteresis), focusing the composer, or pressing `Cmd/Ctrl+K` smoothly expands it upward to expose:
-     - **Vault Workspace Controls**: `+ Add Folder (Vault)` folder mounting, direct save-to-Vault, and expandable Vault file explorer.
-     - **Contextual AI Controls**: `+ Add Context (@)` picker, AI Model selector (`EigenAI Pro`, `Gemini 2.5 Flash`, `Gemini Live Stream`), Execution Mode (`Planning` / `Fast`), conversation history, and collapsible floating chat drawer.
+     - **Vault Workspace Controls**: Obsidian-style `+ Add Folder (Vault)` folder mounting (Chrome FS Access + Firefox/Safari `<input webkitdirectory>` overlay picker + empty-folder initializer), direct save-to-Vault, `+ Note (.md)` for `KnowledgeBase/`, and expandable Vault file explorer.
+     - **Contextual AI Controls**: `+ Add Context (@)` picker, AI Model selector (`EigenAI Pro`, live multi-turn `Gemini 2.5 Flash`, `Gemini Live Stream`), opt-in API Key setup popover, Execution Mode (`Planning` interactive review cards / `Fast`), conversation history, **Canvas View switcher (`Earth 3D / BIM 3D / Plan 2D`)**, and **Settings** launcher.
      - **Manual Drawing & Sculpting Commands (`SpatialManualTool`)**: Direct 1-click toggles for `Orbit`, `Column`, `Beam`, `Wall`, `Footing`, `Line`, `Rect`, `Measure`, and `Terraform`. Selecting a manual tool immediately prepares the canvas and folds open popovers back down when the pointer returns to Earth.
      - **Slash Command Palette (`/`)**: Full command access to views, structural lenses, and on-demand engineering sheets.
 

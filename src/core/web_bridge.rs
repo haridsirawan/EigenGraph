@@ -144,6 +144,12 @@ mod js_vault {
 
         #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = downloadVaultBundle)]
         pub fn download_vault_bundle(vault_name: &str);
+
+        #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = saveGeminiKeyOptIn)]
+        pub fn save_gemini_key_opt_in(remember: bool, api_key: &str);
+
+        #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = loadGeminiKeyOptInJson)]
+        pub fn load_gemini_key_opt_in_json() -> String;
     }
 }
 
@@ -771,12 +777,47 @@ pub fn parse_gemini_generate_content_response(raw_json: &str) -> Result<String, 
     }
 }
 
-/// Dispatches a non-blocking Gemini `generateContent` request in the background and returns `request_id`.
-pub fn gemini_send_prompt(
+/// Builds a multi-turn Google Gemini `generateContent` JSON request body (`contents` with `"user"` / `"model"` roles).
+pub fn build_gemini_generate_content_payload(
+    system_prompt: &str,
+    history_turns: &[(bool, String)],
+) -> serde_json::Value {
+    let mut contents = Vec::new();
+    let tail_start = history_turns.len().saturating_sub(10);
+    for (is_user, text) in &history_turns[tail_start..] {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        contents.push(serde_json::json!({
+            "role": if *is_user { "user" } else { "model" },
+            "parts": [{ "text": trimmed }]
+        }));
+    }
+    if contents.is_empty() {
+        contents.push(serde_json::json!({
+            "role": "user",
+            "parts": [{ "text": "Analyze the active EigenGraph workspace." }]
+        }));
+    }
+    serde_json::json!({
+        "system_instruction": {
+            "parts": [{ "text": system_prompt }]
+        },
+        "contents": contents,
+        "generationConfig": {
+            "temperature": 0.25,
+            "maxOutputTokens": 1200
+        }
+    })
+}
+
+/// Dispatches a non-blocking Gemini `generateContent` request with multi-turn context (`history_turns`).
+pub fn gemini_send_conversation(
     api_key: &str,
     model_id: &str,
     system_prompt: &str,
-    user_prompt: &str,
+    history_turns: &[(bool, String)],
 ) -> Result<u64, String> {
     let key_trimmed = api_key.trim().to_string();
     if key_trimmed.is_empty() {
@@ -788,19 +829,7 @@ pub fn gemini_send_prompt(
         model_id.trim().to_string()
     };
     let req_id = NEXT_GEMINI_REQ_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let body = serde_json::json!({
-        "system_instruction": {
-            "parts": [{ "text": system_prompt }]
-        },
-        "contents": [{
-            "role": "user",
-            "parts": [{ "text": user_prompt }]
-        }],
-        "generationConfig": {
-            "temperature": 0.25,
-            "maxOutputTokens": 1200
-        }
-    });
+    let body = build_gemini_generate_content_payload(system_prompt, history_turns);
     let payload_str = body.to_string();
 
     #[cfg(target_arch = "wasm32")]
@@ -923,6 +952,97 @@ pub fn gemini_send_prompt(
             }
         });
         Ok(req_id)
+    }
+}
+
+/// Dispatches a single-turn Gemini prompt (thin wrapper over [`gemini_send_conversation`]).
+pub fn gemini_send_prompt(
+    api_key: &str,
+    model_id: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+) -> Result<u64, String> {
+    gemini_send_conversation(
+        api_key,
+        model_id,
+        system_prompt,
+        &[(true, user_prompt.to_string())],
+    )
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct GeminiDeviceOptInPayload {
+    #[serde(default)]
+    remember: bool,
+    #[serde(default)]
+    api_key: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_device_key_path() -> std::path::PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        let p = std::path::PathBuf::from(home).join(".eigengraph");
+        if std::fs::create_dir_all(&p).is_ok() {
+            return p.join("device_ai_key.json");
+        }
+    }
+    std::env::temp_dir().join("eigengraph_device_ai_key.json")
+}
+
+/// Saves or deletes the opt-in local device Gemini API key at an explicit path (never inside `.eigen` exports).
+pub fn gemini_key_save_device_opt_in_at(path: &std::path::Path, remember: bool, api_key: &str) {
+    if remember && !api_key.trim().is_empty() {
+        let payload = GeminiDeviceOptInPayload {
+            remember: true,
+            api_key: api_key.trim().to_string(),
+        };
+        if let Ok(json) = serde_json::to_string(&payload) {
+            let _ = std::fs::write(path, json);
+        }
+    } else {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Loads `(remember, api_key)` from an explicit device-local key file.
+pub fn gemini_key_load_device_opt_in_at(path: &std::path::Path) -> (bool, String) {
+    if let Ok(raw) = std::fs::read_to_string(path) {
+        if let Ok(parsed) = serde_json::from_str::<GeminiDeviceOptInPayload>(&raw) {
+            if parsed.remember && !parsed.api_key.trim().is_empty() {
+                return (true, parsed.api_key);
+            }
+        }
+    }
+    (false, String::new())
+}
+
+/// Persists (when `remember == true`) or wipes (when `remember == false`) the Gemini API key on this device only.
+pub fn gemini_key_save_device_opt_in(remember: bool, api_key: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_vault::save_gemini_key_opt_in(remember, api_key);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let path = native_device_key_path();
+        gemini_key_save_device_opt_in_at(&path, remember, api_key);
+    }
+}
+
+/// Restores the device-local opt-in Gemini API key `(remember, api_key)`.
+pub fn gemini_key_load_device_opt_in() -> (bool, String) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let raw = js_vault::load_gemini_key_opt_in_json();
+        if let Ok(parsed) = serde_json::from_str::<GeminiDeviceOptInPayload>(&raw) {
+            return (parsed.remember, parsed.api_key);
+        }
+        (false, String::new())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let path = native_device_key_path();
+        gemini_key_load_device_opt_in_at(&path)
     }
 }
 
