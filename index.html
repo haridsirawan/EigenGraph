@@ -28,17 +28,21 @@
       } catch (_) {}
       let pendingPickedFileJson = "";
       let activeFileInput = null;
+      let activeDirInput = null;
+      let dirOverlayEl = null;
       const VAULT_FOLDERS = [
-        "Projects", "ParametricLibrary", "Columns", "Beams", "Slabs",
-        "Walls", "Footings", "Rebar", "Materials", "Hydraulic_Structures",
-        "KnowledgeBase", "Exports", "AI_Context", "ARI_Analyses"
+        "Projects", "KnowledgeBase", "Exports", "AI_Context"
       ];
       const NOTICE_TEXT =
         "======================================================================\n" +
         "                      EIGENGRAPH DATA VAULT\n" +
         "======================================================================\n" +
-        "This folder acts as the personal local Engineering Vault for EigenGraph.\n" +
-        "Files in Projects/, ParametricLibrary/, and KnowledgeBase/ are kept here.\n";
+        "Obsidian-style personal Engineering Vault for EigenGraph.\n" +
+        "Subfolders:\n" +
+        "  - Projects/       Structural BIM & FEM projects (.eigen)\n" +
+        "  - KnowledgeBase/  Codes, notes & AI context docs (.md, .csv)\n" +
+        "  - Exports/        IFC models, schedules & vault backups\n" +
+        "  - AI_Context/     Dynamic Island session history & prompts\n";
 
       let state = {
         connected: false,
@@ -126,6 +130,16 @@
           const tx = db.transaction("files", "readonly");
           const req = tx.objectStore("files").getAll();
           req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => reject(req.error);
+        });
+      }
+
+      async function idbClearFiles() {
+        const db = await openDb();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction("files", "readwrite");
+          const req = tx.objectStore("files").clear();
+          req.onsuccess = () => resolve();
           req.onerror = () => reject(req.error);
         });
       }
@@ -229,9 +243,207 @@
         await writable.close();
       }
 
+      const WELCOME_MD =
+        "# EigenGraph Engineering Vault\n\n" +
+        "This workspace follows the clean Obsidian-style folder layout:\n\n" +
+        "- `Projects/` — Structural BIM & FEM models (`.eigen`)\n" +
+        "- `KnowledgeBase/` — Design codes, references, and engineering Markdown notes (`.md`, `.csv`)\n" +
+        "- `Exports/` — IFC exports, engineering schedules, and `.eigen-vault.json` snapshots\n" +
+        "- `AI_Context/` — Dynamic Island session transcripts and prompt presets\n";
+
+      function hideDirPickerOverlay() {
+        if (dirOverlayEl && dirOverlayEl.parentNode) {
+          dirOverlayEl.parentNode.removeChild(dirOverlayEl);
+        }
+        dirOverlayEl = null;
+      }
+
+      async function ingestDirectoryFileList(fileList) {
+        if (!fileList || fileList.length === 0) return;
+        state.busy = true;
+        state.error_msg = "";
+        persistSnapshot();
+        try {
+          await idbClearFiles();
+          fileCache.clear();
+          let rootFolder = "";
+          let importedCount = 0;
+          const now = Date.now();
+          for (const file of Array.from(fileList)) {
+            const rawRel = (file.webkitRelativePath || file.name || "").replace(/\\/g, "/");
+            const parts = rawRel.split("/").filter(Boolean);
+            if (!rootFolder && parts.length > 1) {
+              rootFolder = parts[0];
+            }
+            const rel = parts.length > 1 ? parts.slice(1).join("/") : rawRel;
+            const lower = rel.toLowerCase();
+            if (
+              !rel ||
+              !(
+                lower.endsWith(".eigen") ||
+                lower.endsWith(".json") ||
+                lower.endsWith(".md") ||
+                lower.endsWith(".txt") ||
+                lower.endsWith(".csv") ||
+                lower.endsWith(".ifc") ||
+                lower.endsWith(".xyz") ||
+                lower.endsWith(".e2k")
+              )
+            ) {
+              continue;
+            }
+            if (file.size <= 12 * 1024 * 1024) {
+              const text = await file.text();
+              fileCache.set(rel, { content: text, updated_at: file.lastModified || now });
+              await idbPut("files", { path: rel, content: text, updated_at: file.lastModified || now }).catch(() => {});
+              importedCount++;
+            }
+          }
+          if (!fileCache.has("_VAULT_NOTICE.txt")) {
+            fileCache.set("_VAULT_NOTICE.txt", { content: NOTICE_TEXT, updated_at: now });
+            await idbPut("files", { path: "_VAULT_NOTICE.txt", content: NOTICE_TEXT, updated_at: now }).catch(() => {});
+          }
+          if (!fileCache.has("KnowledgeBase/Welcome.md")) {
+            fileCache.set("KnowledgeBase/Welcome.md", { content: WELCOME_MD, updated_at: now });
+            await idbPut("files", { path: "KnowledgeBase/Welcome.md", content: WELCOME_MD, updated_at: now }).catch(() => {});
+          }
+          rebuildProjectsFromCache();
+          const finalName = rootFolder || "Local Browser Vault";
+          activeDirHandle = null;
+          state.connected = true;
+          state.guest_mode = false;
+          state.backend = "indexeddb";
+          state.vault_name = finalName;
+          state.needs_permission = false;
+          state.status_msg = `Opened local folder '${finalName}' (${importedCount} files, ${state.projects.length} projects).`;
+          await idbPut("meta", { connected: true, backend: "indexeddb", vault_name: finalName }, "vault_meta");
+        } catch (err) {
+          state.error_msg = (err && err.message) ? err.message : String(err);
+        } finally {
+          state.busy = false;
+          hideDirPickerOverlay();
+          persistSnapshot();
+        }
+      }
+
+      function ensureDirInput() {
+        if (activeDirInput) return activeDirInput;
+        const inp = document.createElement("input");
+        inp.id = "eg_vault_dir_input";
+        inp.type = "file";
+        inp.setAttribute("webkitdirectory", "");
+        inp.setAttribute("directory", "");
+        inp.multiple = true;
+        inp.style.display = "none";
+        document.body.appendChild(inp);
+        inp.addEventListener("change", async () => {
+          hideDirPickerOverlay();
+          if (inp.files && inp.files.length > 0) {
+            await ingestDirectoryFileList(inp.files);
+          } else {
+            state.busy = false;
+            persistSnapshot();
+          }
+          inp.value = "";
+        });
+        inp.addEventListener("cancel", () => {
+          hideDirPickerOverlay();
+          state.busy = false;
+          state.status_msg = "Folder selection cancelled.";
+          persistSnapshot();
+        });
+        activeDirInput = inp;
+        return inp;
+      }
+
+      function showFirefoxFolderOverlay(requestedName) {
+        ensureDirInput();
+        hideDirPickerOverlay();
+        const bar = document.createElement("div");
+        bar.id = "eg_firefox_folder_overlay";
+        bar.style.cssText = [
+          "position:fixed",
+          "left:50%",
+          "bottom:78px",
+          "transform:translateX(-50%)",
+          "z-index:10002",
+          "background:rgba(15,19,28,0.96)",
+          "border:1px solid rgba(59,130,246,0.55)",
+          "border-radius:14px",
+          "padding:10px 14px",
+          "display:flex",
+          "align-items:center",
+          "gap:10px",
+          "flex-wrap:wrap",
+          "max-width:92vw",
+          "box-shadow:0 12px 32px rgba(0,0,0,0.5)",
+          "font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif",
+          "font-size:12.5px",
+          "color:#e2e8f0"
+        ].join(";");
+
+        const text = document.createElement("span");
+        text.textContent = "Browser Vault Folder Picker (Firefox / Safari):";
+        text.style.fontWeight = "600";
+
+        const label = document.createElement("label");
+        label.htmlFor = "eg_vault_dir_input";
+        label.textContent = "Choose Folder in Finder…";
+        label.style.cssText = [
+          "cursor:pointer",
+          "background:#2563eb",
+          "color:#ffffff",
+          "padding:6px 12px",
+          "border-radius:8px",
+          "font-weight:600"
+        ].join(";");
+
+        const idbBtn = document.createElement("button");
+        idbBtn.type = "button";
+        idbBtn.textContent = "Use Browser Storage";
+        idbBtn.style.cssText = [
+          "cursor:pointer",
+          "background:rgba(148,163,184,0.16)",
+          "color:#cbd5e1",
+          "border:1px solid rgba(148,163,184,0.3)",
+          "padding:6px 10px",
+          "border-radius:8px",
+          "font-size:12px"
+        ].join(";");
+        idbBtn.onclick = () => {
+          hideDirPickerOverlay();
+          void connectIndexedDbVaultAsync(requestedName || "Browser IndexedDB Vault", false);
+        };
+
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.style.cssText = [
+          "cursor:pointer",
+          "background:transparent",
+          "color:#94a3b8",
+          "border:none",
+          "padding:6px 8px",
+          "font-size:12px"
+        ].join(";");
+        cancelBtn.onclick = () => {
+          hideDirPickerOverlay();
+          state.busy = false;
+          state.status_msg = "Folder selection closed.";
+          persistSnapshot();
+        };
+
+        bar.appendChild(text);
+        bar.appendChild(label);
+        bar.appendChild(idbBtn);
+        bar.appendChild(cancelBtn);
+        document.body.appendChild(bar);
+        dirOverlayEl = bar;
+      }
+
       async function scanDirectoryIntoCache(dirHandle) {
         fileCache.clear();
-        const foldersToCheck = [""].concat(["Projects", "ParametricLibrary", "KnowledgeBase", "Columns", "Beams", "Slabs", "Walls"]);
+        const foldersToCheck = [""].concat(["Projects", "KnowledgeBase", "Exports", "AI_Context", "ParametricLibrary", "Columns", "Beams", "Slabs", "Walls"]);
         for (const folder of foldersToCheck) {
           try {
             const sub = folder ? await dirHandle.getDirectoryHandle(folder, { create: false }) : dirHandle;
@@ -279,6 +491,12 @@
         } catch (_) {
           await writeHandleFile(dirHandle, "_VAULT_NOTICE.txt", NOTICE_TEXT);
         }
+        try {
+          const kb = await dirHandle.getDirectoryHandle("KnowledgeBase", { create: true });
+          await kb.getFileHandle("Welcome.md", { create: false });
+        } catch (_) {
+          await writeHandleFile(dirHandle, "KnowledgeBase/Welcome.md", WELCOME_MD);
+        }
       }
 
       async function connectExistingVaultAsync() {
@@ -299,7 +517,15 @@
             state.status_msg = `Connected local Vault folder '${state.vault_name}' (${state.projects.length} projects).`;
             await idbPut("meta", { connected: true, backend: "fs_access", vault_name: state.vault_name }, "vault_meta");
           } else {
-            await connectIndexedDbVaultAsync("Browser IndexedDB Vault");
+            const dirInput = ensureDirInput();
+            showFirefoxFolderOverlay("Local Browser Vault");
+            state.busy = false;
+            state.status_msg = "Select your Finder folder via the picker bar (or click 'Use Browser Storage').";
+            persistSnapshot();
+            try {
+              dirInput.click();
+            } catch (_) {}
+            return;
           }
         } catch (err) {
           if (err && err.name === "AbortError") {
@@ -313,24 +539,35 @@
         }
       }
 
-      async function connectIndexedDbVaultAsync(vaultName) {
+      async function connectIndexedDbVaultAsync(vaultName, resetEmpty) {
         state.busy = true;
         state.error_msg = "";
         persistSnapshot();
         try {
           const cleanName = String(vaultName || "Browser IndexedDB Vault").trim() || "Browser IndexedDB Vault";
-          await loadIdbFilesIntoCache();
-          if (!fileCache.has("_VAULT_NOTICE.txt")) {
-            fileCache.set("_VAULT_NOTICE.txt", { content: NOTICE_TEXT, updated_at: Date.now() });
-            await idbPut("files", { path: "_VAULT_NOTICE.txt", content: NOTICE_TEXT, updated_at: Date.now() });
+          if (resetEmpty) {
+            await idbClearFiles();
+            fileCache.clear();
+          } else {
+            await loadIdbFilesIntoCache();
           }
+          const now = Date.now();
+          if (!fileCache.has("_VAULT_NOTICE.txt")) {
+            fileCache.set("_VAULT_NOTICE.txt", { content: NOTICE_TEXT, updated_at: now });
+            await idbPut("files", { path: "_VAULT_NOTICE.txt", content: NOTICE_TEXT, updated_at: now });
+          }
+          if (!fileCache.has("KnowledgeBase/Welcome.md")) {
+            fileCache.set("KnowledgeBase/Welcome.md", { content: WELCOME_MD, updated_at: now });
+            await idbPut("files", { path: "KnowledgeBase/Welcome.md", content: WELCOME_MD, updated_at: now });
+          }
+          rebuildProjectsFromCache();
           activeDirHandle = null;
           state.connected = true;
           state.guest_mode = false;
           state.backend = "indexeddb";
           state.vault_name = cleanName;
           state.needs_permission = false;
-          state.status_msg = `Connected IndexedDB Vault '${cleanName}' (${state.projects.length} projects).`;
+          state.status_msg = `Connected Browser Vault '${cleanName}' (${state.projects.length} projects).`;
           await idbPut("meta", { connected: true, backend: "indexeddb", vault_name: cleanName }, "vault_meta");
         } catch (err) {
           state.error_msg = (err && err.message) ? err.message : String(err);
@@ -360,8 +597,8 @@
             state.status_msg = `Created & connected Vault '${state.vault_name}' in local folder '${handle.name}'.`;
             await idbPut("meta", { connected: true, backend: "fs_access", vault_name: state.vault_name }, "vault_meta");
           } else {
-            await connectIndexedDbVaultAsync(cleanName);
-            state.status_msg = `Created & connected Browser IndexedDB Vault '${cleanName}'.`;
+            await connectIndexedDbVaultAsync(cleanName, true);
+            state.status_msg = `Created Obsidian-style Vault '${cleanName}' (Projects/, KnowledgeBase/, Exports/, AI_Context/).`;
           }
         } catch (err) {
           if (err && err.name === "AbortError") {
@@ -424,7 +661,42 @@
         }
       }
 
+      async function tryImportVaultBundle(filename, text) {
+        if (!filename || !filename.toLowerCase().endsWith(".eigen-vault.json")) return false;
+        try {
+          const bundle = JSON.parse(text);
+          if (!bundle || bundle.schema !== "eigengraph-vault-bundle-v1" || !bundle.files || typeof bundle.files !== "object") {
+            return false;
+          }
+          await idbClearFiles();
+          fileCache.clear();
+          const now = Date.now();
+          let count = 0;
+          for (const [relPath, content] of Object.entries(bundle.files)) {
+            if (typeof content === "string") {
+              fileCache.set(relPath, { content, updated_at: now });
+              await idbPut("files", { path: relPath, content, updated_at: now }).catch(() => {});
+              count++;
+            }
+          }
+          rebuildProjectsFromCache();
+          activeDirHandle = null;
+          state.connected = true;
+          state.guest_mode = false;
+          state.backend = "indexeddb";
+          state.vault_name = String(bundle.vault_name || "Restored Vault").trim() || "Restored Vault";
+          state.needs_permission = false;
+          state.status_msg = `Restored Obsidian Vault '${state.vault_name}' (${count} files, ${state.projects.length} projects).`;
+          await idbPut("meta", { connected: true, backend: "indexeddb", vault_name: state.vault_name }, "vault_meta");
+          persistSnapshot();
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }
+
       async function disconnectVaultAsync() {
+        hideDirPickerOverlay();
         activeDirHandle = null;
         fileCache.clear();
         await idbDelete("handles", "active_handle").catch(() => {});
@@ -490,8 +762,44 @@
         getVersion: () => state.version || 1,
         getStateJson: () => JSON.stringify(state),
         connectExistingVault: () => { void connectExistingVaultAsync(); },
-        connectIndexedDbVault: (name) => { void connectIndexedDbVaultAsync(name); },
+        connectIndexedDbVault: (name) => { void connectIndexedDbVaultAsync(name, false); },
         createNewVault: (name, forceIdb) => { void createNewVaultAsync(name, !!forceIdb); },
+        downloadVaultBundle: (vaultName) => {
+          const clean = String(vaultName || state.vault_name || "EigenGraph_Vault")
+            .trim()
+            .replace(/[^a-zA-Z0-9._-]+/g, "_");
+          const filesObj = {};
+          for (const [k, v] of fileCache.entries()) {
+            filesObj[k] = v && typeof v.content === "string" ? v.content : "";
+          }
+          const payload = JSON.stringify(
+            {
+              schema: "eigengraph-vault-bundle-v1",
+              vault_name: state.vault_name || clean,
+              exported_at: new Date().toISOString(),
+              folders: VAULT_FOLDERS,
+              files: filesObj
+            },
+            null,
+            2
+          );
+          try {
+            const blob = new Blob([payload], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${clean}.eigen-vault.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            state.status_msg = `Exported Vault backup '${clean}.eigen-vault.json' (${Object.keys(filesObj).length} files).`;
+            persistSnapshot();
+          } catch (err) {
+            state.error_msg = (err && err.message) ? err.message : String(err);
+            persistSnapshot();
+          }
+        },
         reconnectVault: () => { void reconnectPermissionAsync(); },
         refreshVault: () => { void refreshScanAsync(); },
         disconnectVault: () => { void disconnectVaultAsync(); },
@@ -544,9 +852,11 @@
                 if (!file) return;
                 if (file.size <= 32 * 1024 * 1024) {
                   const text = await file.text();
-                  pendingPickedFileJson = JSON.stringify({ filename: file.name, content: text });
-                  state.status_msg = `Imported '${file.name}' (${Math.round(file.size / 1024)} KB).`;
-                  persistSnapshot();
+                  if (!(await tryImportVaultBundle(file.name, text))) {
+                    pendingPickedFileJson = JSON.stringify({ filename: file.name, content: text });
+                    state.status_msg = `Imported '${file.name}' (${Math.round(file.size / 1024)} KB).`;
+                    persistSnapshot();
+                  }
                 } else {
                   state.error_msg = `File '${file.name}' exceeds 32 MB import limit.`;
                   persistSnapshot();
@@ -596,9 +906,11 @@
           const file = e.dataTransfer.files[0];
           if (file && file.size <= 32 * 1024 * 1024) {
             const text = await file.text();
-            pendingPickedFileJson = JSON.stringify({ filename: file.name, content: text });
-            state.status_msg = `Dropped '${file.name}' (${Math.round(file.size / 1024)} KB).`;
-            persistSnapshot();
+            if (!(await tryImportVaultBundle(file.name, text))) {
+              pendingPickedFileJson = JSON.stringify({ filename: file.name, content: text });
+              state.status_msg = `Dropped '${file.name}' (${Math.round(file.size / 1024)} KB).`;
+              persistSnapshot();
+            }
           }
         } catch (err) {
           state.error_msg = (err && err.message) ? err.message : String(err);

@@ -436,7 +436,37 @@ impl App for EigenGraphApp {
                 crate::core::InternalVault::list_personal_vault_projects();
             if crate::core::InternalVault::has_connected_vault() {
                 self.show_vault_startup_modal = false;
+                if let Some(sess_json) = crate::core::InternalVault::load_ai_sessions_json() {
+                    let _ = self
+                        .spatial_workspace
+                        .restore_sessions_json(&sess_json, &mut self.ai_assistant_view);
+                    self.spatial_workspace.vault_sessions_hydrated = true;
+                }
             }
+        }
+        if !self.spatial_workspace.vault_sessions_hydrated
+            && crate::core::InternalVault::has_connected_vault()
+        {
+            self.spatial_workspace.vault_sessions_hydrated = true;
+            if let Some(sess_json) = crate::core::InternalVault::load_ai_sessions_json() {
+                let _ = self
+                    .spatial_workspace
+                    .restore_sessions_json(&sess_json, &mut self.ai_assistant_view);
+            }
+        }
+        if self.show_settings {
+            if self.spatial_workspace.gemini_api_key_draft != self.settings_view.gemini_api_key {
+                self.spatial_workspace.gemini_api_key_draft =
+                    self.settings_view.gemini_api_key.clone();
+            }
+        }
+        if self.spatial_workspace.sessions_dirty && crate::core::InternalVault::has_connected_vault()
+        {
+            let json = self
+                .spatial_workspace
+                .export_sessions_json(&self.ai_assistant_view);
+            let _ = crate::core::InternalVault::save_ai_sessions_json(&json);
+            self.spatial_workspace.sessions_dirty = false;
         }
         #[cfg(target_arch = "wasm32")]
         if crate::core::web_bridge::vault_state_snapshot().busy {
@@ -886,6 +916,16 @@ impl EigenGraphApp {
         self.spatial_workspace
             .sync_pick_events(&mut self.universal_canvas, &mut self.build_view);
 
+        let gemini_actions = self.spatial_workspace.poll_gemini_replies(
+            &mut self.universal_canvas,
+            &mut self.build_view,
+            &mut self.ai_assistant_view,
+        );
+        self.apply_spatial_hud_actions(gemini_actions, workspace_snapshot);
+        if self.spatial_workspace.gemini_inflight_req_id.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+
         let hud_actions = self.spatial_workspace.render_hud_overlays_with_vault(
             ctx,
             &self.theme,
@@ -897,6 +937,11 @@ impl EigenGraphApp {
             &mut self.db_components,
             &self.personal_vault_projects,
         );
+        if !self.show_settings
+            && self.settings_view.gemini_api_key != self.spatial_workspace.gemini_api_key_draft
+        {
+            self.settings_view.gemini_api_key = self.spatial_workspace.gemini_api_key_draft.clone();
+        }
         self.apply_spatial_hud_actions(hud_actions, workspace_snapshot);
 
         // On-demand floating engineering module sheet summoned via `/vault`, `/cost`, `/analysis`, etc.
@@ -1175,6 +1220,23 @@ impl EigenGraphApp {
             crate::core::web_bridge::trigger_file_picker(
                 ".eigen,.json,.ifc,.csv,.md,.txt,.yaml,.yml",
             );
+        }
+        if let Some((lat, lon)) = hud_actions.anchor_and_build_site {
+            self.universal_canvas.ground_origin_lat_lon = (lat, lon);
+            self.universal_canvas.ground_origin_anchored = true;
+            self.universal_canvas.earth_world.start_fly_to(
+                &self.universal_canvas.world_map,
+                lat,
+                lon,
+                16.5,
+                "Anchored BIM Site",
+            );
+            self.spatial_workspace.active_canvas_mode =
+                crate::views::spatial_workspace::SpatialCanvasMode::Bim3D;
+            self.sync_bim_to_fem();
+            self.build_view
+                .fit_view_to_project(&mut self.universal_canvas, &self.members);
+            self.sync_earth_maps();
         }
     }
 
@@ -1953,316 +2015,30 @@ impl EigenGraphApp {
 
                     ui.add_space(10.0);
 
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(RichText::new("Vault Folder Path:").size(11.5).color(self.theme.text_secondary));
-                            let w = (ui.available_width() - 210.0).clamp(160.0, 380.0);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.vault_path_input)
-                                    .hint_text("/path/to/EigenGraph_Vault")
-                                    .desired_width(w),
-                            );
-                            if icons::icon_button(
-                                ui,
-                                AppIcon::Folder,
-                                "Browse...",
-                                11.5,
-                                self.theme.text_primary,
-                                self.theme.bg_sidebar,
-                                Stroke::new(1.0, self.theme.border_subtle),
-                                CornerRadius::same(7),
-                                Vec2::ZERO,
-                            )
-                            .clicked()
-                            {
-                                if let Some(chosen) =
-                                    crate::core::web_bridge::pick_folder_native("Select EigenGraph Vault Folder")
-                                {
-                                    self.vault_path_input = chosen;
-                                }
-                            }
-                        });
-                        ui.add_space(10.0);
+                    let outcome = crate::ui_kit::render_obsidian_vault_panel(
+                        ui,
+                        &self.theme,
+                        &mut self.vault_path_input,
+                        &mut self.vault_new_name_input,
+                        false,
+                        true,
+                        false,
+                    );
+                    if outcome.state_changed {
+                        self.personal_vault_projects =
+                            crate::core::InternalVault::list_personal_vault_projects();
+                        self.settings_view.vault_path_input = self.vault_path_input.clone();
                     }
-
-                    // 1. Connect Existing Vault
-                    Frame::new()
-                        .fill(self.theme.bg_sidebar)
-                        .stroke(Stroke::new(1.0, self.theme.border_subtle))
-                        .corner_radius(CornerRadius::same(10))
-                        .inner_margin(Margin::same(14))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            icons::icon_label(
-                                ui,
-                                AppIcon::Folder,
-                                14.0,
-                                self.theme.accent_blue,
-                                "1. Connect Existing Vault",
-                                13.0,
-                                self.theme.text_primary,
-                                true,
-                            );
-                            ui.add_space(4.0);
-                            ui.label(
-                                RichText::new(if cfg!(target_arch = "wasm32") {
-                                    "Pick an existing local Vault folder using the browser File System Access API (Chrome/Edge) or open your persistent Browser IndexedDB Vault."
-                                } else {
-                                    "Bind an existing local directory containing your personal `.eigen` project archives."
-                                })
-                                .size(11.5)
-                                .color(self.theme.text_secondary),
-                            );
-                            ui.add_space(8.0);
-                            ui.horizontal_wrapped(|ui| {
-                                #[cfg(target_arch = "wasm32")]
-                                {
-                                    let snap = crate::core::web_bridge::vault_state_snapshot();
-                                    if icons::icon_button(
-                                        ui,
-                                        AppIcon::Folder,
-                                        if snap.fs_supported {
-                                            "Connect Existing Vault Folder"
-                                        } else {
-                                            "Connect Browser IndexedDB Vault"
-                                        },
-                                        11.5,
-                                        Color32::WHITE,
-                                        self.theme.accent_blue,
-                                        Stroke::NONE,
-                                        CornerRadius::same(7),
-                                        Vec2::ZERO,
-                                    )
-                                    .clicked()
-                                    {
-                                        crate::core::web_bridge::vault_connect_existing();
-                                    }
-                                    if snap.fs_supported
-                                        && icons::icon_button(
-                                            ui,
-                                            AppIcon::Database,
-                                            "Connect Browser IndexedDB Instead",
-                                            11.0,
-                                            self.theme.text_primary,
-                                            self.theme.bg_card,
-                                            Stroke::new(1.0, self.theme.border_subtle),
-                                            CornerRadius::same(7),
-                                            Vec2::ZERO,
-                                        )
-                                        .clicked()
-                                    {
-                                        crate::core::web_bridge::vault_connect_indexeddb(
-                                            "Browser IndexedDB Vault",
-                                        );
-                                    }
-                                }
-                                #[cfg(not(target_arch = "wasm32"))]
-                                {
-                                    if icons::icon_button(
-                                        ui,
-                                        AppIcon::Folder,
-                                        "Connect Existing Folder",
-                                        11.5,
-                                        Color32::WHITE,
-                                        self.theme.accent_blue,
-                                        Stroke::NONE,
-                                        CornerRadius::same(7),
-                                        Vec2::ZERO,
-                                    )
-                                    .clicked()
-                                    {
-                                        let p = std::path::PathBuf::from(self.vault_path_input.trim());
-                                        match crate::core::InternalVault::connect_existing_vault(p) {
-                                            Ok(_) => {
-                                                self.personal_vault_projects =
-                                                    crate::core::InternalVault::list_personal_vault_projects();
-                                                self.settings_view.vault_path_input =
-                                                    self.vault_path_input.clone();
-                                                self.vault_modal_feedback = None;
-                                                self.show_vault_startup_modal = false;
-                                            }
-                                            Err(err) => {
-                                                self.vault_modal_feedback = Some(err);
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                        });
-
-                    ui.add_space(10.0);
-
-                    // 2. Create New Vault
-                    Frame::new()
-                        .fill(self.theme.bg_sidebar)
-                        .stroke(Stroke::new(1.0, self.theme.border_subtle))
-                        .corner_radius(CornerRadius::same(10))
-                        .inner_margin(Margin::same(14))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            icons::icon_label(
-                                ui,
-                                AppIcon::Plus,
-                                14.0,
-                                self.theme.accent_green,
-                                "2. Create New Vault",
-                                13.0,
-                                self.theme.text_primary,
-                                true,
-                            );
-                            ui.add_space(4.0);
-                            ui.label(
-                                RichText::new("Initialize a clean Vault workspace with structured `Projects/`, `ParametricLibrary/`, and `KnowledgeBase/` storage.")
-                                    .size(11.5)
-                                    .color(self.theme.text_secondary),
-                            );
-                            ui.add_space(8.0);
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(RichText::new("Vault Name:").size(11.5).color(self.theme.text_secondary));
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.vault_new_name_input)
-                                        .hint_text("EigenGraph_Vault")
-                                        .desired_width(180.0),
-                                );
-                                #[cfg(target_arch = "wasm32")]
-                                {
-                                    let snap = crate::core::web_bridge::vault_state_snapshot();
-                                    let clean = if self.vault_new_name_input.trim().is_empty() {
-                                        "EigenGraph_Vault"
-                                    } else {
-                                        self.vault_new_name_input.trim()
-                                    };
-                                    if icons::icon_button(
-                                        ui,
-                                        AppIcon::Plus,
-                                        if snap.fs_supported {
-                                            "Create Vault in Folder"
-                                        } else {
-                                            "Create IndexedDB Vault"
-                                        },
-                                        11.5,
-                                        Color32::WHITE,
-                                        self.theme.accent_green,
-                                        Stroke::NONE,
-                                        CornerRadius::same(7),
-                                        Vec2::ZERO,
-                                    )
-                                    .clicked()
-                                    {
-                                        crate::core::web_bridge::vault_create_new(clean, false);
-                                    }
-                                    if snap.fs_supported
-                                        && icons::icon_button(
-                                            ui,
-                                            AppIcon::Database,
-                                            "Create Browser IndexedDB Vault",
-                                            11.0,
-                                            self.theme.text_primary,
-                                            self.theme.bg_card,
-                                            Stroke::new(1.0, self.theme.border_subtle),
-                                            CornerRadius::same(7),
-                                            Vec2::ZERO,
-                                        )
-                                        .clicked()
-                                    {
-                                        crate::core::web_bridge::vault_create_new(clean, true);
-                                    }
-                                }
-                                #[cfg(not(target_arch = "wasm32"))]
-                                {
-                                    if icons::icon_button(
-                                        ui,
-                                        AppIcon::Plus,
-                                        "Create & Initialize Vault",
-                                        11.5,
-                                        Color32::WHITE,
-                                        self.theme.accent_green,
-                                        Stroke::NONE,
-                                        CornerRadius::same(7),
-                                        Vec2::ZERO,
-                                    )
-                                    .clicked()
-                                    {
-                                        let base = std::path::PathBuf::from(self.vault_path_input.trim());
-                                        let name = self.vault_new_name_input.trim();
-                                        let target = if name.is_empty()
-                                            || base.file_name().and_then(|s| s.to_str()) == Some(name)
-                                        {
-                                            base
-                                        } else {
-                                            base.join(name)
-                                        };
-                                        match crate::core::InternalVault::create_new_vault(
-                                            target,
-                                            Some(self.vault_new_name_input.clone()),
-                                            false,
-                                        ) {
-                                            Ok(created) => {
-                                                let created_str = created.to_string_lossy().to_string();
-                                                self.vault_path_input = created_str.clone();
-                                                self.settings_view.vault_path_input = created_str;
-                                                self.personal_vault_projects =
-                                                    crate::core::InternalVault::list_personal_vault_projects();
-                                                self.vault_modal_feedback = None;
-                                                self.show_vault_startup_modal = false;
-                                            }
-                                            Err(err) => {
-                                                self.vault_modal_feedback = Some(err);
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                        });
-
-                    ui.add_space(10.0);
-
-                    // 3. Explore Workspace First (Guest Mode)
-                    Frame::new()
-                        .fill(self.theme.bg_sidebar)
-                        .stroke(Stroke::new(1.0, self.theme.border_subtle))
-                        .corner_radius(CornerRadius::same(10))
-                        .inner_margin(Margin::same(14))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.horizontal_wrapped(|ui| {
-                                icons::icon_label(
-                                    ui,
-                                    AppIcon::Globe,
-                                    14.0,
-                                    self.theme.accent_orange,
-                                    "3. Explore Workspace First (Guest Mode)",
-                                    13.0,
-                                    self.theme.text_primary,
-                                    true,
-                                );
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    if icons::icon_button(
-                                        ui,
-                                        AppIcon::ArrowRight,
-                                        "Explore First",
-                                        11.5,
-                                        self.theme.text_primary,
-                                        self.theme.bg_card,
-                                        Stroke::new(1.0, self.theme.border_subtle),
-                                        CornerRadius::same(7),
-                                        Vec2::ZERO,
-                                    )
-                                    .clicked()
-                                    {
-                                        crate::core::InternalVault::enter_guest_explore_mode();
-                                        close_guest = true;
-                                    }
-                                });
-                            });
-                            ui.add_space(4.0);
-                            ui.label(
-                                RichText::new("Preview all 15 engineering modules and draw freely on the World Ground Canvas. You can connect or create a personal Vault anytime in Settings.")
-                                    .size(11.5)
-                                    .color(self.theme.text_muted),
-                            );
-                        });
+                    if let Some(fb) = outcome.feedback {
+                        self.vault_modal_feedback = Some(fb);
+                    }
+                    if outcome.connected_now {
+                        self.vault_modal_feedback = None;
+                        self.show_vault_startup_modal = false;
+                    }
+                    if outcome.enter_guest_mode {
+                        close_guest = true;
+                    }
                 });
             });
 

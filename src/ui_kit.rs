@@ -453,6 +453,473 @@ pub fn is_canvas_frozen(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<bool>(egui::Id::new(CANVAS_FROZEN_MEMORY_ID)).unwrap_or(true))
 }
 
+/// Outcome returned by [`render_obsidian_vault_panel`].
+#[derive(Debug, Clone, Default)]
+pub struct ObsidianVaultOutcome {
+    pub state_changed: bool,
+    pub connected_now: bool,
+    pub feedback: Option<String>,
+    pub enter_guest_mode: bool,
+    pub open_startup_modal: bool,
+}
+
+fn render_open_folder_block(
+    ui: &mut Ui,
+    theme: &MacTheme,
+    path_input: &mut String,
+    compact: bool,
+    btn_size: Vec2,
+    font_sz: f32,
+    desc_sz: f32,
+    out: &mut ObsidianVaultOutcome,
+) {
+    use crate::icons::{self, AppIcon};
+    if !compact {
+        icons::icon_label(
+            ui,
+            AppIcon::Folder,
+            14.0,
+            theme.accent_blue,
+            "1. Open Folder as Vault",
+            13.0,
+            theme.text_primary,
+            true,
+        );
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(if cfg!(target_arch = "wasm32") {
+                "Pick any local Finder/OS folder via Browser Folder Picker (Chrome, Edge, Firefox, Safari) or open Browser Storage."
+            } else {
+                "Open an existing local directory as your Engineering Vault."
+            })
+            .size(desc_sz)
+            .color(theme.text_secondary),
+        );
+        ui.add_space(6.0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        ui.horizontal_wrapped(|ui| {
+            if !compact {
+                ui.label(
+                    RichText::new("Folder Path:")
+                        .size(font_sz)
+                        .color(theme.text_secondary),
+                );
+            }
+            let w = if compact {
+                (ui.available_width() - 95.0).clamp(110.0, 240.0)
+            } else {
+                (ui.available_width() - 210.0).clamp(160.0, 360.0)
+            };
+            ui.add(
+                egui::TextEdit::singleline(path_input)
+                    .hint_text("/path/to/EigenGraph_Vault")
+                    .desired_width(w),
+            );
+            if icons::icon_button(
+                ui,
+                AppIcon::Folder,
+                "Browse...",
+                font_sz,
+                theme.text_primary,
+                theme.bg_sidebar,
+                Stroke::new(1.0, theme.border_subtle),
+                CornerRadius::same(7),
+                btn_size,
+            )
+            .clicked()
+            {
+                if let Some(chosen) =
+                    crate::core::web_bridge::pick_folder_native("Select EigenGraph Vault Folder")
+                {
+                    *path_input = chosen;
+                }
+            }
+        });
+        ui.add_space(4.0);
+    }
+
+    ui.horizontal_wrapped(|ui| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = path_input;
+            if icons::icon_button(
+                ui,
+                AppIcon::Folder,
+                "Open / Add Folder",
+                font_sz,
+                Color32::WHITE,
+                theme.accent_blue,
+                Stroke::NONE,
+                CornerRadius::same(7),
+                btn_size,
+            )
+            .on_hover_text("Select an OS folder (uses Chrome FS Access or Firefox/Safari folder picker)")
+            .clicked()
+            {
+                crate::core::web_bridge::vault_connect_existing();
+                out.state_changed = true;
+            }
+            if !compact
+                && icons::icon_button(
+                    ui,
+                    AppIcon::Database,
+                    "Use Browser Storage",
+                    desc_sz,
+                    theme.text_primary,
+                    theme.bg_card,
+                    Stroke::new(1.0, theme.border_subtle),
+                    CornerRadius::same(7),
+                    btn_size,
+                )
+                .clicked()
+            {
+                crate::core::web_bridge::vault_connect_indexeddb("Browser IndexedDB Vault");
+                out.state_changed = true;
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if icons::icon_button(
+                ui,
+                AppIcon::Folder,
+                "Open / Add Folder",
+                font_sz,
+                Color32::WHITE,
+                theme.accent_blue,
+                Stroke::NONE,
+                CornerRadius::same(7),
+                btn_size,
+            )
+            .clicked()
+            {
+                let p = std::path::PathBuf::from(path_input.trim());
+                match crate::core::InternalVault::connect_existing_vault(p) {
+                    Ok(connected) => {
+                        out.feedback = Some(format!("Opened Vault at {}", connected.display()));
+                        out.connected_now = true;
+                        out.state_changed = true;
+                    }
+                    Err(err) => {
+                        out.feedback = Some(err);
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn render_create_vault_block(
+    ui: &mut Ui,
+    theme: &MacTheme,
+    path_input: &mut String,
+    name_input: &mut String,
+    compact: bool,
+    btn_size: Vec2,
+    font_sz: f32,
+    desc_sz: f32,
+    out: &mut ObsidianVaultOutcome,
+) {
+    use crate::icons::{self, AppIcon};
+    #[cfg(target_arch = "wasm32")]
+    let _ = path_input;
+
+    if !compact {
+        icons::icon_label(
+            ui,
+            AppIcon::Plus,
+            14.0,
+            theme.accent_green,
+            "2. Create New Vault",
+            13.0,
+            theme.text_primary,
+            true,
+        );
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Creates a clean Obsidian-style Vault organized automatically into Projects/, KnowledgeBase/, Exports/, and AI_Context/.")
+                .size(desc_sz)
+                .color(theme.text_secondary),
+        );
+        ui.add_space(6.0);
+    }
+
+    ui.horizontal_wrapped(|ui| {
+        if !compact {
+            ui.label(
+                RichText::new("Vault Name:")
+                    .size(font_sz)
+                    .color(theme.text_secondary),
+            );
+        }
+        ui.add(
+            egui::TextEdit::singleline(name_input)
+                .hint_text("EigenGraph_Vault")
+                .desired_width(if compact { 125.0 } else { 180.0 }),
+        );
+
+        let clean_name = if name_input.trim().is_empty() {
+            "EigenGraph_Vault"
+        } else {
+            name_input.trim()
+        };
+
+        if icons::icon_button(
+            ui,
+            AppIcon::Plus,
+            "Create Vault",
+            font_sz,
+            Color32::WHITE,
+            theme.accent_green,
+            Stroke::NONE,
+            CornerRadius::same(7),
+            btn_size,
+        )
+        .clicked()
+        {
+            #[cfg(target_arch = "wasm32")]
+            {
+                crate::core::web_bridge::vault_create_new(clean_name, false);
+                out.feedback = Some(format!(
+                    "Creating Obsidian-style Vault '{clean_name}' (Projects/, KnowledgeBase/, Exports/, AI_Context/)."
+                ));
+                out.state_changed = true;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let base = std::path::PathBuf::from(path_input.trim());
+                let target = if base.as_os_str().is_empty() {
+                    std::path::PathBuf::from(clean_name)
+                } else if base.file_name().and_then(|s| s.to_str()) == Some(clean_name) {
+                    base
+                } else {
+                    base.join(clean_name)
+                };
+                match crate::core::InternalVault::create_new_vault(
+                    target,
+                    Some(clean_name.to_string()),
+                    false,
+                ) {
+                    Ok(created) => {
+                        *path_input = created.to_string_lossy().to_string();
+                        out.feedback = Some(format!("Created Vault at {}", created.display()));
+                        out.connected_now = true;
+                        out.state_changed = true;
+                    }
+                    Err(err) => {
+                        out.feedback = Some(err);
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Shared Obsidian-style Engineering Vault controls used across the Startup Modal,
+/// Settings Vault card, and Dynamic Island popover.
+/// Keeps Vault management cleanly deduplicated with two intuitive workflows:
+/// **Open / Add Folder** and **Create Vault** (auto-organizing `Projects/`,
+/// `KnowledgeBase/`, `Exports/`, and `AI_Context/` internally).
+pub fn render_obsidian_vault_panel(
+    ui: &mut Ui,
+    theme: &MacTheme,
+    path_input: &mut String,
+    name_input: &mut String,
+    compact: bool,
+    show_guest_option: bool,
+    show_open_modal_btn: bool,
+) -> ObsidianVaultOutcome {
+    use crate::icons::{self, AppIcon};
+    let mut out = ObsidianVaultOutcome::default();
+    let status = crate::core::InternalVault::connection_status();
+    let btn_size = if compact { Vec2::new(0.0, 22.0) } else { Vec2::ZERO };
+    let font_sz = if compact { 10.0 } else { 11.5 };
+    let desc_sz = if compact { 9.8 } else { 11.0 };
+
+    if status.needs_permission {
+        ui.horizontal_wrapped(|ui| {
+            if icons::icon_button(
+                ui,
+                AppIcon::Folder,
+                "Re-authorize Folder Access",
+                font_sz,
+                Color32::WHITE,
+                theme.accent_orange,
+                Stroke::NONE,
+                CornerRadius::same(7),
+                btn_size,
+            )
+            .clicked()
+            {
+                crate::core::web_bridge::vault_reconnect();
+                out.state_changed = true;
+            }
+        });
+        ui.add_space(4.0);
+    }
+
+    if compact {
+        render_open_folder_block(
+            ui, theme, path_input, compact, btn_size, font_sz, desc_sz, &mut out,
+        );
+        ui.add_space(4.0);
+        render_create_vault_block(
+            ui, theme, path_input, name_input, compact, btn_size, font_sz, desc_sz, &mut out,
+        );
+    } else {
+        Frame::new()
+            .fill(theme.bg_sidebar)
+            .stroke(Stroke::new(1.0, theme.border_subtle))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                render_open_folder_block(
+                    ui, theme, path_input, compact, btn_size, font_sz, desc_sz, &mut out,
+                );
+            });
+        ui.add_space(8.0);
+        Frame::new()
+            .fill(theme.bg_sidebar)
+            .stroke(Stroke::new(1.0, theme.border_subtle))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                render_create_vault_block(
+                    ui, theme, path_input, name_input, compact, btn_size, font_sz, desc_sz,
+                    &mut out,
+                );
+            });
+    }
+
+    if status.connected || show_open_modal_btn {
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            if status.connected {
+                if icons::icon_button(
+                    ui,
+                    AppIcon::Undo,
+                    "Refresh",
+                    desc_sz,
+                    theme.text_primary,
+                    theme.bg_sidebar,
+                    Stroke::new(1.0, theme.border_subtle),
+                    CornerRadius::same(7),
+                    btn_size,
+                )
+                .clicked()
+                {
+                    crate::core::web_bridge::vault_refresh();
+                    out.state_changed = true;
+                }
+                #[cfg(target_arch = "wasm32")]
+                if icons::icon_button(
+                    ui,
+                    AppIcon::SaveDisk,
+                    "Export Backup",
+                    desc_sz,
+                    theme.accent_blue,
+                    theme.bg_sidebar,
+                    Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.45)),
+                    CornerRadius::same(7),
+                    btn_size,
+                )
+                .on_hover_text("Download a complete .eigen-vault.json archive to Mac/Disk (ideal for Firefox & Safari)")
+                .clicked()
+                {
+                    crate::core::web_bridge::vault_download_bundle(&status.vault_name);
+                }
+                if icons::icon_button(
+                    ui,
+                    AppIcon::Close,
+                    "Disconnect",
+                    desc_sz,
+                    theme.accent_red,
+                    theme.bg_sidebar,
+                    Stroke::new(1.0, theme.accent_red.gamma_multiply(0.5)),
+                    CornerRadius::same(7),
+                    btn_size,
+                )
+                .clicked()
+                {
+                    let _ = crate::core::InternalVault::disconnect_vault();
+                    out.feedback = Some("Personal Vault disconnected.".to_string());
+                    out.state_changed = true;
+                }
+            }
+            if show_open_modal_btn
+                && icons::icon_button(
+                    ui,
+                    AppIcon::Sparkles,
+                    "Open Setup Pop-up",
+                    desc_sz,
+                    theme.accent_blue,
+                    theme.bg_sidebar,
+                    Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.45)),
+                    CornerRadius::same(7),
+                    btn_size,
+                )
+                .clicked()
+            {
+                out.open_startup_modal = true;
+            }
+        });
+    }
+
+    if show_guest_option {
+        ui.add_space(8.0);
+        Frame::new()
+            .fill(theme.bg_sidebar)
+            .stroke(Stroke::new(1.0, theme.border_subtle))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    icons::icon_label(
+                        ui,
+                        AppIcon::Globe,
+                        14.0,
+                        theme.accent_orange,
+                        "3. Explore Workspace First (Guest Mode)",
+                        13.0,
+                        theme.text_primary,
+                        true,
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if icons::icon_button(
+                            ui,
+                            AppIcon::ArrowRight,
+                            "Explore First",
+                            11.5,
+                            theme.text_primary,
+                            theme.bg_card,
+                            Stroke::new(1.0, theme.border_subtle),
+                            CornerRadius::same(7),
+                            Vec2::ZERO,
+                        )
+                        .clicked()
+                        {
+                            crate::core::InternalVault::enter_guest_explore_mode();
+                            out.enter_guest_mode = true;
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Explore the fullscreen Earth & BIM canvas immediately. You can connect or create an Obsidian-style Vault anytime from Dynamic Island or Settings.")
+                        .size(11.0)
+                        .color(theme.text_muted),
+                );
+            });
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

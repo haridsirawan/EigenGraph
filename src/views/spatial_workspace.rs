@@ -270,7 +270,7 @@ impl AiContextAttachment {
 }
 
 /// Visual Antigravity execution metadata paired to an individual chat message index.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct AntigravityTurnMeta {
     pub msg_index: usize,
     pub mode_label: String,
@@ -280,11 +280,111 @@ pub struct AntigravityTurnMeta {
 }
 
 /// Archived Antigravity chat thread allowing `+ New Chat` and History switching.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AgentThreadArchive {
     pub title: String,
     pub messages: Vec<crate::models::ChatMessage>,
     pub turn_meta: Vec<AntigravityTurnMeta>,
+}
+
+/// Persisted Dynamic Island session bundle stored in `Vault/AI_Context/dynamic_island_sessions.json`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct DynamicIslandPersistedState {
+    pub conversation_title: String,
+    pub conversation_archives: Vec<AgentThreadArchive>,
+    pub active_messages: Vec<crate::models::ChatMessage>,
+    pub turn_metadata: Vec<AntigravityTurnMeta>,
+}
+
+/// Action proposed by `Planning` agent mode requiring explicit user confirmation before mutating BIM/Earth.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlannedProposalAction {
+    ExecuteBimNl(String),
+    AutoRepair,
+    FlyEarth {
+        lat: f64,
+        lon: f64,
+        zoom: f64,
+        label: String,
+    },
+    AnchorSite {
+        lat: f64,
+        lon: f64,
+    },
+    ApplyAriLens,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProposalStatus {
+    Pending,
+    Applied,
+    Rejected,
+}
+
+/// Interactive review card rendered inside Dynamic Island when `AgentExecutionMode::Planning` proposes edits.
+#[derive(Debug, Clone)]
+pub struct PlannedAgentProposal {
+    pub id: u64,
+    pub title: String,
+    pub rationale: String,
+    pub action_preview: String,
+    pub actions: Vec<PlannedProposalAction>,
+    pub status: ProposalStatus,
+}
+
+/// Structured bracket directive optionally emitted by Gemini API responses (`[[FLY:...]]`, `[[BIM:...]]`, `[[REPAIR]]`, `[[ARI_AUDIT]]`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum GeminiDirective {
+    Fly { lat: f64, lon: f64, zoom: f64 },
+    Bim(String),
+    Repair,
+    AriAudit,
+}
+
+/// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
+pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective>) {
+    let mut directives = Vec::new();
+    let mut clean = String::with_capacity(raw.len());
+    let mut cursor = raw;
+
+    while let Some(start) = cursor.find("[[") {
+        clean.push_str(&cursor[..start]);
+        let after_start = &cursor[start + 2..];
+        if let Some(end) = after_start.find("]]") {
+            let tag = after_start[..end].trim();
+            let upper = tag.to_ascii_uppercase();
+            if upper.starts_with("FLY:") {
+                let coords_part = tag[4..].trim();
+                let nums: Vec<f64> = coords_part
+                    .split(',')
+                    .filter_map(|s| s.trim().parse::<f64>().ok())
+                    .collect();
+                if nums.len() >= 2 {
+                    let zoom = nums.get(2).copied().unwrap_or(14.5).clamp(1.0, 19.0);
+                    directives.push(GeminiDirective::Fly {
+                        lat: nums[0].clamp(-85.0, 85.0),
+                        lon: nums[1].clamp(-180.0, 180.0),
+                        zoom,
+                    });
+                }
+            } else if upper.starts_with("BIM:") {
+                let nl = tag[4..].trim();
+                if !nl.is_empty() {
+                    directives.push(GeminiDirective::Bim(nl.to_string()));
+                }
+            } else if upper == "REPAIR" {
+                directives.push(GeminiDirective::Repair);
+            } else if upper == "ARI_AUDIT" || upper == "ARI" {
+                directives.push(GeminiDirective::AriAudit);
+            }
+            cursor = &after_start[end + 2..];
+        } else {
+            clean.push_str("[[");
+            cursor = after_start;
+        }
+    }
+    clean.push_str(cursor);
+    (clean.trim().to_string(), directives)
 }
 
 /// Compact Antigravity-style execution trace chip displayed above the AI Command Bar.
@@ -604,6 +704,7 @@ pub struct SpatialHudActions {
     pub refresh_vault: bool,
     pub open_vault_project: Option<crate::core::vault::PersonalVaultProjectEntry>,
     pub pick_local_context_file: bool,
+    pub anchor_and_build_site: Option<(f64, f64)>,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -839,6 +940,15 @@ pub struct SpatialWorkspaceState {
     composer_had_focus: bool,
     last_command_len: usize,
 
+    // Phase 49: Live Gemini API, Planning Proposals & Vault AI Session Persistence
+    pub gemini_api_key_draft: String,
+    pub api_key_popover_open: bool,
+    pub gemini_inflight_req_id: Option<u64>,
+    pub pending_proposals: Vec<PlannedAgentProposal>,
+    next_proposal_id: u64,
+    pub sessions_dirty: bool,
+    pub vault_sessions_hydrated: bool,
+
     // Editable element inspector draft state synced lazily when selection changes
     last_loaded_target: Option<SmartSelectionTarget>,
     pub edit_width_mm: f64,
@@ -892,6 +1002,13 @@ impl Default for SpatialWorkspaceState {
             hud_rects: Vec::new(),
             composer_had_focus: false,
             last_command_len: 0,
+            gemini_api_key_draft: String::new(),
+            api_key_popover_open: false,
+            gemini_inflight_req_id: None,
+            pending_proposals: Vec::new(),
+            next_proposal_id: 1,
+            sessions_dirty: false,
+            vault_sessions_hydrated: false,
             last_loaded_target: None,
             edit_width_mm: 400.0,
             edit_depth_mm: 400.0,
@@ -920,6 +1037,8 @@ impl SpatialWorkspaceState {
             || self.vault_drawer_open
             || self.vault_path_popover_open
             || self.history_popover_open
+            || self.api_key_popover_open
+            || self.gemini_inflight_req_id.is_some()
             || self.command_bar_expanded;
         hovered_island || engaged
     }
@@ -931,6 +1050,7 @@ impl SpatialWorkspaceState {
         self.vault_drawer_open = false;
         self.vault_path_popover_open = false;
         self.history_popover_open = false;
+        self.api_key_popover_open = false;
         self.composer_had_focus = false;
     }
 
@@ -1002,7 +1122,260 @@ impl SpatialWorkspaceState {
         self.conversation_title = "New Spatial Thread".to_string();
         self.context_picker_open = false;
         self.history_popover_open = false;
+        self.sessions_dirty = true;
         self.push_trace("Started new Antigravity conversation", true);
+    }
+
+    /// Serializes Dynamic Island thread archives and active history for `Vault/AI_Context/`.
+    pub fn export_sessions_json(&self, ai_assistant: &AiAssistantView) -> String {
+        let bundle = DynamicIslandPersistedState {
+            conversation_title: self.conversation_title.clone(),
+            conversation_archives: self.conversation_archives.clone(),
+            active_messages: ai_assistant.chat_history.clone(),
+            turn_metadata: self.turn_metadata.clone(),
+        };
+        serde_json::to_string_pretty(&bundle).unwrap_or_default()
+    }
+
+    /// Restores Dynamic Island thread archives and active history from `Vault/AI_Context/`.
+    pub fn restore_sessions_json(&mut self, json: &str, ai_assistant: &mut AiAssistantView) -> bool {
+        let Ok(bundle) = serde_json::from_str::<DynamicIslandPersistedState>(json) else {
+            return false;
+        };
+        if !bundle.conversation_title.trim().is_empty() {
+            self.conversation_title = bundle.conversation_title;
+        }
+        self.conversation_archives = bundle.conversation_archives;
+        if !bundle.active_messages.is_empty() {
+            ai_assistant.chat_history = bundle.active_messages;
+        }
+        self.turn_metadata = bundle.turn_metadata;
+        self.sessions_dirty = false;
+        true
+    }
+
+    /// Queues an interactive proposal review card in `Planning` mode before applying model changes.
+    pub fn queue_planning_proposal(
+        &mut self,
+        title: impl Into<String>,
+        rationale: impl Into<String>,
+        action_preview: impl Into<String>,
+        actions: Vec<PlannedProposalAction>,
+    ) -> u64 {
+        let id = self.next_proposal_id;
+        self.next_proposal_id += 1;
+        self.pending_proposals.push(PlannedAgentProposal {
+            id,
+            title: title.into(),
+            rationale: rationale.into(),
+            action_preview: action_preview.into(),
+            actions,
+            status: ProposalStatus::Pending,
+        });
+        if self.pending_proposals.len() > 8 {
+            let excess = self.pending_proposals.len() - 8;
+            self.pending_proposals.drain(0..excess);
+        }
+        self.command_bar_expanded = true;
+        id
+    }
+
+    /// Commits a list of planned structural/Earth actions via transactional `BimCommandBus` / canvas state.
+    pub fn apply_proposal_actions(
+        &mut self,
+        planned: &[PlannedProposalAction],
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        ai_assistant: &mut AiAssistantView,
+    ) -> SpatialHudActions {
+        let mut out = SpatialHudActions::default();
+        for item in planned {
+            match item {
+                PlannedProposalAction::ExecuteBimNl(cmd) => {
+                    if let Ok(msg) = build_view.bim_bus.execute_natural_language(cmd) {
+                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                        universal_canvas.ground_origin_anchored = true;
+                        out.sync_fem_and_earth = true;
+                        out.fit_camera = true;
+                        self.push_trace(msg.clone(), true);
+                        ai_assistant.chat_history.push(crate::models::ChatMessage {
+                            is_user: false,
+                            message: format!("[Applied BIM Proposal]: {msg}"),
+                            time: crate::core::web_bridge::unix_timestamp_label(),
+                        });
+                    }
+                }
+                PlannedProposalAction::AutoRepair => {
+                    out.run_auto_repair = true;
+                    self.push_trace("Queued Structural Auto-Repair", true);
+                }
+                PlannedProposalAction::FlyEarth {
+                    lat,
+                    lon,
+                    zoom,
+                    label,
+                } => {
+                    self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                    universal_canvas.globe_mode = true;
+                    universal_canvas
+                        .earth_world
+                        .start_fly_to(&universal_canvas.world_map, *lat, *lon, *zoom as f32, label);
+                    universal_canvas.ground_origin_lat_lon = (*lat, *lon);
+                    universal_canvas.ground_origin_anchored = true;
+                    self.selected_target = Some(SmartSelectionTarget::EarthSite {
+                        lat: *lat,
+                        lon: *lon,
+                    });
+                    self.push_trace(format!("Earth Fly-To -> {label}"), true);
+                }
+                PlannedProposalAction::AnchorSite { lat, lon } => {
+                    out.anchor_and_build_site = Some((*lat, *lon));
+                    self.push_trace(format!("Anchored BIM Site @ {lat:.3}°, {lon:.3}°"), true);
+                }
+                PlannedProposalAction::ApplyAriLens => {
+                    self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                    self.apply_lens_to_views(
+                        SpatialLens::AriRedundancy,
+                        build_view,
+                        universal_canvas,
+                    );
+                    out.sync_fem_and_earth = true;
+                    self.push_trace("Applied ARI Redundancy Heatmap Lens", true);
+                }
+            }
+        }
+        self.sessions_dirty = true;
+        out
+    }
+
+    /// Commits a pending proposal card by ID when the user clicks `Apply Changes`.
+    pub fn apply_proposal_by_id(
+        &mut self,
+        id: u64,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        ai_assistant: &mut AiAssistantView,
+    ) -> SpatialHudActions {
+        let mut to_run: Option<Vec<PlannedProposalAction>> = None;
+        if let Some(p) = self.pending_proposals.iter_mut().find(|p| p.id == id) {
+            if p.status == ProposalStatus::Pending {
+                p.status = ProposalStatus::Applied;
+                to_run = Some(p.actions.clone());
+            }
+        }
+        if let Some(actions_list) = to_run {
+            self.apply_proposal_actions(&actions_list, universal_canvas, build_view, ai_assistant)
+        } else {
+            SpatialHudActions::default()
+        }
+    }
+
+    /// Dismisses a pending proposal card by ID when the user clicks `Reject`.
+    pub fn reject_proposal_by_id(&mut self, id: u64, ai_assistant: &mut AiAssistantView) {
+        let mut rejected_title: Option<String> = None;
+        if let Some(p) = self.pending_proposals.iter_mut().find(|p| p.id == id) {
+            if p.status == ProposalStatus::Pending {
+                p.status = ProposalStatus::Rejected;
+                rejected_title = Some(p.title.clone());
+            }
+        }
+        if let Some(title) = rejected_title {
+            self.push_trace(format!("Rejected proposal: {title}"), false);
+            ai_assistant.chat_history.push(crate::models::ChatMessage {
+                is_user: false,
+                message: format!("[Planning Mode]: Proposal '{title}' rejected; model unchanged."),
+                time: crate::core::web_bridge::unix_timestamp_label(),
+            });
+            self.sessions_dirty = true;
+        }
+    }
+
+    /// Polls asynchronous Gemini REST API replies and routes any structured `[[...]]` directives.
+    pub fn poll_gemini_replies(
+        &mut self,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        ai_assistant: &mut AiAssistantView,
+    ) -> SpatialHudActions {
+        let replies = crate::core::web_bridge::gemini_poll_responses();
+        let mut out = SpatialHudActions::default();
+        for reply in replies {
+            if self.gemini_inflight_req_id == Some(reply.request_id) {
+                self.gemini_inflight_req_id = None;
+            }
+            if reply.ok {
+                let (clean_text, directives) = parse_gemini_action_directives(&reply.text);
+                let msg_idx = ai_assistant.chat_history.len();
+                let final_msg = if clean_text.is_empty() {
+                    format!("[{}] Prepared {} engineering directive(s).", reply.model, directives.len())
+                } else {
+                    format!("[{}]:\n{}", reply.model, clean_text)
+                };
+                ai_assistant.chat_history.push(crate::models::ChatMessage {
+                    is_user: false,
+                    message: final_msg,
+                    time: crate::core::web_bridge::unix_timestamp_label(),
+                });
+                self.turn_metadata.push(AntigravityTurnMeta {
+                    msg_index: msg_idx,
+                    mode_label: self.agent_mode.label().to_string(),
+                    model_label: self.agent_model.short_label().to_string(),
+                    context_chips: Vec::new(),
+                    trace_steps: vec![format!("Gemini ({}) replied", reply.model)],
+                });
+                if !directives.is_empty() {
+                    let mapped: Vec<PlannedProposalAction> = directives
+                        .iter()
+                        .map(|d| match d {
+                            GeminiDirective::Fly { lat, lon, zoom } => PlannedProposalAction::FlyEarth {
+                                lat: *lat,
+                                lon: *lon,
+                                zoom: *zoom,
+                                label: format!("Gemini Target ({lat:.2}°, {lon:.2}°)"),
+                            },
+                            GeminiDirective::Bim(cmd) => PlannedProposalAction::ExecuteBimNl(cmd.clone()),
+                            GeminiDirective::Repair => PlannedProposalAction::AutoRepair,
+                            GeminiDirective::AriAudit => PlannedProposalAction::ApplyAriLens,
+                        })
+                        .collect();
+                    let preview: String = directives
+                        .iter()
+                        .map(|d| match d {
+                            GeminiDirective::Fly { lat, lon, .. } => format!("Fly({lat:.2},{lon:.2})"),
+                            GeminiDirective::Bim(c) => format!("BIM:{c}"),
+                            GeminiDirective::Repair => "AutoRepair".to_string(),
+                            GeminiDirective::AriAudit => "ARI_Lens".to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" + ");
+                    if self.agent_mode == AgentExecutionMode::Planning {
+                        self.queue_planning_proposal(
+                            "Gemini Structured Action Plan",
+                            "Review Gemini-proposed BIM / Earth changes before mutating the workspace.",
+                            preview,
+                            mapped,
+                        );
+                    } else {
+                        let sub = self.apply_proposal_actions(&mapped, universal_canvas, build_view, ai_assistant);
+                        out.merge(sub);
+                    }
+                }
+                self.push_trace(format!("Gemini {} ready", reply.model), true);
+                self.sessions_dirty = true;
+            } else {
+                let err = reply.error.unwrap_or_else(|| "Unknown Gemini API error".to_string());
+                ai_assistant.chat_history.push(crate::models::ChatMessage {
+                    is_user: false,
+                    message: format!(
+                        "[Gemini API Notice]: {err}\nClick the Key icon in Dynamic Island to verify your Gemini API Key or switch model to EigenAI Pro (offline FEM engine)."
+                    ),
+                    time: crate::core::web_bridge::unix_timestamp_label(),
+                });
+                self.push_trace("Gemini API request failed (check Key)", false);
+                self.sessions_dirty = true;
+            }
+        }
+        out
     }
 
     /// Formats all attached context pills into prompt metadata, trace step labels, and UI chip strings.
@@ -1581,6 +1954,31 @@ impl SpatialWorkspaceState {
                 .replace("create ", "")
                 .replace("stories", "floors")
                 .replace("story", "floors");
+            if self.agent_mode == AgentExecutionMode::Planning {
+                let (lat, lon) = universal_canvas.ground_origin_lat_lon;
+                let site = compute_site_environmental_coupling(lat, lon, &universal_canvas.earth_world);
+                self.queue_planning_proposal(
+                    "Synthesize Parametric Structural Frame",
+                    format!(
+                        "Planning Mode pre-check at Earth Site ({lat:.3}°, {lon:.3}°): Ss={:.2}g, Wind={:.0} m/s. Click Apply Changes to execute BIM synthesis.",
+                        site.seismic_pga_ss_g, site.design_wind_ms
+                    ),
+                    format!("BIM Command: {norm}"),
+                    vec![PlannedProposalAction::ExecuteBimNl(norm)],
+                );
+                ai_assistant.chat_history.push(crate::models::ChatMessage {
+                    is_user: true,
+                    message: trimmed.to_string(),
+                    time: crate::core::web_bridge::unix_timestamp_label(),
+                });
+                ai_assistant.chat_history.push(crate::models::ChatMessage {
+                    is_user: false,
+                    message: "[Planning Mode]: Prepared structural frame proposal below. Click Apply Changes to build or Reject to cancel.".to_string(),
+                    time: crate::core::web_bridge::unix_timestamp_label(),
+                });
+                self.sessions_dirty = true;
+                return actions;
+            }
             match build_view.bim_bus.execute_natural_language(&norm) {
                 Ok(msg) => {
                     self.active_canvas_mode = SpatialCanvasMode::Bim3D;
@@ -1598,6 +1996,7 @@ impl SpatialWorkspaceState {
                         message: format!("[Antigravity BIM Agent]: {msg}"),
                         time: crate::core::web_bridge::unix_timestamp_label(),
                     });
+                    self.sessions_dirty = true;
                     return actions;
                 }
                 Err(_) => {}
@@ -1654,6 +2053,58 @@ impl SpatialWorkspaceState {
             };
         }
 
+        // 4. Live Google Gemini REST Client when Gemini model + API Key are configured
+        if matches!(
+            self.agent_model,
+            AgentModelChoice::Gemini25Flash | AgentModelChoice::GeminiLive
+        ) && !self.gemini_api_key_draft.trim().is_empty()
+        {
+            let (lat, lon) = universal_canvas.ground_origin_lat_lon;
+            let site = compute_site_environmental_coupling(lat, lon, &universal_canvas.earth_world);
+            let sys_prompt = format!(
+                "You are EigenAI inside EigenGraph (Geospatial Earth + Structural BIM/FEM & Adjusted Redundancy Index ARI platform). \
+                 Respond concisely in professional civil & structural engineering English. \
+                 Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s. \
+                 Active BIM elements={}, FEM members={}. \
+                 If the user asks to navigate Earth, synthesize a portal/frame, repair critical ARI members, or run an ARI audit, \
+                 you may append bracket directives: [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[REPAIR]], [[ARI_AUDIT]].",
+                site.elevation_m,
+                site.seismic_pga_ss_g,
+                site.design_wind_ms,
+                build_view.bim_bus.project.element_count(),
+                members.len()
+            );
+            let model_id = "gemini-2.5-flash";
+            if let Ok(req_id) = crate::core::web_bridge::gemini_send_prompt(
+                &self.gemini_api_key_draft,
+                model_id,
+                &sys_prompt,
+                &enriched_prompt,
+            ) {
+                let user_idx = ai_assistant.chat_history.len();
+                ai_assistant.chat_history.push(crate::models::ChatMessage {
+                    is_user: true,
+                    message: trimmed.to_string(),
+                    time: crate::core::web_bridge::unix_timestamp_label(),
+                });
+                if !chip_labels.is_empty() || !step_traces.is_empty() {
+                    self.turn_metadata.push(AntigravityTurnMeta {
+                        msg_index: user_idx,
+                        mode_label: self.agent_mode.label().to_string(),
+                        model_label: self.agent_model.short_label().to_string(),
+                        context_chips: chip_labels,
+                        trace_steps: step_traces,
+                    });
+                }
+                self.gemini_inflight_req_id = Some(req_id);
+                self.command_bar_expanded = true;
+                self.context_picker_open = false;
+                self.sessions_dirty = true;
+                self.push_trace(format!("Querying {}...", self.agent_model.short_label()), true);
+                return actions;
+            }
+        }
+
         let user_idx = ai_assistant.chat_history.len();
         self.command_bar_expanded = true;
         self.context_picker_open = false;
@@ -1705,9 +2156,25 @@ impl SpatialWorkspaceState {
 
         if ai_assistant.pending_bim_nl_command.as_deref() == Some("__repair_critical__") {
             ai_assistant.pending_bim_nl_command = None;
-            actions.run_auto_repair = true;
+            if self.agent_mode == AgentExecutionMode::Planning {
+                self.queue_planning_proposal(
+                    "Auto-Repair Critical ARI Members",
+                    "Planning Mode detected repair request. Click Apply Changes to upgrade low-redundancy / overstressed elements cleanly via undoable BimCommand.",
+                    "BimCommand::AutoRepairCritical",
+                    vec![PlannedProposalAction::AutoRepair],
+                );
+            } else {
+                actions.run_auto_repair = true;
+            }
         } else if let Some(cmd) = ai_assistant.pending_bim_nl_command.take() {
-            if let Ok(msg) = build_view.bim_bus.execute_natural_language(&cmd) {
+            if self.agent_mode == AgentExecutionMode::Planning {
+                self.queue_planning_proposal(
+                    "Apply Proposed BIM Synthesis",
+                    "Review BIM natural-language synthesis before updating the active workspace.",
+                    format!("BIM Command: {cmd}"),
+                    vec![PlannedProposalAction::ExecuteBimNl(cmd)],
+                );
+            } else if let Ok(msg) = build_view.bim_bus.execute_natural_language(&cmd) {
                 self.active_canvas_mode = SpatialCanvasMode::Bim3D;
                 actions.sync_fem_and_earth = true;
                 actions.fit_camera = true;
@@ -1719,6 +2186,7 @@ impl SpatialWorkspaceState {
                 true,
             );
         }
+        self.sessions_dirty = true;
 
         actions
     }
@@ -1959,6 +2427,64 @@ impl SpatialWorkspaceState {
                                     AppIcon::Wrench,
                                     format!("Tool: {}", build_view.ground_author_tool.label()),
                                     theme.accent_orange,
+                                );
+                                match build_view.ground_author_tool {
+                                    Ground3DAuthorTool::Column => {
+                                        ui.label(RichText::new("W:").size(10.0).color(theme.text_muted));
+                                        ui.add(
+                                            egui::DragValue::new(&mut build_view.author_col_width_mm)
+                                                .range(150.0..=2000.0)
+                                                .speed(25.0)
+                                                .suffix("mm"),
+                                        );
+                                        ui.label(RichText::new("D:").size(10.0).color(theme.text_muted));
+                                        ui.add(
+                                            egui::DragValue::new(&mut build_view.author_col_depth_mm)
+                                                .range(150.0..=2000.0)
+                                                .speed(25.0)
+                                                .suffix("mm"),
+                                        );
+                                    }
+                                    Ground3DAuthorTool::Beam => {
+                                        ui.label(RichText::new("b:").size(10.0).color(theme.text_muted));
+                                        ui.add(
+                                            egui::DragValue::new(&mut build_view.author_beam_width_mm)
+                                                .range(120.0..=1500.0)
+                                                .speed(25.0)
+                                                .suffix("mm"),
+                                        );
+                                        ui.label(RichText::new("h:").size(10.0).color(theme.text_muted));
+                                        ui.add(
+                                            egui::DragValue::new(&mut build_view.author_beam_depth_mm)
+                                                .range(150.0..=2500.0)
+                                                .speed(25.0)
+                                                .suffix("mm"),
+                                        );
+                                    }
+                                    Ground3DAuthorTool::Wall => {
+                                        ui.label(RichText::new("t:").size(10.0).color(theme.text_muted));
+                                        ui.add(
+                                            egui::DragValue::new(&mut build_view.author_wall_thickness_mm)
+                                                .range(80.0..=1200.0)
+                                                .speed(10.0)
+                                                .suffix("mm"),
+                                        );
+                                    }
+                                    Ground3DAuthorTool::Footing => {
+                                        ui.label(RichText::new("Size:").size(10.0).color(theme.text_muted));
+                                        ui.add(
+                                            egui::DragValue::new(&mut build_view.author_footing_size_mm)
+                                                .range(400.0..=6000.0)
+                                                .speed(50.0)
+                                                .suffix("mm"),
+                                        );
+                                    }
+                                    Ground3DAuthorTool::Orbit => {}
+                                }
+                                ui.label(
+                                    RichText::new("(Esc: Orbit)")
+                                        .size(9.8)
+                                        .color(theme.text_muted),
                                 );
                             } else if universal_canvas.active_tool != UniversalCanvasTool::SelectPan {
                                 icons::pill_badge(
@@ -2427,11 +2953,37 @@ impl SpatialWorkspaceState {
                     }
                     if icons::icon_button(
                         ui,
+                        AppIcon::Column,
+                        "Anchor & Build Here",
+                        10.5,
+                        Color32::WHITE,
+                        theme.accent_green,
+                        Stroke::NONE,
+                        CornerRadius::same(7),
+                        Vec2::new(0.0, 26.0),
+                    )
+                    .on_hover_text("Anchor BIM Origin at this Earth site and open 3D Structural Modeling")
+                    .clicked()
+                    {
+                        universal_canvas.ground_origin_lat_lon = (lat, lon);
+                        universal_canvas.ground_origin_anchored = true;
+                        self.active_canvas_mode = SpatialCanvasMode::Bim3D;
+                        if build_view.bim_bus.project.is_empty() {
+                            build_view.ground_author_tool = Ground3DAuthorTool::Column;
+                        }
+                        actions.anchor_and_build_site = Some((lat, lon));
+                        self.push_trace(
+                            format!("Anchored & Opened 3D BIM @ {lat:.3}°, {lon:.3}°"),
+                            true,
+                        );
+                    }
+                    if icons::icon_button(
+                        ui,
                         AppIcon::Grid,
                         "Build 3x2 Portal",
                         10.5,
                         Color32::WHITE,
-                        theme.accent_green,
+                        theme.accent_orange,
                         Stroke::NONE,
                         CornerRadius::same(7),
                         Vec2::new(0.0, 26.0),
@@ -3464,108 +4016,20 @@ impl SpatialWorkspaceState {
                     ui.add_space(5.0);
                     ui.separator();
                     ui.add_space(5.0);
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        ui.label(
-                            RichText::new("Folder Path or New Vault:")
-                                .size(10.0)
-                                .color(theme.text_secondary),
-                        );
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.vault_inline_path)
-                                .desired_width((inner_w - 8.0).max(140.0))
-                                .hint_text("/path/to/EigenGraph_Vault"),
-                        );
-                        ui.add_space(4.0);
-                        ui.horizontal_wrapped(|ui| {
-                            if icons::icon_button(
-                                ui,
-                                AppIcon::Folder,
-                                "Connect Path",
-                                10.0,
-                                Color32::WHITE,
-                                theme.accent_blue,
-                                Stroke::NONE,
-                                CornerRadius::same(6),
-                                Vec2::new(0.0, 22.0),
-                            )
-                            .clicked()
-                            {
-                                actions.connect_vault_path =
-                                    Some(self.vault_inline_path.trim().to_string());
-                            }
-                            if icons::icon_button(
-                                ui,
-                                AppIcon::Plus,
-                                "Create New",
-                                10.0,
-                                Color32::WHITE,
-                                theme.accent_green,
-                                Stroke::NONE,
-                                CornerRadius::same(6),
-                                Vec2::new(0.0, 22.0),
-                            )
-                            .clicked()
-                            {
-                                actions.create_vault_path_and_name = Some((
-                                    self.vault_inline_path.trim().to_string(),
-                                    self.vault_inline_name.trim().to_string(),
-                                ));
-                            }
-                            if status.connected
-                                && icons::icon_button(
-                                    ui,
-                                    AppIcon::Close,
-                                    "Disconnect",
-                                    10.0,
-                                    theme.text_secondary,
-                                    theme.bg_card,
-                                    Stroke::new(1.0, theme.border_subtle),
-                                    CornerRadius::same(6),
-                                    Vec2::new(0.0, 22.0),
-                                )
-                                .clicked()
-                            {
-                                actions.disconnect_vault = true;
-                            }
-                        });
+                    let outcome = crate::ui_kit::render_obsidian_vault_panel(
+                        ui,
+                        theme,
+                        &mut self.vault_inline_path,
+                        &mut self.vault_inline_name,
+                        true,
+                        false,
+                        false,
+                    );
+                    if let Some(fb) = outcome.feedback {
+                        self.vault_feedback = Some(fb);
                     }
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        ui.horizontal_wrapped(|ui| {
-                            if icons::icon_button(
-                                ui,
-                                AppIcon::Database,
-                                "Browser IndexedDB Vault",
-                                10.0,
-                                Color32::WHITE,
-                                theme.accent_green,
-                                Stroke::NONE,
-                                CornerRadius::same(6),
-                                Vec2::new(0.0, 22.0),
-                            )
-                            .clicked()
-                            {
-                                actions.connect_indexeddb_vault =
-                                    Some("EigenGraph_Vault".to_string());
-                            }
-                            if status.connected
-                                && icons::icon_button(
-                                    ui,
-                                    AppIcon::Close,
-                                    "Disconnect",
-                                    10.0,
-                                    theme.text_secondary,
-                                    theme.bg_card,
-                                    Stroke::new(1.0, theme.border_subtle),
-                                    CornerRadius::same(6),
-                                    Vec2::new(0.0, 22.0),
-                                )
-                                .clicked()
-                            {
-                                actions.disconnect_vault = true;
-                            }
-                        });
+                    if outcome.state_changed {
+                        actions.refresh_vault = true;
                     }
                 }
 
@@ -4180,6 +4644,88 @@ impl SpatialWorkspaceState {
                         ui.add_space(6.0);
                     }
 
+                    if self.api_key_popover_open {
+                        Frame::new()
+                            .fill(theme.bg_card)
+                            .corner_radius(CornerRadius::same(12))
+                            .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.55)))
+                            .inner_margin(Margin::same(10))
+                            .show(ui, |ui| {
+                                let kw = (dock_w - 22.0).max(180.0);
+                                ui.set_width(kw);
+                                ui.set_max_width(kw);
+                                ui.horizontal(|ui| {
+                                    icons::icon_label(
+                                        ui,
+                                        AppIcon::Lock,
+                                        12.5,
+                                        theme.accent_blue,
+                                        "Gemini API Key (Quick Setup)",
+                                        11.0,
+                                        theme.text_primary,
+                                        true,
+                                    );
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        if icons::icon_only_button(
+                                            ui,
+                                            AppIcon::Close,
+                                            theme.text_secondary,
+                                            Color32::TRANSPARENT,
+                                            Stroke::NONE,
+                                            CornerRadius::same(6),
+                                            Vec2::splat(18.0),
+                                            "Close API key setup",
+                                        )
+                                        .clicked()
+                                        {
+                                            self.api_key_popover_open = false;
+                                        }
+                                    });
+                                });
+                                ui.add_space(4.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.gemini_api_key_draft)
+                                            .password(true)
+                                            .hint_text("AIza... (synced with Settings)")
+                                            .desired_width((kw - 165.0).max(120.0)),
+                                    );
+                                    if icons::icon_button(
+                                        ui,
+                                        AppIcon::CheckCircle,
+                                        "Use Gemini 2.5",
+                                        10.0,
+                                        Color32::WHITE,
+                                        theme.accent_green,
+                                        Stroke::NONE,
+                                        CornerRadius::same(7),
+                                        Vec2::new(0.0, 22.0),
+                                    )
+                                    .clicked()
+                                    {
+                                        if !self.gemini_api_key_draft.trim().is_empty() {
+                                            self.agent_model = AgentModelChoice::Gemini25Flash;
+                                            self.push_trace("Gemini 2.5 Flash API Key armed", true);
+                                        }
+                                        self.api_key_popover_open = false;
+                                    }
+                                    if !self.gemini_api_key_draft.is_empty()
+                                        && ui.small_button("Clear").clicked()
+                                    {
+                                        self.gemini_api_key_draft.clear();
+                                        self.agent_model = AgentModelChoice::EigenAiProFem;
+                                        self.push_trace("Cleared Gemini API key (Offline EigenAI)", true);
+                                    }
+                                });
+                                ui.label(
+                                    RichText::new("Used only for live Google Gemini REST calls from Dynamic Island. Empty key automatically falls back to offline EigenAI Pro.")
+                                        .size(9.5)
+                                        .color(theme.text_muted),
+                                );
+                            });
+                        ui.add_space(6.0);
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -4368,6 +4914,137 @@ impl SpatialWorkspaceState {
                                         }
                                         ui.add_space(4.0);
                                     }
+
+                                    if self.gemini_inflight_req_id.is_some() {
+                                        Frame::new()
+                                            .fill(theme.accent_blue.gamma_multiply(0.12))
+                                            .corner_radius(CornerRadius::same(9))
+                                            .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.4)))
+                                            .inner_margin(Margin::symmetric(10, 6))
+                                            .show(ui, |ui| {
+                                                ui.set_width((inner_w - 14.0).max(140.0));
+                                                icons::icon_label(
+                                                    ui,
+                                                    AppIcon::Sparkles,
+                                                    12.0,
+                                                    theme.accent_blue,
+                                                    format!("{} is thinking...", self.agent_model.short_label()),
+                                                    10.8,
+                                                    theme.accent_blue,
+                                                    true,
+                                                );
+                                            });
+                                        ui.add_space(4.0);
+                                    }
+
+                                    let mut apply_id: Option<u64> = None;
+                                    let mut reject_id: Option<u64> = None;
+                                    for prop in &self.pending_proposals {
+                                        let border_col = match prop.status {
+                                            ProposalStatus::Pending => theme.accent_orange.gamma_multiply(0.65),
+                                            ProposalStatus::Applied => theme.accent_green.gamma_multiply(0.6),
+                                            ProposalStatus::Rejected => theme.border_subtle,
+                                        };
+                                        Frame::new()
+                                            .fill(theme.bg_sidebar)
+                                            .corner_radius(CornerRadius::same(10))
+                                            .stroke(Stroke::new(1.0, border_col))
+                                            .inner_margin(Margin::symmetric(10, 7))
+                                            .show(ui, |ui| {
+                                                ui.set_width((inner_w - 14.0).max(140.0));
+                                                ui.horizontal_wrapped(|ui| {
+                                                    icons::icon_label(
+                                                        ui,
+                                                        AppIcon::Wrench,
+                                                        12.0,
+                                                        theme.accent_orange,
+                                                        &prop.title,
+                                                        10.8,
+                                                        theme.text_primary,
+                                                        true,
+                                                    );
+                                                    match prop.status {
+                                                        ProposalStatus::Pending => icons::pill_badge(
+                                                            ui,
+                                                            AppIcon::Clock,
+                                                            "PLANNING REVIEW",
+                                                            theme.accent_orange,
+                                                        ),
+                                                        ProposalStatus::Applied => icons::pill_badge(
+                                                            ui,
+                                                            AppIcon::CheckCircle,
+                                                            "APPLIED",
+                                                            theme.accent_green,
+                                                        ),
+                                                        ProposalStatus::Rejected => icons::pill_badge(
+                                                            ui,
+                                                            AppIcon::Close,
+                                                            "REJECTED",
+                                                            theme.text_muted,
+                                                        ),
+                                                    }
+                                                });
+                                                ui.label(
+                                                    RichText::new(&prop.rationale)
+                                                        .size(10.0)
+                                                        .color(theme.text_secondary),
+                                                );
+                                                ui.label(
+                                                    RichText::new(&prop.action_preview)
+                                                        .size(9.8)
+                                                        .monospace()
+                                                        .color(theme.accent_blue),
+                                                );
+                                                if prop.status == ProposalStatus::Pending {
+                                                    ui.add_space(4.0);
+                                                    ui.horizontal_wrapped(|ui| {
+                                                        if icons::icon_button(
+                                                            ui,
+                                                            AppIcon::CheckCircle,
+                                                            "Apply Changes",
+                                                            10.0,
+                                                            Color32::WHITE,
+                                                            theme.accent_green,
+                                                            Stroke::NONE,
+                                                            CornerRadius::same(7),
+                                                            Vec2::new(0.0, 22.0),
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            apply_id = Some(prop.id);
+                                                        }
+                                                        if icons::icon_button(
+                                                            ui,
+                                                            AppIcon::Close,
+                                                            "Reject",
+                                                            10.0,
+                                                            theme.text_secondary,
+                                                            theme.bg_card,
+                                                            Stroke::new(0.9, theme.border_subtle),
+                                                            CornerRadius::same(7),
+                                                            Vec2::new(0.0, 22.0),
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            reject_id = Some(prop.id);
+                                                        }
+                                                    });
+                                                }
+                                            });
+                                        ui.add_space(4.0);
+                                    }
+                                    if let Some(pid) = apply_id {
+                                        let sub = self.apply_proposal_by_id(
+                                            pid,
+                                            universal_canvas,
+                                            build_view,
+                                            ai_assistant,
+                                        );
+                                        actions.merge(sub);
+                                    }
+                                    if let Some(pid) = reject_id {
+                                        self.reject_proposal_by_id(pid, ai_assistant);
+                                    }
                                 });
                         });
                         ui.add_space(6.0);
@@ -4487,6 +5164,48 @@ impl SpatialWorkspaceState {
                                 .clicked()
                                 {
                                     self.agent_model = self.agent_model.next();
+                                }
+
+                                let has_key = !self.gemini_api_key_draft.trim().is_empty();
+                                let needs_key = matches!(
+                                    self.agent_model,
+                                    AgentModelChoice::Gemini25Flash | AgentModelChoice::GeminiLive
+                                ) && !has_key;
+                                if icons::icon_only_button(
+                                    ui,
+                                    AppIcon::Lock,
+                                    if has_key {
+                                        theme.accent_green
+                                    } else if needs_key {
+                                        theme.accent_orange
+                                    } else {
+                                        theme.text_secondary
+                                    },
+                                    if self.api_key_popover_open {
+                                        theme.accent_blue.gamma_multiply(0.16)
+                                    } else {
+                                        theme.bg_card
+                                    },
+                                    Stroke::new(
+                                        0.8,
+                                        if needs_key {
+                                            theme.accent_orange.gamma_multiply(0.55)
+                                        } else {
+                                            theme.border_subtle
+                                        },
+                                    ),
+                                    CornerRadius::same(8),
+                                    Vec2::splat(22.0),
+                                    if has_key {
+                                        "Gemini API Key Armed (click to edit)"
+                                    } else {
+                                        "Configure Google Gemini API Key"
+                                    },
+                                )
+                                .clicked()
+                                {
+                                    self.api_key_popover_open = !self.api_key_popover_open;
+                                    self.history_popover_open = false;
                                 }
 
                                 if icons::icon_button(
@@ -4833,6 +5552,9 @@ impl SpatialHudActions {
             self.open_vault_project = other.open_vault_project;
         }
         self.pick_local_context_file |= other.pick_local_context_file;
+        if other.anchor_and_build_site.is_some() {
+            self.anchor_and_build_site = other.anchor_and_build_site;
+        }
     }
 }
 
@@ -5313,5 +6035,115 @@ mod tests {
         spatial.start_new_conversation(&mut ai);
         assert_eq!(spatial.conversation_archives.len(), 1);
         assert_eq!(ai.chat_history.len(), 1);
+    }
+
+    #[test]
+    fn test_phase49_planning_proposal_apply_and_reject() {
+        let mut spatial = SpatialWorkspaceState::default();
+        assert_eq!(spatial.agent_mode, AgentExecutionMode::Planning);
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        // In Planning mode, "build portal" queues a proposal card instead of mutating BIM immediately
+        let _ = spatial.execute_spatial_input(
+            "build portal 3x2 @6m 2floors",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(spatial.pending_proposals.len(), 1);
+        assert_eq!(spatial.pending_proposals[0].status, ProposalStatus::Pending);
+        assert!(build.bim_bus.project.is_empty());
+
+        let prop_id = spatial.pending_proposals[0].id;
+        let apply_act = spatial.apply_proposal_by_id(prop_id, &mut canvas, &mut build, &mut ai);
+        assert_eq!(spatial.pending_proposals[0].status, ProposalStatus::Applied);
+        assert!(!build.bim_bus.project.is_empty());
+        assert!(apply_act.sync_fem_and_earth);
+        assert!(apply_act.fit_camera);
+
+        // Second proposal rejected leaves BIM count unchanged
+        let before_count = build.bim_bus.project.element_count();
+        let id2 = spatial.queue_planning_proposal(
+            "Add Repair",
+            "Test rationale",
+            "BimCommand::Repair",
+            vec![PlannedProposalAction::AutoRepair],
+        );
+        spatial.reject_proposal_by_id(id2, &mut ai);
+        assert_eq!(spatial.pending_proposals[1].status, ProposalStatus::Rejected);
+        assert_eq!(build.bim_bus.project.element_count(), before_count);
+    }
+
+    #[test]
+    fn test_phase49_gemini_response_and_directive_parsing() {
+        let raw = "Recommended 2-bay ductile moment frame aligned to seismic zone. [[FLY:-6.2088,106.8456,15.5]] [[BIM:portal 2x2 @6m 2floors]] [[ARI_AUDIT]]";
+        let (clean, dirs) = parse_gemini_action_directives(raw);
+        assert_eq!(
+            clean,
+            "Recommended 2-bay ductile moment frame aligned to seismic zone."
+        );
+        assert_eq!(dirs.len(), 3);
+        assert_eq!(
+            dirs[0],
+            GeminiDirective::Fly {
+                lat: -6.2088,
+                lon: 106.8456,
+                zoom: 15.5
+            }
+        );
+        assert_eq!(
+            dirs[1],
+            GeminiDirective::Bim("portal 2x2 @6m 2floors".to_string())
+        );
+        assert_eq!(dirs[2], GeminiDirective::AriAudit);
+
+        let api_json = r#"{
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "Column C1 utilization is 48%."}]
+                }
+            }]
+        }"#;
+        let parsed = crate::core::web_bridge::parse_gemini_generate_content_response(api_json)
+            .expect("Gemini candidate should parse");
+        assert!(parsed.contains("48%"));
+    }
+
+    #[test]
+    fn test_phase49_obsidian_vault_sessions_roundtrip_and_earth_build_here() {
+        let temp_vault = std::env::temp_dir().join(format!(
+            "eigengraph_phase49_vault_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp_vault);
+        let mut spatial = SpatialWorkspaceState::default();
+        spatial.conversation_title = "Jakarta Site Audit".to_string();
+        let mut ai = AiAssistantView::default();
+        ai.chat_history.push(crate::models::ChatMessage {
+            is_user: true,
+            message: "Audit Jakarta seismic columns".to_string(),
+            time: "Now".to_string(),
+        });
+        let json = spatial.export_sessions_json(&ai);
+        let saved_path = crate::core::InternalVault::save_ai_sessions_json_at(&temp_vault, &json)
+            .expect("AI sessions JSON should save to AI_Context/");
+        assert!(saved_path.ends_with("AI_Context/dynamic_island_sessions.json"));
+
+        let loaded_json =
+            crate::core::InternalVault::load_ai_sessions_json_at(&temp_vault).expect("Should reload");
+        let mut spatial_restored = SpatialWorkspaceState::default();
+        let mut ai_restored = AiAssistantView::default();
+        assert!(spatial_restored.restore_sessions_json(&loaded_json, &mut ai_restored));
+        assert_eq!(spatial_restored.conversation_title, "Jakarta Site Audit");
+        assert_eq!(ai_restored.chat_history.len(), ai.chat_history.len());
+        let _ = std::fs::remove_dir_all(&temp_vault);
     }
 }

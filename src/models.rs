@@ -299,7 +299,7 @@ impl Default for StructuralMember {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     pub is_user: bool,
     pub message: String,

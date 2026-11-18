@@ -141,6 +141,9 @@ mod js_vault {
 
         #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = listCachedFilesJson)]
         pub fn list_cached_files_json() -> String;
+
+        #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = downloadVaultBundle)]
+        pub fn download_vault_bundle(vault_name: &str);
     }
 }
 
@@ -204,6 +207,15 @@ pub fn vault_disconnect() {
 pub fn vault_enter_guest_mode() {
     #[cfg(target_arch = "wasm32")]
     js_vault::enter_guest_mode();
+}
+
+/// Triggers browser download of a complete Obsidian-style `.eigen-vault.json` archive
+/// on Firefox, Safari, or Chrome when local directory sync is unavailable.
+pub fn vault_download_bundle(vault_name: &str) {
+    #[cfg(target_arch = "wasm32")]
+    js_vault::download_vault_bundle(vault_name);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = vault_name;
 }
 
 pub fn vault_read_file(rel_path: &str) -> Option<String> {
@@ -700,6 +712,226 @@ pub fn shm_connection_snapshot() -> (bool, String) {
         guard.clone()
     } else {
         (false, String::new())
+    }
+}
+
+/// Asynchronous response delivered by the Gemini REST `generateContent` client.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeminiApiReply {
+    pub request_id: u64,
+    pub model: String,
+    pub ok: bool,
+    pub text: String,
+    pub error: Option<String>,
+}
+
+static PENDING_GEMINI_REPLIES: std::sync::Mutex<Vec<GeminiApiReply>> =
+    std::sync::Mutex::new(Vec::new());
+static NEXT_GEMINI_REQ_ID: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
+fn push_gemini_reply(reply: GeminiApiReply) {
+    if let Ok(mut queue) = PENDING_GEMINI_REPLIES.lock() {
+        queue.push(reply);
+    }
+}
+
+/// Parses a Google Gemini `generateContent` JSON payload and extracts concatenated candidate text.
+pub fn parse_gemini_generate_content_response(raw_json: &str) -> Result<String, String> {
+    let val: serde_json::Value = serde_json::from_str(raw_json)
+        .map_err(|e| format!("Invalid Gemini API JSON response: {e}"))?;
+    if let Some(err_obj) = val.get("error") {
+        let msg = err_obj
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Gemini API returned an unspecified error.");
+        return Err(msg.to_string());
+    }
+    let mut out = String::new();
+    if let Some(parts) = val
+        .get("candidates")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("content"))
+        .and_then(|c| c.get("parts"))
+        .and_then(|p| p.as_array())
+    {
+        for p in parts {
+            if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
+                if !out.is_empty() && !t.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(t);
+            }
+        }
+    }
+    if out.trim().is_empty() {
+        Err("Gemini API returned an empty response candidate.".to_string())
+    } else {
+        Ok(out)
+    }
+}
+
+/// Dispatches a non-blocking Gemini `generateContent` request in the background and returns `request_id`.
+pub fn gemini_send_prompt(
+    api_key: &str,
+    model_id: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+) -> Result<u64, String> {
+    let key_trimmed = api_key.trim().to_string();
+    if key_trimmed.is_empty() {
+        return Err("Gemini API key is empty.".to_string());
+    }
+    let clean_model = if model_id.trim().is_empty() {
+        "gemini-2.5-flash".to_string()
+    } else {
+        model_id.trim().to_string()
+    };
+    let req_id = NEXT_GEMINI_REQ_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let body = serde_json::json!({
+        "system_instruction": {
+            "parts": [{ "text": system_prompt }]
+        },
+        "contents": [{
+            "role": "user",
+            "parts": [{ "text": user_prompt }]
+        }],
+        "generationConfig": {
+            "temperature": 0.25,
+            "maxOutputTokens": 1200
+        }
+    });
+    let payload_str = body.to_string();
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            clean_model, key_trimmed
+        );
+        let model_for_reply = clean_model.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = async {
+                let opts = web_sys::RequestInit::new();
+                opts.set_method("POST");
+                opts.set_mode(web_sys::RequestMode::Cors);
+                let headers = web_sys::Headers::new()
+                    .map_err(|e| format!("Headers init error: {e:?}"))?;
+                headers
+                    .set("Content-Type", "application/json")
+                    .map_err(|e| format!("Headers set error: {e:?}"))?;
+                opts.set_headers(&headers);
+                opts.set_body(&wasm_bindgen::JsValue::from_str(&payload_str));
+                let req = web_sys::Request::new_with_str_and_init(&url, &opts)
+                    .map_err(|e| format!("Request build error: {e:?}"))?;
+                let window = web_sys::window()
+                    .ok_or_else(|| "Browser window unavailable".to_string())?;
+                let resp_val = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&req))
+                    .await
+                    .map_err(|e| format!("Network fetch error: {e:?}"))?;
+                let resp: web_sys::Response = resp_val
+                    .dyn_into()
+                    .map_err(|e| format!("Invalid Response object: {e:?}"))?;
+                let text_promise = resp
+                    .text()
+                    .map_err(|e| format!("Response.text() error: {e:?}"))?;
+                let text_js = wasm_bindgen_futures::JsFuture::from(text_promise)
+                    .await
+                    .map_err(|e| format!("Response read error: {e:?}"))?;
+                let raw = text_js.as_string().unwrap_or_default();
+                parse_gemini_generate_content_response(&raw)
+            }
+            .await;
+            match result {
+                Ok(text) => push_gemini_reply(GeminiApiReply {
+                    request_id: req_id,
+                    model: model_for_reply,
+                    ok: true,
+                    text,
+                    error: None,
+                }),
+                Err(err) => push_gemini_reply(GeminiApiReply {
+                    request_id: req_id,
+                    model: model_for_reply,
+                    ok: false,
+                    text: String::new(),
+                    error: Some(err),
+                }),
+            }
+        });
+        Ok(req_id)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            clean_model
+        );
+        let model_for_reply = clean_model;
+        std::thread::spawn(move || {
+            let outcome: Result<String, String> = (|| {
+                let mut child = Command::new("curl")
+                    .arg("-sS")
+                    .arg("-X")
+                    .arg("POST")
+                    .arg("-H")
+                    .arg("Content-Type: application/json")
+                    .arg("-H")
+                    .arg(format!("x-goog-api-key: {key_trimmed}"))
+                    .arg("-d")
+                    .arg("@-")
+                    .arg(&url)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .map_err(|e| format!("Failed to invoke curl for Gemini API: {e}"))?;
+                if let Some(mut stdin) = child.stdin.take() {
+                    stdin
+                        .write_all(payload_str.as_bytes())
+                        .map_err(|e| format!("Failed writing Gemini payload: {e}"))?;
+                }
+                let output = child
+                    .wait_with_output()
+                    .map_err(|e| format!("Gemini API request interrupted: {e}"))?;
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(format!("curl exited with {}: {}", output.status, stderr.trim()));
+                }
+                let raw = String::from_utf8_lossy(&output.stdout).to_string();
+                parse_gemini_generate_content_response(&raw)
+            })();
+            match outcome {
+                Ok(text) => push_gemini_reply(GeminiApiReply {
+                    request_id: req_id,
+                    model: model_for_reply,
+                    ok: true,
+                    text,
+                    error: None,
+                }),
+                Err(err) => push_gemini_reply(GeminiApiReply {
+                    request_id: req_id,
+                    model: model_for_reply,
+                    ok: false,
+                    text: String::new(),
+                    error: Some(err),
+                }),
+            }
+        });
+        Ok(req_id)
+    }
+}
+
+/// Polls completed asynchronous Gemini API replies without blocking UI rendering.
+pub fn gemini_poll_responses() -> Vec<GeminiApiReply> {
+    if let Ok(mut queue) = PENDING_GEMINI_REPLIES.lock() {
+        std::mem::take(&mut *queue)
+    } else {
+        Vec::new()
     }
 }
 

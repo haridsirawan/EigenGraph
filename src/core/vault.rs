@@ -1078,22 +1078,28 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
         result
     }
 
-    /// Ensures standard functional subdirectories exist in the Vault.
+    /// Ensures the clean Obsidian-style subdirectories exist in the Vault.
+    /// Specialized component categories (`Columns/`, `Beams/`, etc.) are created on demand
+    /// via `auto_route_category` so newly opened folders remain clutter-free.
     pub fn ensure_subdirectories() -> PathBuf {
         let root = Self::vault_root_dir();
         let _ = std::fs::create_dir_all(root.join("Projects"));
-        let _ = std::fs::create_dir_all(root.join("Columns"));
-        let _ = std::fs::create_dir_all(root.join("Beams"));
-        let _ = std::fs::create_dir_all(root.join("Slabs"));
-        let _ = std::fs::create_dir_all(root.join("Walls"));
-        let _ = std::fs::create_dir_all(root.join("Footings"));
-        let _ = std::fs::create_dir_all(root.join("Rebar"));
-        let _ = std::fs::create_dir_all(root.join("Materials"));
-        let _ = std::fs::create_dir_all(root.join("Hydraulic_Structures"));
         let _ = std::fs::create_dir_all(root.join("KnowledgeBase"));
         let _ = std::fs::create_dir_all(root.join("Exports"));
         let _ = std::fs::create_dir_all(root.join("AI_Context"));
         Self::ensure_vault_notice(&root);
+        let welcome = root.join("KnowledgeBase").join("Welcome.md");
+        if !welcome.exists() {
+            let _ = std::fs::write(
+                &welcome,
+                "# EigenGraph Engineering Vault\n\n\
+                 This Vault follows a clean Obsidian-style layout:\n\
+                 - `Projects/` — Structural BIM & FEM models (`.eigen`)\n\
+                 - `KnowledgeBase/` — Codes, design notes & AI context docs (`.md`, `.csv`)\n\
+                 - `Exports/` — IFC models, engineering schedules & snapshots\n\
+                 - `AI_Context/` — Dynamic Island session transcripts & prompt context\n",
+            );
+        }
         root
     }
 
@@ -1878,6 +1884,58 @@ This folder is safe to synchronize with Google Drive, Dropbox, or GitHub.
     /// Viewport segment streaming helper for 3D visualization.
     pub fn stream_nvw_dcr_lod200_viewport_segments() -> Option<Vec<((f32, f32, f32), (f32, f32, f32), String, String)>> {
         None
+    }
+
+    /// Persists serialized Dynamic Island conversation archives inside `AI_Context/dynamic_island_sessions.json`
+    /// for an explicit Vault directory root.
+    pub fn save_ai_sessions_json_at(root: &Path, json: &str) -> Result<PathBuf, String> {
+        let dir = root.join("AI_Context");
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed creating AI_Context directory: {e}"))?;
+        let target = dir.join("dynamic_island_sessions.json");
+        std::fs::write(&target, json)
+            .map_err(|e| format!("Failed writing AI session archive: {e}"))?;
+        Ok(target)
+    }
+
+    /// Loads serialized Dynamic Island conversation archives from `AI_Context/dynamic_island_sessions.json`
+    /// under an explicit Vault directory root.
+    pub fn load_ai_sessions_json_at(root: &Path) -> Option<String> {
+        let target = root.join("AI_Context").join("dynamic_island_sessions.json");
+        std::fs::read_to_string(target).ok()
+    }
+
+    /// Persists Dynamic Island AI sessions to the currently connected Vault (`AI_Context/`).
+    pub fn save_ai_sessions_json(json: &str) -> Result<(), String> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::core::web_bridge::vault_write_file("AI_Context/dynamic_island_sessions.json", json);
+            return Ok(());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let root = Self::vault_root_dir();
+            Self::save_ai_sessions_json_at(&root, json)?;
+            Ok(())
+        }
+    }
+
+    /// Restores previously persisted Dynamic Island AI sessions from the connected Vault (`AI_Context/`).
+    pub fn load_ai_sessions_json() -> Option<String> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let raw = crate::core::web_bridge::vault_read_file("AI_Context/dynamic_island_sessions.json")?;
+            if raw.trim().is_empty() {
+                None
+            } else {
+                Some(raw)
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let root = Self::vault_root_dir();
+            Self::load_ai_sessions_json_at(&root)
+        }
     }
 }
 

@@ -7,6 +7,25 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.4.9] - 2026-11-18 — Phase 49: Live Gemini API Dynamic Island, Planning Proposals & Cross-Browser Obsidian Vault
+
+### Added & Changed
+- **Cross-Browser Obsidian-Style Vault (Mozilla Firefox / Safari macOS Fix) (`index.html`, `src/core/vault.rs`, `src/core/web_bridge.rs`)**:
+  - Added `<input type="file" webkitdirectory directory multiple>` paired with a guaranteed DOM user-activation overlay bar (`#eg_firefox_folder_overlay`) so Mozilla Firefox and Safari users on macOS can open real Finder folders into IndexedDB seamlessly without relying exclusively on Chromium's `window.showDirectoryPicker`.
+  - Simplified the Vault layout to an Obsidian-style two-action model (**Open / Add Folder** and **Create Vault**) with automatic structured subfolders (`Projects/`, `KnowledgeBase/`, `Exports/`, `AI_Context/`) and starter documentation (`KnowledgeBase/Welcome.md`, `_VAULT_NOTICE.txt`), plus one-click `.eigen-vault.json` bundle export and drag/drop restore.
+- **Deduplicated Unified Vault UI (`src/ui_kit.rs`, `src/views/settings.rs`, `src/app.rs`, `src/views/spatial_workspace.rs`)**:
+  - Consolidated legacy Vault UI blocks from the Startup Modal, Settings Vault Card, and Dynamic Island Vault Drawer into a single shared helper (`ui_kit::render_obsidian_vault_panel`), eliminating duplicate platform-specific setup code across the codebase.
+- **Live Async Gemini REST Engine & Quick Dynamic Island Key Setup (`src/core/web_bridge.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Wired `AgentModelChoice::Gemini25Flash` / `GeminiLive` to a non-blocking cross-platform Gemini `generateContent` REST client (`web_sys::Request` via `wasm_bindgen_futures::spawn_local` on WebAssembly; `curl` worker thread on native), bidirectionally synchronized with `Settings` and equipped with an inline Key Setup popover inside Dynamic Island, thinking indicator, automatic offline `EigenAI Pro` fallback, and structured action directive parsing (`[[FLY:...]]`, `[[BIM:...]]`, `[[REPAIR]]`, `[[ARI_AUDIT]]`).
+- **Planning Mode Interactive Proposal Review Cards (`src/views/spatial_workspace.rs`)**:
+  - Distinguished `Planning` vs `Fast` modes: `Planning` queues interactive `PlannedAgentProposal` cards with **Apply Changes** (transactional `BimCommand`) and **Reject** controls inside Dynamic Island before mutating BIM or Earth models.
+- **Precision Manual Authoring & `"Anchor & Build Here"` (`src/views/build/mod.rs`, `src/views/build/viewport_3d.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Added precision width/depth/thickness/size dimension controls directly inside the active tool HUD pill for `Column`, `Beam`, `Wall`, and `Footing` authoring, plus an **"Anchor & Build Here"** button on clicked Earth Site Smart Pop-Ups to bind the BIM origin directly to any Earth coordinate and jump straight into 3D structural drafting.
+- **Dynamic Island AI Session Persistence (`src/core/vault.rs`, `src/models.rs`, `src/views/spatial_workspace.rs`)**:
+  - Automatically saves and restores Dynamic Island chat history and archived threads inside `Vault/AI_Context/dynamic_island_sessions.json`.
+
+---
+
 ## [v0.4.8] - 2026-11-18 — Phase 48: True Full-Canvas Architecture Lock & Hover-Expandable Floating Dynamic Island
 
 ### Added & Changed

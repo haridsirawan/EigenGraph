@@ -696,14 +696,16 @@ impl BuildView {
 
                     match self.ground_author_tool {
                         Ground3DAuthorTool::Column => {
+                            let w = self.author_col_width_mm.clamp(150.0, 2000.0);
+                            let d = self.author_col_depth_mm.clamp(150.0, 2000.0);
                             let res = self.bim_bus.execute(crate::core::BimCommand::AddColumn {
                                 base_level_id,
                                 top_level_id,
                                 pos: p2,
-                                width_mm: 400.0,
-                                depth_mm: 400.0,
+                                width_mm: w,
+                                depth_mm: d,
                                 is_round: false,
-                                profile_name: "C400x400".to_string(),
+                                profile_name: format!("C{:.0}x{:.0}", w, d),
                             });
                             if let Ok(msg) = res {
                                 self.modify_status_msg = Some(msg.clone());
@@ -711,11 +713,12 @@ impl BuildView {
                             }
                         }
                         Ground3DAuthorTool::Footing => {
+                            let fs = self.author_footing_size_mm.clamp(400.0, 6000.0);
                             let res = self.bim_bus.execute(crate::core::BimCommand::AddFooting {
                                 level_id: base_level_id,
                                 pos: p2,
-                                width_mm: 1600.0,
-                                length_mm: 1600.0,
+                                width_mm: fs,
+                                length_mm: fs,
                                 thickness_mm: 450.0,
                             });
                             if let Ok(msg) = res {
@@ -727,23 +730,26 @@ impl BuildView {
                             if let Some(s) = self.pending_3d_start_mm.take() {
                                 if (s[0] - pt[0]).hypot(s[1] - pt[1]) >= 200.0 {
                                     let cmd = if self.ground_author_tool == Ground3DAuthorTool::Wall {
+                                        let wt = self.author_wall_thickness_mm.clamp(80.0, 1200.0);
                                         crate::core::BimCommand::AddWall {
                                             base_level_id,
                                             start: crate::core::P2(s[0], s[1]),
                                             end: p2,
-                                            thickness_mm: 200.0,
+                                            thickness_mm: wt,
                                             is_structural: true,
                                         }
                                     } else {
+                                        let bw = self.author_beam_width_mm.clamp(120.0, 1500.0);
+                                        let bd = self.author_beam_depth_mm.clamp(150.0, 2500.0);
                                         crate::core::BimCommand::AddBeamRun {
                                             level_id: base_level_id,
                                             category: crate::core::RunCategory::StructuralBeam,
                                             start: crate::core::P2(s[0], s[1]),
                                             end: p2,
-                                            width_mm: 300.0,
-                                            depth_mm: 550.0,
+                                            width_mm: bw,
+                                            depth_mm: bd,
                                             justify: crate::core::RunJustify::Top,
-                                            profile_name: "B300x550".to_string(),
+                                            profile_name: format!("B{:.0}x{:.0}", bw, bd),
                                         }
                                     };
                                     if let Ok(msg) = self.bim_bus.execute(cmd) {
