@@ -553,11 +553,29 @@ pub struct AriEngine;
 
 impl AriEngine {
     pub fn verify_kinematics(global_k: &Matrix, tol: f64) -> KinematicGuardReport {
-        let (rank, null_dim, null_vectors) = global_k.rank_and_nullspace(tol);
-        let (_, s, _) = global_k.svd();
-
+        // Compute a single SVD decomposition to derive rank, nullspace modes, and conditioning.
+        let (_, s, v) = global_k.svd();
         let sigma_max = s.first().copied().unwrap_or(0.0);
-        let sigma_min = s.iter().filter(|&&v| v > tol * sigma_max).last().copied().unwrap_or(0.0);
+        let cutoff = tol * sigma_max;
+
+        let mut rank = 0;
+        let mut null_vectors = Vec::new();
+        let mut sigma_min = 0.0;
+
+        for (idx, &sigma) in s.iter().enumerate() {
+            if sigma > cutoff {
+                rank += 1;
+                sigma_min = sigma;
+            } else {
+                let mut null_v = vec![0.0; v.rows];
+                for r in 0..v.rows {
+                    null_v[r] = v[(r, idx)];
+                }
+                null_vectors.push(null_v);
+            }
+        }
+
+        let null_dim = s.len() - rank;
         let condition_number = if sigma_min > 1e-15 { sigma_max / sigma_min } else { f64::INFINITY };
 
         KinematicGuardReport {
@@ -628,8 +646,7 @@ impl AriEngine {
             let (n1_base, n2_base, cx, cy, cz, k_elem, l_elem, e_elem, imin_elem) = elem_geom[elem_idx];
             let p_euler_init = (pi * pi * e_elem * imin_elem) / (l_elem * l_elem);
 
-            // Bentuk vektor kompatibilitas a_e pada derajat kebebasan bebas dalam waktu O(1)
-            let mut a_free = vec![0.0; total_free_dofs];
+            // Sparse 6-DOF compatibility vector a_e in free DOFs -> O(6 * N) influence vector v_e = K_0^(-1) * a_e
             let dof_entries = [
                 (n1_base, -cx),
                 (n1_base + 1, -cy),
@@ -638,21 +655,27 @@ impl AriEngine {
                 (n2_base + 1, cy),
                 (n2_base + 2, cz),
             ];
+            let mut active_dofs: Vec<(usize, f64)> = Vec::with_capacity(6);
             for &(gdof, coeff) in &dof_entries {
                 if let Some(&f_idx) = dof_to_free.get(&gdof) {
-                    a_free[f_idx] = coeff;
+                    if coeff.abs() > 0.0 {
+                        active_dofs.push((f_idx, coeff));
+                    }
                 }
             }
-
-            // Vektor pengaruh v_e = K_0^(-1) * a_e
-            let v_e = k_free_inv.mul_vec(&a_free);
+            let mut v_e = vec![0.0; total_free_dofs];
+            for row in 0..total_free_dofs {
+                let mut sum = 0.0;
+                for &(col_idx, coeff) in &active_dofs {
+                    sum += k_free_inv[(row, col_idx)] * coeff;
+                }
+                v_e[row] = sum;
+            }
 
             // Spectral leverage: h_e = k_e * a_e^T * K_0^(-1) * a_e (Persamaan 4.1)
             let mut a_dot_v = 0.0;
-            for &(gdof, coeff) in &dof_entries {
-                if let Some(&f_idx) = dof_to_free.get(&gdof) {
-                    a_dot_v += coeff * v_e[f_idx];
-                }
+            for &(f_idx, coeff) in &active_dofs {
+                a_dot_v += coeff * v_e[f_idx];
             }
             let h_e = (k_elem * a_dot_v).clamp(0.0, 1.0);
             let stability_margin = 1.0 - h_e;

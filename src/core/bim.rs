@@ -815,6 +815,79 @@ impl BimProject {
             && self.rebars.is_empty()
     }
 
+    /// Computes a deterministic 64-bit FNV-1a content-revision signature covering all topology,
+    /// coordinates, cross-section dimensions, openings, and levels so in-place property edits
+    /// trigger reactive FEM/World synchronization without cloning.
+    pub fn content_revision_hash(&self) -> u64 {
+        let mut h: u64 = 0xcbf29ce484222325;
+        let mix = |hash: &mut u64, val: u64| {
+            *hash ^= val;
+            *hash = hash.wrapping_mul(0x100000001b3);
+        };
+        mix(&mut h, self.next_id as u64);
+        mix(&mut h, self.levels.len() as u64);
+        mix(&mut h, self.grids.len() as u64);
+        mix(&mut h, self.walls.len() as u64);
+        mix(&mut h, self.runs.len() as u64);
+        mix(&mut h, self.columns.len() as u64);
+        mix(&mut h, self.footings.len() as u64);
+        mix(&mut h, self.slabs.len() as u64);
+        mix(&mut h, self.rebars.len() as u64);
+
+        for lvl in &self.levels {
+            mix(&mut h, lvl.id as u64);
+            mix(&mut h, lvl.elevation_mm.to_bits());
+        }
+        for col in &self.columns {
+            mix(&mut h, col.id as u64);
+            mix(&mut h, col.base_level_id as u64);
+            mix(&mut h, col.top_level_id as u64);
+            mix(&mut h, col.pos.0.to_bits());
+            mix(&mut h, col.pos.1.to_bits());
+            mix(&mut h, col.width_mm.to_bits());
+            mix(&mut h, col.depth_mm.to_bits());
+            mix(&mut h, col.rotation_deg.to_bits());
+        }
+        for run in &self.runs {
+            mix(&mut h, run.id as u64);
+            mix(&mut h, run.level_id as u64);
+            mix(&mut h, run.start.0.to_bits());
+            mix(&mut h, run.start.1.to_bits());
+            mix(&mut h, run.end.0.to_bits());
+            mix(&mut h, run.end.1.to_bits());
+            mix(&mut h, run.width_mm.to_bits());
+            mix(&mut h, run.depth_mm.to_bits());
+        }
+        for wall in &self.walls {
+            mix(&mut h, wall.id as u64);
+            mix(&mut h, wall.base_level_id as u64);
+            mix(&mut h, wall.start.0.to_bits());
+            mix(&mut h, wall.start.1.to_bits());
+            mix(&mut h, wall.end.0.to_bits());
+            mix(&mut h, wall.end.1.to_bits());
+            mix(&mut h, wall.thickness_mm.to_bits());
+            mix(&mut h, wall.is_structural as u64);
+            mix(&mut h, wall.openings.len() as u64);
+        }
+        for ft in &self.footings {
+            mix(&mut h, ft.id as u64);
+            mix(&mut h, ft.level_id as u64);
+            mix(&mut h, ft.pos.0.to_bits());
+            mix(&mut h, ft.pos.1.to_bits());
+            mix(&mut h, ft.width_mm.to_bits());
+            mix(&mut h, ft.length_mm.to_bits());
+            mix(&mut h, ft.thickness_mm.to_bits());
+        }
+        for sl in &self.slabs {
+            mix(&mut h, sl.id as u64);
+            mix(&mut h, sl.level_id as u64);
+            mix(&mut h, sl.thickness_mm.to_bits());
+            mix(&mut h, sl.boundary.len() as u64);
+            mix(&mut h, sl.openings.len() as u64);
+        }
+        h
+    }
+
     /// Creates a multi-storey structural & architectural BIM test fixture for geometry/CSG verification.
     #[cfg(test)]
     pub fn sample_bimcraft_building() -> Self {
@@ -2760,6 +2833,7 @@ trailer << /Size 6 /Root 1 0 R >>\n%%EOF\n"
 #[derive(Clone, Debug, Default)]
 pub struct BimCommandBus {
     pub project: BimProject,
+    pub revision: u64,
     pub undo_stack: Vec<BimProject>,
     pub redo_stack: Vec<BimProject>,
     pub log: Vec<String>,
@@ -2769,6 +2843,7 @@ impl BimCommandBus {
     pub fn new() -> Self {
         Self {
             project: BimProject::empty(),
+            revision: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             log: vec![
@@ -2780,6 +2855,7 @@ impl BimCommandBus {
     pub fn from_project(project: BimProject) -> Self {
         Self {
             project,
+            revision: 1,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             log: vec!["Loaded project into Relational BIM Command Bus".to_string()],
@@ -2790,6 +2866,7 @@ impl BimCommandBus {
     pub fn execute(&mut self, cmd: BimCommand) -> Result<String, String> {
         let snapshot = self.project.clone();
         let msg = self.apply_command(cmd)?;
+        self.revision = self.revision.wrapping_add(1);
         self.undo_stack.push(snapshot);
         self.redo_stack.clear();
         self.log.push(msg.clone());
@@ -2808,6 +2885,7 @@ impl BimCommandBus {
         let prev = self.undo_stack.pop()?;
         let cur = std::mem::replace(&mut self.project, prev);
         self.redo_stack.push(cur);
+        self.revision = self.revision.wrapping_add(1);
         let msg = format!("Undo applied ({} steps remaining)", self.undo_stack.len());
         self.log.push(msg.clone());
         crate::core::InternalVault::sync_live_bim_state(&self.project, &msg);
@@ -2818,6 +2896,7 @@ impl BimCommandBus {
         let next = self.redo_stack.pop()?;
         let cur = std::mem::replace(&mut self.project, next);
         self.undo_stack.push(cur);
+        self.revision = self.revision.wrapping_add(1);
         let msg = format!("Redo applied ({} steps remaining)", self.redo_stack.len());
         self.log.push(msg.clone());
         crate::core::InternalVault::sync_live_bim_state(&self.project, &msg);
@@ -2871,6 +2950,7 @@ impl BimCommandBus {
         if lower == "clear" || lower == "reset" || lower == "reset workspace" {
             let snapshot = self.project.clone();
             self.project = BimProject::empty();
+            self.revision = self.revision.wrapping_add(1);
             self.undo_stack.push(snapshot);
             self.redo_stack.clear();
             let msg = "Cleared active BIM workspace to blank ground plane.".to_string();
@@ -3095,6 +3175,7 @@ impl BimCommandBus {
                     roof_slope_deg: 0.0,
                 });
                 self.project.detect_rooms_on_level(base_id);
+                self.revision = self.revision.wrapping_add(1);
                 self.undo_stack.push(snapshot);
                 self.redo_stack.clear();
                 let msg = format!(
@@ -3157,6 +3238,7 @@ impl BimCommandBus {
             }
 
             if is_grid && !is_portal {
+                self.revision = self.revision.wrapping_add(1);
                 self.undo_stack.push(snapshot);
                 self.redo_stack.clear();
                 let msg = format!(
@@ -3272,6 +3354,7 @@ impl BimCommandBus {
                 });
             }
 
+            self.revision = self.revision.wrapping_add(1);
             self.undo_stack.push(snapshot);
             self.redo_stack.clear();
             let msg = format!(
@@ -4023,6 +4106,7 @@ impl BimCommandBus {
             .map(|r| r.utilization_initial)
             .fold(0.0_f64, f64::max);
 
+        self.revision = self.revision.wrapping_add(1);
         self.undo_stack.push(snapshot);
         self.redo_stack.clear();
 

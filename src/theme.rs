@@ -161,32 +161,117 @@ impl MacTheme {
             .inner_margin(Margin::symmetric(16, 10))
     }
 
-    /// Floating Dynamic Island / Pill Frame (Collapsed Capsule)
+    /// Floating Dynamic Island / Pill Frame (Collapsed Liquid Glass Capsule)
     pub fn floating_pill_frame(&self) -> Frame {
-        let fill = if self.is_dark() {
-            Color32::from_rgba_premultiplied(22, 26, 36, 240)
-        } else {
-            Color32::from_rgba_premultiplied(248, 250, 252, 245)
-        };
-        Frame::new()
-            .fill(fill)
-            .corner_radius(CornerRadius::same(22))
-            .stroke(Stroke::new(1.2, self.accent_blue.gamma_multiply(0.6)))
-            .inner_margin(Margin::symmetric(14, 7))
+        self.glass_capsule_frame(22, Margin::symmetric(14, 7))
     }
 
-    /// Floating Dynamic Island Expanded Console Frame
+    /// Floating Dynamic Island Expanded Console Frame (Liquid Glass Console)
     pub fn floating_island_expanded_frame(&self) -> Frame {
-        let fill = if self.is_dark() {
-            Color32::from_rgba_premultiplied(18, 22, 31, 250)
+        self.glass_capsule_frame(16, Margin::same(14))
+    }
+
+    /// Frosted Liquid Glass outer capsule with translucent backdrop, specular ice-cyan rim,
+    /// and soft ambient drop shadow.
+    pub fn glass_capsule_frame(&self, corner_r: u8, pad: Margin) -> Frame {
+        let (fill, rim_col, shadow) = if self.is_dark() {
+            (
+                Color32::from_rgba_unmultiplied(14, 20, 32, 188),
+                Color32::from_rgba_unmultiplied(135, 206, 255, 112),
+                egui::epaint::Shadow {
+                    offset: [0, 8],
+                    blur: 22,
+                    spread: 1,
+                    color: Color32::from_black_alpha(110),
+                },
+            )
         } else {
-            Color32::from_rgba_premultiplied(255, 255, 255, 252)
+            (
+                Color32::from_rgba_unmultiplied(246, 250, 255, 198),
+                Color32::from_rgba_unmultiplied(56, 138, 240, 108),
+                egui::epaint::Shadow {
+                    offset: [0, 6],
+                    blur: 18,
+                    spread: 0,
+                    color: Color32::from_black_alpha(36),
+                },
+            )
         };
         Frame::new()
             .fill(fill)
-            .corner_radius(CornerRadius::same(16))
-            .stroke(Stroke::new(1.5, self.accent_blue.gamma_multiply(0.75)))
-            .inner_margin(Margin::same(14))
+            .corner_radius(CornerRadius::same(corner_r))
+            .stroke(Stroke::new(1.15, rim_col))
+            .shadow(shadow)
+            .inner_margin(pad)
+    }
+
+    /// Recessed frosted glass sub-container for grouping related controls inside Dynamic Island.
+    pub fn glass_subpill_frame(&self, corner_r: u8, pad: Margin) -> Frame {
+        let (fill, rim) = if self.is_dark() {
+            (
+                Color32::from_rgba_unmultiplied(255, 255, 255, 14),
+                Color32::from_rgba_unmultiplied(255, 255, 255, 28),
+            )
+        } else {
+            (
+                Color32::from_rgba_unmultiplied(15, 23, 42, 11),
+                Color32::from_rgba_unmultiplied(15, 23, 42, 24),
+            )
+        };
+        Frame::new()
+            .fill(fill)
+            .corner_radius(CornerRadius::same(corner_r))
+            .stroke(Stroke::new(0.85, rim))
+            .inner_margin(pad)
+    }
+
+    /// Returns `(text_color, bg_fill, border_stroke)` for pill chips rendered inside Liquid Glass containers.
+    pub fn glass_chip_style(&self, active: bool, active_accent: Color32) -> (Color32, Color32, Stroke) {
+        if active {
+            (
+                Color32::WHITE,
+                active_accent.gamma_multiply(0.84),
+                Stroke::new(1.1, Color32::from_rgba_unmultiplied(255, 255, 255, 195)),
+            )
+        } else if self.is_dark() {
+            (
+                self.text_secondary,
+                Color32::from_rgba_unmultiplied(255, 255, 255, 15),
+                Stroke::new(0.8, Color32::from_rgba_unmultiplied(255, 255, 255, 32)),
+            )
+        } else {
+            (
+                self.text_secondary,
+                Color32::from_rgba_unmultiplied(255, 255, 255, 165),
+                Stroke::new(0.8, Color32::from_rgba_unmultiplied(15, 23, 42, 28)),
+            )
+        }
+    }
+
+    /// Paints a delicate top refractive specular sheen along a Liquid Glass capsule border.
+    pub fn paint_glass_specular_sheen(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        corner_r: f32,
+    ) {
+        if !rect.is_positive() || rect.width() <= corner_r * 2.0 + 4.0 {
+            return;
+        }
+        let sheen_col = Color32::from_rgba_unmultiplied(
+            255,
+            255,
+            255,
+            if self.is_dark() { 82 } else { 190 },
+        );
+        let y = rect.top() + 1.2;
+        painter.line_segment(
+            [
+                egui::pos2(rect.left() + corner_r, y),
+                egui::pos2(rect.right() - corner_r, y),
+            ],
+            Stroke::new(1.0, sheen_col),
+        );
     }
 
     /// Apply modern Pro Dark or Engineering Daylight visuals to the global egui Context

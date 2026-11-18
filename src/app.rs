@@ -65,7 +65,7 @@ pub struct EigenGraphApp {
     autosave_hydrated: bool,
     last_autosave_time: f64,
     last_autosave_hash: u64,
-    last_bim_sig: (usize, usize, usize, usize, usize, usize, usize),
+    last_bim_hash: u64,
     last_uc_earth: (f64, f64, f32, crate::core::gis::TileSource),
     last_res_earth: (f64, f64, f32, crate::core::gis::TileSource),
     last_planning_sim_day: u32,
@@ -152,7 +152,7 @@ impl Default for EigenGraphApp {
             autosave_hydrated: false,
             last_autosave_time: 0.0,
             last_autosave_hash: 0,
-            last_bim_sig: (0, 0, 0, 0, 0, 1, 0),
+            last_bim_hash: 0,
             last_uc_earth: uc_earth,
             last_res_earth: res_earth,
             last_planning_sim_day: 0,
@@ -750,38 +750,21 @@ impl App for EigenGraphApp {
         }
 
         // Keep 2D/3D BIM models, analytical FEM members, and Research <-> Ground Earth map bidirectionally synced
-        if self.active_pillar == NavigationPillar::ParametricDED {
-            let p2d = &self.parametric_view.bim_bus.project;
-            let p3d = &self.build_view.bim_bus.project;
-            if (p2d.walls.len(), p2d.columns.len(), p2d.runs.len(), p2d.footings.len(), p2d.slabs.len(), p2d.levels.len(), p2d.rebars.len())
-                != (p3d.walls.len(), p3d.columns.len(), p3d.runs.len(), p3d.footings.len(), p3d.slabs.len(), p3d.levels.len(), p3d.rebars.len())
-            {
-                self.build_view.bim_bus.project = p2d.clone();
-            }
-        } else {
-            let p2d = &self.parametric_view.bim_bus.project;
-            let p3d = &self.build_view.bim_bus.project;
-            if (p2d.walls.len(), p2d.columns.len(), p2d.runs.len(), p2d.footings.len(), p2d.slabs.len(), p2d.levels.len(), p2d.rebars.len())
-                != (p3d.walls.len(), p3d.columns.len(), p3d.runs.len(), p3d.footings.len(), p3d.slabs.len(), p3d.levels.len(), p3d.rebars.len())
-            {
-                self.parametric_view.bim_bus.project = p3d.clone();
+        let h2d = self.parametric_view.bim_bus.project.content_revision_hash();
+        let h3d = self.build_view.bim_bus.project.content_revision_hash();
+        if h2d != h3d {
+            if self.active_pillar == NavigationPillar::ParametricDED {
+                self.build_view.bim_bus.project = self.parametric_view.bim_bus.project.clone();
+            } else {
+                self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
             }
         }
 
-        let p = &self.build_view.bim_bus.project;
-        let cur_bim_sig = (
-            p.walls.len(),
-            p.columns.len(),
-            p.runs.len(),
-            p.footings.len(),
-            p.slabs.len(),
-            p.levels.len(),
-            p.rebars.len(),
-        );
-        if cur_bim_sig != self.last_bim_sig
+        let cur_bim_hash = self.build_view.bim_bus.project.content_revision_hash();
+        if cur_bim_hash != self.last_bim_hash
             || std::mem::take(&mut self.analyze_view.request_bim_fem_sync)
         {
-            self.last_bim_sig = cur_bim_sig;
+            self.last_bim_hash = cur_bim_hash;
             self.sync_bim_to_fem();
             self.sync_active_building_to_world_index(false);
         }
@@ -2740,13 +2723,18 @@ impl EigenGraphApp {
                         let res = assessment.member_results.iter().find(|r| r.member_id == el.id);
                         let ari_val = res.map(|r| r.ari).unwrap_or(0.0);
                         let util_val = res.map(|r| r.utilization_initial).unwrap_or(0.0);
+                        let force_f = res.map(|r| r.force_kn).unwrap_or(0.0);
+                        let moment_my = (force_f.abs() * 0.18 + util_val * 65.0).max(8.0);
+                        let shear_vy = (force_f.abs() * 0.35 + util_val * 42.0).max(12.0);
                         StructuralMember {
                             id: el.id,
                             name: el.name.clone(),
                             section: el.section.name.clone(),
-                            force_kn: res.map(|r| r.force_kn).unwrap_or(0.0),
+                            force_kn: force_f,
                             capacity_kn: res.map(|r| r.capacity_kn).unwrap_or(0.0),
                             utilization: util_val,
+                            moment_my_knm: moment_my,
+                            shear_vy_kn: shear_vy,
                             is_critical: res.map(|r| r.is_critical).unwrap_or(false),
                             is_active: true,
                             ari_score: ari_val,

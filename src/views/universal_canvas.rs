@@ -388,6 +388,8 @@ pub struct EarthBimAuthorConfig {
     pub base_level_id: usize,
     pub top_level_id: usize,
     pub isolate_active_story: bool,
+    pub section_cut_active: bool,
+    pub section_cut_elev_m: f64,
     pub col_width_mm: f64,
     pub col_depth_mm: f64,
     pub beam_width_mm: f64,
@@ -407,6 +409,8 @@ impl Default for EarthBimAuthorConfig {
             base_level_id: 1,
             top_level_id: 2,
             isolate_active_story: false,
+            section_cut_active: false,
+            section_cut_elev_m: 6.0,
             col_width_mm: 400.0,
             col_depth_mm: 400.0,
             beam_width_mm: 300.0,
@@ -606,6 +610,31 @@ impl Default for UniversalCanvasState {
 }
 
 impl UniversalCanvasState {
+    /// Computes crisp directional sun-lighting depth shading for 3D extruded Earth faces
+    /// against an SE solar azimuth `(0.707, -0.707)`.
+    pub fn directional_face_shade(base: Color32, p0: Pos2, p1: Pos2, is_top_cap: bool) -> Color32 {
+        if is_top_cap {
+            return base.gamma_multiply(0.82);
+        }
+        let dx = p1.x - p0.x;
+        let dy = p1.y - p0.y;
+        let len = dx.hypot(dy);
+        if len < 1e-3 {
+            return base.gamma_multiply(0.46);
+        }
+        let nx = dy / len;
+        let ny = -dx / len;
+        let sun_dot = nx * 0.707 + ny * -0.707;
+        let factor = if sun_dot > 0.25 {
+            0.64
+        } else if sun_dot < -0.25 {
+            0.30
+        } else {
+            0.46
+        };
+        base.gamma_multiply(factor)
+    }
+
     /// Computes coupled geotechnical, seismic, wind, flood, and site logistics telemetry
     /// from the currently anchored Earth coordinate (or viewport focus) and planetary terrain.
     pub fn active_site_coupling(&self) -> SiteEnvironmentalCoupling {
@@ -5782,6 +5811,8 @@ impl UniversalCanvasState {
                 let active_lvl_id = self.earth_bim_author.base_level_id.max(1);
                 let active_top_id = self.earth_bim_author.top_level_id.max(active_lvl_id);
                 let show_on_story = |lvl: usize| -> bool { !isolate || lvl == active_lvl_id };
+                let sec_active = self.earth_bim_author.section_cut_active;
+                let sec_elev = self.earth_bim_author.section_cut_elev_m;
 
                 // 6A. Isolated Footings (Ground Pads)
                 for ft in &bim_project.footings {
@@ -5790,6 +5821,9 @@ impl UniversalCanvasState {
                     }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Footing, ft.id));
                     let z_m = bim_project.level_elevation(ft.level_id) * 0.001;
+                    if sec_active && z_m > sec_elev + 0.05 {
+                        continue;
+                    }
                     let pts: Vec<Pos2> = ft
                         .footprint_ring()
                         .into_iter()
@@ -5820,6 +5854,9 @@ impl UniversalCanvasState {
                     }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Slab, sl.id));
                     let z_m = bim_project.level_elevation(sl.level_id) * 0.001;
+                    if sec_active && z_m > sec_elev + 0.05 {
+                        continue;
+                    }
                     let pts: Vec<Pos2> = sl
                         .boundary
                         .iter()
@@ -5844,18 +5881,23 @@ impl UniversalCanvasState {
                     }
                 }
 
-                // 6C. Extruded 3D Walls & Door/Window Openings
+                // 6C. Extruded 3D Walls & Door/Window Openings (with Directional Sun Shading & Section Cut)
                 for w in &bim_project.walls {
                     if !show_on_story(w.base_level_id) {
                         continue;
                     }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Wall, w.id));
                     let z0 = bim_project.level_elevation(w.base_level_id) * 0.001;
-                    let z1 = w
+                    let raw_z1 = w
                         .top_level_id
                         .map(|tid| bim_project.level_elevation(tid))
                         .unwrap_or_else(|| bim_project.level_elevation(w.base_level_id) + w.unconnected_height_mm)
                         * 0.001;
+                    if sec_active && z0 >= sec_elev - 0.02 {
+                        continue;
+                    }
+                    let wall_sliced = sec_active && raw_z1 > sec_elev + 0.01;
+                    let z1 = if wall_sliced { sec_elev } else { raw_z1 };
                     if let (Some(b0), Some(b1), Some(t1), Some(t0)) = (
                         proj_mm(w.start.0, w.start.1, z0),
                         proj_mm(w.end.0, w.end.1, z0),
@@ -5863,13 +5905,14 @@ impl UniversalCanvasState {
                         proj_mm(w.start.0, w.start.1, z1),
                     ) {
                         if [b0, b1, t1, t0].iter().any(|p| rect.expand(60.0).contains(*p)) {
-                            let wall_fill = if is_sel {
-                                Color32::from_rgba_unmultiplied(56, 189, 248, 125)
+                            let base_wall_col = if is_sel {
+                                Color32::from_rgb(56, 189, 248)
                             } else if w.is_structural {
-                                Color32::from_rgba_unmultiplied(100, 116, 139, 130)
+                                Color32::from_rgb(112, 130, 156)
                             } else {
-                                Color32::from_rgba_unmultiplied(148, 163, 184, 95)
+                                Color32::from_rgb(162, 176, 196)
                             };
+                            let wall_fill = Self::directional_face_shade(base_wall_col, b0, b1, false);
                             let wall_stroke = if is_sel {
                                 Stroke::new(2.3, Color32::from_rgb(56, 189, 248))
                             } else {
@@ -5880,13 +5923,22 @@ impl UniversalCanvasState {
                                 wall_fill,
                                 wall_stroke,
                             ));
+                            if wall_sliced {
+                                clip_painter.line_segment(
+                                    [t0, t1],
+                                    Stroke::new(2.6, Color32::from_rgb(245, 158, 11)),
+                                );
+                            }
                             // Render CSG Door/Window Openings directly on the 3D wall face
                             let len_mm = w.length_mm().max(1.0);
                             for op in &w.openings {
                                 let u0 = (op.offset_along_mm / len_mm).clamp(0.0, 1.0);
                                 let u1 = ((op.offset_along_mm + op.width_mm) / len_mm).clamp(0.0, 1.0);
                                 let oz0 = z0 + op.sill_height_mm * 0.001;
-                                let oz1 = oz0 + op.height_mm * 0.001;
+                                let oz1 = (oz0 + op.height_mm * 0.001).min(z1);
+                                if oz1 <= oz0 + 0.05 {
+                                    continue;
+                                }
                                 let x0 = w.start.0 + (w.end.0 - w.start.0) * u0;
                                 let y0 = w.start.1 + (w.end.1 - w.start.1) * u0;
                                 let x1 = w.start.0 + (w.end.0 - w.start.0) * u1;
@@ -5925,14 +5977,19 @@ impl UniversalCanvasState {
                     }
                 }
 
-                // 6D. Structural Columns (3D Extruded Prisms at Ground Scale, Bold Shafts from Orbit)
+                // 6D. Structural Columns (Directional Sun-Shaded Prisms + Lateral Force Diagrams)
                 for col in &bim_project.columns {
                     if isolate && col.base_level_id != active_lvl_id && col.top_level_id != active_lvl_id {
                         continue;
                     }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Column, col.id));
                     let base_m = bim_project.level_elevation(col.base_level_id) * 0.001;
-                    let top_m = bim_project.level_elevation(col.top_level_id) * 0.001;
+                    let raw_top_m = bim_project.level_elevation(col.top_level_id) * 0.001;
+                    if sec_active && base_m >= sec_elev - 0.02 {
+                        continue;
+                    }
+                    let col_sliced = sec_active && raw_top_m > sec_elev + 0.01;
+                    let top_m = if col_sliced { sec_elev } else { raw_top_m };
                     let col_color = lens_color(
                         crate::core::BimElementKind::Column,
                         col.id,
@@ -5945,20 +6002,27 @@ impl UniversalCanvasState {
                         let b_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_mm(p.0, p.1, base_m)).collect();
                         let t_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_mm(p.0, p.1, top_m)).collect();
                         if b_pts.len() == 4 && t_pts.len() == 4 && t_pts.iter().any(|p| rect.expand(45.0).contains(*p)) {
-                            let side_fill = col_color.gamma_multiply(0.32);
                             for i in 0..4 {
                                 let ni = (i + 1) % 4;
+                                let face_fill = Self::directional_face_shade(col_color, b_pts[i], b_pts[ni], false);
                                 clip_painter.add(egui::Shape::convex_polygon(
                                     vec![b_pts[i], b_pts[ni], t_pts[ni], t_pts[i]],
-                                    side_fill,
+                                    face_fill,
                                     Stroke::new(if is_sel { 1.8 } else { 1.0 }, col_color),
                                 ));
                             }
-                            clip_painter.add(egui::Shape::convex_polygon(
-                                t_pts,
-                                col_color.gamma_multiply(0.55),
-                                Stroke::new(if is_sel { 2.2 } else { 1.2 }, Color32::WHITE.gamma_multiply(0.7)),
-                            ));
+                            let (cap_fill, cap_stroke) = if col_sliced {
+                                (
+                                    Color32::from_rgba_unmultiplied(245, 158, 11, 215),
+                                    Stroke::new(2.0, Color32::from_rgb(248, 113, 113)),
+                                )
+                            } else {
+                                (
+                                    Self::directional_face_shade(col_color, t_pts[0], t_pts[1], true),
+                                    Stroke::new(if is_sel { 2.2 } else { 1.2 }, Color32::WHITE.gamma_multiply(0.7)),
+                                )
+                            };
+                            clip_painter.add(egui::Shape::convex_polygon(t_pts, cap_fill, cap_stroke));
                         }
                     }
                     if let (Some(p0), Some(p1)) = (
@@ -5970,6 +6034,34 @@ impl UniversalCanvasState {
                                 [p0, p1],
                                 Stroke::new(if is_sel { 4.2 } else { 2.4 }, col_color),
                             );
+                            if self.earth_bim_author.active_lens == EarthBimLens::MomentStress {
+                                let m_col = bim_project
+                                    .fem_id_for_bim_element(crate::core::BimElementKind::Column, col.id)
+                                    .and_then(|fid| members.iter().find(|m| m.id == fid))
+                                    .map(|m| m.moment_my_knm.abs().max(m.shear_vy_kn.abs()))
+                                    .unwrap_or(28.0)
+                                    .max(12.0);
+                                let dx_mm = (m_col * 8.5).clamp(220.0, 950.0);
+                                let mid_m = 0.5 * (base_m + top_m);
+                                if let (Some(pm), Some(ft), Some(fb)) = (
+                                    proj_mm(col.pos.0, col.pos.1, mid_m),
+                                    proj_mm(col.pos.0 + dx_mm, col.pos.1, top_m),
+                                    proj_mm(col.pos.0 - dx_mm * 0.7, col.pos.1, base_m),
+                                ) {
+                                    let fin_fill = Color32::from_rgba_unmultiplied(168, 85, 247, 72);
+                                    let fin_stroke = Stroke::new(1.5, Color32::from_rgb(192, 132, 252));
+                                    clip_painter.add(egui::Shape::convex_polygon(
+                                        vec![p1, ft, pm],
+                                        fin_fill,
+                                        fin_stroke,
+                                    ));
+                                    clip_painter.add(egui::Shape::convex_polygon(
+                                        vec![p0, fb, pm],
+                                        fin_fill,
+                                        fin_stroke,
+                                    ));
+                                }
+                            }
                             if is_sel {
                                 clip_painter.circle_stroke(p1, 10.0, Stroke::new(1.8, Color32::WHITE));
                                 clip_painter.text(
@@ -5984,30 +6076,133 @@ impl UniversalCanvasState {
                     }
                 }
 
-                // 6E. Structural Beams / Runs
-                for run in &bim_project.runs {
+                // 6E. Structural Beams / Runs (Sun-Shaded 3D Extruded Prisms + Parabolic 3D Moment Diagrams)
+                for (beam_idx, run) in bim_project.runs.iter().enumerate() {
                     if isolate && run.level_id != active_lvl_id && run.level_id != active_top_id {
                         continue;
                     }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Run, run.id));
                     let elev_m = bim_project.level_elevation(run.level_id) * 0.001;
+                    if sec_active && elev_m > sec_elev + 0.05 {
+                        continue;
+                    }
+                    let beam_col = lens_color(
+                        crate::core::BimElementKind::Run,
+                        run.id,
+                        level_rank(run.level_id),
+                        theme.accent_green.gamma_multiply(0.92),
+                        is_sel,
+                    );
+                    if self.world_map.zoom_level >= 16.5 {
+                        let z_bot = (elev_m - run.depth_mm * 0.001).max(0.0);
+                        let ring = run.footprint_ring();
+                        let b_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_mm(p.0, p.1, z_bot)).collect();
+                        let t_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_mm(p.0, p.1, elev_m)).collect();
+                        if b_pts.len() == 4 && t_pts.len() == 4 && t_pts.iter().any(|p| rect.expand(45.0).contains(*p)) {
+                            for i in 0..4 {
+                                let ni = (i + 1) % 4;
+                                let side_fill = Self::directional_face_shade(beam_col, b_pts[i], b_pts[ni], false);
+                                clip_painter.add(egui::Shape::convex_polygon(
+                                    vec![b_pts[i], b_pts[ni], t_pts[ni], t_pts[i]],
+                                    side_fill,
+                                    Stroke::new(if is_sel { 1.6 } else { 0.85 }, beam_col),
+                                ));
+                            }
+                            let top_fill = Self::directional_face_shade(beam_col, t_pts[0], t_pts[1], true);
+                            clip_painter.add(egui::Shape::convex_polygon(
+                                t_pts,
+                                top_fill,
+                                Stroke::new(if is_sel { 1.9 } else { 1.0 }, Color32::WHITE.gamma_multiply(0.55)),
+                            ));
+                        }
+                    }
                     if let (Some(p0), Some(p1)) = (
                         proj_mm(run.start.0, run.start.1, elev_m),
                         proj_mm(run.end.0, run.end.1, elev_m),
                     ) {
                         if rect.expand(45.0).contains(p0) || rect.expand(45.0).contains(p1) {
-                            let beam_col = lens_color(
-                                crate::core::BimElementKind::Run,
-                                run.id,
-                                level_rank(run.level_id),
-                                theme.accent_green.gamma_multiply(0.92),
-                                is_sel,
-                            );
                             clip_painter.line_segment(
                                 [p0, p1],
                                 Stroke::new(if is_sel { 4.2 } else { 2.3 }, beam_col),
                             );
+                            if self.earth_bim_author.active_lens == EarthBimLens::MomentStress {
+                                let m_knm = bim_project
+                                    .fem_id_for_bim_element(crate::core::BimElementKind::Run, run.id)
+                                    .and_then(|fid| members.iter().find(|m| m.id == fid))
+                                    .map(|m| m.moment_my_knm.abs().max(m.moment_mz_knm.abs()))
+                                    .unwrap_or(45.0)
+                                    .max(15.0);
+                                let mut base_pts = Vec::with_capacity(7);
+                                let mut curve_pts = Vec::with_capacity(7);
+                                for t in 0..=6 {
+                                    let u = t as f64 / 6.0;
+                                    let sx = run.start.0 + (run.end.0 - run.start.0) * u;
+                                    let sy = run.start.1 + (run.end.1 - run.start.1) * u;
+                                    let dz_m = 4.0 * u * (1.0 - u) * (m_knm / 120.0).clamp(0.25, 1.45);
+                                    if let (Some(bp), Some(cp)) = (
+                                        proj_mm(sx, sy, elev_m),
+                                        proj_mm(sx, sy, elev_m + dz_m),
+                                    ) {
+                                        base_pts.push(bp);
+                                        curve_pts.push(cp);
+                                    }
+                                }
+                                if base_pts.len() == 7 && curve_pts.len() == 7 {
+                                    let rib_fill = Color32::from_rgba_unmultiplied(244, 63, 94, 72);
+                                    let rib_stroke = Stroke::new(1.8, Color32::from_rgb(244, 63, 94));
+                                    for k in 0..6 {
+                                        clip_painter.add(egui::Shape::convex_polygon(
+                                            vec![base_pts[k], base_pts[k + 1], curve_pts[k + 1], curve_pts[k]],
+                                            rib_fill,
+                                            Stroke::NONE,
+                                        ));
+                                        clip_painter.line_segment([curve_pts[k], curve_pts[k + 1]], rib_stroke);
+                                    }
+                                    if is_sel || m_knm > 65.0 || beam_idx < 3 {
+                                        clip_painter.text(
+                                            curve_pts[3] + Vec2::new(0.0, -6.0),
+                                            Align2::CENTER_BOTTOM,
+                                            format!("M={m_knm:.0}kNm"),
+                                            egui::FontId::monospace(9.5),
+                                            Color32::from_rgb(253, 164, 175),
+                                        );
+                                    }
+                                }
+                            }
                         }
+                    }
+                }
+
+                // 6E-bis. Interactive 3D Section Cut Horizontal Plane Indicator
+                if sec_active {
+                    let (min_x, max_x, min_y, max_y) = bim_project
+                        .plan_extents_mm()
+                        .map(|(pmin, pmax)| (pmin[0] - 1500.0, pmax[0] + 1500.0, pmin[1] - 1500.0, pmax[1] + 1500.0))
+                        .unwrap_or((-4000.0, 4000.0, -4000.0, 4000.0));
+                    let corners = [
+                        (min_x, min_y),
+                        (max_x, min_y),
+                        (max_x, max_y),
+                        (min_x, max_y),
+                    ];
+                    let sec_pts: Vec<Pos2> = corners
+                        .iter()
+                        .filter_map(|(x, y)| proj_mm(*x, *y, sec_elev))
+                        .collect();
+                    if sec_pts.len() == 4 {
+                        let label_pos = sec_pts[1];
+                        clip_painter.add(egui::Shape::convex_polygon(
+                            sec_pts,
+                            Color32::from_rgba_unmultiplied(56, 189, 248, 28),
+                            Stroke::new(1.6, Color32::from_rgba_unmultiplied(245, 158, 11, 215)),
+                        ));
+                        clip_painter.text(
+                            label_pos + Vec2::new(4.0, -4.0),
+                            Align2::LEFT_BOTTOM,
+                            format!("SECTION CUT Z = {sec_elev:.1}m"),
+                            egui::FontId::monospace(10.0),
+                            Color32::from_rgb(251, 191, 36),
+                        );
                     }
                 }
 
@@ -6633,8 +6828,11 @@ impl UniversalCanvasState {
                         EarthBimLens::Erection4D => Color32::from_rgb(56, 189, 248),
                     }
                 };
-                let side_fill = base_col.gamma_multiply(if is_hovered { 0.56 } else { 0.38 });
-                let roof_fill = base_col.gamma_multiply(if is_hovered { 0.82 } else { 0.62 });
+                let roof_fill = if is_hovered {
+                    base_col.gamma_multiply(0.85)
+                } else {
+                    Self::directional_face_shade(base_col, roof_pts[0], roof_pts[1], true)
+                };
                 let edge_stroke = if is_hovered {
                     Stroke::new(2.0, Color32::from_rgb(0, 240, 255))
                 } else {
@@ -6642,6 +6840,11 @@ impl UniversalCanvasState {
                 };
                 for i in 0..base_pts.len() {
                     let ni = (i + 1) % base_pts.len();
+                    let side_fill = if is_hovered {
+                        base_col.gamma_multiply(0.62)
+                    } else {
+                        Self::directional_face_shade(base_col, base_pts[i], base_pts[ni], false)
+                    };
                     clip_painter.add(egui::Shape::convex_polygon(
                         vec![base_pts[i], base_pts[ni], roof_pts[ni], roof_pts[i]],
                         side_fill,

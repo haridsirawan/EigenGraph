@@ -7,6 +7,40 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.6.1] - 2026-11-18 — Phase 61: Liquid Glass UI System (Frosted Translucency & Specular Rim), 4-Tab Segmented Dynamic Island Studio Deck, Exclusive Drawer Policy & Grouped Quick-Draw Strip
+
+### Added & Changed
+- **Liquid Glass UI System (`src/theme.rs`, `src/views/spatial_workspace.rs`)**:
+  - Added `MacTheme::glass_capsule_frame`, `MacTheme::glass_subpill_frame`, `MacTheme::glass_chip_style`, and `MacTheme::paint_glass_specular_sheen` across both `ProDark` (frosted obsidian glass with ice-cyan rim) and `EngineeringLight` (frosted crystal daylight glass), featuring translucent backdrops (`alpha < 200`), soft ambient drop shadows, recessed glass sub-containers, and refractive top specular border highlights.
+  - Upgraded `floating_pill_frame`, `floating_island_expanded_frame`, `antigravity_glass_frame`, Dynamic Island trace chips, and the prompt composer to render with unified Liquid Glass translucency.
+- **4-Tab Segmented Dynamic Island Studio Deck (`src/views/spatial_workspace.rs`)**:
+  - Added `DynamicIslandStudioTab` (`ViewAndLens`, `BimAndStory`, `GisAndSite`, `CadAndExport`) replacing the 23+ multi-row wrapped button list with a compact Telemetry + Glass Utility Row, a 4-tab segmented glass switcher, and grouped frosted sub-pill capsules (`Cam`, `Lens`, `Floor`, `Section`, `Snap`, `Map`, `Site`, `Tour`, `2D & Earth`, `Export`).
+- **Exclusive Drawer Policy & Grouped Glass Quick-Draw Strip (`src/views/spatial_workspace.rs`)**:
+  - Added `SpatialWorkspaceState::toggle_exclusive_drawer` enforcing mutual exclusion across `"vault"`, `"context"`, `"history"`, and `"api_key"` drawers so stacked popovers never pile up inside the Dynamic Island.
+  - Balanced Resting Dock Row 1 (`Vault` / `Context` left-aligned, `Model` / `Mode` / `History` / `Collapse` right-aligned on desktop, wrapped cleanly on mobile) and grouped Resting Row 2 inside a single recessed glass sub-pill using compact `SpatialManualTool::short_label()` buttons separated by structural category dividers.
+
+---
+
+## [v0.6.0] - 2026-11-18 — Phase 60: Reactive Content-Revision BIM Sync, Sparse 6-DOF Sherman-Morrison ARI Acceleration, Directional Earth 3D Sun Shading, 3D Force Diagrams, Interactive Section Cut & Smart Pop-Up 2D Rebar Section Inspector
+
+### Added & Changed
+- **Reactive Content-Revision BIM Synchronization (`src/core/bim.rs`, `src/app.rs`)**:
+  - Added `BimProject::content_revision_hash` (deterministic 64-bit FNV-1a signature covering levels, coordinates, cross-section dimensions, openings, and topology) and monotonic `BimCommandBus.revision` tracking across `execute`, `undo`, `redo`, and natural-language synthesis commands.
+  - Replaced count-only `last_bim_sig` tuple comparison in `EigenGraphApp` (`src/app.rs`) with `last_bim_hash` so in-place element property mutations (`ResizeColumn`, `ResizeRun`, `ResizeWall`, `ResizeFooting`, `MoveElement`, `AddOpening`) trigger reactive `parametric_view` <-> `build_view`, FEM, and `WorldSpatialIndex` synchronization without redundant clones.
+- **Single-SVD Kinematics & Sparse 6-DOF Sherman-Morrison ARI Acceleration (`src/core/ari.rs`, `src/app.rs`)**:
+  - Eliminated duplicate `Matrix::svd()` execution inside `AriEngine::verify_kinematics` and replaced dense `N×N` matrix-vector multiplication in `AriEngine::evaluate_redundancy_fast` with a sparse active 6-DOF column accumulation (`O(6·N)` influence vectors).
+  - Populated analytical member bending moment (`moment_my_knm`) and shear (`shear_vy_kn`) fields during `EigenGraphApp::sync_bim_to_fem` so Earth 3D force lenses display active internal force values.
+- **Earth 3D Directional Sun Shading, Extruded 3D Beam Prisms, 3D Force Diagrams & Interactive Section Cut (`src/views/universal_canvas.rs`)**:
+  - Added `UniversalCanvasState::directional_face_shade` to illuminate 3D columns, walls, beams, and LOD 1/2 neighbor massing against an SE solar azimuth (`0.82` top cap, `0.64` sunlit face, `0.46` neutral face, `0.30` shadow face).
+  - Upgraded 3D `BimRun` rendering on Earth 3D to extrude full `width_mm × depth_mm` beam prisms at ground scale (`zoom >= 16.5`) and paint parabolic 3D bending moment ribbons (`M=...kNm`) and double-curvature column moment/shear fins when `EarthBimLens::MomentStress` is active.
+  - Added `EarthBimAuthorConfig::{section_cut_active, section_cut_elev_m}` slicing slabs, walls, columns, and beams cleanly against an interactive translucent horizontal `SECTION CUT Z = ...m` plane directly on Earth 3D.
+- **Live Lens Colorbar Legend, `Sec Cut` Studio Controls & 2D RC Cross-Section Preview (`src/views/spatial_workspace.rs`)**:
+  - Added `/section` (`/cut`) slash command and Dynamic Island `Sec Cut` toggle + `Z: ...m` elevation control inside the unified Earth 3D Studio Bar.
+  - Added `render_active_lens_colorbar_strip` inside Dynamic Island displaying live threshold stops (`DCR%`, `ARI`, `Force Diagrams`, `4D Erection`) whenever a non-clean structural lens is active.
+  - Added `render_rc_cross_section_preview` inside the Smart Element Pop-Up for Columns and Beams, rendering a scaled 2D concrete cross-section, stirrup hoop, longitudinal rebar cage dots, and LRFD DCR% / ARI target progress gauges.
+
+---
+
 ## [v0.5.9] - 2026-11-18 — Phase 59: Streaming OSM Overpass & GeoJSON Urban Vectors, Live Terrarium DEM Topography, Inter-Building Seismic Pounding/Wind/Collapse Coupling & Gemini Batch Directives
 
 ### Added & Changed

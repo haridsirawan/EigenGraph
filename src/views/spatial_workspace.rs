@@ -90,6 +90,52 @@ impl SmartPopupTab {
     }
 }
 
+/// Active category tab inside the Dynamic Island Hover Studio Deck (Phase 61).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DynamicIslandStudioTab {
+    #[default]
+    ViewAndLens,
+    BimAndStory,
+    GisAndSite,
+    CadAndExport,
+}
+
+impl DynamicIslandStudioTab {
+    pub const ALL: [Self; 4] = [
+        Self::ViewAndLens,
+        Self::BimAndStory,
+        Self::GisAndSite,
+        Self::CadAndExport,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ViewAndLens => "View & Lens",
+            Self::BimAndStory => "BIM & Story",
+            Self::GisAndSite => "GIS & Site",
+            Self::CadAndExport => "CAD & Export",
+        }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::ViewAndLens => "View",
+            Self::BimAndStory => "BIM",
+            Self::GisAndSite => "GIS",
+            Self::CadAndExport => "CAD",
+        }
+    }
+
+    pub fn icon(self) -> AppIcon {
+        match self {
+            Self::ViewAndLens => AppIcon::Cube3D,
+            Self::BimAndStory => AppIcon::Layers,
+            Self::GisAndSite => AppIcon::Globe,
+            Self::CadAndExport => AppIcon::RulerSquare,
+        }
+    }
+}
+
 /// Domain provenance used to maintain chronological LIFO Undo/Redo across 3D BIM & 2D Canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpatialUndoDomain {
@@ -697,6 +743,12 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Sparkles,
     },
     SlashCommandSpec {
+        cmd: "/section",
+        category: "Lens",
+        description: "Toggle 3D horizontal section cut plane (e.g. /section 4.5)",
+        icon: AppIcon::RulerSquare,
+    },
+    SlashCommandSpec {
         cmd: "/repair",
         category: "AI",
         description: "Run closed-loop AI auto-repair for critical ARI/DCR members",
@@ -943,6 +995,24 @@ impl SpatialManualTool {
             Self::Rect2D => "Rect",
             Self::Measure => "Measure",
             Self::Terraform => "Terraform",
+        }
+    }
+
+    /// Compact single-line button label used inside the Dynamic Island Quick-Draw Strip.
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::OrbitPan => "Orbit",
+            Self::Column => "Col",
+            Self::Beam => "Beam",
+            Self::Wall => "Wall",
+            Self::Footing => "Foot",
+            Self::Slab => "Slab",
+            Self::Door => "Door",
+            Self::Window => "Win",
+            Self::Line2D => "Line",
+            Self::Rect2D => "Rect",
+            Self::Measure => "Meas",
+            Self::Terraform => "Earth",
         }
     }
 
@@ -1247,6 +1317,7 @@ pub struct SpatialWorkspaceState {
     pub vault_rename_target: Option<(String, String)>,
     // Phase 54: Restructured essential Dynamic Island drawer, subfolder note save, & structural triage
     pub hover_more_tools_open: bool,
+    pub studio_tab: DynamicIslandStudioTab,
     pub vault_note_folder: String,
     // Phase 58: Planetary Portfolio triage filter inside Vault drawer & Dynamic Island
     pub world_portfolio_filter: crate::core::gis::WorldPortfolioFilter,
@@ -1339,6 +1410,7 @@ impl Default for SpatialWorkspaceState {
             vault_new_folder_name: String::new(),
             vault_rename_target: None,
             hover_more_tools_open: false,
+            studio_tab: DynamicIslandStudioTab::ViewAndLens,
             vault_note_folder: "KnowledgeBase".to_string(),
             world_portfolio_filter: crate::core::gis::WorldPortfolioFilter::All,
             batch_pin_query: String::new(),
@@ -1384,6 +1456,55 @@ impl SpatialWorkspaceState {
         self.composer_had_focus = false;
         if matches!(self.selected_target, Some(SmartSelectionTarget::EarthSite { .. })) {
             self.selected_target = None;
+        }
+    }
+
+    /// Toggles `"vault"`, `"context"`, `"history"`, or `"api_key"` exclusively so
+    /// multiple popovers never stack vertically inside the Dynamic Island.
+    pub fn toggle_exclusive_drawer(&mut self, drawer: &'static str) {
+        match drawer {
+            "vault" => {
+                let next = !self.vault_drawer_open;
+                self.vault_drawer_open = next;
+                if next {
+                    self.context_picker_open = false;
+                    self.history_popover_open = false;
+                    self.api_key_popover_open = false;
+                } else {
+                    self.vault_path_popover_open = false;
+                }
+            }
+            "context" => {
+                let next = !self.context_picker_open;
+                self.context_picker_open = next;
+                if next {
+                    self.vault_drawer_open = false;
+                    self.vault_path_popover_open = false;
+                    self.history_popover_open = false;
+                    self.api_key_popover_open = false;
+                }
+            }
+            "history" => {
+                let next = !self.history_popover_open;
+                self.history_popover_open = next;
+                if next {
+                    self.vault_drawer_open = false;
+                    self.vault_path_popover_open = false;
+                    self.context_picker_open = false;
+                    self.api_key_popover_open = false;
+                }
+            }
+            "api_key" => {
+                let next = !self.api_key_popover_open;
+                self.api_key_popover_open = next;
+                if next {
+                    self.vault_drawer_open = false;
+                    self.vault_path_popover_open = false;
+                    self.context_picker_open = false;
+                    self.history_popover_open = false;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -2740,6 +2861,31 @@ impl SpatialWorkspaceState {
                     self.apply_lens_to_views(next_lens, build_view, universal_canvas);
                     self.push_trace(format!("Earth 3D Lens: {}", next_lens.label()), true);
                 }
+                "/section" | "/cut" => {
+                    let elev_opt = arg
+                        .trim_end_matches('m')
+                        .trim()
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|v| v.is_finite());
+                    if let Some(z_m) = elev_opt {
+                        universal_canvas.earth_bim_author.section_cut_elev_m =
+                            z_m.clamp(0.5, 120.0);
+                        universal_canvas.earth_bim_author.section_cut_active = true;
+                    } else {
+                        universal_canvas.earth_bim_author.section_cut_active =
+                            !universal_canvas.earth_bim_author.section_cut_active;
+                    }
+                    let trace_msg = if universal_canvas.earth_bim_author.section_cut_active {
+                        format!(
+                            "Section Cut ON @ Z = {:.1}m",
+                            universal_canvas.earth_bim_author.section_cut_elev_m
+                        )
+                    } else {
+                        "Section Cut OFF".to_string()
+                    };
+                    self.push_trace(trace_msg, true);
+                }
                 "/fly" | "/go" | "/loc" => {
                     if let Some((label, lat, lon, zoom)) =
                         crate::core::gis::SlippyMapState::resolve_location_query(arg)
@@ -3348,18 +3494,239 @@ impl SpatialWorkspaceState {
         }
     }
 
-    /// Antigravity frosted translucent surface frame used for all spatial HUD overlays.
+    /// Liquid Glass frosted translucent surface frame used for all spatial HUD overlays.
     fn antigravity_glass_frame(theme: &MacTheme, corner_r: u8, pad: Margin) -> Frame {
-        let fill = if theme.is_dark() {
-            Color32::from_rgba_premultiplied(15, 19, 28, 240)
+        theme.glass_capsule_frame(corner_r, pad)
+    }
+
+    /// Renders a compact frosted glass pill button styled via `MacTheme::glass_chip_style`.
+    fn glass_pill_button(
+        ui: &mut Ui,
+        theme: &MacTheme,
+        icon: Option<AppIcon>,
+        label: impl Into<String>,
+        active: bool,
+        accent: Color32,
+        tooltip: &str,
+    ) -> egui::Response {
+        let (fg, bg, stroke) = theme.glass_chip_style(active, accent);
+        let text = label.into();
+        let resp = if let Some(ic) = icon {
+            icons::icon_button(
+                ui,
+                ic,
+                text,
+                9.6,
+                fg,
+                bg,
+                stroke,
+                CornerRadius::same(7),
+                Vec2::new(0.0, 20.0),
+            )
         } else {
-            Color32::from_rgba_premultiplied(252, 253, 255, 245)
+            ui.add(
+                egui::Button::new(RichText::new(text).size(9.6).color(fg))
+                    .min_size(Vec2::new(0.0, 20.0))
+                    .fill(bg)
+                    .stroke(stroke)
+                    .corner_radius(CornerRadius::same(7)),
+            )
         };
-        Frame::new()
-            .fill(fill)
-            .corner_radius(CornerRadius::same(corner_r))
-            .stroke(Stroke::new(1.1, theme.accent_blue.gamma_multiply(0.42)))
-            .inner_margin(pad)
+        if tooltip.is_empty() {
+            resp
+        } else {
+            resp.on_hover_text(tooltip)
+        }
+    }
+
+    /// Renders a width-clamped frosted Liquid Glass sub-pill container whose inner widgets
+    /// wrap strictly within `max_w` so mobile viewports never overflow horizontally.
+    fn glass_subpill_group(
+        ui: &mut Ui,
+        theme: &MacTheme,
+        corner_r: u8,
+        pad: Margin,
+        max_w: f32,
+        add_contents: impl FnOnce(&mut Ui),
+    ) {
+        theme.glass_subpill_frame(corner_r, pad).show(ui, |ui| {
+            let inner_max = (max_w - pad.left as f32 - pad.right as f32 - 4.0).max(130.0);
+            ui.set_max_width(inner_max);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(inner_max);
+                add_contents(ui);
+            });
+        });
+    }
+
+    fn render_dynamic_island_row1_left(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        vault_connected: bool,
+        vault_name: &str,
+        is_mobile: bool,
+        actions: &mut SpatialHudActions,
+    ) {
+        if vault_connected {
+            let lbl = if is_mobile {
+                "Vault".to_string()
+            } else {
+                format!("Vault: {vault_name}")
+            };
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Folder),
+                lbl,
+                self.vault_drawer_open,
+                theme.accent_green,
+                "Browse Vault folders, notes, & folder switch",
+            )
+            .clicked()
+            {
+                self.toggle_exclusive_drawer("vault");
+            }
+        } else {
+            let lbl = if is_mobile {
+                "+ Vault"
+            } else {
+                "+ Add Folder (Vault)"
+            };
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Folder),
+                lbl,
+                true,
+                theme.accent_blue,
+                "Select local folder to mount as Engineering Vault",
+            )
+            .clicked()
+            {
+                actions.add_vault_folder = true;
+            }
+        }
+        let ctx_lbl = if is_mobile { "Context" } else { "Add Context" };
+        if Self::glass_pill_button(
+            ui,
+            theme,
+            Some(if self.context_picker_open {
+                AppIcon::Close
+            } else {
+                AppIcon::Plus
+            }),
+            ctx_lbl,
+            self.context_picker_open,
+            theme.accent_blue,
+            "Attach element, Earth site, BIM, FEM, Vault file, or disk file (@)",
+        )
+        .clicked()
+        {
+            self.toggle_exclusive_drawer("context");
+        }
+    }
+
+    fn render_dynamic_island_row1_right(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        is_mobile: bool,
+        should_expand: bool,
+        reverse_order: bool,
+    ) {
+        let order = if reverse_order { [4, 3, 2, 1, 0] } else { [0, 1, 2, 3, 4] };
+        for slot in order {
+            match slot {
+                0 => {
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Bot),
+                        self.agent_model.short_label(),
+                        false,
+                        theme.accent_blue,
+                        &format!("AI Model: {} (click to cycle)", self.agent_model.label()),
+                    )
+                    .clicked()
+                    {
+                        self.agent_model = self.agent_model.next();
+                    }
+                }
+                1 => {
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::SlidersPanel),
+                        self.agent_mode.label(),
+                        true,
+                        theme.accent_blue,
+                        self.agent_mode.description(),
+                    )
+                    .clicked()
+                    {
+                        self.agent_mode = self.agent_mode.next();
+                    }
+                }
+                2 => {
+                    let (hist_fg, hist_bg, hist_st) =
+                        theme.glass_chip_style(self.history_popover_open, theme.accent_blue);
+                    if icons::icon_only_button(
+                        ui,
+                        AppIcon::Clock,
+                        hist_fg,
+                        hist_bg,
+                        hist_st,
+                        CornerRadius::same(8),
+                        Vec2::splat(22.0),
+                        "Conversation History",
+                    )
+                    .clicked()
+                    {
+                        self.toggle_exclusive_drawer("history");
+                    }
+                }
+                3 => {
+                    if is_mobile
+                        && !should_expand
+                        && Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Layers),
+                            "Deck",
+                            true,
+                            theme.accent_blue,
+                            "Expand Dynamic Island controls for touch devices",
+                        )
+                        .clicked()
+                    {
+                        self.mobile_deck_pinned = true;
+                    }
+                }
+                _ => {
+                    if should_expand
+                        && (is_mobile
+                            || self.command_bar_expanded
+                            || self.context_picker_open
+                            || self.vault_drawer_open
+                            || self.mobile_deck_pinned)
+                        && icons::icon_only_button(
+                            ui,
+                            AppIcon::Close,
+                            theme.text_secondary,
+                            Color32::TRANSPARENT,
+                            Stroke::NONE,
+                            CornerRadius::same(8),
+                            Vec2::splat(22.0),
+                            "Collapse Dynamic Island",
+                        )
+                        .clicked()
+                    {
+                        self.collapse_dynamic_island();
+                    }
+                }
+            }
+        }
     }
 
     /// Renders all Antigravity floating HUD layers (legacy zero-vault wrapper kept compatible for tests).
@@ -3464,7 +3831,7 @@ impl SpatialWorkspaceState {
                 .order(Order::Foreground)
                 .anchor(Align2::CENTER_TOP, top_center_offset)
                 .show(ctx, |ui| {
-                    Self::antigravity_glass_frame(theme, 16, Margin::symmetric(12, 5)).show(ui, |ui| {
+                    let glass = Self::antigravity_glass_frame(theme, 16, Margin::symmetric(12, 5)).show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
                             if let Some(rel) = universal_canvas.placing_unlocated_rel_path.clone() {
                                 let short_n = rel.split('/').next_back().unwrap_or(&rel);
@@ -3929,6 +4296,7 @@ impl SpatialWorkspaceState {
                             }
                         });
                     });
+                    theme.paint_glass_specular_sheen(ui.painter(), glass.response.rect, 16.0);
                 });
             self.hud_rects.push(pill_resp.response.rect);
         }
@@ -4024,7 +4392,7 @@ impl SpatialWorkspaceState {
             .anchor(anchor, offset)
             .constrain(true)
             .show(ctx, |ui| {
-                Self::antigravity_glass_frame(theme, 14, Margin::same(12)).show(ui, |ui| {
+                let glass = Self::antigravity_glass_frame(theme, 14, Margin::same(12)).show(ui, |ui| {
                     ui.set_width(inner_w);
                     ui.set_max_width(inner_w);
                     ui.set_max_height(max_h);
@@ -4146,6 +4514,7 @@ impl SpatialWorkspaceState {
                             actions.merge(body_actions);
                         });
                 });
+                theme.paint_glass_specular_sheen(ui.painter(), glass.response.rect, 14.0);
             });
         self.hud_rects.push(area_resp.response.rect);
 
@@ -4895,6 +5264,17 @@ impl SpatialWorkspaceState {
                     * 0.001;
 
                 self.render_structural_kpi_strip(ui, theme, fem_member);
+                ui.add_space(4.0);
+                Self::render_hosted_rc_section_preview(
+                    ui,
+                    theme,
+                    &build_view.bim_bus.project,
+                    col_id,
+                    col.width_mm,
+                    col.depth_mm,
+                    true,
+                    fem_member,
+                );
                 ui.add_space(6.0);
 
                 match self.popup_tab {
@@ -5196,6 +5576,17 @@ impl SpatialWorkspaceState {
                 let len_m = run.start.dist(run.end) * 0.001;
 
                 self.render_structural_kpi_strip(ui, theme, fem_member);
+                ui.add_space(4.0);
+                Self::render_hosted_rc_section_preview(
+                    ui,
+                    theme,
+                    &build_view.bim_bus.project,
+                    run_id,
+                    run.width_mm,
+                    run.depth_mm,
+                    false,
+                    fem_member,
+                );
                 ui.add_space(6.0);
 
                 match self.popup_tab {
@@ -5710,6 +6101,351 @@ impl SpatialWorkspaceState {
             });
         });
         ui.add_space(2.0);
+    }
+
+    /// Resolves hosted longitudinal rebars for a column or beam and draws the 2D RC section preview.
+    #[allow(clippy::too_many_arguments)]
+    fn render_hosted_rc_section_preview(
+        ui: &mut Ui,
+        theme: &MacTheme,
+        project: &BimProject,
+        host_id: usize,
+        width_mm: f64,
+        depth_mm: f64,
+        is_column: bool,
+        fem_member: Option<&StructuralMember>,
+    ) {
+        let hosted_rebars: Vec<_> = project
+            .rebars
+            .iter()
+            .filter(|rb| rb.host_id == host_id && !rb.closed_stirrup)
+            .collect();
+        let rebar_bars = if hosted_rebars.is_empty() {
+            if is_column { 8 } else { 6 }
+        } else {
+            hosted_rebars.iter().map(|rb| rb.count.max(1)).sum()
+        };
+        let bar_dia_mm = hosted_rebars
+            .first()
+            .map(|rb| rb.diameter_mm)
+            .unwrap_or(if is_column { 19.0 } else { 16.0 });
+        let default_util = if is_column { 0.42 } else { 0.36 };
+        let default_ari = if is_column { 0.89 } else { 0.88 };
+        Self::render_rc_cross_section_preview(
+            ui,
+            theme,
+            width_mm,
+            depth_mm,
+            is_column,
+            rebar_bars,
+            bar_dia_mm,
+            fem_member.map(|m| m.utilization).unwrap_or(default_util),
+            fem_member.map(|m| m.ari).unwrap_or(default_ari),
+        );
+    }
+
+    /// Renders a live 2D reinforced-concrete cross-section & rebar cage mini-canvas alongside
+    /// LRFD DCR% and ARI redundancy gauges inside the Smart Element Pop-Up.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_rc_cross_section_preview(
+        ui: &mut Ui,
+        theme: &MacTheme,
+        width_mm: f64,
+        depth_mm: f64,
+        is_column: bool,
+        rebar_bars: usize,
+        bar_dia_mm: f64,
+        util_ratio: f64,
+        ari_score: f64,
+    ) {
+        let avail_w = ui.available_width().max(150.0);
+        Frame::new()
+            .fill(theme.bg_sidebar)
+            .corner_radius(CornerRadius::same(8))
+            .stroke(Stroke::new(0.8, theme.border_subtle))
+            .inner_margin(Margin::same(6))
+            .show(ui, |ui| {
+                ui.set_max_width((avail_w - 4.0).max(140.0));
+                ui.horizontal(|ui| {
+                    let (canvas_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(68.0, 68.0), egui::Sense::hover());
+                    let painter = ui.painter_at(canvas_rect);
+                    let max_dim = (width_mm.max(depth_mm) as f32).max(100.0);
+                    let scale = 52.0 / max_dim;
+                    let bw = (width_mm as f32 * scale).clamp(18.0, 52.0);
+                    let bh = (depth_mm as f32 * scale).clamp(18.0, 52.0);
+                    let sec_rect = Rect::from_center_size(canvas_rect.center(), Vec2::new(bw, bh));
+
+                    painter.rect_filled(
+                        sec_rect,
+                        CornerRadius::same(2),
+                        Color32::from_rgba_unmultiplied(100, 116, 139, 92),
+                    );
+                    painter.rect_stroke(
+                        sec_rect,
+                        CornerRadius::same(2),
+                        Stroke::new(1.2, theme.text_secondary),
+                        egui::StrokeKind::Inside,
+                    );
+
+                    // 40 mm concrete cover stirrup hoop inset
+                    let hoop_rect = sec_rect.shrink(4.5);
+                    if hoop_rect.width() > 6.0 && hoop_rect.height() > 6.0 {
+                        painter.rect_stroke(
+                            hoop_rect,
+                            CornerRadius::same(2),
+                            Stroke::new(1.1, theme.accent_orange.gamma_multiply(0.9)),
+                            egui::StrokeKind::Inside,
+                        );
+                        let n_bars = rebar_bars.clamp(4, 16);
+                        let mut bar_pts = vec![
+                            hoop_rect.left_top(),
+                            hoop_rect.right_top(),
+                            hoop_rect.right_bottom(),
+                            hoop_rect.left_bottom(),
+                        ];
+                        let extra = n_bars.saturating_sub(4);
+                        if extra > 0 {
+                            if is_column {
+                                for k in 0..extra {
+                                    let side = k % 4;
+                                    let slot = (k / 4) + 1;
+                                    let per_side = (extra / 4) + usize::from(side < extra % 4);
+                                    let t = (slot as f32) / ((per_side + 1) as f32);
+                                    let pt = match side {
+                                        0 => egui::pos2(
+                                            egui::lerp(hoop_rect.left()..=hoop_rect.right(), t),
+                                            hoop_rect.top(),
+                                        ),
+                                        1 => egui::pos2(
+                                            hoop_rect.right(),
+                                            egui::lerp(hoop_rect.top()..=hoop_rect.bottom(), t),
+                                        ),
+                                        2 => egui::pos2(
+                                            egui::lerp(hoop_rect.left()..=hoop_rect.right(), t),
+                                            hoop_rect.bottom(),
+                                        ),
+                                        _ => egui::pos2(
+                                            hoop_rect.left(),
+                                            egui::lerp(hoop_rect.top()..=hoop_rect.bottom(), t),
+                                        ),
+                                    };
+                                    bar_pts.push(pt);
+                                }
+                            } else {
+                                let top_n = extra / 2;
+                                let bot_n = extra - top_n;
+                                for i in 0..top_n {
+                                    let t = ((i + 1) as f32) / ((top_n + 1) as f32);
+                                    bar_pts.push(egui::pos2(
+                                        egui::lerp(hoop_rect.left()..=hoop_rect.right(), t),
+                                        hoop_rect.top(),
+                                    ));
+                                }
+                                for i in 0..bot_n {
+                                    let t = ((i + 1) as f32) / ((bot_n + 1) as f32);
+                                    bar_pts.push(egui::pos2(
+                                        egui::lerp(hoop_rect.left()..=hoop_rect.right(), t),
+                                        hoop_rect.bottom(),
+                                    ));
+                                }
+                            }
+                        }
+                        let bar_col = Color32::from_rgb(56, 189, 248);
+                        for pt in bar_pts {
+                            painter.circle_filled(pt, 2.2, bar_col);
+                        }
+                    }
+
+                    ui.vertical(|ui| {
+                        let gauge_w = ui.available_width().clamp(72.0, 210.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "{:.0}×{:.0} mm • {}-D{:.0}",
+                                width_mm, depth_mm, rebar_bars, bar_dia_mm
+                            ))
+                            .size(9.8)
+                            .monospace()
+                            .strong()
+                            .color(theme.text_primary),
+                        );
+                        ui.add_space(3.0);
+
+                        let dcr_frac = (util_ratio as f32).clamp(0.0, 1.0);
+                        let dcr_col = if util_ratio > 0.85 {
+                            theme.accent_red
+                        } else if util_ratio > 0.65 {
+                            theme.accent_orange
+                        } else {
+                            theme.accent_green
+                        };
+                        ui.label(
+                            RichText::new(format!("LRFD DCR: {:.1}%", util_ratio * 100.0))
+                                .size(9.2)
+                                .monospace()
+                                .color(dcr_col),
+                        );
+                        let (dcr_bar, _) =
+                            ui.allocate_exact_size(Vec2::new(gauge_w, 7.0), egui::Sense::hover());
+                        ui.painter().rect_filled(dcr_bar, CornerRadius::same(3), theme.bg_card);
+                        let dcr_fill = Rect::from_min_size(
+                            dcr_bar.min,
+                            Vec2::new((dcr_bar.width() * dcr_frac).max(2.0), dcr_bar.height()),
+                        );
+                        ui.painter().rect_filled(dcr_fill, CornerRadius::same(3), dcr_col);
+
+                        ui.add_space(3.0);
+                        let ari_frac = (ari_score as f32).clamp(0.0, 1.0);
+                        let ari_col = if ari_score >= 0.70 {
+                            theme.accent_green
+                        } else if ari_score >= 0.60 {
+                            theme.accent_orange
+                        } else {
+                            theme.accent_red
+                        };
+                        ui.label(
+                            RichText::new(format!("ARI: {:.3} (Target ≥ 0.70)", ari_score))
+                                .size(9.2)
+                                .monospace()
+                                .color(ari_col),
+                        );
+                        let (ari_bar, _) =
+                            ui.allocate_exact_size(Vec2::new(gauge_w, 7.0), egui::Sense::hover());
+                        ui.painter().rect_filled(ari_bar, CornerRadius::same(3), theme.bg_card);
+                        let ari_fill = Rect::from_min_size(
+                            ari_bar.min,
+                            Vec2::new((ari_bar.width() * ari_frac).max(2.0), ari_bar.height()),
+                        );
+                        ui.painter().rect_filled(ari_fill, CornerRadius::same(3), ari_col);
+                        let target_x = ari_bar.left() + ari_bar.width() * 0.70;
+                        ui.painter().line_segment(
+                            [
+                                egui::pos2(target_x, ari_bar.top() - 1.0),
+                                egui::pos2(target_x, ari_bar.bottom() + 1.0),
+                            ],
+                            Stroke::new(1.3, Color32::WHITE),
+                        );
+                    });
+                });
+            });
+    }
+
+    /// Renders a compact lens colorbar legend inside Dynamic Island whenever a structural
+    /// visualization lens (`DCR%`, `ARI`, `Moment/Force`, `4D`) is active.
+    fn render_active_lens_colorbar_strip(
+        &self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        max_dcr: f64,
+        min_ari: f64,
+        panel_w: f32,
+    ) {
+        if self.active_lens == SpatialLens::Clean {
+            return;
+        }
+        let strip_w = (panel_w - 8.0).max(160.0);
+        Frame::new()
+            .fill(theme.bg_sidebar.gamma_multiply(0.85))
+            .corner_radius(CornerRadius::same(8))
+            .stroke(Stroke::new(0.8, theme.border_subtle))
+            .inner_margin(Margin::symmetric(8, 3))
+            .show(ui, |ui| {
+                ui.set_max_width(strip_w);
+                ui.horizontal_wrapped(|ui| {
+                    match self.active_lens {
+                        SpatialLens::DcrHeatmap => {
+                            ui.label(
+                                RichText::new("DCR% Legend:")
+                                    .size(9.3)
+                                    .strong()
+                                    .color(theme.text_secondary),
+                            );
+                            for (lbl, col) in [
+                                ("<50% Optimal", theme.accent_green),
+                                ("50–70% Mod", Color32::from_rgb(56, 189, 248)),
+                                ("70–85% High", theme.accent_orange),
+                                (">85% Crit", theme.accent_red),
+                            ] {
+                                ui.colored_label(col, RichText::new(format!("■ {lbl}")).size(9.2));
+                            }
+                            ui.label(
+                                RichText::new(format!("Peak {max_dcr:.0}%"))
+                                    .size(9.3)
+                                    .monospace()
+                                    .color(theme.text_primary),
+                            );
+                        }
+                        SpatialLens::AriRedundancy => {
+                            ui.label(
+                                RichText::new("ARI Legend:")
+                                    .size(9.3)
+                                    .strong()
+                                    .color(theme.text_secondary),
+                            );
+                            for (lbl, col) in [
+                                ("<0.60 Fragile", theme.accent_red),
+                                ("0.60–0.70 Warn", theme.accent_orange),
+                                ("0.70–0.85 Good", Color32::from_rgb(56, 189, 248)),
+                                (">0.85 Redundant", theme.accent_green),
+                            ] {
+                                ui.colored_label(col, RichText::new(format!("■ {lbl}")).size(9.2));
+                            }
+                            ui.label(
+                                RichText::new(format!("Min {min_ari:.2}"))
+                                    .size(9.3)
+                                    .monospace()
+                                    .color(theme.text_primary),
+                            );
+                        }
+                        SpatialLens::AxialForce
+                        | SpatialLens::ShearForce
+                        | SpatialLens::BendingMoment => {
+                            ui.label(
+                                RichText::new("Force Diagrams:")
+                                    .size(9.3)
+                                    .strong()
+                                    .color(theme.text_secondary),
+                            );
+                            ui.colored_label(
+                                Color32::from_rgb(244, 63, 94),
+                                RichText::new("■ Beam 3D BMD (kNm)").size(9.2),
+                            );
+                            ui.colored_label(
+                                Color32::from_rgb(192, 132, 252),
+                                RichText::new("■ Col Moment/Shear Fin").size(9.2),
+                            );
+                            ui.label(
+                                RichText::new("3D Force Ribbon Active (kNm / kN)")
+                                    .size(9.2)
+                                    .monospace()
+                                    .color(theme.text_primary),
+                            );
+                        }
+                        SpatialLens::Erection4D => {
+                            ui.label(
+                                RichText::new("4D Erection:")
+                                    .size(9.3)
+                                    .strong()
+                                    .color(theme.text_secondary),
+                            );
+                            for (lbl, col) in [
+                                ("Ground", Color32::from_rgb(16, 185, 129)),
+                                ("Mid Levels", Color32::from_rgb(56, 189, 248)),
+                                ("Upper / Roof", Color32::from_rgb(251, 191, 36)),
+                            ] {
+                                ui.colored_label(col, RichText::new(format!("■ {lbl}")).size(9.2));
+                            }
+                            ui.label(
+                                RichText::new(format!("Day {} Timeline", self.active_4d_day))
+                                    .size(9.3)
+                                    .monospace()
+                                    .color(theme.text_primary),
+                            );
+                        }
+                        SpatialLens::Clean => {}
+                    }
+                });
+            });
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -6922,15 +7658,9 @@ impl SpatialWorkspaceState {
                                 } else {
                                     theme.accent_orange
                                 };
-                                Frame::new()
-                                    .fill(if theme.is_dark() {
-                                        Color32::from_rgba_premultiplied(15, 19, 28, 225)
-                                    } else {
-                                        Color32::from_rgba_premultiplied(250, 252, 255, 235)
-                                    })
-                                    .corner_radius(CornerRadius::same(12))
-                                    .stroke(Stroke::new(1.0, col.gamma_multiply(0.45)))
-                                    .inner_margin(Margin::symmetric(10, 3))
+                                theme
+                                    .glass_capsule_frame(12, Margin::symmetric(10, 3))
+                                    .stroke(Stroke::new(1.0, col.gamma_multiply(0.55)))
                                     .show(ui, |ui| {
                                         icons::icon_label(
                                             ui,
@@ -6952,8 +7682,8 @@ impl SpatialWorkspaceState {
                         ui.add_space(5.0);
                     }
 
-                    // B. ONE UNIFIED GROWING DYNAMIC ISLAND (morphs seamlessly upward when hovered or expanded)
-                    Self::antigravity_glass_frame(theme, 20, Margin::symmetric(12, 9)).show(
+                    // B. ONE UNIFIED GROWING LIQUID GLASS DYNAMIC ISLAND (morphs seamlessly upward when hovered or expanded)
+                    let island_glass = Self::antigravity_glass_frame(theme, 20, Margin::symmetric(12, 9)).show(
                         ui,
                         |ui| {
                             let cap_w = (dock_w - 28.0).max(200.0);
@@ -7518,50 +8248,69 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
-                    // Restructured Essential Hover Deck inside ONE seamless growing Dynamic Island
-                            Frame::new()
-                                .fill(Color32::TRANSPARENT)
-                                .inner_margin(Margin::symmetric(2, 4))
-                                .show(
-                                ui,
-                                |ui| {
+                    // Liquid Glass 4-Tab Segmented Hover Studio Deck inside ONE continuous Dynamic Island
+                    Frame::new()
+                        .fill(Color32::TRANSPARENT)
+                        .inner_margin(Margin::symmetric(2, 4))
+                        .show(ui, |ui| {
                             let deck_w = (cap_w - 10.0).max(170.0);
                             ui.set_width(deck_w);
                             ui.set_max_width(deck_w);
 
-                            // 1. Contextual World Portfolio & Structural Health Strip
                             let world_total = universal_canvas.world_index.buildings.len();
                             let world_unloc = universal_canvas.world_index.unlocated_count();
-                            if world_total > 0 || !build_view.bim_bus.project.is_empty() || !members.is_empty() {
-                                let (worst_target, max_dcr, min_ari, crit_cnt) =
-                                    self.structural_health_summary(&build_view.bim_bus.project, members);
-                                let health_col = if max_dcr > 95.0 || min_ari < 0.65 {
-                                    theme.accent_red
-                                } else if max_dcr > 75.0 || min_ari < 0.78 {
-                                    theme.accent_orange
-                                } else {
-                                    theme.accent_green
-                                };
-                                ui.horizontal_wrapped(|ui| {
+                            let world_crit = universal_canvas
+                                .world_index
+                                .buildings
+                                .iter()
+                                .filter(|b| b.is_critical())
+                                .count();
+                            let (worst_target, max_dcr, min_ari, crit_cnt) =
+                                self.structural_health_summary(&build_view.bim_bus.project, members);
+                            let health_col = if max_dcr > 95.0 || min_ari < 0.65 {
+                                theme.accent_red
+                            } else if max_dcr > 75.0 || min_ari < 0.78 {
+                                theme.accent_orange
+                            } else {
+                                theme.accent_green
+                            };
+                            let can_undo = !build_view.bim_bus.undo_stack.is_empty()
+                                || !universal_canvas.undo_stack.is_empty();
+                            let can_redo = !build_view.bim_bus.redo_stack.is_empty()
+                                || !universal_canvas.redo_stack.is_empty();
+                            let has_key = !self.gemini_api_key_draft.trim().is_empty();
+                            let needs_key = matches!(
+                                self.agent_model,
+                                AgentModelChoice::Gemini25Flash | AgentModelChoice::Gemini25Pro
+                            ) && !has_key;
+
+                            // 1. Compact Telemetry & Glass Utility Bar
+                            Self::glass_subpill_group(
+                                ui,
+                                theme,
+                                9,
+                                Margin::symmetric(6, 3),
+                                deck_w,
+                                |ui| {
                                     if world_total > 0 {
-                                        let world_crit = universal_canvas
-                                            .world_index
-                                            .buildings
-                                            .iter()
-                                            .filter(|b| b.is_critical())
-                                            .count();
                                         icons::pill_badge(
                                             ui,
                                             AppIcon::Layers,
-                                            format!("World: {world_total} Bldgs"),
+                                            format!("World: {world_total}"),
                                             theme.accent_blue,
                                         );
                                         let rep = &universal_canvas.neighborhood_report;
                                         if rep.neighbors_evaluated > 0 {
                                             let exp_tag = match rep.recommended_exposure {
-                                                crate::core::wind::ExposureCategory::ExposureB => "ExpB",
-                                                crate::core::wind::ExposureCategory::ExposureC => "ExpC",
-                                                crate::core::wind::ExposureCategory::ExposureD => "ExpD",
+                                                crate::core::wind::ExposureCategory::ExposureB => {
+                                                    "ExpB"
+                                                }
+                                                crate::core::wind::ExposureCategory::ExposureC => {
+                                                    "ExpC"
+                                                }
+                                                crate::core::wind::ExposureCategory::ExposureD => {
+                                                    "ExpD"
+                                                }
                                             };
                                             let gap_tag = rep
                                                 .min_clear_gap_m
@@ -7579,61 +8328,23 @@ impl SpatialWorkspaceState {
                                                 format!(
                                                     "Nb:{} Gap {gap_tag} {exp_tag}{}",
                                                     rep.neighbors_evaluated,
-                                                    if rep.pounding_risk_count > 0 { " POUND" } else { "" }
+                                                    if rep.pounding_risk_count > 0 {
+                                                        " POUND"
+                                                    } else {
+                                                        ""
+                                                    }
                                                 ),
                                                 nb_col,
                                             );
                                         }
-                                        if world_crit > 0
-                                            && ui
-                                                .small_button(format!("{world_crit} Crit • Fly"))
-                                                .on_hover_text("Fly Earth 3D camera to the next high-DCR/low-ARI structure across the Vault")
-                                                .clicked()
-                                        {
-                                            actions.fly_to_next_world_building =
-                                                Some(crate::core::gis::WorldPortfolioFilter::CriticalRisk);
-                                        }
-                                        if world_unloc > 0 {
-                                            if ui
-                                                .small_button(format!("{world_unloc} Unlocated • Place"))
-                                                .on_hover_text("Pick next unlocated Staging model and click anywhere on Earth 3D to pin its real address")
-                                                .clicked()
-                                            {
-                                                let next_rel = universal_canvas
-                                                    .active_world_project_rel_path
-                                                    .clone()
-                                                    .filter(|r| universal_canvas.world_index.get(r).is_some_and(|b| b.is_unlocated()))
-                                                    .or_else(|| {
-                                                        universal_canvas
-                                                            .world_index
-                                                            .buildings
-                                                            .iter()
-                                                            .find(|b| b.is_unlocated())
-                                                            .map(|b| b.rel_path.clone())
-                                                    });
-                                                if let Some(rel) = next_rel {
-                                                    universal_canvas.globe_mode = true;
-                                                    universal_canvas.placing_unlocated_rel_path = Some(rel.clone());
-                                                    universal_canvas.placing_heading_deg = 0.0;
-                                                    self.push_trace(format!("Place '{rel}' onto Earth 3D (Q/E rotate)"), true);
-                                                }
-                                            }
-                                            if ui
-                                                .small_button("Next Unloc")
-                                                .on_hover_text("Fly camera to the next unlocated Staging parcel on Earth 3D")
-                                                .clicked()
-                                            {
-                                                actions.fly_to_next_world_building =
-                                                    Some(crate::core::gis::WorldPortfolioFilter::UnlocatedStaging);
-                                            }
-                                        }
                                     }
-                                    if !build_view.bim_bus.project.is_empty() || !members.is_empty() {
+                                    if !build_view.bim_bus.project.is_empty() || !members.is_empty()
+                                    {
                                         icons::pill_badge(
                                             ui,
                                             AppIcon::Bolt,
                                             format!(
-                                                "{}C {}B • Max DCR {:.0}% • Min ARI {:.2}{}",
+                                                "{}C {}B • DCR {:.0}% • ARI {:.2}{}",
                                                 build_view.bim_bus.project.columns.len(),
                                                 build_view.bim_bus.project.runs.len(),
                                                 max_dcr,
@@ -7648,638 +8359,881 @@ impl SpatialWorkspaceState {
                                         );
                                     }
                                     if let Some(target) = worst_target {
-                                        if ui
-                                            .small_button("Inspect Worst")
-                                            .on_hover_text("Select critical / highest-DCR structural element on Earth 3D")
-                                            .clicked()
+                                        if Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            Some(AppIcon::Target),
+                                            "Worst",
+                                            false,
+                                            theme.accent_orange,
+                                            "Select critical / highest-DCR structural element on Earth 3D",
+                                        )
+                                        .clicked()
                                         {
-                                            self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                                            self.active_canvas_mode =
+                                                SpatialCanvasMode::EarthGlobe;
                                             universal_canvas.globe_mode = true;
                                             self.selected_target = Some(target);
                                             self.popup_tab = SmartPopupTab::Calculations;
                                             actions.fit_camera = true;
-                                            self.push_trace("Focused worst bottleneck member", true);
-                                        }
-                                    }
-                                    if (crit_cnt > 0 || max_dcr > 95.0)
-                                        && ui
-                                            .small_button("Auto-Repair")
-                                            .on_hover_text("Upgrade low-redundancy / overstressed elements cleanly")
-                                            .clicked()
-                                    {
-                                        actions.run_auto_repair = true;
-                                    }
-                                });
-                                ui.add_space(4.0);
-                            }
-
-                            // 2. Essential Everyday Controls (Undo/Redo, View Mode, Camera Fit, Quick Export, Key & Settings)
-                            let can_undo = !build_view.bim_bus.undo_stack.is_empty()
-                                || !universal_canvas.undo_stack.is_empty();
-                            let can_redo = !build_view.bim_bus.redo_stack.is_empty()
-                                || !universal_canvas.redo_stack.is_empty();
-
-                            ui.horizontal_wrapped(|ui| {
-                                if icons::icon_button(
-                                    ui,
-                                    AppIcon::Undo,
-                                    "Undo",
-                                    9.8,
-                                    if can_undo {
-                                        theme.text_primary
-                                    } else {
-                                        theme.text_muted
-                                    },
-                                    theme.bg_card,
-                                    Stroke::new(0.8, theme.border_subtle),
-                                    CornerRadius::same(7),
-                                    Vec2::new(0.0, 21.0),
-                                )
-                                .on_hover_text("Undo last BIM or 2D canvas action (Cmd/Ctrl+Z)")
-                                .clicked()
-                                    && can_undo
-                                {
-                                    actions.undo = true;
-                                }
-                                if icons::icon_button(
-                                    ui,
-                                    AppIcon::Redo,
-                                    "Redo",
-                                    9.8,
-                                    if can_redo {
-                                        theme.text_primary
-                                    } else {
-                                        theme.text_muted
-                                    },
-                                    theme.bg_card,
-                                    Stroke::new(0.8, theme.border_subtle),
-                                    CornerRadius::same(7),
-                                    Vec2::new(0.0, 21.0),
-                                )
-                                .on_hover_text("Redo undone BIM or 2D canvas action (Cmd/Ctrl+Y)")
-                                .clicked()
-                                    && can_redo
-                                {
-                                    actions.redo = true;
-                                }
-
-                                if ui.small_button("Fit").on_hover_text("Fit Earth 3D viewport to model").clicked() {
-                                    actions.fit_camera = true;
-                                }
-                                if ui.small_button("Export").on_hover_text("Export .eigen.json workspace").clicked() {
-                                    actions.export_archive = true;
-                                }
-                                if ui.small_button("IFC4").on_hover_text("Export IFC4 STEP BIM file").clicked() {
-                                    actions.export_ifc4 = true;
-                                }
-                                if ui.small_button("Audit .md").on_hover_text("Save Engineering Audit Markdown note to Vault").clicked() {
-                                    actions.save_audit_note = true;
-                                }
-
-                                let has_key = !self.gemini_api_key_draft.trim().is_empty();
-                                let needs_key = matches!(
-                                    self.agent_model,
-                                    AgentModelChoice::Gemini25Flash | AgentModelChoice::Gemini25Pro
-                                ) && !has_key;
-                                if icons::icon_button(
-                                    ui,
-                                    AppIcon::Lock,
-                                    if has_key { "Key OK" } else { "API Key" },
-                                    9.8,
-                                    if has_key {
-                                        theme.accent_green
-                                    } else if needs_key {
-                                        theme.accent_orange
-                                    } else {
-                                        theme.text_secondary
-                                    },
-                                    theme.bg_card,
-                                    Stroke::new(0.8, theme.border_subtle),
-                                    CornerRadius::same(7),
-                                    Vec2::new(0.0, 21.0),
-                                )
-                                .clicked()
-                                {
-                                    self.api_key_popover_open = !self.api_key_popover_open;
-                                    self.history_popover_open = false;
-                                }
-
-                                if icons::icon_button(
-                                    ui,
-                                    AppIcon::SettingsGear,
-                                    "Settings",
-                                    9.8,
-                                    theme.text_primary,
-                                    theme.bg_card,
-                                    Stroke::new(0.8, theme.border_subtle),
-                                    CornerRadius::same(7),
-                                    Vec2::new(0.0, 21.0),
-                                )
-                                .on_hover_text("Open Workspace Settings")
-                                .clicked()
-                                {
-                                    actions.open_settings = true;
-                                }
-
-                                if ui
-                                    .small_button(if self.hover_more_tools_open {
-                                        "More Tools ▲"
-                                    } else {
-                                        "More Tools ▼"
-                                    })
-                                    .on_hover_text("Show/hide secondary 2D vector, Promote-to-BIM & Earth sculpting brushes")
-                                    .clicked()
-                                {
-                                    self.hover_more_tools_open = !self.hover_more_tools_open;
-                                }
-                            });
-
-                            ui.add_space(4.0);
-
-                            // 3. Unified Earth 3D Studio Bar (all migrated 3D BIM + Plan + Earth controls directly on Earth 3D)
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(
-                                    RichText::new("Earth 3D:")
-                                        .size(9.5)
-                                        .strong()
-                                        .color(theme.text_muted),
-                                );
-                                if ui.small_button("Iso").on_hover_text("Earth 3D Isometric Camera (42° tilt)").clicked() {
-                                    self.apply_camera_preset(build_view, universal_canvas, "iso");
-                                    actions.fit_camera = true;
-                                }
-                                if ui.small_button("Top").on_hover_text("Earth 3D Nadir Top-Down Plan View (0° tilt)").clicked() {
-                                    self.apply_camera_preset(build_view, universal_canvas, "top");
-                                    actions.fit_camera = true;
-                                }
-                                if ui.small_button("Elev").on_hover_text("Earth 3D Low-Horizon Elevation Camera (64° tilt)").clicked() {
-                                    self.apply_camera_preset(build_view, universal_canvas, "front");
-                                    actions.fit_camera = true;
-                                }
-                                let (_, _, story_lbl, lvl_cnt) =
-                                    self.active_base_and_top_levels(&build_view.bim_bus.project);
-                                if ui
-                                    .small_button(format!("Story: {story_lbl}"))
-                                    .on_hover_text("Cycle active placement floor level")
-                                    .clicked()
-                                {
-                                    self.active_story_idx = (self.active_story_idx + 1) % lvl_cnt.max(1);
-                                }
-                                if ui
-                                    .small_button("+ Story")
-                                    .on_hover_text("Add upper floor story (+3.5m) on Earth 3D")
-                                    .clicked()
-                                    && self.add_story_above_top(build_view).is_ok()
-                                {
-                                    actions.sync_fem_and_earth = true;
-                                    actions.fit_camera = true;
-                                }
-                                if ui
-                                    .small_button("+ Slab")
-                                    .on_hover_text("Add structural concrete floor slab on Earth 3D")
-                                    .clicked()
-                                    && self.add_slab_at_active_story(build_view).is_ok()
-                                {
-                                    actions.sync_fem_and_earth = true;
-                                }
-                                for (lens, lbl) in [
-                                    (SpatialLens::Clean, "Clean"),
-                                    (SpatialLens::DcrHeatmap, "DCR%"),
-                                    (SpatialLens::AriRedundancy, "ARI"),
-                                    (SpatialLens::BendingMoment, "Moment"),
-                                    (SpatialLens::Erection4D, "4D"),
-                                ] {
-                                    let active_l = self.active_lens == lens;
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                RichText::new(lbl).size(9.5).color(if active_l {
-                                                    Color32::WHITE
-                                                } else {
-                                                    theme.text_secondary
-                                                }),
-                                            )
-                                            .min_size(Vec2::new(0.0, 20.0))
-                                            .fill(if active_l {
-                                                theme.accent_blue
-                                            } else {
-                                                theme.bg_card
-                                            })
-                                            .stroke(Stroke::new(0.8, theme.border_subtle))
-                                            .corner_radius(CornerRadius::same(7)),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.apply_lens_to_views(lens, build_view, universal_canvas);
-                                    }
-                                }
-                                if ui
-                                    .small_button(if universal_canvas.earth_bim_author.isolate_active_story {
-                                        "Isolate ON"
-                                    } else {
-                                        "Isolate"
-                                    })
-                                    .on_hover_text("Isolate active Story elements for unobstructed interior BIM authoring")
-                                    .clicked()
-                                {
-                                    universal_canvas.earth_bim_author.isolate_active_story =
-                                        !universal_canvas.earth_bim_author.isolate_active_story;
-                                }
-                                if ui
-                                    .small_button("Anchor Here")
-                                    .on_hover_text("Relocate BIM/IFC origin (0,0) to current Earth 3D center GPS coordinates")
-                                    .clicked()
-                                {
-                                    actions.anchor_and_build_site = Some(universal_canvas.world_map.center_lat_lon);
-                                }
-                                if ui
-                                    .small_button(if universal_canvas.ortho_mode { "Ortho ON" } else { "Ortho" })
-                                    .on_hover_text("Toggle orthogonal 90° snap when drawing Beams/Walls/Lines on Earth 3D")
-                                    .clicked()
-                                {
-                                    universal_canvas.ortho_mode = !universal_canvas.ortho_mode;
-                                }
-                                if ui
-                                    .small_button(if build_view.show_grid { "Grid ON" } else { "Grid OFF" })
-                                    .on_hover_text("Show/hide engineering grid on Earth 3D surface")
-                                    .clicked()
-                                {
-                                    let next_grid = !build_view.show_grid;
-                                    build_view.show_grid = next_grid;
-                                    universal_canvas.show_grid = next_grid;
-                                }
-                                let map_lbl = format!("Map: {}", universal_canvas.world_map.visual_layer_label());
-                                if ui
-                                    .small_button(map_lbl)
-                                    .on_hover_text("Cycle Earth 3D layer: Satellite+Vector / Pure Rust Vector (anti-blur) / OSM+Vector / Dark+Vector")
-                                    .clicked()
-                                {
-                                    universal_canvas.world_map.cycle_basemap_visual_mode();
-                                    self.push_trace(
-                                        format!("Map layer: {}", universal_canvas.world_map.visual_layer_label()),
-                                        true,
-                                    );
-                                }
-                                if ui
-                                    .small_button(if universal_canvas.show_terrain_contours {
-                                        if universal_canvas.site_tin_is_live_dem {
-                                            "Topo DEM ON"
-                                        } else {
-                                            "Topo ON"
-                                        }
-                                    } else {
-                                        "Topo"
-                                    })
-                                    .on_hover_text("Toggle live Terrarium DEM / 3D TIN terrain contours & SNI 8460:2017 steep slope (>30°) overlay on Earth 3D")
-                                    .clicked()
-                                {
-                                    universal_canvas.show_terrain_contours = !universal_canvas.show_terrain_contours;
-                                    if universal_canvas.show_terrain_contours {
-                                        universal_canvas.ensure_site_tin_generated();
-                                    }
-                                }
-                                if ui
-                                    .small_button(if universal_canvas.urban_vectors.live_osm_streaming {
-                                        "OSM Vec ON"
-                                    } else {
-                                        "OSM Vec"
-                                    })
-                                    .on_hover_text("Stream crisp OpenStreetMap vector streets, rivers & buildings over Earth 3D")
-                                    .clicked()
-                                {
-                                    universal_canvas.urban_vectors.live_osm_streaming =
-                                        !universal_canvas.urban_vectors.live_osm_streaming;
-                                }
-                                if let Some(rel) = universal_canvas.active_world_project_rel_path.clone() {
-                                    if ui
-                                        .small_button("Move Pin")
-                                        .on_hover_text("Reposition active building on Earth 3D with automatic road/parcel vector OSNAP")
-                                        .clicked()
-                                    {
-                                        universal_canvas.globe_mode = true;
-                                        universal_canvas.placing_unlocated_rel_path = Some(rel.clone());
-                                        universal_canvas.placing_heading_deg = universal_canvas
-                                            .world_index
-                                            .get(&rel)
-                                            .map(|b| b.heading_deg)
-                                            .unwrap_or(0.0);
-                                    }
-                                    if ui
-                                        .small_button("-15°")
-                                        .on_hover_text("Rotate active Earth building -15° counter-clockwise (Shift+R)")
-                                        .clicked()
-                                    {
-                                        actions.rotate_active_world_heading_deg = Some(-15.0);
-                                    }
-                                    if ui
-                                        .small_button("+15°")
-                                        .on_hover_text("Rotate active Earth building +15° clockwise (R)")
-                                        .clicked()
-                                    {
-                                        actions.rotate_active_world_heading_deg = Some(15.0);
-                                    }
-                                }
-                            });
-
-                            // 4. Secondary Extended Tools (cleanly collapsed unless user clicks `More Tools`)
-                            if self.hover_more_tools_open {
-                                ui.add_space(4.0);
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label(
-                                        RichText::new("Extended:")
-                                            .size(9.5)
-                                            .strong()
-                                            .color(theme.text_muted),
-                                    );
-                                    for ext_tool in [
-                                        UniversalCanvasTool::Freehand,
-                                        UniversalCanvasTool::Circle,
-                                        UniversalCanvasTool::Dimension,
-                                        UniversalCanvasTool::Callout,
-                                        UniversalCanvasTool::BoxSelect,
-                                        UniversalCanvasTool::Eraser,
-                                        UniversalCanvasTool::EarthUplift,
-                                        UniversalCanvasTool::EarthCarve,
-                                        UniversalCanvasTool::EarthSeawall,
-                                        UniversalCanvasTool::EarthBridge,
-                                        UniversalCanvasTool::EarthCorridor,
-                                    ] {
-                                        let is_act = build_view.ground_author_tool == Ground3DAuthorTool::Orbit
-                                            && universal_canvas.active_tool == ext_tool;
-                                        if icons::icon_button(
-                                            ui,
-                                            ext_tool.app_icon(),
-                                            ext_tool.short_label(),
-                                            9.5,
-                                            if is_act { Color32::WHITE } else { theme.text_secondary },
-                                            if is_act { theme.accent_orange } else { theme.bg_card },
-                                            Stroke::new(0.7, theme.border_subtle),
-                                            CornerRadius::same(7),
-                                            Vec2::new(0.0, 20.0),
-                                        )
-                                        .on_hover_text(ext_tool.tooltip())
-                                        .clicked()
-                                        {
-                                            self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
-                                            universal_canvas.globe_mode = true;
-                                            build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
-                                            universal_canvas.earth_bim_author.active_tool =
-                                                crate::views::universal_canvas::EarthBimTool::None;
-                                            universal_canvas.active_tool = ext_tool;
                                             self.push_trace(
-                                                format!("Earth 3D Tool: {}", ext_tool.short_label()),
+                                                "Focused worst bottleneck member",
                                                 true,
                                             );
                                         }
                                     }
-                                    if !universal_canvas.entities.is_empty()
-                                        && ui
-                                            .small_button("Promote -> BIM")
-                                            .on_hover_text("Promote selected vector Lines/Rects on Earth 3D into 3D BIM Walls, Beams & Slabs")
-                                            .clicked()
+                                    if (crit_cnt > 0 || max_dcr > 95.0)
+                                        && Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            Some(AppIcon::Wrench),
+                                            "Auto-Repair",
+                                            true,
+                                            theme.accent_orange,
+                                            "Upgrade low-redundancy / overstressed elements cleanly",
+                                        )
+                                        .clicked()
                                     {
-                                        let (w, r, s) =
-                                            universal_canvas.promote_selection_to_bim(&mut build_view.bim_bus.project);
-                                        if w + r + s > 0 {
-                                            actions.sync_fem_and_earth = true;
-                                            self.push_trace(format!("Promoted +{w}W +{r}B +{s}S on Earth 3D"), true);
+                                        actions.run_auto_repair = true;
+                                    }
+
+                                    ui.separator();
+
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Undo),
+                                        "Undo",
+                                        false,
+                                        theme.accent_blue,
+                                        "Undo last BIM or 2D canvas action (Cmd/Ctrl+Z)",
+                                    )
+                                    .clicked()
+                                        && can_undo
+                                    {
+                                        actions.undo = true;
+                                    }
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Redo),
+                                        "Redo",
+                                        false,
+                                        theme.accent_blue,
+                                        "Redo undone BIM or 2D canvas action (Cmd/Ctrl+Y)",
+                                    )
+                                    .clicked()
+                                        && can_redo
+                                    {
+                                        actions.redo = true;
+                                    }
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::ZoomFit),
+                                        "Fit",
+                                        false,
+                                        theme.accent_blue,
+                                        "Fit Earth 3D viewport to model",
+                                    )
+                                    .clicked()
+                                    {
+                                        actions.fit_camera = true;
+                                    }
+                                    let key_accent = if has_key {
+                                        theme.accent_green
+                                    } else if needs_key {
+                                        theme.accent_orange
+                                    } else {
+                                        theme.accent_blue
+                                    };
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Lock),
+                                        if has_key { "Key OK" } else { "API Key" },
+                                        self.api_key_popover_open || has_key || needs_key,
+                                        key_accent,
+                                        "Configure Gemini API Key",
+                                    )
+                                    .clicked()
+                                    {
+                                        self.toggle_exclusive_drawer("api_key");
+                                    }
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::SettingsGear),
+                                        "Settings",
+                                        false,
+                                        theme.accent_blue,
+                                        "Open Workspace Settings",
+                                    )
+                                    .clicked()
+                                    {
+                                        actions.open_settings = true;
+                                    }
+                                },
+                            );
+
+                            ui.add_space(4.0);
+
+                            // 2. Segmented Studio Category Tabs
+                            let effective_tab = if self.hover_more_tools_open {
+                                DynamicIslandStudioTab::CadAndExport
+                            } else {
+                                self.studio_tab
+                            };
+                            Self::glass_subpill_group(
+                                ui,
+                                theme,
+                                10,
+                                Margin::symmetric(6, 3),
+                                deck_w,
+                                |ui| {
+                                    for tab in DynamicIslandStudioTab::ALL {
+                                        let is_act = effective_tab == tab;
+                                        let lbl = if is_mobile {
+                                            tab.short_label()
+                                        } else {
+                                            tab.label()
+                                        };
+                                        if Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            Some(tab.icon()),
+                                            lbl,
+                                            is_act,
+                                            theme.accent_blue,
+                                            "",
+                                        )
+                                        .clicked()
+                                        {
+                                            self.studio_tab = tab;
+                                            self.hover_more_tools_open =
+                                                tab == DynamicIslandStudioTab::CadAndExport;
                                         }
                                     }
-                                });
+                                },
+                            );
+
+                            ui.add_space(4.0);
+
+                            // 3. Active Studio Tab Content (Grouped inside frosted glass sub-pills)
+                            match effective_tab {
+                                DynamicIslandStudioTab::ViewAndLens => {
+                                    let tilt = universal_canvas.earth_world.camera.tilt_deg;
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new("Cam:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            for (preset, lbl, act, tip) in [
+                                                (
+                                                    "iso",
+                                                    "Iso",
+                                                    tilt >= 5.0 && tilt <= 55.0,
+                                                    "Earth 3D Isometric Camera (42° tilt)",
+                                                ),
+                                                (
+                                                    "top",
+                                                    "Top",
+                                                    tilt < 5.0,
+                                                    "Earth 3D Nadir Top-Down Plan View (0° tilt)",
+                                                ),
+                                                (
+                                                    "front",
+                                                    "Elev",
+                                                    tilt > 55.0,
+                                                    "Earth 3D Low-Horizon Elevation Camera (64° tilt)",
+                                                ),
+                                            ] {
+                                                if Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    None,
+                                                    lbl,
+                                                    act,
+                                                    theme.accent_blue,
+                                                    tip,
+                                                )
+                                                .clicked()
+                                                {
+                                                    self.apply_camera_preset(
+                                                        build_view,
+                                                        universal_canvas,
+                                                        preset,
+                                                    );
+                                                    actions.fit_camera = true;
+                                                }
+                                            }
+                                            ui.separator();
+                                            ui.label(
+                                                RichText::new("Lens:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            for (lens, lbl) in [
+                                                (SpatialLens::Clean, "Clean"),
+                                                (SpatialLens::DcrHeatmap, "DCR%"),
+                                                (SpatialLens::AriRedundancy, "ARI"),
+                                                (SpatialLens::BendingMoment, "Moment"),
+                                                (SpatialLens::Erection4D, "4D"),
+                                            ] {
+                                                if Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    None,
+                                                    lbl,
+                                                    self.active_lens == lens,
+                                                    theme.accent_blue,
+                                                    "",
+                                                )
+                                                .clicked()
+                                                {
+                                                    self.apply_lens_to_views(
+                                                        lens,
+                                                        build_view,
+                                                        universal_canvas,
+                                                    );
+                                                }
+                                            }
+                                        },
+                                    );
+                                    if self.active_lens != SpatialLens::Clean {
+                                        ui.add_space(4.0);
+                                        self.render_active_lens_colorbar_strip(
+                                            ui,
+                                            theme,
+                                            max_dcr,
+                                            min_ari,
+                                            deck_w,
+                                        );
+                                    }
+                                }
+                                DynamicIslandStudioTab::BimAndStory => {
+                                    let (_, _, story_lbl, lvl_cnt) =
+                                        self.active_base_and_top_levels(&build_view.bim_bus.project);
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new("Floor:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            let story_btn_lbl = if is_mobile {
+                                                format!("Story L{}", self.active_story_idx + 1)
+                                            } else {
+                                                format!("Story: {story_lbl}")
+                                            };
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                story_btn_lbl,
+                                                false,
+                                                theme.accent_blue,
+                                                "Cycle active placement floor level",
+                                            )
+                                            .clicked()
+                                            {
+                                                self.active_story_idx =
+                                                    (self.active_story_idx + 1) % lvl_cnt.max(1);
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                "+ Story",
+                                                false,
+                                                theme.accent_green,
+                                                "Add upper floor story (+3.5m) on Earth 3D",
+                                            )
+                                            .clicked()
+                                                && self.add_story_above_top(build_view).is_ok()
+                                            {
+                                                actions.sync_fem_and_earth = true;
+                                                actions.fit_camera = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                "+ Slab",
+                                                false,
+                                                theme.accent_green,
+                                                "Add structural concrete floor slab on Earth 3D",
+                                            )
+                                            .clicked()
+                                                && self.add_slab_at_active_story(build_view).is_ok()
+                                            {
+                                                actions.sync_fem_and_earth = true;
+                                            }
+                                            ui.separator();
+                                            let iso_on = universal_canvas
+                                                .earth_bim_author
+                                                .isolate_active_story;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                if iso_on { "Isolate ON" } else { "Isolate" },
+                                                iso_on,
+                                                theme.accent_orange,
+                                                "Isolate active Story elements for unobstructed interior BIM authoring",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas
+                                                    .earth_bim_author
+                                                    .isolate_active_story = !iso_on;
+                                            }
+                                            let sec_on =
+                                                universal_canvas.earth_bim_author.section_cut_active;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                if sec_on { "Sec Cut ON" } else { "Sec Cut" },
+                                                sec_on,
+                                                theme.accent_orange,
+                                                "Slice 3D building horizontally at target elevation on Earth 3D (/section)",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas
+                                                    .earth_bim_author
+                                                    .section_cut_active = !sec_on;
+                                            }
+                                            if universal_canvas.earth_bim_author.section_cut_active
+                                            {
+                                                ui.add(
+                                                    egui::DragValue::new(
+                                                        &mut universal_canvas
+                                                            .earth_bim_author
+                                                            .section_cut_elev_m,
+                                                    )
+                                                    .range(0.5..=120.0)
+                                                    .speed(0.25)
+                                                    .prefix("Z:")
+                                                    .suffix("m"),
+                                                );
+                                            }
+                                            ui.separator();
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                if universal_canvas.ortho_mode {
+                                                    "Ortho ON"
+                                                } else {
+                                                    "Ortho"
+                                                },
+                                                universal_canvas.ortho_mode,
+                                                theme.accent_blue,
+                                                "Toggle orthogonal 90° snap when drawing Beams/Walls/Lines on Earth 3D",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.ortho_mode =
+                                                    !universal_canvas.ortho_mode;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                if build_view.show_grid {
+                                                    "Grid ON"
+                                                } else {
+                                                    "Grid OFF"
+                                                },
+                                                build_view.show_grid,
+                                                theme.accent_blue,
+                                                "Show/hide engineering grid on Earth 3D surface",
+                                            )
+                                            .clicked()
+                                            {
+                                                let next_grid = !build_view.show_grid;
+                                                build_view.show_grid = next_grid;
+                                                universal_canvas.show_grid = next_grid;
+                                            }
+                                        },
+                                    );
+                                }
+                                DynamicIslandStudioTab::GisAndSite => {
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            let map_lbl = format!(
+                                                "Map: {}",
+                                                universal_canvas.world_map.visual_layer_label()
+                                            );
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                map_lbl,
+                                                false,
+                                                theme.accent_blue,
+                                                "Cycle Earth 3D layer: Satellite+Vector / Pure Rust Vector (anti-blur) / OSM+Vector / Dark+Vector",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.world_map.cycle_basemap_visual_mode();
+                                                self.push_trace(
+                                                    format!(
+                                                        "Map layer: {}",
+                                                        universal_canvas.world_map.visual_layer_label()
+                                                    ),
+                                                    true,
+                                                );
+                                            }
+                                            let topo_lbl = if universal_canvas.show_terrain_contours {
+                                                if universal_canvas.site_tin_is_live_dem {
+                                                    "Topo DEM ON"
+                                                } else {
+                                                    "Topo ON"
+                                                }
+                                            } else {
+                                                "Topo"
+                                            };
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                topo_lbl,
+                                                universal_canvas.show_terrain_contours,
+                                                theme.accent_green,
+                                                "Toggle live Terrarium DEM / 3D TIN terrain contours & SNI 8460:2017 steep slope (>30°) overlay on Earth 3D",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.show_terrain_contours =
+                                                    !universal_canvas.show_terrain_contours;
+                                                if universal_canvas.show_terrain_contours {
+                                                    universal_canvas.ensure_site_tin_generated();
+                                                }
+                                            }
+                                            let osm_on =
+                                                universal_canvas.urban_vectors.live_osm_streaming;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                if osm_on { "OSM Vec ON" } else { "OSM Vec" },
+                                                osm_on,
+                                                theme.accent_blue,
+                                                "Stream crisp OpenStreetMap vector streets, rivers & buildings over Earth 3D",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.urban_vectors.live_osm_streaming =
+                                                    !osm_on;
+                                            }
+                                            ui.separator();
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::MapPin),
+                                                "Anchor Here",
+                                                false,
+                                                theme.accent_blue,
+                                                "Relocate BIM/IFC origin (0,0) to current Earth 3D center GPS coordinates",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.anchor_and_build_site =
+                                                    Some(universal_canvas.world_map.center_lat_lon);
+                                            }
+                                            if let Some(rel) =
+                                                universal_canvas.active_world_project_rel_path.clone()
+                                            {
+                                                if Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    None,
+                                                    "Move Pin",
+                                                    false,
+                                                    theme.accent_orange,
+                                                    "Reposition active building on Earth 3D with automatic road/parcel vector OSNAP",
+                                                )
+                                                .clicked()
+                                                {
+                                                    universal_canvas.globe_mode = true;
+                                                    universal_canvas.placing_unlocated_rel_path =
+                                                        Some(rel.clone());
+                                                    universal_canvas.placing_heading_deg =
+                                                        universal_canvas
+                                                            .world_index
+                                                            .get(&rel)
+                                                            .map(|b| b.heading_deg)
+                                                            .unwrap_or(0.0);
+                                                }
+                                                if Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    None,
+                                                    "-15°",
+                                                    false,
+                                                    theme.accent_blue,
+                                                    "Rotate active Earth building -15° counter-clockwise (Shift+R)",
+                                                )
+                                                .clicked()
+                                                {
+                                                    actions.rotate_active_world_heading_deg =
+                                                        Some(-15.0);
+                                                }
+                                                if Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    None,
+                                                    "+15°",
+                                                    false,
+                                                    theme.accent_blue,
+                                                    "Rotate active Earth building +15° clockwise (R)",
+                                                )
+                                                .clicked()
+                                                {
+                                                    actions.rotate_active_world_heading_deg =
+                                                        Some(15.0);
+                                                }
+                                            }
+                                            if world_total > 0 && (world_crit > 0 || world_unloc > 0)
+                                            {
+                                                ui.separator();
+                                                if world_crit > 0
+                                                    && Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        None,
+                                                        format!("{world_crit} Crit • Fly"),
+                                                        false,
+                                                        theme.accent_red,
+                                                        "Fly Earth 3D camera to the next high-DCR/low-ARI structure across the Vault",
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    actions.fly_to_next_world_building = Some(
+                                                        crate::core::gis::WorldPortfolioFilter::CriticalRisk,
+                                                    );
+                                                }
+                                                if world_unloc > 0 {
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        None,
+                                                        format!("{world_unloc} Unlocated • Place"),
+                                                        false,
+                                                        theme.accent_orange,
+                                                        "Pick next unlocated Staging model and click anywhere on Earth 3D to pin its real address",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        let next_rel = universal_canvas
+                                                            .active_world_project_rel_path
+                                                            .clone()
+                                                            .filter(|r| {
+                                                                universal_canvas
+                                                                    .world_index
+                                                                    .get(r)
+                                                                    .is_some_and(|b| {
+                                                                        b.is_unlocated()
+                                                                    })
+                                                            })
+                                                            .or_else(|| {
+                                                                universal_canvas
+                                                                    .world_index
+                                                                    .buildings
+                                                                    .iter()
+                                                                    .find(|b| b.is_unlocated())
+                                                                    .map(|b| b.rel_path.clone())
+                                                            });
+                                                        if let Some(rel) = next_rel {
+                                                            universal_canvas.globe_mode = true;
+                                                            universal_canvas
+                                                                .placing_unlocated_rel_path =
+                                                                Some(rel.clone());
+                                                            universal_canvas.placing_heading_deg =
+                                                                0.0;
+                                                            self.push_trace(
+                                                                format!(
+                                                                    "Place '{rel}' onto Earth 3D (Q/E rotate)"
+                                                                ),
+                                                                true,
+                                                            );
+                                                        }
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        None,
+                                                        "Next Unloc",
+                                                        false,
+                                                        theme.accent_blue,
+                                                        "Fly camera to the next unlocated Staging parcel on Earth 3D",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.fly_to_next_world_building = Some(
+                                                            crate::core::gis::WorldPortfolioFilter::UnlocatedStaging,
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        },
+                                    );
+                                }
+                                DynamicIslandStudioTab::CadAndExport => {
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new("2D & Earth:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            for ext_tool in [
+                                                UniversalCanvasTool::Freehand,
+                                                UniversalCanvasTool::Circle,
+                                                UniversalCanvasTool::Dimension,
+                                                UniversalCanvasTool::Callout,
+                                                UniversalCanvasTool::BoxSelect,
+                                                UniversalCanvasTool::Eraser,
+                                                UniversalCanvasTool::EarthUplift,
+                                                UniversalCanvasTool::EarthCarve,
+                                                UniversalCanvasTool::EarthSeawall,
+                                                UniversalCanvasTool::EarthBridge,
+                                                UniversalCanvasTool::EarthCorridor,
+                                            ] {
+                                                let is_act = build_view.ground_author_tool
+                                                    == Ground3DAuthorTool::Orbit
+                                                    && universal_canvas.active_tool == ext_tool;
+                                                if Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    Some(ext_tool.app_icon()),
+                                                    ext_tool.short_label(),
+                                                    is_act,
+                                                    theme.accent_orange,
+                                                    ext_tool.tooltip(),
+                                                )
+                                                .clicked()
+                                                {
+                                                    self.active_canvas_mode =
+                                                        SpatialCanvasMode::EarthGlobe;
+                                                    universal_canvas.globe_mode = true;
+                                                    build_view.ground_author_tool =
+                                                        Ground3DAuthorTool::Orbit;
+                                                    universal_canvas.earth_bim_author.active_tool =
+                                                        crate::views::universal_canvas::EarthBimTool::None;
+                                                    universal_canvas.active_tool = ext_tool;
+                                                    self.push_trace(
+                                                        format!(
+                                                            "Earth 3D Tool: {}",
+                                                            ext_tool.short_label()
+                                                        ),
+                                                        true,
+                                                    );
+                                                }
+                                            }
+                                            if !universal_canvas.entities.is_empty()
+                                                && Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    None,
+                                                    "Promote -> BIM",
+                                                    false,
+                                                    theme.accent_green,
+                                                    "Promote selected vector Lines/Rects on Earth 3D into 3D BIM Walls, Beams & Slabs",
+                                                )
+                                                .clicked()
+                                            {
+                                                let (w, r, s) = universal_canvas
+                                                    .promote_selection_to_bim(
+                                                        &mut build_view.bim_bus.project,
+                                                    );
+                                                if w + r + s > 0 {
+                                                    actions.sync_fem_and_earth = true;
+                                                    self.push_trace(
+                                                        format!(
+                                                            "Promoted +{w}W +{r}B +{s}S on Earth 3D"
+                                                        ),
+                                                        true,
+                                                    );
+                                                }
+                                            }
+                                            ui.separator();
+                                            ui.label(
+                                                RichText::new("Export:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::SaveDisk),
+                                                "Export",
+                                                false,
+                                                theme.accent_blue,
+                                                "Export .eigen.json workspace",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.export_archive = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Cube3D),
+                                                "IFC4",
+                                                false,
+                                                theme.accent_blue,
+                                                "Export IFC4 STEP BIM file",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.export_ifc4 = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Document),
+                                                "Audit .md",
+                                                false,
+                                                theme.accent_green,
+                                                "Save Engineering Audit Markdown note to Vault",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.save_audit_note = true;
+                                            }
+                                        },
+                                    );
+                                }
                             }
-                        },
-                    );
+                        });
                         });
                     ui.add_space(4.0);
                     ui.separator();
                     ui.add_space(4.0);
                     }
 
-                            // Resting 3-Row Dynamic Island Base Dock (Essential, Uncluttered, Airy)
-                            // Row 1: Vault (`+ Add Folder` / `Vault: name`), `+ Add Context`, AI Model & Mode, Chat & History
-                            ui.horizontal_wrapped(|ui| {
-                                if vault_status.connected {
-                                    if icons::icon_button(
+                            // Resting 3-Row Liquid Glass Dynamic Island Base Dock
+                            // Row 1: Balanced Left (Vault + Context) / Right (Model + Mode + History + Collapse)
+                            if is_mobile {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.set_max_width(cap_w);
+                                    self.render_dynamic_island_row1_left(
                                         ui,
-                                        AppIcon::Folder,
-                                        if is_mobile {
-                                            "Vault".to_string()
-                                        } else {
-                                            format!("Vault: {}", vault_status.vault_name)
-                                        },
-                                        10.0,
-                                        theme.accent_green,
-                                        theme.accent_green.gamma_multiply(0.14),
-                                        Stroke::new(
-                                            0.8,
-                                            theme.accent_green.gamma_multiply(0.42),
-                                        ),
-                                        CornerRadius::same(8),
-                                        Vec2::new(0.0, 22.0),
-                                    )
-                                    .on_hover_text("Browse Vault folders, notes, & folder switch")
-                                    .clicked()
-                                    {
-                                        self.vault_drawer_open = !self.vault_drawer_open;
-                                        self.context_picker_open = false;
-                                    }
-                                } else if icons::icon_button(
-                                    ui,
-                                    AppIcon::Folder,
-                                    "+ Add Folder (Vault)",
-                                    10.0,
-                                    Color32::WHITE,
-                                    theme.accent_blue,
-                                    Stroke::new(0.8, theme.border_subtle),
-                                    CornerRadius::same(8),
-                                    Vec2::new(0.0, 22.0),
-                                )
-                                .on_hover_text("Select local folder to mount as Engineering Vault")
-                                .clicked()
-                                {
-                                    actions.add_vault_folder = true;
-                                }
-
-                                if icons::icon_button(
-                                    ui,
-                                    if self.context_picker_open {
-                                        AppIcon::Close
-                                    } else {
-                                        AppIcon::Plus
-                                    },
-                                    "Add Context",
-                                    10.0,
-                                    if self.context_picker_open {
-                                        Color32::WHITE
-                                    } else {
-                                        theme.text_primary
-                                    },
-                                    if self.context_picker_open {
-                                        theme.accent_blue
-                                    } else {
-                                        theme.bg_card
-                                    },
-                                    Stroke::new(0.8, theme.border_subtle),
-                                    CornerRadius::same(8),
-                                    Vec2::new(0.0, 22.0),
-                                )
-                                .on_hover_text(
-                                    "Attach element, Earth site, BIM, FEM, Vault file, or disk file (@)",
-                                )
-                                .clicked()
-                                {
-                                    self.context_picker_open = !self.context_picker_open;
-                                }
-
-                                if icons::icon_button(
-                                    ui,
-                                    AppIcon::Bot,
-                                    self.agent_model.short_label(),
-                                    10.0,
-                                    theme.text_primary,
-                                    theme.bg_card,
-                                    Stroke::new(0.8, theme.border_subtle),
-                                    CornerRadius::same(8),
-                                    Vec2::new(0.0, 22.0),
-                                )
-                                .on_hover_text(format!(
-                                    "AI Model: {} (click to cycle)",
-                                    self.agent_model.label()
-                                ))
-                                .clicked()
-                                {
-                                    self.agent_model = self.agent_model.next();
-                                }
-
-                                if icons::icon_button(
-                                    ui,
-                                    AppIcon::SlidersPanel,
-                                    self.agent_mode.label(),
-                                    10.0,
-                                    theme.accent_blue,
-                                    theme.accent_blue.gamma_multiply(0.12),
-                                    Stroke::new(0.8, theme.accent_blue.gamma_multiply(0.38)),
-                                    CornerRadius::same(8),
-                                    Vec2::new(0.0, 22.0),
-                                )
-                                .on_hover_text(self.agent_mode.description())
-                                .clicked()
-                                {
-                                    self.agent_mode = self.agent_mode.next();
-                                }
-
-                                if icons::icon_only_button(
-                                    ui,
-                                    AppIcon::Clock,
-                                    if self.history_popover_open {
-                                        theme.accent_blue
-                                    } else {
-                                        theme.text_secondary
-                                    },
-                                    theme.bg_card,
-                                    Stroke::new(0.8, theme.border_subtle),
-                                    CornerRadius::same(8),
-                                    Vec2::splat(22.0),
-                                    "Conversation History",
-                                )
-                                .clicked()
-                                {
-                                    self.history_popover_open = !self.history_popover_open;
-                                }
-
-                                if is_mobile && !should_expand {
-                                    if icons::icon_button(
+                                        theme,
+                                        vault_status.connected,
+                                        &vault_status.vault_name,
+                                        true,
+                                        &mut actions,
+                                    );
+                                    self.render_dynamic_island_row1_right(
                                         ui,
-                                        AppIcon::Layers,
-                                        "Deck",
-                                        9.8,
-                                        theme.accent_blue,
-                                        theme.accent_blue.gamma_multiply(0.14),
-                                        Stroke::new(0.8, theme.accent_blue.gamma_multiply(0.42)),
-                                        CornerRadius::same(8),
-                                        Vec2::new(0.0, 22.0),
-                                    )
-                                    .on_hover_text("Expand Dynamic Island controls for touch devices")
-                                    .clicked()
-                                    {
-                                        self.mobile_deck_pinned = true;
-                                    }
-                                }
-
-                                if should_expand
-                                    && (is_mobile
-                                        || self.command_bar_expanded
-                                        || self.context_picker_open
-                                        || self.vault_drawer_open
-                                        || self.mobile_deck_pinned)
-                                {
-                                    if icons::icon_only_button(
+                                        theme,
+                                        true,
+                                        should_expand,
+                                        false,
+                                    );
+                                });
+                            } else {
+                                ui.horizontal(|ui| {
+                                    self.render_dynamic_island_row1_left(
                                         ui,
-                                        AppIcon::Close,
-                                        theme.text_secondary,
-                                        Color32::TRANSPARENT,
-                                        Stroke::NONE,
-                                        CornerRadius::same(8),
-                                        Vec2::splat(22.0),
-                                        "Collapse Dynamic Island",
-                                    )
-                                    .clicked()
-                                    {
-                                        self.collapse_dynamic_island();
-                                    }
-                                }
-                            });
+                                        theme,
+                                        vault_status.connected,
+                                        &vault_status.vault_name,
+                                        false,
+                                        &mut actions,
+                                    );
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        self.render_dynamic_island_row1_right(
+                                            ui,
+                                            theme,
+                                            false,
+                                            should_expand,
+                                            true,
+                                        );
+                                    });
+                                });
+                            }
 
                             ui.add_space(5.0);
 
-                            // Row 2: Manual Drawing & Earth Sculpting Commands
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(
-                                    RichText::new("Draw:")
-                                        .size(9.8)
-                                        .strong()
-                                        .color(theme.text_muted),
-                                );
-                                for tool in SpatialManualTool::ALL {
-                                    let active = tool.is_active(
-                                        self.active_canvas_mode,
-                                        universal_canvas,
-                                        build_view,
-                                    );
-                                    if icons::icon_button(
-                                        ui,
-                                        tool.icon(),
-                                        tool.label(),
-                                        9.8,
-                                        if active {
-                                            Color32::WHITE
+                            // Row 2: Grouped Glass Quick-Draw Strip with subtle category dividers
+                            Self::glass_subpill_group(
+                                ui,
+                                theme,
+                                11,
+                                Margin::symmetric(7, 3),
+                                cap_w,
+                                |ui| {
+                                    for tool in SpatialManualTool::ALL {
+                                        let active = tool.is_active(
+                                            self.active_canvas_mode,
+                                            universal_canvas,
+                                            build_view,
+                                        );
+                                        let accent = if *tool == SpatialManualTool::OrbitPan {
+                                            theme.accent_blue
                                         } else {
-                                            theme.text_secondary
-                                        },
-                                        if active {
-                                            if *tool == SpatialManualTool::OrbitPan {
-                                                theme.accent_blue
-                                            } else {
-                                                theme.accent_orange
-                                            }
-                                        } else {
-                                            theme.bg_card
-                                        },
-                                        Stroke::new(0.8, theme.border_subtle),
-                                        CornerRadius::same(8),
-                                        Vec2::new(0.0, 21.0),
-                                    )
-                                    .on_hover_text(tool.tooltip())
-                                    .clicked()
-                                    {
-                                        let sub =
-                                            tool.apply(self, universal_canvas, build_view);
-                                        actions.merge(sub);
-                                        // Fold popovers so moving cursor to Earth lets user draw right away
-                                        self.collapse_dynamic_island();
+                                            theme.accent_orange
+                                        };
+                                        if Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            Some(tool.icon()),
+                                            tool.short_label(),
+                                            active,
+                                            accent,
+                                            tool.tooltip(),
+                                        )
+                                        .clicked()
+                                        {
+                                            let sub =
+                                                tool.apply(self, universal_canvas, build_view);
+                                            actions.merge(sub);
+                                            self.collapse_dynamic_island();
+                                        }
+                                        if matches!(
+                                            tool,
+                                            SpatialManualTool::OrbitPan
+                                                | SpatialManualTool::Slab
+                                                | SpatialManualTool::Window
+                                        ) {
+                                            ui.separator();
+                                        }
                                     }
-                                }
-                            });
+                                },
+                            );
 
                             // Row 3: Attached `@Context` Chips (if any)
                             if !self.attached_contexts.is_empty() {
@@ -8320,18 +9274,30 @@ impl SpatialWorkspaceState {
 
                             ui.add_space(5.0);
 
-                            // Row 4: Prompt & `/` Slash Command Composer
-                            Frame::new()
-                                .fill(theme.bg_card)
-                                .corner_radius(CornerRadius::same(12))
-                                .stroke(Stroke::new(
-                                    1.0,
+                            // Row 4: Frosted Liquid Glass Prompt & `/` Slash Command Composer
+                            let (composer_fill, composer_stroke) = if theme.is_dark() {
+                                (
+                                    Color32::from_rgba_unmultiplied(255, 255, 255, 16),
                                     if self.composer_had_focus {
-                                        theme.accent_blue.gamma_multiply(0.68)
+                                        Color32::from_rgba_unmultiplied(125, 211, 252, 165)
                                     } else {
-                                        theme.border_subtle
+                                        Color32::from_rgba_unmultiplied(255, 255, 255, 36)
                                     },
-                                ))
+                                )
+                            } else {
+                                (
+                                    Color32::from_rgba_unmultiplied(255, 255, 255, 185),
+                                    if self.composer_had_focus {
+                                        theme.accent_blue.gamma_multiply(0.75)
+                                    } else {
+                                        Color32::from_rgba_unmultiplied(15, 23, 42, 32)
+                                    },
+                                )
+                            };
+                            Frame::new()
+                                .fill(composer_fill)
+                                .corner_radius(CornerRadius::same(12))
+                                .stroke(Stroke::new(1.0, composer_stroke))
                                 .inner_margin(Margin::symmetric(10, 6))
                                 .show(ui, |ui| {
                                     let row_w = (cap_w - 22.0).max(160.0);
@@ -8461,6 +9427,7 @@ impl SpatialWorkspaceState {
                                 });
                         },
                     );
+                    theme.paint_glass_specular_sheen(ui.painter(), island_glass.response.rect, 20.0);
                 });
             });
 
@@ -10482,6 +11449,252 @@ END-ISO-10303-21;\r\n";
             assert!(!spatial.hud_rects.is_empty());
             for r in &spatial.hud_rects {
                 assert!(r.right() <= win_w + 1.0 && r.left() >= -1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_phase60_revision_hash_sparse_ari_section_cut_colorbar_and_rebar_popup() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = crate::views::AiAssistantView::default();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = crate::theme::MacTheme::default();
+
+        // 1. Reactive content-revision hash & monotonic BimCommandBus revision across in-place resizes
+        build.bim_bus.execute_natural_language("portal 2x1 @6m 2floors").expect("portal");
+        let h0 = build.bim_bus.project.content_revision_hash();
+        let r0 = build.bim_bus.revision;
+
+        let col_id = build.bim_bus.project.columns[0].id;
+        build
+            .bim_bus
+            .execute(BimCommand::ResizeColumn {
+                column_id: col_id,
+                width_mm: 550.0,
+                depth_mm: 550.0,
+                rotation_deg: 15.0,
+                profile_name: "RC 550x550".to_string(),
+            })
+            .expect("resize column");
+        let h1 = build.bim_bus.project.content_revision_hash();
+        let r1 = build.bim_bus.revision;
+        assert_ne!(h1, h0, "Column resize must change content_revision_hash without changing element counts");
+        assert_eq!(r1, r0 + 1);
+
+        let run_id = build.bim_bus.project.runs[0].id;
+        build
+            .bim_bus
+            .execute(BimCommand::ResizeRun {
+                run_id,
+                width_mm: 350.0,
+                depth_mm: 650.0,
+                profile_name: "RC 350x650".to_string(),
+            })
+            .expect("resize run");
+        let h2 = build.bim_bus.project.content_revision_hash();
+        let r2 = build.bim_bus.revision;
+        assert_ne!(h2, h1);
+        assert_eq!(r2, r1 + 1);
+
+        let base_level_id = build.bim_bus.project.levels[0].id;
+        build
+            .bim_bus
+            .execute(BimCommand::AddWall {
+                base_level_id,
+                start: crate::core::P2(0.0, 0.0),
+                end: crate::core::P2(4000.0, 0.0),
+                thickness_mm: 200.0,
+                is_structural: true,
+            })
+            .expect("add wall");
+        let wall_id = build.bim_bus.project.walls.last().unwrap().id;
+        let h_wall_before = build.bim_bus.project.content_revision_hash();
+        build
+            .bim_bus
+            .execute(BimCommand::ResizeWall {
+                wall_id,
+                thickness_mm: 300.0,
+                is_structural: true,
+            })
+            .expect("resize wall");
+        assert_ne!(build.bim_bus.project.content_revision_hash(), h_wall_before);
+
+        let footing_id = build.bim_bus.project.footings[0].id;
+        let h_ft_before = build.bim_bus.project.content_revision_hash();
+        build
+            .bim_bus
+            .execute(BimCommand::ResizeFooting {
+                footing_id,
+                width_mm: 2000.0,
+                length_mm: 2000.0,
+                thickness_mm: 550.0,
+            })
+            .expect("resize footing");
+        let h_ft_after = build.bim_bus.project.content_revision_hash();
+        assert_ne!(h_ft_after, h_ft_before);
+
+        assert!(build.bim_bus.undo().is_some());
+        assert_eq!(build.bim_bus.project.content_revision_hash(), h_ft_before);
+        assert!(build.bim_bus.redo().is_some());
+        assert_eq!(build.bim_bus.project.content_revision_hash(), h_ft_after);
+
+        // 2. Single-SVD verify_kinematics + sparse 6-DOF Sherman-Morrison ARI evaluation
+        let fem = build.bim_bus.project.to_structural_model();
+        let assessment = crate::core::AriEngine::evaluate_redundancy(&fem).expect("ARI evaluation");
+        assert!(assessment.kinematic_guard.is_stable);
+        assert!(!assessment.member_results.is_empty());
+        assert!(assessment.average_ari > 0.50);
+
+        let members: Vec<StructuralMember> = assessment
+            .member_results
+            .iter()
+            .map(|r| StructuralMember {
+                id: r.member_id,
+                name: r.member_name.clone(),
+                force_kn: r.force_kn,
+                capacity_kn: r.capacity_kn,
+                utilization: r.utilization_initial,
+                moment_my_knm: (r.force_kn.abs() * 0.18 + r.utilization_initial * 65.0).max(8.0),
+                shear_vy_kn: (r.force_kn.abs() * 0.35 + r.utilization_initial * 42.0).max(12.0),
+                ari: r.ari,
+                ari_score: r.ari,
+                svd_margin: r.svd_margin,
+                is_critical: r.is_critical,
+                ..Default::default()
+            })
+            .collect();
+
+        // 3. `/section 4.5` slash command activates 3D horizontal section cut plane
+        let _ = spatial.execute_spatial_input(
+            "/section 4.5",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(canvas.earth_bim_author.section_cut_active);
+        assert!((canvas.earth_bim_author.section_cut_elev_m - 4.5).abs() < 1e-6);
+
+        // 4. Smart Element Pop-Up (2D Rebar Cross-Section) + Dynamic Island (DCR/Moment Colorbar + Sec Cut) fit viewport bounds
+        spatial.mobile_deck_pinned = true;
+        for (target, lens) in [
+            (SmartSelectionTarget::Column(col_id), SpatialLens::DcrHeatmap),
+            (SmartSelectionTarget::Beam(run_id), SpatialLens::BendingMoment),
+        ] {
+            spatial.selected_target = Some(target);
+            spatial.apply_lens_to_views(lens, &mut build, &mut canvas);
+            for win_w in [1200.0_f32, 390.0] {
+                let ctx = egui::Context::default();
+                for _ in 0..3 {
+                    let input = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 820.0))),
+                        ..Default::default()
+                    };
+                    let mut out = ctx.run_ui(input, |ui| {
+                        let _ = spatial.render_hud_overlays(
+                            ui.ctx(),
+                            &theme,
+                            &mut canvas,
+                            &mut build,
+                            &mut ai,
+                            &members,
+                            &projects,
+                            &mut db_components,
+                        );
+                    });
+                    out.textures_delta.clear();
+                }
+                assert!(!spatial.hud_rects.is_empty());
+                for r in &spatial.hud_rects {
+                    assert!(
+                        r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                        "Phase 60 HUD rect {r:?} overflowed viewport width {win_w}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_phase61_liquid_glass_ui_segmented_dynamic_island_and_exclusive_drawers() {
+        // 1. Liquid Glass UI translucency across ProDark & EngineeringLight
+        for mode in [crate::theme::ThemeMode::ProDark, crate::theme::ThemeMode::EngineeringLight] {
+            let t = crate::theme::MacTheme::for_mode(mode);
+            let outer = t.glass_capsule_frame(20, Margin::same(12));
+            let sub = t.glass_subpill_frame(10, Margin::same(6));
+            assert!(outer.fill.a() < 220, "Outer glass frame should remain translucent in {mode:?}");
+            assert!(sub.fill.a() < 220, "Glass sub-pill should remain translucent in {mode:?}");
+        }
+
+        // 2. Exclusive Drawer Policy (only one popover drawer open at any time)
+        let mut spatial = SpatialWorkspaceState::default();
+        spatial.toggle_exclusive_drawer("vault");
+        assert!(spatial.vault_drawer_open);
+        assert!(!spatial.context_picker_open && !spatial.history_popover_open && !spatial.api_key_popover_open);
+
+        spatial.toggle_exclusive_drawer("context");
+        assert!(spatial.context_picker_open);
+        assert!(!spatial.vault_drawer_open && !spatial.history_popover_open && !spatial.api_key_popover_open);
+
+        spatial.toggle_exclusive_drawer("history");
+        assert!(spatial.history_popover_open);
+        assert!(!spatial.vault_drawer_open && !spatial.context_picker_open && !spatial.api_key_popover_open);
+
+        spatial.toggle_exclusive_drawer("api_key");
+        assert!(spatial.api_key_popover_open);
+        assert!(!spatial.vault_drawer_open && !spatial.context_picker_open && !spatial.history_popover_open);
+
+        // Close api_key drawer before cycling Studio Tabs
+        spatial.toggle_exclusive_drawer("api_key");
+        assert!(!spatial.api_key_popover_open);
+
+        // 3. All 4 Segmented Studio Tabs render within bounds on Desktop (1200px) & Mobile (390px)
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = crate::theme::MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let _ = build.bim_bus.execute_natural_language("portal 2x1 @6m 1floors");
+        spatial.mobile_deck_pinned = true;
+
+        for tab in DynamicIslandStudioTab::ALL {
+            spatial.studio_tab = tab;
+            spatial.hover_more_tools_open = tab == DynamicIslandStudioTab::CadAndExport;
+            for win_w in [1200.0_f32, 390.0] {
+                let ctx = egui::Context::default();
+                for _ in 0..3 {
+                    let input = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 820.0))),
+                        ..Default::default()
+                    };
+                    let mut out = ctx.run_ui(input, |ui| {
+                        let _ = spatial.render_hud_overlays(
+                            ui.ctx(),
+                            &theme,
+                            &mut canvas,
+                            &mut build,
+                            &mut ai,
+                            &members,
+                            &projects,
+                            &mut db_components,
+                        );
+                    });
+                    out.textures_delta.clear();
+                }
+                assert!(!spatial.hud_rects.is_empty());
+                for r in &spatial.hud_rects {
+                    assert!(
+                        r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                        "Phase 61 HUD rect {r:?} for tab {tab:?} overflowed viewport width {win_w}"
+                    );
+                }
             }
         }
     }
