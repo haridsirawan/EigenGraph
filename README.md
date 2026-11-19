@@ -75,7 +75,7 @@ trunk build --release --public-url /
 
 If you reference the **Adjusted Redundancy Index (ARI)** methodology or EigenGraph platform in academic work, please cite:
 
-> Irawan, H. (2026). *Development and Validation of the Adjusted Redundancy Index for Pre-Analysis Screening of Element Damage Scenarios in Linear-Elastic Structures* [Doctoral Dissertation]. Doctoral Program in Engineering Science, Faculty of Engineering, Universitas Negeri Yogyakarta.
+> Irawan, H. (2026). *Development and Validation of the Adjusted Redundancy Index for Pre-Analysis Screening of Element Damage Scenarios in Linear-Elastic Structures*
 
 ---
 
