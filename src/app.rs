@@ -1015,7 +1015,9 @@ impl EigenGraphApp {
             | SpatialLens::AriRedundancy
             | SpatialLens::AxialForce
             | SpatialLens::ShearForce
-            | SpatialLens::BendingMoment => NavigationPillar::AnalysisSimulation,
+            | SpatialLens::BendingMoment
+            | SpatialLens::DeformedShape
+            | SpatialLens::ModalVibration => NavigationPillar::AnalysisSimulation,
             SpatialLens::Erection4D => NavigationPillar::TimeScheduling,
         };
 
@@ -1300,12 +1302,14 @@ impl EigenGraphApp {
         if hud_actions.switch_to_classic_ui {
             self.spatial_workspace.spatial_mode_enabled = false;
         }
+        if hud_actions.restore_n1_simulation {
+            self.universal_canvas.earth_fem_cache.n1_simulation = None;
+            self.build_view.simulated_eliminated_ids.clear();
+            self.spatial_workspace
+                .push_trace("Restored intact structure (cleared N-1 disruption)", true);
+        }
         if let Some(fid) = hud_actions.toggle_n1_member {
-            if self.build_view.simulated_eliminated_ids.contains(&fid) {
-                self.build_view.simulated_eliminated_ids.retain(|&x| x != fid);
-            } else {
-                self.build_view.simulated_eliminated_ids.push(fid);
-            }
+            self.toggle_n1_disruption_on_fem_id(fid);
         }
         if hud_actions.run_auto_repair {
             let msg = match self.build_view.bim_bus.repair_critical_members(&self.members) {
@@ -2696,16 +2700,108 @@ impl EigenGraphApp {
         }
     }
 
+    fn toggle_n1_disruption_on_fem_id(&mut self, fid: usize) {
+        let already_same = self
+            .universal_canvas
+            .earth_fem_cache
+            .n1_simulation
+            .as_ref()
+            .is_some_and(|s| s.removed_fem_id == fid);
+        if already_same {
+            self.universal_canvas.earth_fem_cache.n1_simulation = None;
+            self.build_view.simulated_eliminated_ids.clear();
+            self.spatial_workspace
+                .push_trace("Restored member (N-1 simulation cleared)", true);
+            return;
+        }
+        if self.universal_canvas.earth_fem_cache.cached_fem_model.is_none()
+            || self.universal_canvas.earth_fem_cache.cached_baseline_analysis.is_none()
+        {
+            self.sync_bim_to_fem();
+        }
+        let Some(fem_model) = self.universal_canvas.earth_fem_cache.cached_fem_model.clone() else {
+            return;
+        };
+        let Some(baseline) = self
+            .universal_canvas
+            .earth_fem_cache
+            .cached_baseline_analysis
+            .clone()
+        else {
+            return;
+        };
+        let report =
+            crate::core::AriEngine::simulate_single_member_removal(&fem_model, &baseline, fid);
+        let Some((removed_kind, removed_bim_id)) =
+            self.universal_canvas.earth_fem_cache.bim_ref(fid)
+        else {
+            return;
+        };
+        let removed_name = report.removed_member_name.clone();
+        let summary = if report.is_kinematic_mechanism {
+            format!(
+                "N-1 Removed {}: KINEMATIC MECHANISM DETECTED (SVD=0, Δ={:.1}mm)",
+                removed_name, report.post_max_disp_mm
+            )
+        } else {
+            format!(
+                "N-1 Removed {}: Stable (ARI={:.2}, DCR {:.0}%→{:.0}%, Δ {:.1}→{:.1}mm, +{} crit)",
+                removed_name,
+                report.residual_ari,
+                report.baseline_max_dcr * 100.0,
+                report.post_max_dcr * 100.0,
+                report.baseline_max_disp_mm,
+                report.post_max_disp_mm,
+                report.newly_critical_fem_ids.len()
+            )
+        };
+        self.universal_canvas.earth_fem_cache.n1_simulation =
+            Some(crate::views::universal_canvas::EarthN1OverlayState {
+                removed_kind,
+                removed_bim_id,
+                removed_fem_id: fid,
+                removed_name,
+                report,
+            });
+        self.build_view.simulated_eliminated_ids = vec![fid];
+        self.spatial_workspace.push_trace(summary, true);
+    }
+
     fn sync_bim_to_fem(&mut self) {
         let proj = &self.build_view.bim_bus.project;
         if proj.is_empty() {
             self.members.clear();
+            self.universal_canvas.earth_fem_cache.clear();
+            self.build_view.simulated_eliminated_ids.clear();
             self.analyze_view.synced_bim_element_count = 0;
             self.analyze_view.last_bim_sync_label = "Idle (0 BIM elements)".to_string();
             self.planning_view.sync_from_bim(&self.build_view.bim_bus.project, &self.members);
             return;
         }
-        let fem = proj.to_structural_model();
+        let prev_n1_target = self
+            .universal_canvas
+            .earth_fem_cache
+            .n1_simulation
+            .as_ref()
+            .map(|s| (s.removed_kind, s.removed_bim_id));
+
+        let site_coupling = self.universal_canvas.active_site_coupling();
+        let (fem, fem_map, load_summary) = proj.to_structural_model_with_site_loads(&site_coupling);
+        let rev_hash = proj.content_revision_hash();
+
+        let cache = &mut self.universal_canvas.earth_fem_cache;
+        cache.clear();
+        cache.bim_revision_hash = rev_hash;
+        cache.total_gravity_kn = load_summary.total_gravity_kn;
+        cache.seismic_base_shear_kn = load_summary.seismic_base_shear_kn;
+        cache.wind_base_shear_kn = load_summary.wind_base_shear_kn;
+        cache.load_case_label = load_summary.load_case_label.clone();
+        for &(fid, kind, bid) in &fem_map {
+            cache.bim_to_fem.entry((kind, bid)).or_insert(fid);
+            cache.fem_to_bim.insert(fid, (kind, bid));
+        }
+        cache.node_coords_m = fem.nodes.iter().map(|n| [n.x, n.y, n.z]).collect();
+
         if fem.elements.is_empty() {
             self.members.clear();
             self.analyze_view.synced_bim_element_count = 0;
@@ -2714,44 +2810,136 @@ impl EigenGraphApp {
             return;
         }
         let stamp = crate::core::web_bridge::unix_timestamp_label();
+
+        // 1. Solve Exact 6-DOF Elastic Equilibrium + LRFD Governing Envelope + Inter-Story Drift
+        let fea_opt = crate::core::FemSolver::solve(&fem).ok();
+        let lrfd_opt = crate::core::FemSolver::solve_lrfd_envelope(&fem, &[]).ok();
+
+        if let Some(ref fea) = fea_opt {
+            cache.static_nodal_disp_m = fea
+                .nodal_displacements
+                .iter()
+                .map(|d| [d[0], d[1], d[2]])
+                .collect();
+            cache.max_disp_mm = fea.max_displacement_mm;
+            cache.governing_combo = lrfd_opt
+                .as_ref()
+                .map(|e| e.governing_system_combination.clone())
+                .unwrap_or_else(|| load_summary.load_case_label.clone());
+
+            // Compute exact maximum inter-story drift ratio across all vertical frame members
+            let mut node_idx_map = std::collections::HashMap::with_capacity(fem.nodes.len());
+            for (idx, n) in fem.nodes.iter().enumerate() {
+                node_idx_map.insert(n.id, idx);
+            }
+            let mut max_drift = 0.0_f64;
+            for elem in &fem.elements {
+                if let (Some(&i1), Some(&i2)) =
+                    (node_idx_map.get(&elem.start_node), node_idx_map.get(&elem.end_node))
+                {
+                    let dy = (fem.nodes[i2].y - fem.nodes[i1].y).abs();
+                    if dy >= 1.5 {
+                        let d1 = fea.nodal_displacements[i1];
+                        let d2 = fea.nodal_displacements[i2];
+                        let rel_horiz = (d2[0] - d1[0]).hypot(d2[2] - d1[2]);
+                        max_drift = max_drift.max(rel_horiz / dy);
+                    }
+                }
+            }
+            cache.max_story_drift_ratio = max_drift;
+            cache.cached_fem_model = Some(fem.clone());
+            cache.cached_baseline_analysis = Some(fea.clone());
+        }
+
+        // 2. Run Dynamic Modal Analysis (Modes 1..3) for Earth 3D Eigenmode Animation
+        if let Ok(modal_rep) = crate::core::ModalEngine::analyze_for_earth_3d(
+            &fem,
+            3,
+            load_summary.spectrum.clone(),
+        ) {
+            cache.modal_modes = modal_rep.modes;
+        }
+
+        // 3. Evaluate Adjusted Redundancy Index (ARI) & Populate True 6-DOF Member Forces
         match crate::core::AriEngine::evaluate_redundancy(&fem) {
             Ok(assessment) => {
                 self.members = fem
                     .elements
                     .iter()
-                    .map(|el| {
+                    .enumerate()
+                    .map(|(elem_idx, el)| {
                         let res = assessment.member_results.iter().find(|r| r.member_id == el.id);
                         let ari_val = res.map(|r| r.ari).unwrap_or(0.0);
-                        let util_val = res.map(|r| r.utilization_initial).unwrap_or(0.0);
-                        let force_f = res.map(|r| r.force_kn).unwrap_or(0.0);
-                        let moment_my = (force_f.abs() * 0.18 + util_val * 65.0).max(8.0);
-                        let shear_vy = (force_f.abs() * 0.35 + util_val * 42.0).max(12.0);
+                        let axial_kn = fea_opt
+                            .as_ref()
+                            .and_then(|s| s.member_axial_forces.get(elem_idx))
+                            .map(|f| f / 1000.0)
+                            .or_else(|| res.map(|r| r.force_kn))
+                            .unwrap_or(0.0);
+                        let cap_kn = fea_opt
+                            .as_ref()
+                            .and_then(|s| s.member_capacities.get(elem_idx))
+                            .map(|c| c / 1000.0)
+                            .or_else(|| res.map(|r| r.capacity_kn))
+                            .unwrap_or(0.0);
+                        let (moment_my, moment_mz) = fea_opt
+                            .as_ref()
+                            .and_then(|s| s.member_bending_moments.get(elem_idx))
+                            .map(|&(my, mz)| (my / 1000.0, mz / 1000.0))
+                            .unwrap_or((0.0, 0.0));
+                        let shear_vy = fea_opt
+                            .as_ref()
+                            .and_then(|s| s.member_shear_forces.get(elem_idx))
+                            .map(|v| v / 1000.0)
+                            .unwrap_or(0.0);
+                        let pmv_dcr = fea_opt
+                            .as_ref()
+                            .and_then(|s| s.member_dcr_interactions.get(elem_idx))
+                            .copied()
+                            .unwrap_or_else(|| res.map(|r| r.utilization_initial).unwrap_or(0.0));
+                        let util_val = pmv_dcr
+                            .max(res.map(|r| r.utilization_initial).unwrap_or(0.0))
+                            .min(2.0);
+                        let second_order = res
+                            .map(|r| r.second_order_dcr.max(pmv_dcr))
+                            .unwrap_or(pmv_dcr);
                         StructuralMember {
                             id: el.id,
                             name: el.name.clone(),
                             section: el.section.name.clone(),
-                            force_kn: force_f,
-                            capacity_kn: res.map(|r| r.capacity_kn).unwrap_or(0.0),
+                            force_kn: axial_kn,
+                            capacity_kn: cap_kn,
                             utilization: util_val,
                             moment_my_knm: moment_my,
+                            moment_mz_knm: moment_mz,
                             shear_vy_kn: shear_vy,
-                            is_critical: res.map(|r| r.is_critical).unwrap_or(false),
+                            is_critical: res.map(|r| r.is_critical).unwrap_or(false)
+                                || util_val >= 0.85,
                             is_active: true,
                             ari_score: ari_val,
                             ari: ari_val,
-                            svd_sensitivity: res.map(|r| 1.0 - r.svd_margin.clamp(0.0, 1.0)).unwrap_or(0.0),
+                            svd_sensitivity: res
+                                .map(|r| 1.0 - r.svd_margin.clamp(0.0, 1.0))
+                                .unwrap_or(0.0),
                             svd_margin: res.map(|r| r.svd_margin).unwrap_or(0.0),
                             ci: res.map(|r| r.ci).unwrap_or(0.0),
                             rr: res.map(|r| r.rr).unwrap_or(0.0),
-                            dcr_interaction: res.map(|r| r.second_order_dcr).unwrap_or(util_val),
+                            dcr_interaction: second_order,
                             ..Default::default()
                         }
                     })
                     .collect();
+                for (idx, m) in self.members.iter().enumerate() {
+                    self.universal_canvas
+                        .earth_fem_cache
+                        .fem_to_member_idx
+                        .insert(m.id, idx);
+                }
                 self.analyze_view.synced_bim_element_count = self.members.len();
                 self.analyze_view.last_bim_sync_label = format!(
-                    "ARI={:.3} | {} FEM members ({})",
+                    "ARI={:.3} | 6-DOF Δ={:.1}mm | {} FEM ({})",
                     assessment.average_ari,
+                    self.universal_canvas.earth_fem_cache.max_disp_mm,
                     self.members.len(),
                     stamp
                 );
@@ -2760,13 +2948,42 @@ impl EigenGraphApp {
                 self.members = fem
                     .elements
                     .iter()
-                    .map(|el| StructuralMember {
-                        id: el.id,
-                        name: el.name.clone(),
-                        section: el.section.name.clone(),
-                        ..Default::default()
+                    .enumerate()
+                    .map(|(elem_idx, el)| {
+                        let (my, mz) = fea_opt
+                            .as_ref()
+                            .and_then(|s| s.member_bending_moments.get(elem_idx))
+                            .map(|&(a, b)| (a / 1000.0, b / 1000.0))
+                            .unwrap_or((0.0, 0.0));
+                        let vy = fea_opt
+                            .as_ref()
+                            .and_then(|s| s.member_shear_forces.get(elem_idx))
+                            .map(|v| v / 1000.0)
+                            .unwrap_or(0.0);
+                        let dcr = fea_opt
+                            .as_ref()
+                            .and_then(|s| s.member_dcr_interactions.get(elem_idx))
+                            .copied()
+                            .unwrap_or(0.0);
+                        StructuralMember {
+                            id: el.id,
+                            name: el.name.clone(),
+                            section: el.section.name.clone(),
+                            utilization: dcr,
+                            dcr_interaction: dcr,
+                            moment_my_knm: my,
+                            moment_mz_knm: mz,
+                            shear_vy_kn: vy,
+                            ..Default::default()
+                        }
                     })
                     .collect();
+                for (idx, m) in self.members.iter().enumerate() {
+                    self.universal_canvas
+                        .earth_fem_cache
+                        .fem_to_member_idx
+                        .insert(m.id, idx);
+                }
                 self.analyze_view.synced_bim_element_count = self.members.len();
                 self.analyze_view.last_bim_sync_label = format!(
                     "Synced {} elems (partial frame) at {}",
@@ -2775,6 +2992,16 @@ impl EigenGraphApp {
                 );
             }
         }
+
+        // Re-apply active N-1 simulation smoothly if the removed element still exists after a resize/edit
+        if let Some((rk, rbid)) = prev_n1_target {
+            if let Some(new_fid) = self.universal_canvas.earth_fem_cache.fem_id(rk, rbid) {
+                self.toggle_n1_disruption_on_fem_id(new_fid);
+            } else {
+                self.build_view.simulated_eliminated_ids.clear();
+            }
+        }
+
         self.planning_view
             .sync_from_bim(&self.build_view.bim_bus.project, &self.members);
     }

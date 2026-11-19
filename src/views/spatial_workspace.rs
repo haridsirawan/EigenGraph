@@ -52,6 +52,8 @@ pub enum SpatialLens {
     AxialForce,
     ShearForce,
     BendingMoment,
+    DeformedShape,
+    ModalVibration,
     Erection4D,
 }
 
@@ -64,6 +66,8 @@ impl SpatialLens {
             Self::AxialForce => "Axial NFD",
             Self::ShearForce => "Shear SFD",
             Self::BendingMoment => "Moment BMD",
+            Self::DeformedShape => "Deformed 6-DOF",
+            Self::ModalVibration => "Modal Eigenmode",
             Self::Erection4D => "4D Erection",
         }
     }
@@ -411,6 +415,11 @@ pub enum PlannedProposalAction {
     AuditNeighborhood,
     EnableTerrainContours,
     SwitchPureVector,
+    // Phase 63: True 6-DOF Deformed Shape, Modal Eigenmodes & Interactive N-1 Disruption
+    ApplyDeformedLens,
+    ApplyModalLens(usize),
+    SimulateN1(usize),
+    RestoreN1,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -459,6 +468,11 @@ pub enum GeminiDirective {
     AuditNeighborhood,
     EnableTerrainContours,
     SwitchPureVector,
+    // Phase 63: True 6-DOF Deformed Shape, Modal Eigenmodes & Interactive N-1 Disruption
+    ApplyDeformedLens,
+    ApplyModalLens(usize),
+    SimulateN1(usize),
+    RestoreN1,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -605,6 +619,22 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::EnableTerrainContours);
             } else if upper == "TOGGLE_VECTOR" || upper == "PURE_VECTOR" {
                 directives.push(GeminiDirective::SwitchPureVector);
+            } else if upper == "LENS_DEFORM" || upper == "DEFORMED" {
+                directives.push(GeminiDirective::ApplyDeformedLens);
+            } else if upper == "LENS_MODAL" || upper.starts_with("LENS_MODAL:") {
+                let m = upper
+                    .strip_prefix("LENS_MODAL:")
+                    .and_then(|s| s.trim().parse::<usize>().ok())
+                    .unwrap_or(1)
+                    .saturating_sub(1)
+                    .min(2);
+                directives.push(GeminiDirective::ApplyModalLens(m));
+            } else if upper.starts_with("SIMULATE_N1:") {
+                if let Ok(fid) = tag[12..].trim().parse::<usize>() {
+                    directives.push(GeminiDirective::SimulateN1(fid));
+                }
+            } else if upper == "RESTORE_N1" {
+                directives.push(GeminiDirective::RestoreN1);
             }
             cursor = &after_start[end + 2..];
         } else {
@@ -928,6 +958,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Jump Earth 3D to next unlocated Staging or critical Risk building across Vault",
         icon: AppIcon::Globe,
     },
+    SlashCommandSpec {
+        cmd: "/deform",
+        category: "Lens",
+        description: "Toggle live 6-DOF elastic deformed shape & inter-story drift lens on Earth 3D",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/modal",
+        category: "Lens",
+        description: "Animate 3D dynamic modal eigenmodes (Mode 1–3, natural period T & frequency f)",
+        icon: AppIcon::Pulse,
+    },
+    SlashCommandSpec {
+        cmd: "/n1",
+        category: "Analysis",
+        description: "Simulate N-1 single-member removal on selected or worst critical element",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/restore",
+        category: "Analysis",
+        description: "Restore intact structure and clear any active N-1 disruption overlay",
+        icon: AppIcon::CheckCircle,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -942,6 +996,7 @@ pub struct SpatialHudActions {
     pub open_settings: bool,
     pub switch_to_classic_ui: bool,
     pub toggle_n1_member: Option<usize>,
+    pub restore_n1_simulation: bool,
     pub run_auto_repair: bool,
     pub add_vault_folder: bool,
     pub connect_indexeddb_vault: Option<String>,
@@ -1521,6 +1576,39 @@ impl SpatialWorkspaceState {
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.
+    /// Fast O(M) structural health summary using the cached `EarthStructuralRenderCache` lookup table.
+    pub fn structural_health_summary_cached(
+        &self,
+        project: &BimProject,
+        members: &[StructuralMember],
+        fem_cache: &crate::views::universal_canvas::EarthStructuralRenderCache,
+    ) -> (Option<SmartSelectionTarget>, f64, f64, usize) {
+        if !fem_cache.fem_to_bim.is_empty() {
+            let mut worst_target: Option<SmartSelectionTarget> = None;
+            let mut worst_score = -1.0_f64;
+            let mut max_dcr = 0.0_f64;
+            let mut min_ari = 1.0_f64;
+            let mut crit_count = 0usize;
+            for m in members {
+                let dcr_pct = m.utilization * 100.0;
+                max_dcr = max_dcr.max(dcr_pct);
+                min_ari = min_ari.min(m.ari);
+                if m.is_critical || m.ari < 0.70 || m.utilization > 0.95 {
+                    crit_count += 1;
+                }
+                let severity = m.utilization + (1.0 - m.ari).max(0.0);
+                if severity > worst_score {
+                    if let Some((kind, id)) = fem_cache.bim_ref(m.id) {
+                        worst_score = severity;
+                        worst_target = Some(Self::target_from_bim(kind, id));
+                    }
+                }
+            }
+            return (worst_target, max_dcr, min_ari, crit_count);
+        }
+        self.structural_health_summary(project, members)
+    }
+
     pub fn structural_health_summary(
         &self,
         project: &BimProject,
@@ -1531,6 +1619,11 @@ impl SpatialWorkspaceState {
         let mut max_dcr = 0.0_f64;
         let mut min_ari = 1.0_f64;
         let mut crit_count = 0usize;
+        let (_, fem_map) = project.to_structural_model_with_map();
+        let mut fem_to_bim = std::collections::HashMap::with_capacity(fem_map.len());
+        for (fid, kind, id) in fem_map {
+            fem_to_bim.insert(fid, (kind, id));
+        }
         for m in members {
             let dcr_pct = m.utilization * 100.0;
             max_dcr = max_dcr.max(dcr_pct);
@@ -1540,7 +1633,7 @@ impl SpatialWorkspaceState {
             }
             let severity = m.utilization + (1.0 - m.ari).max(0.0);
             if severity > worst_score {
-                if let Some((kind, id)) = project.bim_ref_for_fem_id(m.id) {
+                if let Some(&(kind, id)) = fem_to_bim.get(&m.id) {
                     worst_score = severity;
                     worst_target = Some(Self::target_from_bim(kind, id));
                 }
@@ -1554,9 +1647,14 @@ impl SpatialWorkspaceState {
         project: &BimProject,
         members: &[StructuralMember],
     ) -> String {
+        let (_, fem_map) = project.to_structural_model_with_map();
+        let mut fem_to_bim = std::collections::HashMap::with_capacity(fem_map.len());
+        for (fid, kind, id) in fem_map {
+            fem_to_bim.insert(fid, (kind, id));
+        }
         let mut ranked: Vec<(f64, String)> = Vec::new();
         for m in members {
-            if let Some((kind, id)) = project.bim_ref_for_fem_id(m.id) {
+            if let Some(&(kind, id)) = fem_to_bim.get(&m.id) {
                 let tag = match kind {
                     BimElementKind::Column => project
                         .columns
@@ -2551,6 +2649,27 @@ impl SpatialWorkspaceState {
                     universal_canvas.world_map.vector_site_overlay = true;
                     self.push_trace("Switched Earth 3D to Pure Rust Vector (anti-blur)", true);
                 }
+                PlannedProposalAction::ApplyDeformedLens => {
+                    self.apply_lens_to_views(SpatialLens::DeformedShape, build_view, universal_canvas);
+                    self.push_trace("Activated 6-DOF Deformed Shape lens on Earth 3D", true);
+                }
+                PlannedProposalAction::ApplyModalLens(mode_idx) => {
+                    universal_canvas.earth_bim_author.active_modal_mode = (*mode_idx).min(2);
+                    universal_canvas.earth_bim_author.modal_anim_playing = true;
+                    self.apply_lens_to_views(SpatialLens::ModalVibration, build_view, universal_canvas);
+                    self.push_trace(
+                        format!("Activated Animated Modal Mode {} on Earth 3D", mode_idx + 1),
+                        true,
+                    );
+                }
+                PlannedProposalAction::SimulateN1(fid) => {
+                    out.toggle_n1_member = Some(*fid);
+                    self.push_trace(format!("Triggered N-1 disruption on FEM #{fid}"), true);
+                }
+                PlannedProposalAction::RestoreN1 => {
+                    out.restore_n1_simulation = true;
+                    self.push_trace("Restored intact structure (N-1 cleared)", true);
+                }
             }
         }
         self.sessions_dirty = true;
@@ -2689,6 +2808,10 @@ impl SpatialWorkspaceState {
                             GeminiDirective::AuditNeighborhood => PlannedProposalAction::AuditNeighborhood,
                             GeminiDirective::EnableTerrainContours => PlannedProposalAction::EnableTerrainContours,
                             GeminiDirective::SwitchPureVector => PlannedProposalAction::SwitchPureVector,
+                            GeminiDirective::ApplyDeformedLens => PlannedProposalAction::ApplyDeformedLens,
+                            GeminiDirective::ApplyModalLens(m) => PlannedProposalAction::ApplyModalLens(*m),
+                            GeminiDirective::SimulateN1(fid) => PlannedProposalAction::SimulateN1(*fid),
+                            GeminiDirective::RestoreN1 => PlannedProposalAction::RestoreN1,
                         })
                         .collect();
                     let preview: String = directives
@@ -2722,6 +2845,10 @@ impl SpatialWorkspaceState {
                             GeminiDirective::AuditNeighborhood => "AuditNeighborhood".to_string(),
                             GeminiDirective::EnableTerrainContours => "EnableTopoTIN".to_string(),
                             GeminiDirective::SwitchPureVector => "PureVectorEarth".to_string(),
+                            GeminiDirective::ApplyDeformedLens => "LensDeformed".to_string(),
+                            GeminiDirective::ApplyModalLens(m) => format!("LensModal(M{})", m + 1),
+                            GeminiDirective::SimulateN1(fid) => format!("SimulateN1(#{fid})"),
+                            GeminiDirective::RestoreN1 => "RestoreN1".to_string(),
                         })
                         .collect::<Vec<_>>()
                         .join(" + ");
@@ -2858,12 +2985,35 @@ impl SpatialWorkspaceState {
                         .iter()
                         .map(|m| m.utilization * 100.0)
                         .fold(0.0_f64, f64::max);
-                    step_traces.push("Inspected FEM & ARI Redundancy".to_string());
+                    let fc = &universal_canvas.earth_fem_cache;
+                    let modal_tag = fc
+                        .modal_modes
+                        .first()
+                        .map(|m| format!("T1={:.2}s ({:.2}Hz)", m.period_s, m.frequency_hz))
+                        .unwrap_or_else(|| "T1=n/a".to_string());
+                    let n1_tag = fc
+                        .n1_simulation
+                        .as_ref()
+                        .map(|s| {
+                            format!(
+                                " | Active N-1 Removed '{}': {}, Post Max DCR={:.0}%, Post Δ={:.1}mm, Res ARI={:.2}",
+                                s.removed_name,
+                                if s.report.is_kinematic_mechanism { "MECHANISM" } else { "Stable" },
+                                s.report.post_max_dcr * 100.0,
+                                s.report.post_max_disp_mm,
+                                s.report.residual_ari
+                            )
+                        })
+                        .unwrap_or_default();
+                    step_traces.push("Inspected FEM & ARI 6-DOF + Modal Redundancy".to_string());
                     sections.push(format!(
-                        "[FEM & ARI Matrix]: {} members, Max DCR={:.1}%, Min ARI={:.3}, Critical (<0.70)={crit}. Bottlenecks: {}",
+                        "[FEM & ARI 6-DOF Matrix]: {} members, Max DCR={:.1}%, Min ARI={:.3}, Critical (<0.70)={crit}, Δmax={:.1}mm, Drift={:.2}%, V_seismic={:.0}kN, {modal_tag}{n1_tag}. Bottlenecks: {}",
                         members.len(),
                         max_dcr,
                         min_ari,
+                        fc.max_disp_mm,
+                        fc.max_story_drift_ratio * 100.0,
+                        fc.seismic_base_shear_kn,
                         Self::format_critical_bim_context(project, members),
                     ));
                 }
@@ -3073,6 +3223,19 @@ impl SpatialWorkspaceState {
                 build_view.highlight_4d_erection = false;
                 universal_canvas.earth_bim_author.active_lens = EarthBimLens::MomentStress;
             }
+            SpatialLens::DeformedShape => {
+                build_view.render_mode = Render3DMode::SolidShaded;
+                build_view.highlight_4d_erection = false;
+                universal_canvas.show_domain_overlay = true;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::DeformedShape;
+            }
+            SpatialLens::ModalVibration => {
+                build_view.render_mode = Render3DMode::SolidShaded;
+                build_view.highlight_4d_erection = false;
+                universal_canvas.show_domain_overlay = true;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::ModalVibration;
+                universal_canvas.earth_bim_author.modal_anim_playing = true;
+            }
             SpatialLens::Erection4D => {
                 build_view.render_mode = Render3DMode::CsgSolidBrep;
                 build_view.highlight_4d_erection = true;
@@ -3204,6 +3367,10 @@ impl SpatialWorkspaceState {
                         SpatialLens::ShearForce
                     } else if arg_l.contains("ax") || arg_l.contains("nfd") {
                         SpatialLens::AxialForce
+                    } else if arg_l.contains("def") || arg_l.contains("drift") || arg_l.contains("sway") {
+                        SpatialLens::DeformedShape
+                    } else if arg_l.contains("mod") || arg_l.contains("eig") || arg_l.contains("vib") {
+                        SpatialLens::ModalVibration
                     } else if arg_l.contains("4d") || arg_l.contains("time") {
                         SpatialLens::Erection4D
                     } else {
@@ -3211,6 +3378,76 @@ impl SpatialWorkspaceState {
                     };
                     self.apply_lens_to_views(next_lens, build_view, universal_canvas);
                     self.push_trace(format!("Earth 3D Lens: {}", next_lens.label()), true);
+                }
+                "/deform" | "/deflection" | "/drift" => {
+                    if let Ok(scale) = arg.trim_end_matches('x').trim().parse::<f64>() {
+                        if scale.is_finite() {
+                            universal_canvas.earth_bim_author.deform_scale = scale.clamp(1.0, 150.0);
+                        }
+                    }
+                    self.apply_lens_to_views(SpatialLens::DeformedShape, build_view, universal_canvas);
+                    self.push_trace(
+                        format!(
+                            "Earth 3D 6-DOF Deformed Shape ({:.0}x, Δmax={:.1}mm)",
+                            universal_canvas.earth_bim_author.deform_scale,
+                            universal_canvas.earth_fem_cache.max_disp_mm
+                        ),
+                        true,
+                    );
+                }
+                "/modal" | "/eigen" | "/vibrate" => {
+                    if let Ok(m_num) = arg.trim().parse::<usize>() {
+                        universal_canvas.earth_bim_author.active_modal_mode =
+                            m_num.saturating_sub(1).min(2);
+                    }
+                    self.apply_lens_to_views(SpatialLens::ModalVibration, build_view, universal_canvas);
+                    let m_idx = universal_canvas.earth_bim_author.active_modal_mode;
+                    let period_str = universal_canvas
+                        .earth_fem_cache
+                        .modal_modes
+                        .get(m_idx)
+                        .map(|m| format!("T={:.2}s f={:.2}Hz", m.period_s, m.frequency_hz))
+                        .unwrap_or_else(|| "animating".to_string());
+                    self.push_trace(
+                        format!("Earth 3D Modal Mode {} ({period_str})", m_idx + 1),
+                        true,
+                    );
+                }
+                "/n1" | "/disrupt" => {
+                    let target_fid = arg
+                        .trim()
+                        .parse::<usize>()
+                        .ok()
+                        .or_else(|| match self.selected_target {
+                            Some(SmartSelectionTarget::Column(id)) => {
+                                universal_canvas.earth_fem_cache.fem_id(BimElementKind::Column, id)
+                            }
+                            Some(SmartSelectionTarget::Beam(id)) => {
+                                universal_canvas.earth_fem_cache.fem_id(BimElementKind::Run, id)
+                            }
+                            Some(SmartSelectionTarget::Wall(id)) => {
+                                universal_canvas.earth_fem_cache.fem_id(BimElementKind::Wall, id)
+                            }
+                            _ => None,
+                        })
+                        .or_else(|| {
+                            members
+                                .iter()
+                                .max_by(|a, b| {
+                                    let sa = a.utilization + (1.0 - a.ari).max(0.0);
+                                    let sb = b.utilization + (1.0 - b.ari).max(0.0);
+                                    sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+                                })
+                                .map(|m| m.id)
+                        });
+                    if let Some(fid) = target_fid {
+                        actions.toggle_n1_member = Some(fid);
+                    } else {
+                        self.push_trace("No FEM structural member available for N-1 disruption", false);
+                    }
+                }
+                "/restore" | "/intact" => {
+                    actions.restore_n1_simulation = true;
                 }
                 "/section" | "/cut" => {
                     let elev_opt = arg
@@ -3805,9 +4042,14 @@ impl SpatialWorkspaceState {
         match self.selected_target? {
             SmartSelectionTarget::Column(id) => {
                 let col = project.columns.iter().find(|c| c.id == id)?;
-                let fem_m = project
-                    .fem_id_for_bim_element(BimElementKind::Column, id)
-                    .and_then(|fid| members.iter().find(|m| m.id == fid));
+                let fem_m = universal_canvas
+                    .earth_fem_cache
+                    .member_for_bim(BimElementKind::Column, id, members)
+                    .or_else(|| {
+                        project
+                            .fem_id_for_bim_element(BimElementKind::Column, id)
+                            .and_then(|fid| members.iter().find(|m| m.id == fid))
+                    });
                 let dcr = fem_m.map(|m| m.utilization * 100.0).unwrap_or(42.0);
                 let ari = fem_m.map(|m| m.ari).unwrap_or(0.89);
                 Some(format!(
@@ -3817,9 +4059,14 @@ impl SpatialWorkspaceState {
             }
             SmartSelectionTarget::Beam(id) => {
                 let r = project.runs.iter().find(|r| r.id == id)?;
-                let fem_m = project
-                    .fem_id_for_bim_element(BimElementKind::Run, id)
-                    .and_then(|fid| members.iter().find(|m| m.id == fid));
+                let fem_m = universal_canvas
+                    .earth_fem_cache
+                    .member_for_bim(BimElementKind::Run, id, members)
+                    .or_else(|| {
+                        project
+                            .fem_id_for_bim_element(BimElementKind::Run, id)
+                            .and_then(|fid| members.iter().find(|m| m.id == fid))
+                    });
                 let dcr = fem_m.map(|m| m.utilization * 100.0).unwrap_or(45.0);
                 let ari = fem_m.map(|m| m.ari).unwrap_or(0.87);
                 Some(format!(
@@ -4257,6 +4504,7 @@ impl SpatialWorkspaceState {
         cap_w: f32,
     ) {
         let has_active = self.active_lens != SpatialLens::Clean
+            || universal_canvas.earth_fem_cache.n1_simulation.is_some()
             || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
             || universal_canvas.earth_bim_author.active_tool
                 != crate::views::universal_canvas::EarthBimTool::None
@@ -4268,6 +4516,51 @@ impl SpatialWorkspaceState {
         }
         ui.add_space(5.0);
         Self::glass_subpill_group(ui, theme, 10, Margin::symmetric(7, 3), cap_w, |ui| {
+            if let Some(n1) = universal_canvas.earth_fem_cache.n1_simulation.clone() {
+                let status_col = if n1.report.is_kinematic_mechanism {
+                    theme.accent_red
+                } else if n1.report.post_max_dcr >= 0.85 {
+                    theme.accent_orange
+                } else {
+                    theme.accent_green
+                };
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Bolt,
+                    if n1.report.is_kinematic_mechanism {
+                        format!("N-1 {} • MECHANISM", n1.removed_name)
+                    } else {
+                        format!("N-1 {} • ARI {:.2}", n1.removed_name, n1.report.residual_ari)
+                    },
+                    status_col,
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "DCR {:.0}%→{:.0}% • Δ {:.1}→{:.1}mm • +{} Crit",
+                        n1.report.baseline_max_dcr * 100.0,
+                        n1.report.post_max_dcr * 100.0,
+                        n1.report.baseline_max_disp_mm,
+                        n1.report.post_max_disp_mm,
+                        n1.report.newly_critical_fem_ids.len()
+                    ))
+                    .size(9.3)
+                    .monospace()
+                    .color(theme.text_primary),
+                );
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::CheckCircle),
+                    "Restore",
+                    false,
+                    theme.accent_green,
+                    "Restore removed member and return to intact 6-DOF equilibrium",
+                )
+                .clicked()
+                {
+                    actions.restore_n1_simulation = true;
+                }
+            }
             if let Some(rel) = universal_canvas.placing_unlocated_rel_path.clone() {
                 let short_n = rel.split('/').next_back().unwrap_or(&rel);
                 icons::pill_badge(
@@ -4340,6 +4633,78 @@ impl SpatialWorkspaceState {
                     ui.spacing_mut().slider_width = if cap_w < 380.0 { 88.0 } else { 140.0 };
                     ui.add(egui::Slider::new(&mut self.active_4d_day, 1..=180).text("Day"));
                     build_view.simulation_4d_day = self.active_4d_day as usize;
+                } else if self.active_lens == SpatialLens::DeformedShape {
+                    ui.spacing_mut().slider_width = if cap_w < 380.0 { 76.0 } else { 118.0 };
+                    ui.add(
+                        egui::Slider::new(&mut universal_canvas.earth_bim_author.deform_scale, 1.0..=150.0)
+                            .suffix("x")
+                            .fixed_decimals(0),
+                    );
+                    let fc = &universal_canvas.earth_fem_cache;
+                    ui.label(
+                        RichText::new(format!(
+                            "Δ={:.1}mm • Drift={:.2}% • Vb={:.0}kN",
+                            fc.max_disp_mm,
+                            fc.max_story_drift_ratio * 100.0,
+                            fc.seismic_base_shear_kn.max(fc.wind_base_shear_kn)
+                        ))
+                        .size(9.3)
+                        .monospace()
+                        .color(theme.text_primary),
+                    );
+                } else if self.active_lens == SpatialLens::ModalVibration {
+                    let mode_cnt = universal_canvas.earth_fem_cache.modal_modes.len().clamp(1, 3);
+                    for m_idx in 0..mode_cnt {
+                        let act = universal_canvas.earth_bim_author.active_modal_mode == m_idx;
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            format!("M{}", m_idx + 1),
+                            act,
+                            theme.accent_blue,
+                            "Select dynamic natural vibration eigenmode",
+                        )
+                        .clicked()
+                        {
+                            universal_canvas.earth_bim_author.active_modal_mode = m_idx;
+                        }
+                    }
+                    let playing = universal_canvas.earth_bim_author.modal_anim_playing;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        if playing { "Pause" } else { "Play" },
+                        playing,
+                        theme.accent_green,
+                        "Toggle live sinusoidal eigenmode animation",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.earth_bim_author.modal_anim_playing = !playing;
+                    }
+                    ui.spacing_mut().slider_width = if cap_w < 380.0 { 64.0 } else { 96.0 };
+                    ui.add(
+                        egui::Slider::new(&mut universal_canvas.earth_bim_author.deform_scale, 5.0..=120.0)
+                            .suffix("x")
+                            .fixed_decimals(0),
+                    );
+                    let m_slot = universal_canvas
+                        .earth_bim_author
+                        .active_modal_mode
+                        .min(universal_canvas.earth_fem_cache.modal_modes.len().saturating_sub(1));
+                    if let Some(m) = universal_canvas.earth_fem_cache.modal_modes.get(m_slot) {
+                        ui.label(
+                            RichText::new(format!(
+                                "T={:.2}s • f={:.2}Hz • Mx={:.0}%",
+                                m.period_s, m.frequency_hz, m.mass_participation_ratio_x
+                            ))
+                            .size(9.3)
+                            .monospace()
+                            .color(theme.text_primary),
+                        );
+                    }
                 }
             }
             if build_view.ground_author_tool != Ground3DAuthorTool::Orbit {
@@ -5790,10 +6155,15 @@ impl SpatialWorkspaceState {
                     ui.label("Column not found in active model.");
                     return actions;
                 };
-                let fem_id = build_view
-                    .bim_bus
-                    .project
-                    .fem_id_for_bim_element(BimElementKind::Column, col_id);
+                let fem_id = universal_canvas
+                    .earth_fem_cache
+                    .fem_id(BimElementKind::Column, col_id)
+                    .or_else(|| {
+                        build_view
+                            .bim_bus
+                            .project
+                            .fem_id_for_bim_element(BimElementKind::Column, col_id)
+                    });
                 let fem_member = fem_id.and_then(|fid| members.iter().find(|m| m.id == fid));
                 let height_m = ((build_view.bim_bus.project.level_elevation(col.top_level_id)
                     - build_view.bim_bus.project.level_elevation(col.base_level_id))
@@ -5932,6 +6302,9 @@ impl SpatialWorkspaceState {
                     SmartPopupTab::Calculations => {
                         let force_kn = fem_member.map(|m| m.force_kn).unwrap_or(-420.0);
                         let cap_kn = fem_member.map(|m| m.capacity_kn).unwrap_or(1450.0);
+                        let my_knm = fem_member.map(|m| m.moment_my_knm).unwrap_or(0.0);
+                        let mz_knm = fem_member.map(|m| m.moment_mz_knm).unwrap_or(0.0);
+                        let vy_kn = fem_member.map(|m| m.shear_vy_kn).unwrap_or(0.0);
                         let util = fem_member.map(|m| m.utilization).unwrap_or(0.29);
                         let dcr_pmv = fem_member.map(|m| m.dcr_interaction).unwrap_or(util);
                         let ari = fem_member.map(|m| m.ari).unwrap_or(0.90);
@@ -5950,9 +6323,16 @@ impl SpatialWorkspaceState {
                         Self::render_kv_row(
                             ui,
                             theme,
-                            "Nominal Capacity (ϕPn)",
-                            &format!("{:.1} kN", cap_kn),
+                            "6-DOF Moment (My / Mz)",
+                            &format!("{:.1} / {:.1} kNm", my_knm, mz_knm),
                             theme.text_primary,
+                        );
+                        Self::render_kv_row(
+                            ui,
+                            theme,
+                            "6-DOF Shear (Vu) / ϕPn",
+                            &format!("{:.1} kN / {:.0} kN", vy_kn, cap_kn),
+                            theme.text_secondary,
                         );
                         Self::render_kv_row(
                             ui,
@@ -6123,10 +6503,15 @@ impl SpatialWorkspaceState {
                     ui.label("Beam/Run not found in active model.");
                     return actions;
                 };
-                let fem_id = build_view
-                    .bim_bus
-                    .project
-                    .fem_id_for_bim_element(BimElementKind::Run, run_id);
+                let fem_id = universal_canvas
+                    .earth_fem_cache
+                    .fem_id(BimElementKind::Run, run_id)
+                    .or_else(|| {
+                        build_view
+                            .bim_bus
+                            .project
+                            .fem_id_for_bim_element(BimElementKind::Run, run_id)
+                    });
                 let fem_member = fem_id.and_then(|fid| members.iter().find(|m| m.id == fid));
                 let len_m = run.start.dist(run.end) * 0.001;
 
@@ -6229,24 +6614,47 @@ impl SpatialWorkspaceState {
                         }
                     }
                     SmartPopupTab::Calculations => {
-                        let force_kn = fem_member.map(|m| m.force_kn).unwrap_or(185.0);
+                        let force_kn = fem_member.map(|m| m.force_kn).unwrap_or(0.0);
                         let cap_kn = fem_member.map(|m| m.capacity_kn).unwrap_or(520.0);
+                        let my_knm = fem_member.map(|m| m.moment_my_knm).unwrap_or(0.0);
+                        let mz_knm = fem_member.map(|m| m.moment_mz_knm).unwrap_or(0.0);
+                        let vy_kn = fem_member.map(|m| m.shear_vy_kn).unwrap_or(0.0);
                         let util = fem_member.map(|m| m.utilization).unwrap_or(0.36);
                         let ari = fem_member.map(|m| m.ari).unwrap_or(0.88);
-                        let est_moment_knm = (force_kn.abs() * len_m * 0.125).max(12.0);
                         let span_depth = (len_m * 1000.0) / run.depth_mm.max(100.0);
 
-                        Self::render_kv_row(ui, theme, "Clear Span (L)", &format!("{len_m:.2} m"), theme.text_primary);
-                        Self::render_kv_row(ui, theme, "Span/Depth Ratio (L/h)", &format!("{span_depth:.1}"), theme.text_secondary);
-                        Self::render_kv_row(ui, theme, "Est. Moment (Mu)", &format!("{est_moment_knm:.1} kNm"), theme.accent_blue);
-                        Self::render_kv_row(ui, theme, "Axial/Chord Force", &format!("{force_kn:.1} / {cap_kn:.1} kN"), theme.text_secondary);
+                        Self::render_kv_row(ui, theme, "Clear Span (L) / L/h", &format!("{len_m:.2} m / {span_depth:.1}"), theme.text_primary);
+                        Self::render_kv_row(ui, theme, "6-DOF Moment (My / Mz)", &format!("{my_knm:.1} / {mz_knm:.1} kNm"), theme.accent_blue);
+                        Self::render_kv_row(ui, theme, "6-DOF Shear (Vu) / Axial", &format!("{vy_kn:.1} kN / {force_kn:.1} kN"), theme.text_secondary);
                         Self::render_kv_row(
                             ui,
                             theme,
-                            "Utilization (DCR) / ARI",
-                            &format!("{:.1}% / {:.3}", util * 100.0, ari),
+                            "P-M-V DCR / ARI / ϕPn",
+                            &format!("{:.1}% / {:.3} / {:.0}kN", util * 100.0, ari, cap_kn),
                             if util > 0.85 { theme.accent_red } else { theme.accent_green },
                         );
+                        if let Some(fid) = fem_id {
+                            ui.add_space(6.0);
+                            let elim = universal_canvas
+                                .earth_fem_cache
+                                .is_n1_removed(BimElementKind::Run, run_id)
+                                || build_view.simulated_eliminated_ids.contains(&fid);
+                            if icons::icon_button(
+                                ui,
+                                AppIcon::Bolt,
+                                if elim { "Restore N-1 Beam" } else { "Simulate N-1 Removal" },
+                                10.0,
+                                Color32::WHITE,
+                                if elim { theme.accent_green } else { theme.accent_red },
+                                Stroke::NONE,
+                                CornerRadius::same(7),
+                                Vec2::new(ui.available_width(), 24.0),
+                            )
+                            .clicked()
+                            {
+                                actions.toggle_n1_member = Some(fid);
+                            }
+                        }
                     }
                     SmartPopupTab::Lifecycle5D6D => {
                         let vol_m3 = len_m * (run.width_mm * 0.001) * (run.depth_mm * 0.001);
@@ -6412,9 +6820,47 @@ impl SpatialWorkspaceState {
                         }
                     }
                     SmartPopupTab::Calculations => {
+                        let wall_fem_id = universal_canvas
+                            .earth_fem_cache
+                            .fem_id(BimElementKind::Wall, wall_id);
+                        let wall_member =
+                            wall_fem_id.and_then(|fid| members.iter().find(|m| m.id == fid));
                         Self::render_kv_row(ui, theme, "Length x Height", &format!("{len_m:.2}m x {h_m:.2}m"), theme.text_primary);
                         Self::render_kv_row(ui, theme, "Structural Shear Role", if wall.is_structural { "Active Shear Wall" } else { "Architectural Partition" }, theme.accent_blue);
                         Self::render_kv_row(ui, theme, "Compound Layers", &format!("{} plies", wall.layers.len()), theme.text_secondary);
+                        if let Some(m) = wall_member {
+                            Self::render_kv_row(
+                                ui,
+                                theme,
+                                "Shear Strut DCR / ARI",
+                                &format!("{:.1}% / {:.3}", m.utilization * 100.0, m.ari),
+                                if m.utilization > 0.85 { theme.accent_red } else { theme.accent_green },
+                            );
+                        }
+                        if let Some(fid) = wall_fem_id {
+                            if wall.is_structural {
+                                ui.add_space(6.0);
+                                let elim = universal_canvas
+                                    .earth_fem_cache
+                                    .is_n1_removed(BimElementKind::Wall, wall_id)
+                                    || build_view.simulated_eliminated_ids.contains(&fid);
+                                if icons::icon_button(
+                                    ui,
+                                    AppIcon::Bolt,
+                                    if elim { "Restore N-1 Wall" } else { "Simulate N-1 Removal" },
+                                    10.0,
+                                    Color32::WHITE,
+                                    if elim { theme.accent_green } else { theme.accent_red },
+                                    Stroke::NONE,
+                                    CornerRadius::same(7),
+                                    Vec2::new(ui.available_width(), 24.0),
+                                )
+                                .clicked()
+                                {
+                                    actions.toggle_n1_member = Some(fid);
+                                }
+                            }
+                        }
                     }
                     SmartPopupTab::Lifecycle5D6D => {
                         let co2_kg = vol_m3 * 290.0;
@@ -7226,13 +7672,15 @@ impl SpatialWorkspaceState {
     }
 
     /// Renders a compact lens colorbar legend inside Dynamic Island whenever a structural
-    /// visualization lens (`DCR%`, `ARI`, `Moment/Force`, `4D`) is active.
+    /// visualization lens (`DCR%`, `ARI`, `Moment/Force`, `Deformed`, `Modal`, `4D`) is active.
     fn render_active_lens_colorbar_strip(
         &self,
         ui: &mut Ui,
         theme: &MacTheme,
         max_dcr: f64,
         min_ari: f64,
+        fem_cache: &crate::views::universal_canvas::EarthStructuralRenderCache,
+        active_modal_mode: usize,
         panel_w: f32,
     ) {
         if self.active_lens == SpatialLens::Clean {
@@ -7315,6 +7763,59 @@ impl SpatialWorkspaceState {
                                     .monospace()
                                     .color(theme.text_primary),
                             );
+                        }
+                        SpatialLens::DeformedShape => {
+                            ui.label(
+                                RichText::new("6-DOF Deformed:")
+                                    .size(9.3)
+                                    .strong()
+                                    .color(theme.text_secondary),
+                            );
+                            for (lbl, col) in [
+                                ("Low", Color32::from_rgb(208, 235, 225)),
+                                ("Mid", Color32::from_rgb(91, 146, 165)),
+                                ("High", Color32::from_rgb(245, 158, 11)),
+                                ("Peak Sway", Color32::from_rgb(244, 63, 94)),
+                            ] {
+                                ui.colored_label(col, RichText::new(format!("■ {lbl}")).size(9.2));
+                            }
+                            ui.label(
+                                RichText::new(format!(
+                                    "Δmax {:.1}mm • Drift {:.2}%",
+                                    fem_cache.max_disp_mm,
+                                    fem_cache.max_story_drift_ratio * 100.0
+                                ))
+                                .size(9.2)
+                                .monospace()
+                                .color(theme.text_primary),
+                            );
+                        }
+                        SpatialLens::ModalVibration => {
+                            ui.label(
+                                RichText::new("Modal Eigenmode:")
+                                    .size(9.3)
+                                    .strong()
+                                    .color(theme.text_secondary),
+                            );
+                            for (lbl, col) in [
+                                ("Node Base", Color32::from_rgb(208, 235, 225)),
+                                ("Mid Amp", Color32::from_rgb(91, 146, 165)),
+                                ("Peak Mode", Color32::from_rgb(244, 63, 94)),
+                            ] {
+                                ui.colored_label(col, RichText::new(format!("■ {lbl}")).size(9.2));
+                            }
+                            let slot = active_modal_mode.min(fem_cache.modal_modes.len().saturating_sub(1));
+                            if let Some(m) = fem_cache.modal_modes.get(slot) {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "M{} • T={:.2}s • f={:.2}Hz",
+                                        m.mode_number, m.period_s, m.frequency_hz
+                                    ))
+                                    .size(9.2)
+                                    .monospace()
+                                    .color(theme.text_primary),
+                                );
+                            }
                         }
                         SpatialLens::Erection4D => {
                             ui.label(
@@ -9161,7 +9662,11 @@ impl SpatialWorkspaceState {
                                 .filter(|b| b.is_critical())
                                 .count();
                             let (worst_target, max_dcr, min_ari, crit_cnt) =
-                                self.structural_health_summary(&build_view.bim_bus.project, members);
+                                self.structural_health_summary_cached(
+                                    &build_view.bim_bus.project,
+                                    members,
+                                    &universal_canvas.earth_fem_cache,
+                                );
                             let health_col = if max_dcr > 95.0 || min_ari < 0.65 {
                                 theme.accent_red
                             } else if max_dcr > 75.0 || min_ari < 0.78 {
@@ -9495,6 +10000,8 @@ impl SpatialWorkspaceState {
                                                 (SpatialLens::DcrHeatmap, "DCR%"),
                                                 (SpatialLens::AriRedundancy, "ARI"),
                                                 (SpatialLens::BendingMoment, "Moment"),
+                                                (SpatialLens::DeformedShape, "Deform"),
+                                                (SpatialLens::ModalVibration, "Modal"),
                                                 (SpatialLens::Erection4D, "4D"),
                                             ] {
                                                 if Self::glass_pill_button(
@@ -9524,6 +10031,8 @@ impl SpatialWorkspaceState {
                                             theme,
                                             max_dcr,
                                             min_ari,
+                                            &universal_canvas.earth_fem_cache,
+                                            universal_canvas.earth_bim_author.active_modal_mode,
                                             deck_w,
                                         );
                                     }
@@ -10402,6 +10911,7 @@ impl SpatialHudActions {
         if other.toggle_n1_member.is_some() {
             self.toggle_n1_member = other.toggle_n1_member;
         }
+        self.restore_n1_simulation |= other.restore_n1_simulation;
         self.run_auto_repair |= other.run_auto_repair;
         self.add_vault_folder |= other.add_vault_folder;
         if other.connect_indexeddb_vault.is_some() {
@@ -12762,5 +13272,190 @@ END-ISO-10303-21;\r\n";
             .auto_size_selected_element(&mut build)
             .expect("auto-size should succeed");
         assert!(build.bim_bus.project.columns[0].width_mm > orig_w);
+    }
+
+    #[test]
+    fn test_phase63_site_coupled_6dof_fem_modal_and_n1_disruption() {
+        let mut build = BuildView::default();
+        let _ = build.bim_bus.execute_natural_language("portal 3x2");
+        let mut high_site = crate::core::SiteEnvironmentalCoupling::default();
+        high_site.seismic_pga_ss_g = 1.25;
+        high_site.seismic_pga_s1_g = 0.55;
+        high_site.recommended_soil_class = "SD (Stiff Soil)".to_string();
+
+        let mut low_site = high_site.clone();
+        low_site.seismic_pga_ss_g = 0.25;
+        low_site.seismic_pga_s1_g = 0.10;
+        low_site.recommended_soil_class = "SB (Rock)".to_string();
+
+        let (fem_hi, map_hi, load_hi) =
+            build.bim_bus.project.to_structural_model_with_site_loads(&high_site);
+        let (_, _, load_lo) =
+            build.bim_bus.project.to_structural_model_with_site_loads(&low_site);
+
+        assert!(load_hi.total_gravity_kn > 50.0, "Gravity weight should be positive");
+        assert!(
+            load_hi.seismic_base_shear_kn > load_lo.seismic_base_shear_kn,
+            "High-seismic site ({:.1} kN) must produce greater base shear than rock site ({:.1} kN)",
+            load_hi.seismic_base_shear_kn,
+            load_lo.seismic_base_shear_kn
+        );
+        assert!(!map_hi.is_empty());
+
+        let fea = crate::core::FemSolver::solve(&fem_hi)
+            .expect("Site-coupled 6-DOF 3D frame should solve");
+        assert!(fea.max_displacement_mm > 0.01 && fea.max_displacement_mm.is_finite());
+        let any_nonzero_moment = fea
+            .member_bending_moments
+            .iter()
+            .any(|&(my, mz)| my.abs().max(mz.abs()) > 10.0);
+        assert!(any_nonzero_moment, "6-DOF solver must compute genuine non-zero bending moments");
+
+        // Dynamic Modal Eigenmodes (Modes 1..3)
+        let modal = crate::core::ModalEngine::analyze_for_earth_3d(&fem_hi, 3, load_hi.spectrum)
+            .expect("Earth 3D modal engine should succeed");
+        assert_eq!(modal.modes.len(), 3);
+        assert!(modal.modes[0].period_s > 0.01 && modal.modes[0].frequency_hz > 0.05);
+        assert_eq!(modal.modes[0].nodal_deformations.len(), fem_hi.nodes.len());
+
+        // Interactive N-1 Single-Member Removal on redundant portal column
+        let first_col_fid = map_hi
+            .iter()
+            .find(|&&(_, k, _)| k == BimElementKind::Column)
+            .map(|&(fid, _, _)| fid)
+            .expect("column FEM id");
+        let n1_rep =
+            crate::core::AriEngine::simulate_single_member_removal(&fem_hi, &fea, first_col_fid);
+        assert_eq!(n1_rep.removed_fem_id, first_col_fid);
+        assert!(n1_rep.post_max_disp_mm >= n1_rep.baseline_max_disp_mm * 0.99);
+        assert_eq!(n1_rep.post_nodal_displacements.len(), fem_hi.nodes.len());
+
+        // Determinate single cantilever column removal MUST trigger kinematic mechanism guard
+        let mut cant = crate::core::StructuralModel::new("Cantilever");
+        cant.add_node(
+            crate::core::Node3D::new(0, 0.0, 0.0, 0.0)
+                .with_fixity(crate::core::BoundaryFixity::fixed()),
+        );
+        cant.add_node(crate::core::Node3D::new(1, 0.0, 3.5, 0.0));
+        cant.add_element(
+            crate::core::Element3D::new(1, "C1", 0, 1)
+                .with_type(crate::core::ElementType::Frame3D)
+                .with_section(crate::core::CrossSection::rectangular_rc("RC 400x400", 0.4, 0.4, 0.7))
+                .with_material(crate::core::Material::reinforced_concrete_fc30()),
+        );
+        cant.add_load(crate::core::NodalLoad::force_y(1, -100_000.0));
+        let cant_base = crate::core::FemSolver::solve(&cant).expect("cantilever solves intact");
+        let cant_n1 = crate::core::AriEngine::simulate_single_member_removal(&cant, &cant_base, 1);
+        assert!(cant_n1.is_kinematic_mechanism);
+        assert_eq!(cant_n1.residual_ari, 0.0);
+    }
+
+    #[test]
+    fn test_phase63_earth_fem_cache_o1_lookup_and_slash_directives() {
+        let mut uc = UniversalCanvasState::default();
+        uc.earth_fem_cache.bim_to_fem.insert((BimElementKind::Column, 10), 1);
+        uc.earth_fem_cache.fem_to_bim.insert(1, (BimElementKind::Column, 10));
+        uc.earth_fem_cache.fem_to_member_idx.insert(1, 0);
+        uc.earth_fem_cache.node_coords_m = vec![[0.0, 0.0, 0.0], [5.0, 3.5, 2.0]];
+        uc.earth_fem_cache.static_nodal_disp_m = vec![[0.0, 0.0, 0.0], [0.010, -0.002, 0.004]];
+        uc.earth_fem_cache.max_disp_mm = 11.0;
+
+        let members = vec![StructuralMember {
+            id: 1,
+            name: "C10".to_string(),
+            utilization: 0.72,
+            ari: 0.84,
+            ..Default::default()
+        }];
+        let hit = uc
+            .earth_fem_cache
+            .member_for_bim(BimElementKind::Column, 10, &members)
+            .expect("O(1) lookup must resolve");
+        assert_eq!(hit.id, 1);
+
+        // Verify FEM (x, y_up, z) -> BIM (x_mm, y_mm, elev_m) coordinate mapping
+        let ([dx_mm, dy_mm, dz_m], norm) = uc.earth_fem_cache.sample_displacement_at_mm(
+            5000.0,
+            2000.0,
+            3.5,
+            crate::views::universal_canvas::EarthBimLens::DeformedShape,
+            20.0,
+            0,
+            0.0,
+            false,
+        );
+        assert!((dx_mm - 200.0).abs() < 1e-6, "Expected dx_mm=200, got {dx_mm}");
+        assert!((dy_mm - 80.0).abs() < 1e-6, "Expected dy_mm=80 (FEM dz), got {dy_mm}");
+        assert!((dz_m - (-0.04)).abs() < 1e-6, "Expected dz_m=-0.04 (FEM dy_up), got {dz_m}");
+        assert!(norm > 0.5);
+
+        // Verify slash commands & Gemini directives
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let mut db = Vec::new();
+        let _ = spatial.execute_spatial_input(
+            "/deform 45x",
+            &mut uc,
+            &mut build,
+            &mut ai,
+            &members,
+            &[],
+            &mut db,
+        );
+        assert_eq!(spatial.active_lens, SpatialLens::DeformedShape);
+        assert_eq!(
+            uc.earth_bim_author.active_lens,
+            crate::views::universal_canvas::EarthBimLens::DeformedShape
+        );
+        assert!((uc.earth_bim_author.deform_scale - 45.0).abs() < 1e-6);
+
+        let _ = spatial.execute_spatial_input(
+            "/modal 2",
+            &mut uc,
+            &mut build,
+            &mut ai,
+            &members,
+            &[],
+            &mut db,
+        );
+        assert_eq!(spatial.active_lens, SpatialLens::ModalVibration);
+        assert_eq!(uc.earth_bim_author.active_modal_mode, 1);
+
+        let n1_act = spatial.execute_spatial_input(
+            "/n1",
+            &mut uc,
+            &mut build,
+            &mut ai,
+            &members,
+            &[],
+            &mut db,
+        );
+        assert_eq!(n1_act.toggle_n1_member, Some(1));
+
+        let restore_act = spatial.execute_spatial_input(
+            "/restore",
+            &mut uc,
+            &mut build,
+            &mut ai,
+            &members,
+            &[],
+            &mut db,
+        );
+        assert!(restore_act.restore_n1_simulation);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Inspect sway [[LENS_DEFORM]] [[LENS_MODAL:3]] [[SIMULATE_N1:2]] [[RESTORE_N1]]",
+        );
+        assert_eq!(clean, "Inspect sway");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::ApplyDeformedLens,
+                GeminiDirective::ApplyModalLens(2),
+                GeminiDirective::SimulateN1(2),
+                GeminiDirective::RestoreN1,
+            ]
+        );
     }
 }

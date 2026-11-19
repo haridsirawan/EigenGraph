@@ -139,6 +139,46 @@ impl Material {
         }
     }
 
+    /// Standard structural reinforced concrete (f'c = 30 MPa, Ec = 4700*sqrt(30) ≈ 25.74 GPa).
+    pub fn reinforced_concrete_fc30() -> Self {
+        Self {
+            name: "Concrete fc' 30 MPa".to_string(),
+            elastic_modulus: 25.74e9, // 25.74 GPa (SNI 2847 / ACI 318)
+            poisson_ratio: 0.20,
+            yield_strength: 30.0e6, // 30 MPa nominal design strength
+            density: 2400.0,        // kg/m^3
+        }
+    }
+
+    /// Detects whether a section profile label refers to a hot-rolled or hollow steel section.
+    pub fn is_steel_profile(profile: &str) -> bool {
+        let up = profile.trim().to_ascii_uppercase();
+        up.starts_with("WF")
+            || up.starts_with("H-")
+            || up.starts_with("H ")
+            || up.starts_with("IPE")
+            || up.starts_with("HEA")
+            || up.starts_with("HEB")
+            || up.starts_with("UB")
+            || up.starts_with("UC")
+            || up.starts_with("W1")
+            || up.starts_with("W2")
+            || up.starts_with("W3")
+            || up.starts_with("BOX")
+            || up.starts_with("SHS")
+            || up.starts_with("RHS")
+            || up.contains("STEEL")
+    }
+
+    /// Resolves structural steel vs reinforced concrete material from a BIM section profile label.
+    pub fn from_profile_name(profile: &str) -> Self {
+        if Self::is_steel_profile(profile) {
+            Self::steel_q355()
+        } else {
+            Self::reinforced_concrete_fc30()
+        }
+    }
+
     pub fn shear_modulus(&self) -> f64 {
         self.elastic_modulus / (2.0 * (1.0 + self.poisson_ratio))
     }
@@ -163,6 +203,33 @@ impl Default for CrossSection {
 }
 
 impl CrossSection {
+    /// Constructs a solid rectangular reinforced-concrete cross-section with ACI 318 / SNI 2847
+    /// effective cracked moment-of-inertia modifier (`0.70` columns, `0.35` beams).
+    pub fn rectangular_rc(
+        name: impl Into<String>,
+        width_m: f64,
+        depth_m: f64,
+        cracked_i_factor: f64,
+    ) -> Self {
+        let b = width_m.clamp(0.08, 4.0);
+        let h = depth_m.clamp(0.08, 4.0);
+        let k_cr = cracked_i_factor.clamp(0.25, 1.0);
+        let area = b * h;
+        let iz = k_cr * (b * h.powi(3)) / 12.0;
+        let iy = k_cr * (h * b.powi(3)) / 12.0;
+        let short_dim = b.min(h);
+        let long_dim = b.max(h);
+        let j_torsion = k_cr * 0.141 * short_dim.powi(3) * long_dim;
+        Self {
+            name: name.into(),
+            area,
+            iy,
+            iz,
+            j_torsion,
+            depth: h,
+            width: b,
+        }
+    }
     pub fn wf_300x150() -> Self {
         Self {
             name: "WF 300x150x6.5x9".to_string(),

@@ -1,104 +1,86 @@
 <div align="center">
 
-<img src="assets/logo.png" width="380" alt="EigenGraph Logo" />
+<img src="assets/logo.png" width="360" alt="EigenGraph Logo" />
 
-# 🌐 EigenGraph Web Workstation
+# EigenGraph — Adjusted Redundancy Index (ARI) & Spatial Structural Analytics
 
-### High-Performance 10D BIM & Structural Graph Analytics Running Natively in WebAssembly (Rust + egui/eframe)
+### Doctoral Dissertation Reference Platform (Rust + WebAssembly / WebGL2)
 
 [![Live Web App](https://img.shields.io/badge/web%20app-eigengraph.net-0A84FF?style=for-the-badge&logo=cloudflare&logoColor=white)](https://eigengraph.net/)
-[![Core Engine](https://img.shields.io/badge/engine-Rust%20%2B%20WebAssembly%20(WebGL2)-orange?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/EigenGraph/EigenGraph)
+[![Version](https://img.shields.io/badge/version-v0.6.3%20(Phase%2063)-5B92A5?style=for-the-badge)](docs/CHANGELOG.md)
+[![Engine](https://img.shields.io/badge/engine-Rust%20%2B%20WebAssembly-orange?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/EigenGraph/EigenGraph)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue?style=for-the-badge)](LICENSE)
 
-*Full Rust/egui **EigenGraph** 10D BIM & Structural Mechanics Workstation compiled to WebAssembly (`wasm32-unknown-unknown`) via `eframe` and `Trunk`, with responsive navigation across Desktop, Tablet, and Mobile.*
-
-[**Launch EigenGraph Web App ↗**](https://eigengraph.net/) • [**Mirror (`www`) ↗**](https://www.eigengraph.net/)
+[**Launch Interactive Web Workstation ↗**](https://eigengraph.net/) • [**Mirror (`www`) ↗**](https://www.eigengraph.net/)
 
 </div>
 
-> [!IMPORTANT]
-> **Disclaimer**: *EigenGraph is an experimental computational engineering and BIM platform currently under active development. Features, architecture, and capabilities are subject to change.*
+---
+
+## Doctoral Dissertation Summary
+
+> **Title**: *Development and Validation of the Adjusted Redundancy Index for Pre-Analysis Screening of Element Damage Scenarios in Linear-Elastic Structures*
+>
+> **Author**: Harids Irawan, S.T., M.T.
+> **Program**: Doctoral Program in Engineering Science, Faculty of Engineering, Universitas Negeri Yogyakarta (2026)
+
+### Research Overview
+Exhaustive progressive-collapse and element-disruption assessment across large structural portfolios is computationally intensive—even when accelerated by Graph Neural Network (GNN) surrogates. This dissertation introduces and validates the **Adjusted Redundancy Index (ARI)** and **Criticality Index (CI)** as a mechanics-informed, intact-model pre-analysis screening framework for linear-elastic structures.
+
+Rather than relying on purely topological graph metrics, **ARI** combines stiffness- and capacity-weighted alternative load paths (deterministic edge-disjoint path aggregation) with initial utilization adjustments and a **three-channel formulation (`ARI v2`)** integrating kinematic stiffness reserve, cross-section capacity, and deformation control with convex weights $(w_k, w_c, w_d) = (0.25, 0.45, 0.30)$.
+
+### Key Validated Findings
+1. **Mathematical & Algorithmic Verification**: The ARI formulation satisfies canonical boundary axioms and achieved **100% pass rate (342/342 automated verification tests)** across deterministic edge-disjoint path searches and direct-stiffness benchmarks.
+2. **Epistemic Boundary of Graph Connectivity**: Canonical counterexamples demonstrated that graph connectivity and low topological `CI` alone do *not* guarantee structural stability—removing a zero-force member can still trigger stiffness-matrix rank deficiency (a kinematic mechanism).
+3. **Intact-Model Spectral Kinematic Guard**: Coupling ARI with an intact-model spectral/SVD kinematic guard successfully detected and forwarded **100% of mechanism-inducing disruptions** without distorting the underlying path-scoring formula.
+4. **Full-Scale Empirical Screening (`S1–S5`)**: Evaluated on an independent benchmark of **300 parent structural models** across five structural families (**7,640 element loss and degradation scenarios**) under strict conformal risk calibration and frozen blind testing, **`ARI v2`** achieved a **68.4% scenario reduction** while maintaining **100.0% safety recall** on all critical collapse scenarios.
+5. **Pairwise ARI–GNN Integration & Green AI**: Deploying `ARI v2` as a pre-analysis filter ahead of a trained surrogate Graph Neural Network (**`StructGNN-CRC v1.0`**) reduced net wall-clock computation time by **64.8%** compared to exhaustive GNN inference, substantially lowering computational energy demand and carbon emissions.
+
+**Keywords**: *Adjusted Redundancy Index (ARI)*, *Alternative Load Paths*, *Spectral Kinematic Guard*, *Progressive Collapse Screening*, *Graph Neural Networks (`StructGNN-CRC`)*, *Green AI*, *Structural Redundancy*.
 
 ---
 
-## 🏛️ Overview
+## EigenGraph Computational Platform (`v0.6.3`)
 
-**EigenGraph** (`EigenGraph/EigenGraph`) is a client-side **WebAssembly + WebGL2** 10D BIM and structural mechanics workstation compiled cleanly from Rust (`v0.5.9`, Phase 59 Streaming OpenStreetMap Overpass & GeoJSON Urban Vectors, Live Terrarium DEM Elevation TINs, Inter-Building Seismic Pounding / Wind Venturi / Collapse Halo Coupling, Interactive Vector-Snapped Relocation, Batch City Pinning & Expanded Multi-Action Gemini Tool Directives) and deployed automatically to **Cloudflare Workers**.
+**EigenGraph** operationalizes the dissertation's ARI & Spectral Kinematic Guard engines inside a client-side **Rust + WebAssembly (WebGL2)** spatial engineering workstation deployed to [eigengraph.net](https://eigengraph.net/):
 
-### 15 Engineering Modules
-1. **📁 Vault** — Project records, parametric component catalog, interactive HTML5 3D viewer & Markdown dossier browser downloads.
-2. **🤖 Agent** — Virtual engineering firm & multi-agent collaboration board.
-3. **💡 Planning** — Interactive 3D Google Earth / Slippy Map, WGS84/UTM geodetic CRS transformations, and DEM topographic TIN mesh.
-4. **📐 Drafting** — 2D vector CAD studio (`Plan`, `Section`, `Sheet 2D`, `Dynamo`), magnetic snaps, below-toolbar `Rebar BBS`, `Elevations & MEP Riser`, interactive `MEP Engineering Sizing`, and PDF/SVG/IFC4 exports.
-5. **🏗️ Geometry** — Clean 3D BIM spatial assembly with dedicated below-toolbar `Structural Analysis` sub-menu (`3D Diagrams & Heatmap`, `FEA Solver & N-1`, `Critical Check & -> Analysis`).
-6. **⚡ Analysis** — 3D FEM solver, Sherman-Morrison $O(N^2)$ linear ARI, Woodbury rank-2 ($N-2$) disruption screening, SVD kinematic mechanism guard, Earth-coupled hazard sync, pushover, nonlinear time-history, seismic isolation, geotech/SSI, blast, and fire engineering.
-7. **⏱️ Scheduling** — 4D phased erection timeline, CPM scheduling, S-Curve tracking, and Earth-aware **Site Daily Diary & Heavy Fleet Log**.
-8. **💰 Budgeting** — 5D cost heatmap, Quantity Take-Off (QTO), parametric BoQ, Earned Value (EVM), and **Procurement, IPC Claims & Variation Orders**.
-9. **🌱 Sustainability** — 6D solar heliodon sun-path analysis and cradle-to-gate embodied carbon LCA.
-10. **🏢 Facility** — 7D Digital Twin spatial asset tagging and telemetry logs.
-11. **🛡️ Safety** — 8D tower crane sweep envelopes and slab-edge hazard guards.
-12. **♻️ Construction** — 9D Lean material staging, 1D Cutting Stock Optimizer (CSO), Bar Bending Schedules (BBS), and **Field QA/QC Cylinder Lab, ITP, NCR & MEP T&C**.
-13. **🤖 Automation** — 10D DfMA modular prefabrication, OpenBIM IFC 4.3 STEP parser/editor, clash detection, model diff, and IDS validation.
-14. **🔮 Prediction** — Structural stress concentration forecasts and aging risk diagnostics.
-15. **📑 Report** — Living publishing suite for engineering docs, spreadsheets, and executive decks.
+- **ARI, Woodbury & Kinematic Guard Core** ([src/core/ari.rs](src/core/ari.rs)): Fast $O(N^2)$ Sherman-Morrison linear ARI, rank-2 Woodbury $N-2$ disruption screening, SVD spectral kinematic guard, and live interactive $N-1$ single-member removal simulation.
+- **Site-Coupled 6-DOF FEM & Dynamic Modal Engine** ([src/core/solver.rs](src/core/solver.rs), [src/core/modal.rs](src/core/modal.rs), [src/core/bim.rs](src/core/bim.rs)): 6-DOF 3D frame solver (axial, biaxial bending, shear, P-M-V LRFD envelopes, inter-story drift) coupled to Earth 3D SNI 1726 / ASCE 7 seismic spectra and animated 3D modal eigenmodes (`Mode 1–3`).
+- **Unified Earth 3D Spatial BIM & OpenBIM IFC4** ([src/views/universal_canvas.rs](src/views/universal_canvas.rs), [src/views/spatial_workspace.rs](src/views/spatial_workspace.rs)): Edge-to-edge 3D Earth globe with Liquid Glass Dynamic Island, streaming OSM/GeoJSON urban vectors, Terrarium DEM TIN topography, planetary multi-building registry, and georeferenced IFC4 round-trip support.
 
 ---
 
-## 📁 Repository Structure
+## Local Development & Verification
 
-```text
-EigenGraph/
-├── .github/workflows/deploy.yml   # Test, Trunk WASM build & Cloudflare Workers deploy
-├── assets/
-│   └── *.png                      # Web favicon & runtime app icons/logos
-├── docs/
-│   └── CHANGELOG.md               # Versioned changelog across development phases
-├── src/                           # Rust core mechanics, egui views, WebAssembly bridge
-├── Cargo.toml                     # Rust package manifest & dependencies
-├── Trunk.toml                     # WebAssembly build configuration
-├── wrangler.jsonc                 # Cloudflare Workers Static Assets deployment config
-└── index.html                     # Responsive HTML5 WebGL2 shell
-```
-
----
-
-## 💻 Local Development
-
-### Run as Full WebAssembly Web App
 ```bash
-# Install the WebAssembly Rust target and Trunk bundler
+# Add WebAssembly target and Trunk bundler
 rustup target add wasm32-unknown-unknown
 cargo install --locked trunk
 
-# Serve locally with live reload
+# Run locally with hot reload
 trunk serve --public-url / --open
-```
 
-### Run Automated Tests & Checks
-```bash
+# Verify Rust tests & WebAssembly compilation
 cargo test --lib
 cargo check --bin eigengraph --target wasm32-unknown-unknown
+trunk build --release --public-url /
 ```
 
 ---
 
-## 🚀 Continuous Deployment (Cloudflare Workers)
+## Documentation & Citation
 
-Every push to `main` triggers [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml):
-1. Runs `cargo test --lib` and verifies `cargo check --bin eigengraph --target wasm32-unknown-unknown`.
-2. Builds the optimized WebAssembly bundle with `trunk build --release --public-url /`.
-3. Deploys `./dist` via Wrangler to Cloudflare Workers (`eigengraph.net` and `www.eigengraph.net`).
+- [Changelog (`v0.0.1` – `v0.6.3`)](docs/CHANGELOG.md)
+- [Spatial UI Architecture Contract](docs/UI_ARCHITECTURE.md)
+- [Repository Guidelines](AGENTS.md)
 
----
+If you reference the **Adjusted Redundancy Index (ARI)** methodology or EigenGraph platform in academic work, please cite:
 
-## 📚 Documentation
-
-- [Changelog](docs/CHANGELOG.md)
-- [Agent & Architecture Guidelines](AGENTS.md)
+> Irawan, H. (2026). *Development and Validation of the Adjusted Redundancy Index for Pre-Analysis Screening of Element Damage Scenarios in Linear-Elastic Structures* [Doctoral Dissertation]. Doctoral Program in Engineering Science, Faculty of Engineering, Universitas Negeri Yogyakarta.
 
 ---
 
-## 📄 License
+## License
 
-Copyright © 2026 Harids Irawan.  
+Copyright © 2026 Harids Irawan.
 Dual-licensed under the [MIT License](LICENSE) and [Apache License 2.0](LICENSE).

@@ -439,6 +439,24 @@ impl BimSlab {
         }
         solid
     }
+
+    /// Computes net floor/roof slab plan area in square meters (`outer - openings`).
+    pub fn net_area_m2(&self) -> f64 {
+        let ring_area_mm2 = |pts: &[P2]| -> f64 {
+            if pts.len() < 3 {
+                return 0.0;
+            }
+            let mut sum = 0.0;
+            for i in 0..pts.len() {
+                let j = (i + 1) % pts.len();
+                sum += pts[i].0 * pts[j].1 - pts[j].0 * pts[i].1;
+            }
+            0.5 * sum.abs()
+        };
+        let outer = ring_area_mm2(&self.boundary);
+        let holes: f64 = self.openings.iter().map(|h| ring_area_mm2(h)).sum();
+        ((outer - holes).max(0.0)) * 1e-6
+    }
 }
 
 /// Automatically bounded Architectural Room (`IfcSpace`).
@@ -751,6 +769,18 @@ pub enum BimElementKind {
     Wall,
     Footing,
     Slab,
+}
+
+/// Summary of site-coupled gravity, seismic (SNI 1726 ELF), and wind lateral loads applied to the
+/// 6-DOF analytical model generated from [`BimProject::to_structural_model_with_site_loads`].
+#[derive(Clone, Debug)]
+pub struct SiteLoadSummary {
+    pub total_gravity_kn: f64,
+    pub seismic_base_shear_kn: f64,
+    pub wind_base_shear_kn: f64,
+    pub governing_lateral_kn: f64,
+    pub spectrum: crate::core::modal::Sni1726Spectrum,
+    pub load_case_label: String,
 }
 
 /// Complete Relational BIM Project Model with Transactional Undo/Redo History.
@@ -2116,6 +2146,336 @@ impl BimProject {
 
     pub fn to_structural_model(&self) -> StructuralModel {
         self.to_structural_model_with_map().0
+    }
+
+    /// Builds a site-coupled 6-DOF 3D Frame `StructuralModel` incorporating:
+    /// - True solid rectangular RC sections (`0.70 Ig` columns / `0.35 Ig` beams per ACI 318 / SNI 2847)
+    ///   for concrete members, or scaled structural steel sections for WF/H/IPE/BOX profiles.
+    /// - Member self-weight + floor slab tributary gravity loads (`DL + LL`) lumped to elevated story nodes.
+    /// - SNI 1726:2019 / ASCE 7-22 Equivalent Lateral Force (`ELF`) seismic shear (`Cs * W`) and
+    ///   site wind base shear (`qz * Cp * A`), distributed vertically by height (`Cvx = w_x * h_x^k / sum`)
+    ///   with `100% X + 30% Z` orthogonal directional coupling.
+    pub fn to_structural_model_with_site_loads(
+        &self,
+        site: &crate::core::SiteEnvironmentalCoupling,
+    ) -> (
+        StructuralModel,
+        Vec<(usize, BimElementKind, usize)>,
+        SiteLoadSummary,
+    ) {
+        let mut model = StructuralModel::new(self.project_name.clone());
+        let mut fem_map: Vec<(usize, BimElementKind, usize)> = Vec::new();
+        let tol_m = 0.05; // 50 mm node merging tolerance
+
+        let find_or_add_node = |m: &mut StructuralModel, x_m: f64, y_m: f64, z_m: f64| -> usize {
+            if let Some(existing) = m.nodes.iter().find(|n| {
+                (n.x - x_m).hypot(n.y - y_m).hypot(n.z - z_m) <= tol_m
+            }) {
+                return existing.id;
+            }
+            let id = m.nodes.len();
+            let mut node = Node3D::new(id, x_m, y_m, z_m);
+            if y_m.abs() <= 0.05 {
+                node.fixity = BoundaryFixity::fixed();
+            }
+            m.add_node(node);
+            id
+        };
+
+        let build_section_and_material = |profile: &str,
+                                          w_mm: f64,
+                                          d_mm: f64,
+                                          is_column: bool|
+         -> (CrossSection, Material) {
+            if Material::is_steel_profile(profile) {
+                let base = if is_column {
+                    CrossSection::wf_400x200()
+                } else {
+                    CrossSection::wf_300x150()
+                };
+                let (ref_w, ref_d) = if is_column { (400.0, 400.0) } else { (300.0, 550.0) };
+                let rw = (w_mm / ref_w).clamp(0.4, 4.0);
+                let rd = (d_mm / ref_d).clamp(0.4, 4.0);
+                let a_fac = rw * rd;
+                let i_fac = rw * rd.powi(3).max(rw.powi(3) * rd);
+                let sec = CrossSection {
+                    name: profile.to_string(),
+                    area: base.area * a_fac,
+                    iy: base.iy * (rd * rw.powi(2)),
+                    iz: base.iz * i_fac.max(a_fac),
+                    j_torsion: base.j_torsion * a_fac,
+                    depth: (d_mm * 1e-3).max(0.08),
+                    width: (w_mm * 1e-3).max(0.08),
+                };
+                (sec, Material::steel_q355())
+            } else {
+                let k_cr = if is_column { 0.70 } else { 0.35 };
+                let sec = CrossSection::rectangular_rc(
+                    profile,
+                    w_mm * 1e-3,
+                    d_mm * 1e-3,
+                    k_cr,
+                );
+                (sec, Material::reinforced_concrete_fc30())
+            }
+        };
+
+        let mut elem_id = 1usize;
+
+        // 1. Structural Columns
+        for c in &self.columns {
+            let z0_m = self.level_elevation(c.base_level_id) * 1e-3;
+            let z1_m = self.level_elevation(c.top_level_id) * 1e-3;
+            let x_m = c.pos.0 * 1e-3;
+            let y_m = c.pos.1 * 1e-3;
+            let n1 = find_or_add_node(&mut model, x_m, z0_m, y_m);
+            let n2 = find_or_add_node(&mut model, x_m, z1_m, y_m);
+            if n1 != n2 {
+                let (sec, mat) = build_section_and_material(&c.profile_name, c.width_mm, c.depth_mm, true);
+                let elem = Element3D::new(elem_id, c.name.clone(), n1, n2)
+                    .with_type(ElementType::Frame3D)
+                    .with_section(sec)
+                    .with_material(mat);
+                model.add_element(elem);
+                fem_map.push((elem_id, BimElementKind::Column, c.id));
+                elem_id += 1;
+            }
+        }
+
+        // 2. Structural Beams & Braces
+        for r in &self.runs {
+            if matches!(
+                r.category,
+                RunCategory::StructuralBeam | RunCategory::StructuralBrace
+            ) {
+                let elev = self.level_elevation(r.level_id);
+                let z0_m = (elev + r.start_offset_mm) * 1e-3;
+                let z1_m = (elev + r.end_offset_mm) * 1e-3;
+                let n1 = find_or_add_node(&mut model, r.start.0 * 1e-3, z0_m, r.start.1 * 1e-3);
+                let n2 = find_or_add_node(&mut model, r.end.0 * 1e-3, z1_m, r.end.1 * 1e-3);
+                if n1 != n2 {
+                    let (sec, mat) =
+                        build_section_and_material(&r.profile_name, r.width_mm, r.depth_mm, false);
+                    let elem = Element3D::new(elem_id, r.name.clone(), n1, n2)
+                        .with_type(ElementType::Frame3D)
+                        .with_section(sec)
+                        .with_material(mat);
+                    model.add_element(elem);
+                    fem_map.push((elem_id, BimElementKind::Run, r.id));
+                    elem_id += 1;
+                }
+            }
+        }
+
+        // 3. Structural Shear Walls -> Equivalent RC Diagonal Compression/Tension Struts
+        for w in &self.walls {
+            if w.is_structural {
+                let z0_m = self.level_elevation(w.base_level_id) * 1e-3;
+                let z1_m = w
+                    .top_level_id
+                    .map(|tid| self.level_elevation(tid) * 1e-3)
+                    .unwrap_or(z0_m + w.unconnected_height_mm * 1e-3);
+                let n_bl = find_or_add_node(&mut model, w.start.0 * 1e-3, z0_m, w.start.1 * 1e-3);
+                let n_br = find_or_add_node(&mut model, w.end.0 * 1e-3, z0_m, w.end.1 * 1e-3);
+                let n_tl = find_or_add_node(&mut model, w.start.0 * 1e-3, z1_m, w.start.1 * 1e-3);
+                let n_tr = find_or_add_node(&mut model, w.end.0 * 1e-3, z1_m, w.end.1 * 1e-3);
+                let t_m = (w.thickness_mm * 1e-3).clamp(0.12, 0.80);
+                let strut_w_m = (w.length_mm() * 1e-3 * 0.18).clamp(0.25, 1.2);
+                let wall_sec = CrossSection::rectangular_rc(
+                    format!("RC Wall {:.0}mm", w.thickness_mm),
+                    t_m,
+                    strut_w_m,
+                    0.50,
+                );
+                let wall_mat = Material::reinforced_concrete_fc30();
+
+                if n_bl != n_tr {
+                    let strut = Element3D::new(
+                        elem_id,
+                        format!("{} Shear Strut", w.name),
+                        n_bl,
+                        n_tr,
+                    )
+                    .with_type(ElementType::Frame3D)
+                    .with_section(wall_sec.clone())
+                    .with_material(wall_mat.clone());
+                    model.add_element(strut);
+                    fem_map.push((elem_id, BimElementKind::Wall, w.id));
+                    elem_id += 1;
+                }
+                if n_br != n_tl {
+                    let strut2 = Element3D::new(
+                        elem_id,
+                        format!("{} Counter Strut", w.name),
+                        n_br,
+                        n_tl,
+                    )
+                    .with_type(ElementType::Frame3D)
+                    .with_section(wall_sec)
+                    .with_material(wall_mat);
+                    model.add_element(strut2);
+                    fem_map.push((elem_id, BimElementKind::Wall, w.id));
+                    elem_id += 1;
+                }
+            }
+        }
+
+        // 4. Gravity Nodal Weights (Member Self-Weight + Floor Slab Tributary Dead/Live Load)
+        let n_nodes = model.nodes.len();
+        let mut node_weight_n = vec![0.0_f64; n_nodes];
+        let mut node_id_to_idx = std::collections::HashMap::with_capacity(n_nodes);
+        for (idx, n) in model.nodes.iter().enumerate() {
+            node_id_to_idx.insert(n.id, idx);
+        }
+
+        for elem in &model.elements {
+            if let (Some(&i1), Some(&i2)) = (
+                node_id_to_idx.get(&elem.start_node),
+                node_id_to_idx.get(&elem.end_node),
+            ) {
+                let len = model.nodes[i1].distance_to(&model.nodes[i2]);
+                let wt_n = elem.section.area * len * elem.material.density * 9.81;
+                node_weight_n[i1] += 0.5 * wt_n;
+                node_weight_n[i2] += 0.5 * wt_n;
+            }
+        }
+
+        // Distribute floor & roof slab loads (24 kN/m^3 * t + 1.5 kPa SDL + 2.5 kPa LL)
+        let mut slab_gravity_applied = false;
+        for sl in &self.slabs {
+            let area_m2 = sl.net_area_m2().max(0.0);
+            if area_m2 <= 0.1 {
+                continue;
+            }
+            let z_m = self.level_elevation(sl.level_id) * 1e-3;
+            let t_m = (sl.thickness_mm * 1e-3).clamp(0.10, 0.50);
+            let q_kpa = if sl.is_roof {
+                24.0 * t_m + 1.0 + 1.0 // roof dead + SDL + roof live
+            } else {
+                24.0 * t_m + 1.5 + 2.5 // floor dead + SDL + occupancy live
+            };
+            let total_slab_n = area_m2 * q_kpa * 1000.0;
+            let level_nodes: Vec<usize> = model
+                .nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| (n.y - z_m).abs() <= 0.35 && n.y > 0.4)
+                .map(|(idx, _)| idx)
+                .collect();
+            if !level_nodes.is_empty() {
+                let share = total_slab_n / level_nodes.len() as f64;
+                for idx in level_nodes {
+                    node_weight_n[idx] += share;
+                }
+                slab_gravity_applied = true;
+            }
+        }
+
+        let elevated_indices: Vec<usize> = model
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.y > 0.4)
+            .map(|(idx, _)| idx)
+            .collect();
+
+        // Fallback tributary gravity load when floor slabs have not been drawn yet
+        if !slab_gravity_applied {
+            for &idx in &elevated_indices {
+                node_weight_n[idx] += 85_000.0; // ~85 kN typical bay tributary gravity
+            }
+        } else {
+            for &idx in &elevated_indices {
+                node_weight_n[idx] = node_weight_n[idx].max(25_000.0);
+            }
+        }
+
+        let total_elev_weight_n: f64 = elevated_indices.iter().map(|&i| node_weight_n[i]).sum();
+        let total_gravity_kn = (total_elev_weight_n / 1000.0).max(0.0);
+
+        // 5. Site-Coupled SNI 1726:2019 / ASCE 7-22 ELF Seismic & Wind Lateral Forces
+        let site_class = crate::core::modal::SiteClass::from_soil_label(&site.recommended_soil_class);
+        let ss = (site.seismic_pga_ss_g as f64).clamp(0.08, 2.5);
+        let s1 = (site.seismic_pga_s1_g as f64).clamp(0.04, 1.5);
+        let spectrum = crate::core::modal::Sni1726Spectrum::new(site_class, ss, s1, 8.0, 1.0);
+
+        let max_h_m = model
+            .nodes
+            .iter()
+            .map(|n| n.y)
+            .fold(0.0_f64, f64::max)
+            .max(3.0);
+        let t_approx = (0.0466 * max_h_m.powf(0.9)).clamp(0.12, 4.0);
+        let cs = spectrum.seismic_coefficient(t_approx);
+        let seismic_base_shear_n = cs * total_elev_weight_n;
+
+        // Wind base shear from Earth site design wind speed V (m/s): q_z = 0.613 * Kz * V^2
+        let (mut min_x, mut max_x, mut min_z, mut max_z) =
+            (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        for n in &model.nodes {
+            min_x = min_x.min(n.x);
+            max_x = max_x.max(n.x);
+            min_z = min_z.min(n.z);
+            max_z = max_z.max(n.z);
+        }
+        let b_width = if min_z.is_finite() {
+            (max_z - min_z).max(max_x - min_x).max(4.0)
+        } else {
+            6.0
+        };
+        let v_wind = (site.design_wind_ms as f64).clamp(20.0, 75.0);
+        let qz_pa = 0.613 * 0.85 * v_wind * v_wind;
+        let wind_base_shear_n = qz_pa * 1.30 * b_width * max_h_m;
+
+        let governing_lateral_n = seismic_base_shear_n.max(wind_base_shear_n);
+        let load_case_label = if seismic_base_shear_n >= wind_base_shear_n {
+            format!(
+                "1.2D + 1.0E (SNI 1726 {:?}, Ss={:.2}g, Cs={:.3})",
+                site_class, ss, cs
+            )
+        } else {
+            format!("1.2D + 1.0W (Site V={:.0} m/s)", v_wind)
+        };
+
+        // Vertical ELF distribution factor Cvx = (w_x * h_x^k) / sum(w_i * h_i^k)
+        let k_exp = if t_approx <= 0.5 {
+            1.0
+        } else if t_approx >= 2.5 {
+            2.0
+        } else {
+            1.0 + 0.5 * (t_approx - 0.5)
+        };
+        let wh_sum: f64 = elevated_indices
+            .iter()
+            .map(|&i| node_weight_n[i] * model.nodes[i].y.max(0.5).powf(k_exp))
+            .sum::<f64>()
+            .max(1e-6);
+
+        for &idx in &elevated_indices {
+            let nid = model.nodes[idx].id;
+            let cvx = (node_weight_n[idx] * model.nodes[idx].y.max(0.5).powf(k_exp)) / wh_sum;
+            let lat_x = governing_lateral_n * cvx;
+            let lat_z = 0.30 * lat_x; // SNI 1726 orthogonal 100% + 30% seismic/wind combination
+            model.add_load(NodalLoad {
+                node_id: nid,
+                fx: lat_x,
+                fy: -node_weight_n[idx],
+                fz: lat_z,
+                mx: 0.0,
+                my: 0.0,
+                mz: 0.0,
+            });
+        }
+
+        let summary = SiteLoadSummary {
+            total_gravity_kn,
+            seismic_base_shear_kn: seismic_base_shear_n / 1000.0,
+            wind_base_shear_kn: wind_base_shear_n / 1000.0,
+            governing_lateral_kn: governing_lateral_n / 1000.0,
+            spectrum,
+            load_case_label,
+        };
+        (model, fem_map, summary)
     }
 
     /// Resolves the analytical FEM element ID corresponding to a physical BIM element.

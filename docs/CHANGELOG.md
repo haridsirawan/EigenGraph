@@ -7,6 +7,23 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.6.3] - 2026-11-19 — Phase 63: True 6-DOF Site-Coupled FEM on Earth 3D, O(1) Cached BIM-FEM Lookup, Live Deformed & Animated Modal Eigenmodes, Interactive N-1 Disruption & Dissertation README
+
+### Added & Changed
+- **O(1) Cached BIM-to-FEM Lookup & Frame Render Acceleration (`src/views/universal_canvas.rs`, `src/views/spatial_workspace.rs`)**:
+  - Added `EarthStructuralRenderCache` (`bim_to_fem`, `fem_to_bim`, `fem_to_member_idx`) keyed by `BimProject::content_revision_hash`, eliminating all per-frame `to_structural_model_with_map()` rebuilds across 2D/3D lens rendering, force diagrams, `structural_health_summary_cached`, and Smart Element Pop-Up queries ($O(E^3) \to O(E)$ per frame).
+- **True 6-DOF Site-Coupled FEM & Realistic RC/Steel Section Mechanics (`src/core/model.rs`, `src/core/bim.rs`, `src/core/modal.rs`, `src/app.rs`)**:
+  - Added `Material::reinforced_concrete_fc30()`, `Material::is_steel_profile()`, `CrossSection::rectangular_rc()` (with ACI 318 / SNI 2847 effective cracked stiffness modifiers `0.70 Ig` columns / `0.35 Ig` beams), `BimSlab::net_area_m2()`, `SiteClass::from_soil_label()`, and `BimProject::to_structural_model_with_site_loads()` coupling member self-weight, floor slab tributary gravity loads, and SNI 1726:2019 / ASCE 7-22 ELF height-distributed seismic (`Cs * W`, `Cvx`) + site wind shear directly to the Earth 3D coordinate.
+  - Upgraded `EigenGraphApp::sync_bim_to_fem()` to extract exact 6-DOF `FemSolver::solve` axial forces (`N`), bending moments (`My`, `Mz`), shear forces (`Vy`), `P-M-V` DCR interactions, nodal displacements, inter-story drift ratio, and LRFD governing load combination envelopes rather than heuristic moment/shear proxies.
+- **Live 3D Deformed Shape, Animated Modal Eigenmodes & Interactive N-1 Disruption on Earth 3D (`src/core/modal.rs`, `src/core/ari.rs`, `src/views/universal_canvas.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Added `ModalEngine::analyze_for_earth_3d` (full 6-DOF inverse-power eigenproblem with seamless analytical continuum fallback for large IFC towers) and `AriEngine::simulate_single_member_removal` (`N1SimulationReport` with SVD spectral kinematic mechanism detection).
+  - Added `EarthBimLens::{DeformedShape, ModalVibration}` and `SpatialLens::{DeformedShape, ModalVibration}` (`Deform` & `Modal` pills in Dynamic Island `View & Lens`, amplification scale slider `1x–150x`, `M1/M2/M3` mode switcher, `Play/Pause`, live `Δmax / Drift% / T / f / Mx%` apex badges, and undeformed reference ghost wireframes).
+  - Upgraded interactive **`Simulate N-1`** across Columns, Beams, and Structural Shear Walls inside the Smart Element Pop-Up and Dynamic Island status strip (`Restore`, crimson dashed removed-member ghost, post-disruption DCR% heatmap, newly critical load-path redistribution highlight, and `/deform`, `/modal`, `/n1`, `/restore` slash commands + Gemini directives `[[LENS_DEFORM]]`, `[[LENS_MODAL:...]]`, `[[SIMULATE_N1:...]]`, `[[RESTORE_N1]]`).
+- **Dissertation Research Overview (`README.md`)**:
+  - Updated repository `README.md` with a concise, publication-grade English summary of Harids Irawan's 2026 Doctoral Dissertation on the Adjusted Redundancy Index (ARI) and how EigenGraph implements the framework interactively in Rust + WebAssembly.
+
+---
+
 ## [v0.6.2] - 2026-11-18 — Phase 62: Coastal Marine Teal Frosted Glass Palette, Unified Dynamic Island Active Lens & Manual Tool Strip, 1-Click Story Cloning, Subsurface 3D Pile Caps & Full Smart Pop-Up Engineering Diagrams
 
 ### Added & Changed

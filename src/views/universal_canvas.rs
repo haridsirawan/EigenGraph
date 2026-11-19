@@ -369,7 +369,7 @@ pub enum EarthBimTool {
     Window,
 }
 
-/// Phase 55: Structural visualization overlay rendered directly over 3D BIM buildings on Earth 3D.
+/// Phase 55–63: Structural visualization overlay rendered directly over 3D BIM buildings on Earth 3D.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EarthBimLens {
     #[default]
@@ -377,6 +377,8 @@ pub enum EarthBimLens {
     DcrHeatmap,
     AriRedundancy,
     MomentStress,
+    DeformedShape,
+    ModalVibration,
     Erection4D,
 }
 
@@ -397,6 +399,9 @@ pub struct EarthBimAuthorConfig {
     pub wall_thickness_mm: f64,
     pub footing_size_mm: f64,
     pub erection_day_limit: usize,
+    pub deform_scale: f64,
+    pub active_modal_mode: usize,
+    pub modal_anim_playing: bool,
     pub pending_start_mm: Option<[f64; 2]>,
     pub hover_snap_mm: Option<[f64; 2]>,
 }
@@ -418,9 +423,190 @@ impl Default for EarthBimAuthorConfig {
             wall_thickness_mm: 200.0,
             footing_size_mm: 1800.0,
             erection_day_limit: 999,
+            deform_scale: 30.0,
+            active_modal_mode: 0,
+            modal_anim_playing: true,
             pending_start_mm: None,
             hover_snap_mm: None,
         }
+    }
+}
+
+/// Active interactive single-member (`N-1`) disruption simulation overlay state on Earth 3D.
+#[derive(Debug, Clone)]
+pub struct EarthN1OverlayState {
+    pub removed_kind: crate::core::BimElementKind,
+    pub removed_bim_id: usize,
+    pub removed_fem_id: usize,
+    pub removed_name: String,
+    pub report: crate::core::ari::N1SimulationReport,
+}
+
+/// Phase 63: O(1) cached BIM-to-FEM lookup tables, true 6-DOF displacements, dynamic eigenmodes,
+/// and interactive `N-1` disruption state keyed by `BimProject::content_revision_hash`.
+/// Eliminates per-frame `to_structural_model_with_map()` rebuilds on Earth 3D.
+#[derive(Debug, Clone, Default)]
+pub struct EarthStructuralRenderCache {
+    pub bim_revision_hash: u64,
+    pub bim_to_fem: std::collections::HashMap<(crate::core::BimElementKind, usize), usize>,
+    pub fem_to_bim: std::collections::HashMap<usize, (crate::core::BimElementKind, usize)>,
+    pub fem_to_member_idx: std::collections::HashMap<usize, usize>,
+    pub node_coords_m: Vec<[f64; 3]>,
+    pub static_nodal_disp_m: Vec<[f64; 3]>,
+    pub max_disp_mm: f64,
+    pub max_story_drift_ratio: f64,
+    pub governing_combo: String,
+    pub load_case_label: String,
+    pub seismic_base_shear_kn: f64,
+    pub wind_base_shear_kn: f64,
+    pub total_gravity_kn: f64,
+    pub modal_modes: Vec<crate::core::modal::ModeShape>,
+    pub cached_fem_model: Option<crate::core::StructuralModel>,
+    pub cached_baseline_analysis: Option<crate::core::AnalysisResult>,
+    pub n1_simulation: Option<EarthN1OverlayState>,
+}
+
+impl EarthStructuralRenderCache {
+    pub fn clear(&mut self) {
+        self.bim_revision_hash = 0;
+        self.bim_to_fem.clear();
+        self.fem_to_bim.clear();
+        self.fem_to_member_idx.clear();
+        self.node_coords_m.clear();
+        self.static_nodal_disp_m.clear();
+        self.max_disp_mm = 0.0;
+        self.max_story_drift_ratio = 0.0;
+        self.governing_combo.clear();
+        self.load_case_label.clear();
+        self.seismic_base_shear_kn = 0.0;
+        self.wind_base_shear_kn = 0.0;
+        self.total_gravity_kn = 0.0;
+        self.modal_modes.clear();
+        self.cached_fem_model = None;
+        self.cached_baseline_analysis = None;
+        self.n1_simulation = None;
+    }
+
+    #[inline]
+    pub fn fem_id(&self, kind: crate::core::BimElementKind, bim_id: usize) -> Option<usize> {
+        self.bim_to_fem.get(&(kind, bim_id)).copied()
+    }
+
+    #[inline]
+    pub fn bim_ref(&self, fem_id: usize) -> Option<(crate::core::BimElementKind, usize)> {
+        self.fem_to_bim.get(&fem_id).copied()
+    }
+
+    #[inline]
+    pub fn member_for_bim<'a>(
+        &self,
+        kind: crate::core::BimElementKind,
+        bim_id: usize,
+        members: &'a [StructuralMember],
+    ) -> Option<&'a StructuralMember> {
+        let fid = self.fem_id(kind, bim_id)?;
+        let idx = *self.fem_to_member_idx.get(&fid)?;
+        members.get(idx).filter(|m| m.id == fid)
+    }
+
+    /// Returns whether a given physical BIM element is currently virtually removed in an active `N-1` test.
+    #[inline]
+    pub fn is_n1_removed(&self, kind: crate::core::BimElementKind, bim_id: usize) -> bool {
+        self.n1_simulation
+            .as_ref()
+            .is_some_and(|s| s.removed_kind == kind && s.removed_bim_id == bim_id)
+    }
+
+    /// Samples visual 3D displacement `([dx_mm, dy_mm, dz_elev_m], norm_mag_0_1)` at a BIM point
+    /// `(x_mm, y_mm, elev_m)` for `DeformedShape`, `ModalVibration`, or active `N-1` disruption.
+    #[allow(clippy::too_many_arguments)]
+    pub fn sample_displacement_at_mm(
+        &self,
+        x_mm: f64,
+        y_mm: f64,
+        elev_m: f64,
+        lens: EarthBimLens,
+        deform_scale: f64,
+        mode_idx: usize,
+        anim_time_s: f64,
+        anim_playing: bool,
+    ) -> ([f64; 3], f64) {
+        if self.node_coords_m.is_empty() || elev_m.abs() < 0.06 {
+            return ([0.0, 0.0, 0.0], 0.0);
+        }
+        let n1_active = self.n1_simulation.is_some();
+        let use_modal = lens == EarthBimLens::ModalVibration && !self.modal_modes.is_empty();
+        let use_deformed = lens == EarthBimLens::DeformedShape || n1_active;
+        if !use_modal && !use_deformed {
+            return ([0.0, 0.0, 0.0], 0.0);
+        }
+
+        // FEM coordinate convention: (x = BIM x_m, y = BIM elev_m, z = BIM y_m)
+        let qx = x_mm * 1e-3;
+        let qy = elev_m;
+        let qz = y_mm * 1e-3;
+
+        // Locate closest FEM node (prefer same story elevation band)
+        let mut best_idx = 0usize;
+        let mut best_d2 = f64::INFINITY;
+        for (idx, nc) in self.node_coords_m.iter().enumerate() {
+            let dy_band = (nc[1] - qy).abs();
+            let d2 = (nc[0] - qx).powi(2) + (dy_band * 3.0).powi(2) + (nc[2] - qz).powi(2);
+            if d2 < best_d2 {
+                best_d2 = d2;
+                best_idx = idx;
+            }
+        }
+        // Only apply deformation if node is within reasonable building proximity
+        if best_d2 > 225.0 {
+            return ([0.0, 0.0, 0.0], 0.0);
+        }
+
+        let max_visual_m = 2.4;
+        if use_modal {
+            let m_slot = mode_idx.min(self.modal_modes.len().saturating_sub(1));
+            let mode = &self.modal_modes[m_slot];
+            let raw = mode
+                .nodal_deformations
+                .get(best_idx)
+                .copied()
+                .unwrap_or([0.0, 0.0, 0.0]);
+            // Readable visual oscillation frequency mapped gently from natural frequency
+            let vis_hz = (0.55 + (mode.frequency_hz.clamp(0.2, 8.0) / 8.0) * 1.15).clamp(0.55, 1.70);
+            let phase = if anim_playing {
+                (anim_time_s * 2.0 * std::f64::consts::PI * vis_hz).sin()
+            } else {
+                1.0
+            };
+            let amp_m = (0.18 + 0.011 * deform_scale).clamp(0.15, 1.85) * phase;
+            let dx_m = (raw[0] * amp_m).clamp(-max_visual_m, max_visual_m);
+            let dy_elev_m = (raw[1] * amp_m).clamp(-max_visual_m, max_visual_m);
+            let dz_m = (raw[2] * amp_m).clamp(-max_visual_m, max_visual_m);
+            let norm_mag = (raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2])
+                .sqrt()
+                .clamp(0.0, 1.0);
+            return ([dx_m * 1000.0, dz_m * 1000.0, dy_elev_m], norm_mag);
+        }
+
+        // Static 6-DOF Deformed Shape (or post-disruption N-1 deflected shape)
+        let (disp_slice, peak_mm) = if let Some(ref n1) = self.n1_simulation {
+            (&n1.report.post_nodal_displacements, n1.report.post_max_disp_mm.max(1.0))
+        } else {
+            (&self.static_nodal_disp_m, self.max_disp_mm.max(1.0))
+        };
+        let raw = disp_slice.get(best_idx).copied().unwrap_or([0.0, 0.0, 0.0]);
+        let eff_scale = if lens == EarthBimLens::DeformedShape {
+            deform_scale.clamp(1.0, 150.0)
+        } else {
+            // Subtle readable deflection overlay when N-1 is active on DCR/ARI/Clean lenses
+            (deform_scale * 0.45).clamp(4.0, 45.0)
+        };
+        let dx_m = (raw[0] * eff_scale).clamp(-max_visual_m, max_visual_m);
+        let dy_elev_m = (raw[1] * eff_scale).clamp(-max_visual_m, max_visual_m);
+        let dz_m = (raw[2] * eff_scale).clamp(-max_visual_m, max_visual_m);
+        let mag_mm = (raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2]).sqrt() * 1000.0;
+        let norm_mag = (mag_mm / peak_mm).clamp(0.0, 1.0);
+        ([dx_m * 1000.0, dz_m * 1000.0, dy_elev_m], norm_mag)
     }
 }
 
@@ -513,6 +699,8 @@ pub struct UniversalCanvasState {
     pub neighborhood_report: crate::core::gis::NeighborhoodAuditReport,
     pub show_neighborhood_hazards: bool,
     pub active_vector_snap_az_deg: Option<f64>,
+    // Phase 63: O(1) Cached BIM-FEM Lookup, True 6-DOF Displacements, Modal Eigenmodes & N-1 Disruption
+    pub earth_fem_cache: EarthStructuralRenderCache,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -605,6 +793,7 @@ impl Default for UniversalCanvasState {
             neighborhood_report: crate::core::gis::NeighborhoodAuditReport::default(),
             show_neighborhood_hazards: true,
             active_vector_snap_az_deg: None,
+            earth_fem_cache: EarthStructuralRenderCache::default(),
         }
     }
 }
@@ -5642,9 +5831,9 @@ impl UniversalCanvasState {
                 let col = if is_sel {
                     Color32::from_rgb(56, 189, 248)
                 } else if active_pillar == NavigationPillar::AnalysisSimulation {
-                    let util = bim_project
-                        .fem_id_for_bim_element(crate::core::BimElementKind::Run, run.id)
-                        .and_then(|fid| members.iter().find(|m| m.id == fid))
+                    let util = self
+                        .earth_fem_cache
+                        .member_for_bim(crate::core::BimElementKind::Run, run.id, members)
                         .map(|m| m.utilization)
                         .unwrap_or(0.45);
                     if util >= 0.85 {
@@ -5697,9 +5886,9 @@ impl UniversalCanvasState {
                 let fill = if is_sel {
                     Color32::from_rgb(56, 189, 248)
                 } else if active_pillar == NavigationPillar::AnalysisSimulation {
-                    let util = bim_project
-                        .fem_id_for_bim_element(crate::core::BimElementKind::Column, col.id)
-                        .and_then(|fid| members.iter().find(|m| m.id == fid))
+                    let util = self
+                        .earth_fem_cache
+                        .member_for_bim(crate::core::BimElementKind::Column, col.id, members)
                         .map(|m| m.utilization)
                         .unwrap_or(0.45);
                     if util >= 0.85 {
@@ -5737,7 +5926,7 @@ impl UniversalCanvasState {
             }
         }
 
-        // 6. Phase 55: Full 3D Extruded BIM Architecture, Structural Lenses & Ghost Authoring directly on Earth 3D
+        // 6. Phase 55–63: Full 3D Extruded BIM Architecture, O(1) Structural Lenses, Deformed/Modal Animation & N-1 Disruption on Earth 3D
         if self.globe_mode
             && (self.ground_origin_anchored
                 || !bim_project.is_empty()
@@ -5745,24 +5934,97 @@ impl UniversalCanvasState {
         {
             if let Some(ref xf) = self.last_globe_xform {
                 let lift_scale = if self.world_map.zoom_level < 14.5 { 8.0 } else { 1.0 };
+                let active_lens = self.earth_bim_author.active_lens;
+                let deform_scale = self.earth_bim_author.deform_scale;
+                let modal_idx = self.earth_bim_author.active_modal_mode;
+                let modal_playing = self.earth_bim_author.modal_anim_playing;
+                let n1_active = self.earth_fem_cache.n1_simulation.is_some();
+                let deform_visual_active = matches!(
+                    active_lens,
+                    EarthBimLens::DeformedShape | EarthBimLens::ModalVibration
+                ) || n1_active;
+
+                let anim_time_s = if active_lens == EarthBimLens::ModalVibration {
+                    if modal_playing {
+                        clip_painter.ctx().request_repaint();
+                    }
+                    clip_painter.ctx().input(|i| i.time)
+                } else {
+                    0.0
+                };
+
                 let proj_mm = |x_mm: f64, y_mm: f64, elev_m: f64| -> Option<Pos2> {
                     self.project_active_bim_mm(xf, x_mm, y_mm, elev_m, lift_scale)
                 };
+                let proj_def_mm = |x_mm: f64, y_mm: f64, elev_m: f64| -> Option<Pos2> {
+                    if !deform_visual_active {
+                        return self.project_active_bim_mm(xf, x_mm, y_mm, elev_m, lift_scale);
+                    }
+                    let ([dx_mm, dy_mm, dz_m], _) = self.earth_fem_cache.sample_displacement_at_mm(
+                        x_mm,
+                        y_mm,
+                        elev_m,
+                        active_lens,
+                        deform_scale,
+                        modal_idx,
+                        anim_time_s,
+                        modal_playing,
+                    );
+                    self.project_active_bim_mm(
+                        xf,
+                        x_mm + dx_mm,
+                        y_mm + dy_mm,
+                        (elev_m + dz_m).max(-6.0),
+                        lift_scale,
+                    )
+                };
+
+                let disp_gradient_color = |norm: f64| -> Color32 {
+                    let t = norm.clamp(0.0, 1.0);
+                    if t >= 0.78 {
+                        Color32::from_rgb(244, 63, 94) // Crimson peak sway
+                    } else if t >= 0.48 {
+                        Color32::from_rgb(245, 158, 11) // Amber mid-high sway
+                    } else if t >= 0.22 {
+                        Color32::from_rgb(91, 146, 165) // Coastal Teal moderate sway
+                    } else {
+                        Color32::from_rgb(208, 235, 225) // Seafoam Mint base/low sway
+                    }
+                };
+
                 let lens_color = |kind: crate::core::BimElementKind,
                                   id: usize,
                                   level_idx: usize,
                                   default_col: Color32,
-                                  is_sel: bool| -> Color32 {
+                                  is_sel: bool,
+                                  disp_norm: f64| -> Color32 {
                     if is_sel {
                         return Color32::from_rgb(56, 189, 248);
                     }
-                    let mem_opt = bim_project
-                        .fem_id_for_bim_element(kind, id)
-                        .and_then(|fid| members.iter().find(|m| m.id == fid));
-                    match self.earth_bim_author.active_lens {
+                    // Interactive N-1 disruption override: highlight redistributed load paths & newly critical members
+                    if let Some(ref n1) = self.earth_fem_cache.n1_simulation {
+                        if let Some(fid) = self.earth_fem_cache.fem_id(kind, id) {
+                            if n1.report.newly_critical_fem_ids.contains(&fid) {
+                                return Color32::from_rgb(244, 63, 94);
+                            }
+                            if let Some(&post_dcr) = n1.report.post_member_dcr.get(&fid) {
+                                return if post_dcr >= 0.85 {
+                                    theme.accent_red
+                                } else if post_dcr >= 0.65 {
+                                    theme.accent_orange
+                                } else {
+                                    theme.accent_green
+                                };
+                            }
+                        }
+                    }
+                    let mem_opt = self.earth_fem_cache.member_for_bim(kind, id, members);
+                    match active_lens {
                         EarthBimLens::Clean => default_col,
                         EarthBimLens::DcrHeatmap => {
-                            let u = mem_opt.map(|m| m.utilization).unwrap_or(0.40);
+                            let u = mem_opt
+                                .map(|m| m.dcr_interaction.max(m.utilization))
+                                .unwrap_or(0.40);
                             if u >= 0.85 || mem_opt.is_some_and(|m| m.is_critical) {
                                 theme.accent_red
                             } else if u >= 0.65 {
@@ -5793,6 +6055,9 @@ impl UniversalCanvasState {
                                 Color32::from_rgb(129, 140, 248)
                             }
                         }
+                        EarthBimLens::DeformedShape | EarthBimLens::ModalVibration => {
+                            disp_gradient_color(disp_norm)
+                        }
                         EarthBimLens::Erection4D => {
                             if level_idx == 0 {
                                 Color32::from_rgb(16, 185, 129)
@@ -5813,6 +6078,36 @@ impl UniversalCanvasState {
                 let show_on_story = |lvl: usize| -> bool { !isolate || lvl == active_lvl_id };
                 let sec_active = self.earth_bim_author.section_cut_active;
                 let sec_elev = self.earth_bim_author.section_cut_elev_m;
+
+                // 6.0 Undeformed Reference Ghost Wireframe when Deformed / Modal / N-1 Disruption is active
+                if deform_visual_active {
+                    let ghost_stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(208, 235, 225, 62));
+                    for col in &bim_project.columns {
+                        if isolate && col.base_level_id != active_lvl_id && col.top_level_id != active_lvl_id {
+                            continue;
+                        }
+                        let b_m = bim_project.level_elevation(col.base_level_id) * 0.001;
+                        let t_m = bim_project.level_elevation(col.top_level_id) * 0.001;
+                        if let (Some(g0), Some(g1)) = (
+                            proj_mm(col.pos.0, col.pos.1, b_m),
+                            proj_mm(col.pos.0, col.pos.1, t_m),
+                        ) {
+                            clip_painter.line_segment([g0, g1], ghost_stroke);
+                        }
+                    }
+                    for run in &bim_project.runs {
+                        if isolate && run.level_id != active_lvl_id && run.level_id != active_top_id {
+                            continue;
+                        }
+                        let e_m = bim_project.level_elevation(run.level_id) * 0.001;
+                        if let (Some(g0), Some(g1)) = (
+                            proj_mm(run.start.0, run.start.1, e_m),
+                            proj_mm(run.end.0, run.end.1, e_m),
+                        ) {
+                            clip_painter.line_segment([g0, g1], ghost_stroke);
+                        }
+                    }
+                }
 
                 // 6A. Subsurface 3D Foundation Pads / Pile Caps & Deep Foundation Pile Shafts
                 for ft in &bim_project.footings {
@@ -5913,7 +6208,7 @@ impl UniversalCanvasState {
                     let pts: Vec<Pos2> = sl
                         .boundary
                         .iter()
-                        .filter_map(|p| proj_mm(p.0, p.1, z_m))
+                        .filter_map(|p| proj_def_mm(p.0, p.1, z_m))
                         .collect();
                     if pts.len() >= 3 && pts.iter().any(|p| rect.expand(60.0).contains(*p)) {
                         let fill = if is_sel {
@@ -5951,17 +6246,61 @@ impl UniversalCanvasState {
                     }
                     let wall_sliced = sec_active && raw_z1 > sec_elev + 0.01;
                     let z1 = if wall_sliced { sec_elev } else { raw_z1 };
+                    let wall_n1_removed = self
+                        .earth_fem_cache
+                        .is_n1_removed(crate::core::BimElementKind::Wall, w.id);
                     if let (Some(b0), Some(b1), Some(t1), Some(t0)) = (
-                        proj_mm(w.start.0, w.start.1, z0),
-                        proj_mm(w.end.0, w.end.1, z0),
-                        proj_mm(w.end.0, w.end.1, z1),
-                        proj_mm(w.start.0, w.start.1, z1),
+                        proj_def_mm(w.start.0, w.start.1, z0),
+                        proj_def_mm(w.end.0, w.end.1, z0),
+                        proj_def_mm(w.end.0, w.end.1, z1),
+                        proj_def_mm(w.start.0, w.start.1, z1),
                     ) {
                         if [b0, b1, t1, t0].iter().any(|p| rect.expand(60.0).contains(*p)) {
+                            if wall_n1_removed {
+                                let rem_stroke = Stroke::new(2.0, Color32::from_rgb(244, 63, 94));
+                                clip_painter.add(egui::Shape::convex_polygon(
+                                    vec![b0, b1, t1, t0],
+                                    Color32::from_rgba_unmultiplied(244, 63, 94, 34),
+                                    rem_stroke,
+                                ));
+                                clip_painter.line_segment([b0, t1], rem_stroke);
+                                clip_painter.line_segment([b1, t0], rem_stroke);
+                                let mid = Pos2::new((t0.x + t1.x) * 0.5, (t0.y + t1.y) * 0.5 - 6.0);
+                                let mech = self
+                                    .earth_fem_cache
+                                    .n1_simulation
+                                    .as_ref()
+                                    .is_some_and(|s| s.report.is_kinematic_mechanism);
+                                clip_painter.text(
+                                    mid,
+                                    Align2::CENTER_BOTTOM,
+                                    if mech { "✕ N-1 MECHANISM" } else { "✕ N-1 REMOVED" },
+                                    egui::FontId::monospace(9.5),
+                                    Color32::from_rgb(253, 164, 175),
+                                );
+                                continue;
+                            }
                             let base_wall_col = if is_sel {
                                 Color32::from_rgb(56, 189, 248)
                             } else if w.is_structural {
-                                Color32::from_rgb(112, 130, 156)
+                                let (_, d_norm) = self.earth_fem_cache.sample_displacement_at_mm(
+                                    0.5 * (w.start.0 + w.end.0),
+                                    0.5 * (w.start.1 + w.end.1),
+                                    z1,
+                                    active_lens,
+                                    deform_scale,
+                                    modal_idx,
+                                    anim_time_s,
+                                    modal_playing,
+                                );
+                                lens_color(
+                                    crate::core::BimElementKind::Wall,
+                                    w.id,
+                                    level_rank(w.base_level_id),
+                                    Color32::from_rgb(112, 130, 156),
+                                    false,
+                                    d_norm,
+                                )
                             } else {
                                 Color32::from_rgb(162, 176, 196)
                             };
@@ -5997,10 +6336,10 @@ impl UniversalCanvasState {
                                 let x1 = w.start.0 + (w.end.0 - w.start.0) * u1;
                                 let y1 = w.start.1 + (w.end.1 - w.start.1) * u1;
                                 if let (Some(ob0), Some(ob1), Some(ot1), Some(ot0)) = (
-                                    proj_mm(x0, y0, oz0),
-                                    proj_mm(x1, y1, oz0),
-                                    proj_mm(x1, y1, oz1),
-                                    proj_mm(x0, y0, oz1),
+                                    proj_def_mm(x0, y0, oz0),
+                                    proj_def_mm(x1, y1, oz0),
+                                    proj_def_mm(x1, y1, oz1),
+                                    proj_def_mm(x0, y0, oz1),
                                 ) {
                                     let is_door = matches!(
                                         op.kind,
@@ -6030,7 +6369,8 @@ impl UniversalCanvasState {
                     }
                 }
 
-                // 6D. Structural Columns (Directional Sun-Shaded Prisms + Lateral Force Diagrams)
+                // 6D. Structural Columns (Directional Sun-Shaded Prisms + Deformed/Modal + N-1 Ghost + Force Diagrams)
+                let mut apex_callout_pt: Option<(f64, Pos2)> = None;
                 for col in &bim_project.columns {
                     if isolate && col.base_level_id != active_lvl_id && col.top_level_id != active_lvl_id {
                         continue;
@@ -6043,17 +6383,80 @@ impl UniversalCanvasState {
                     }
                     let col_sliced = sec_active && raw_top_m > sec_elev + 0.01;
                     let top_m = if col_sliced { sec_elev } else { raw_top_m };
+
+                    let col_n1_removed = self
+                        .earth_fem_cache
+                        .is_n1_removed(crate::core::BimElementKind::Column, col.id);
+                    if col_n1_removed {
+                        if let (Some(p0), Some(p1)) = (
+                            proj_mm(col.pos.0, col.pos.1, base_m),
+                            proj_mm(col.pos.0, col.pos.1, top_m),
+                        ) {
+                            let rem_col = Color32::from_rgb(244, 63, 94);
+                            let segs = 6usize;
+                            for s in (0..segs).step_by(2) {
+                                let t0 = s as f32 / segs as f32;
+                                let t1 = ((s + 1) as f32 / segs as f32).min(1.0);
+                                let a = Pos2::new(p0.x + (p1.x - p0.x) * t0, p0.y + (p1.y - p0.y) * t0);
+                                let b = Pos2::new(p0.x + (p1.x - p0.x) * t1, p0.y + (p1.y - p0.y) * t1);
+                                clip_painter.line_segment([a, b], Stroke::new(2.4, rem_col));
+                            }
+                            let mid = Pos2::new(0.5 * (p0.x + p1.x), 0.5 * (p0.y + p1.y));
+                            clip_painter.line_segment(
+                                [mid + Vec2::new(-7.0, -7.0), mid + Vec2::new(7.0, 7.0)],
+                                Stroke::new(2.2, rem_col),
+                            );
+                            clip_painter.line_segment(
+                                [mid + Vec2::new(7.0, -7.0), mid + Vec2::new(-7.0, 7.0)],
+                                Stroke::new(2.2, rem_col),
+                            );
+                            let mech = self
+                                .earth_fem_cache
+                                .n1_simulation
+                                .as_ref()
+                                .is_some_and(|s| s.report.is_kinematic_mechanism);
+                            clip_painter.text(
+                                p1 + Vec2::new(0.0, -10.0),
+                                Align2::CENTER_BOTTOM,
+                                if mech {
+                                    format!("✕ {} [MECHANISM]", col.name)
+                                } else {
+                                    format!("✕ {} [N-1 REMOVED]", col.name)
+                                },
+                                egui::FontId::monospace(9.5),
+                                Color32::from_rgb(253, 164, 175),
+                            );
+                        }
+                        continue;
+                    }
+
+                    let (_, col_disp_norm) = self.earth_fem_cache.sample_displacement_at_mm(
+                        col.pos.0,
+                        col.pos.1,
+                        top_m,
+                        active_lens,
+                        deform_scale,
+                        modal_idx,
+                        anim_time_s,
+                        modal_playing,
+                    );
                     let col_color = lens_color(
                         crate::core::BimElementKind::Column,
                         col.id,
                         level_rank(col.base_level_id),
                         Color32::from_rgba_unmultiplied(56, 189, 248, 235),
                         is_sel,
+                        col_disp_norm,
                     );
+                    let is_n1_redist = self.earth_fem_cache.n1_simulation.as_ref().is_some_and(|s| {
+                        self.earth_fem_cache
+                            .fem_id(crate::core::BimElementKind::Column, col.id)
+                            .is_some_and(|fid| s.report.newly_critical_fem_ids.contains(&fid))
+                    });
                     if self.world_map.zoom_level >= 16.5 {
                         let ring = col.footprint_ring();
-                        let b_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_mm(p.0, p.1, base_m)).collect();
-                        let t_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_mm(p.0, p.1, top_m)).collect();
+                        let b_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_def_mm(p.0, p.1, base_m)).collect();
+                        let t_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_def_mm(p.0, p.1, top_m)).collect();
                         if b_pts.len() == 4 && t_pts.len() == 4 && t_pts.iter().any(|p| rect.expand(45.0).contains(*p)) {
                             for i in 0..4 {
                                 let ni = (i + 1) % 4;
@@ -6061,7 +6464,7 @@ impl UniversalCanvasState {
                                 clip_painter.add(egui::Shape::convex_polygon(
                                     vec![b_pts[i], b_pts[ni], t_pts[ni], t_pts[i]],
                                     face_fill,
-                                    Stroke::new(if is_sel { 1.8 } else { 1.0 }, col_color),
+                                    Stroke::new(if is_sel || is_n1_redist { 1.8 } else { 1.0 }, col_color),
                                 ));
                             }
                             let (cap_fill, cap_stroke) = if col_sliced {
@@ -6079,27 +6482,37 @@ impl UniversalCanvasState {
                         }
                     }
                     if let (Some(p0), Some(p1)) = (
-                        proj_mm(col.pos.0, col.pos.1, base_m),
-                        proj_mm(col.pos.0, col.pos.1, top_m),
+                        proj_def_mm(col.pos.0, col.pos.1, base_m),
+                        proj_def_mm(col.pos.0, col.pos.1, top_m),
                     ) {
+                        if apex_callout_pt.map_or(true, |(h, _)| top_m > h) {
+                            apex_callout_pt = Some((top_m, p1));
+                        }
                         if rect.expand(45.0).contains(p0) || rect.expand(45.0).contains(p1) {
                             clip_painter.line_segment(
                                 [p0, p1],
-                                Stroke::new(if is_sel { 4.2 } else { 2.4 }, col_color),
+                                Stroke::new(if is_sel || is_n1_redist { 4.2 } else { 2.4 }, col_color),
                             );
-                            if self.earth_bim_author.active_lens == EarthBimLens::MomentStress {
-                                let m_col = bim_project
-                                    .fem_id_for_bim_element(crate::core::BimElementKind::Column, col.id)
-                                    .and_then(|fid| members.iter().find(|m| m.id == fid))
-                                    .map(|m| m.moment_my_knm.abs().max(m.shear_vy_kn.abs()))
+                            if is_n1_redist {
+                                clip_painter.circle_stroke(
+                                    p1,
+                                    7.5,
+                                    Stroke::new(1.8, Color32::from_rgb(251, 191, 36)),
+                                );
+                            }
+                            if active_lens == EarthBimLens::MomentStress {
+                                let m_col = self
+                                    .earth_fem_cache
+                                    .member_for_bim(crate::core::BimElementKind::Column, col.id, members)
+                                    .map(|m| m.moment_my_knm.abs().max(m.moment_mz_knm.abs()).max(m.shear_vy_kn.abs()))
                                     .unwrap_or(28.0)
                                     .max(12.0);
                                 let dx_mm = (m_col * 8.5).clamp(220.0, 950.0);
                                 let mid_m = 0.5 * (base_m + top_m);
                                 if let (Some(pm), Some(ft), Some(fb)) = (
-                                    proj_mm(col.pos.0, col.pos.1, mid_m),
-                                    proj_mm(col.pos.0 + dx_mm, col.pos.1, top_m),
-                                    proj_mm(col.pos.0 - dx_mm * 0.7, col.pos.1, base_m),
+                                    proj_def_mm(col.pos.0, col.pos.1, mid_m),
+                                    proj_def_mm(col.pos.0 + dx_mm, col.pos.1, top_m),
+                                    proj_def_mm(col.pos.0 - dx_mm * 0.7, col.pos.1, base_m),
                                 ) {
                                     let fin_fill = Color32::from_rgba_unmultiplied(168, 85, 247, 72);
                                     let fin_stroke = Stroke::new(1.5, Color32::from_rgb(192, 132, 252));
@@ -6129,7 +6542,7 @@ impl UniversalCanvasState {
                     }
                 }
 
-                // 6E. Structural Beams / Runs (Sun-Shaded 3D Extruded Prisms + Parabolic 3D Moment Diagrams)
+                // 6E. Structural Beams / Runs (Sun-Shaded 3D Extruded Prisms + Deformed/Modal + N-1 Ghost + 3D Moment Diagrams)
                 for (beam_idx, run) in bim_project.runs.iter().enumerate() {
                     if isolate && run.level_id != active_lvl_id && run.level_id != active_top_id {
                         continue;
@@ -6139,18 +6552,64 @@ impl UniversalCanvasState {
                     if sec_active && elev_m > sec_elev + 0.05 {
                         continue;
                     }
+
+                    let beam_n1_removed = self
+                        .earth_fem_cache
+                        .is_n1_removed(crate::core::BimElementKind::Run, run.id);
+                    if beam_n1_removed {
+                        if let (Some(p0), Some(p1)) = (
+                            proj_mm(run.start.0, run.start.1, elev_m),
+                            proj_mm(run.end.0, run.end.1, elev_m),
+                        ) {
+                            let rem_col = Color32::from_rgb(244, 63, 94);
+                            let segs = 6usize;
+                            for s in (0..segs).step_by(2) {
+                                let t0 = s as f32 / segs as f32;
+                                let t1 = ((s + 1) as f32 / segs as f32).min(1.0);
+                                let a = Pos2::new(p0.x + (p1.x - p0.x) * t0, p0.y + (p1.y - p0.y) * t0);
+                                let b = Pos2::new(p0.x + (p1.x - p0.x) * t1, p0.y + (p1.y - p0.y) * t1);
+                                clip_painter.line_segment([a, b], Stroke::new(2.4, rem_col));
+                            }
+                            let mid = Pos2::new(0.5 * (p0.x + p1.x), 0.5 * (p0.y + p1.y));
+                            clip_painter.text(
+                                mid + Vec2::new(0.0, -8.0),
+                                Align2::CENTER_BOTTOM,
+                                format!("✕ {} [N-1]", run.name),
+                                egui::FontId::monospace(9.5),
+                                Color32::from_rgb(253, 164, 175),
+                            );
+                        }
+                        continue;
+                    }
+
+                    let (_, beam_disp_norm) = self.earth_fem_cache.sample_displacement_at_mm(
+                        0.5 * (run.start.0 + run.end.0),
+                        0.5 * (run.start.1 + run.end.1),
+                        elev_m,
+                        active_lens,
+                        deform_scale,
+                        modal_idx,
+                        anim_time_s,
+                        modal_playing,
+                    );
                     let beam_col = lens_color(
                         crate::core::BimElementKind::Run,
                         run.id,
                         level_rank(run.level_id),
                         theme.accent_green.gamma_multiply(0.92),
                         is_sel,
+                        beam_disp_norm,
                     );
+                    let is_n1_redist = self.earth_fem_cache.n1_simulation.as_ref().is_some_and(|s| {
+                        self.earth_fem_cache
+                            .fem_id(crate::core::BimElementKind::Run, run.id)
+                            .is_some_and(|fid| s.report.newly_critical_fem_ids.contains(&fid))
+                    });
                     if self.world_map.zoom_level >= 16.5 {
                         let z_bot = (elev_m - run.depth_mm * 0.001).max(0.0);
                         let ring = run.footprint_ring();
-                        let b_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_mm(p.0, p.1, z_bot)).collect();
-                        let t_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_mm(p.0, p.1, elev_m)).collect();
+                        let b_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_def_mm(p.0, p.1, z_bot)).collect();
+                        let t_pts: Vec<Pos2> = ring.iter().filter_map(|p| proj_def_mm(p.0, p.1, elev_m)).collect();
                         if b_pts.len() == 4 && t_pts.len() == 4 && t_pts.iter().any(|p| rect.expand(45.0).contains(*p)) {
                             for i in 0..4 {
                                 let ni = (i + 1) % 4;
@@ -6158,7 +6617,7 @@ impl UniversalCanvasState {
                                 clip_painter.add(egui::Shape::convex_polygon(
                                     vec![b_pts[i], b_pts[ni], t_pts[ni], t_pts[i]],
                                     side_fill,
-                                    Stroke::new(if is_sel { 1.6 } else { 0.85 }, beam_col),
+                                    Stroke::new(if is_sel || is_n1_redist { 1.6 } else { 0.85 }, beam_col),
                                 ));
                             }
                             let top_fill = Self::directional_face_shade(beam_col, t_pts[0], t_pts[1], true);
@@ -6170,18 +6629,18 @@ impl UniversalCanvasState {
                         }
                     }
                     if let (Some(p0), Some(p1)) = (
-                        proj_mm(run.start.0, run.start.1, elev_m),
-                        proj_mm(run.end.0, run.end.1, elev_m),
+                        proj_def_mm(run.start.0, run.start.1, elev_m),
+                        proj_def_mm(run.end.0, run.end.1, elev_m),
                     ) {
                         if rect.expand(45.0).contains(p0) || rect.expand(45.0).contains(p1) {
                             clip_painter.line_segment(
                                 [p0, p1],
-                                Stroke::new(if is_sel { 4.2 } else { 2.3 }, beam_col),
+                                Stroke::new(if is_sel || is_n1_redist { 4.2 } else { 2.3 }, beam_col),
                             );
-                            if self.earth_bim_author.active_lens == EarthBimLens::MomentStress {
-                                let m_knm = bim_project
-                                    .fem_id_for_bim_element(crate::core::BimElementKind::Run, run.id)
-                                    .and_then(|fid| members.iter().find(|m| m.id == fid))
+                            if active_lens == EarthBimLens::MomentStress {
+                                let m_knm = self
+                                    .earth_fem_cache
+                                    .member_for_bim(crate::core::BimElementKind::Run, run.id, members)
                                     .map(|m| m.moment_my_knm.abs().max(m.moment_mz_knm.abs()))
                                     .unwrap_or(45.0)
                                     .max(15.0);
@@ -6193,8 +6652,8 @@ impl UniversalCanvasState {
                                     let sy = run.start.1 + (run.end.1 - run.start.1) * u;
                                     let dz_m = 4.0 * u * (1.0 - u) * (m_knm / 120.0).clamp(0.25, 1.45);
                                     if let (Some(bp), Some(cp)) = (
-                                        proj_mm(sx, sy, elev_m),
-                                        proj_mm(sx, sy, elev_m + dz_m),
+                                        proj_def_mm(sx, sy, elev_m),
+                                        proj_def_mm(sx, sy, elev_m + dz_m),
                                     ) {
                                         base_pts.push(bp);
                                         curve_pts.push(cp);
@@ -6222,6 +6681,45 @@ impl UniversalCanvasState {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // 6E-ter. Peak 3D Deformed / Modal Eigenmode Apex Telemetry Badge
+                if let Some((_, apex_pt)) = apex_callout_pt {
+                    if rect.expand(40.0).contains(apex_pt) {
+                        if active_lens == EarthBimLens::ModalVibration {
+                            if let Some(m) = self
+                                .earth_fem_cache
+                                .modal_modes
+                                .get(modal_idx.min(self.earth_fem_cache.modal_modes.len().saturating_sub(1)))
+                            {
+                                clip_painter.text(
+                                    apex_pt + Vec2::new(0.0, -14.0),
+                                    Align2::CENTER_BOTTOM,
+                                    format!(
+                                        "Mode {} • T={:.2}s • f={:.2}Hz • Mx={:.0}%",
+                                        m.mode_number, m.period_s, m.frequency_hz, m.mass_participation_ratio_x
+                                    ),
+                                    egui::FontId::monospace(10.0),
+                                    Color32::from_rgb(208, 235, 225),
+                                );
+                            }
+                        } else if active_lens == EarthBimLens::DeformedShape && self.earth_fem_cache.max_disp_mm > 0.01 {
+                            let disp_mm = self
+                                .earth_fem_cache
+                                .n1_simulation
+                                .as_ref()
+                                .map(|s| s.report.post_max_disp_mm)
+                                .unwrap_or(self.earth_fem_cache.max_disp_mm);
+                            let drift_pct = self.earth_fem_cache.max_story_drift_ratio * 100.0;
+                            clip_painter.text(
+                                apex_pt + Vec2::new(0.0, -14.0),
+                                Align2::CENTER_BOTTOM,
+                                format!("Δmax={disp_mm:.1}mm ({deform_scale:.0}x) • Drift={drift_pct:.2}%"),
+                                egui::FontId::monospace(10.0),
+                                Color32::from_rgb(251, 191, 36),
+                            );
                         }
                     }
                 }
@@ -6878,6 +7376,8 @@ impl UniversalCanvasState {
                             }
                         }
                         EarthBimLens::MomentStress => Color32::from_rgb(129, 140, 248),
+                        EarthBimLens::DeformedShape => Color32::from_rgb(245, 158, 11),
+                        EarthBimLens::ModalVibration => Color32::from_rgb(91, 146, 165),
                         EarthBimLens::Erection4D => Color32::from_rgb(56, 189, 248),
                     }
                 };
