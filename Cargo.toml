@@ -61,7 +61,3 @@ path = "src/lib.rs"
 [[bin]]
 name = "eigengraph"
 path = "src/main.rs"
-
-[[bin]]
-name = "make_icon"
-path = "src/bin/make_icon.rs"
