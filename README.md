@@ -21,8 +21,7 @@
 
 > **Title**: *Development and Validation of the Adjusted Redundancy Index for Pre-Analysis Screening of Element Damage Scenarios in Linear-Elastic Structures*
 >
-> **Author**: Harids Irawan, S.T., M.T.
-> **Program**: Doctoral Program in Engineering Science, Faculty of Engineering, Universitas Negeri Yogyakarta (2026)
+> **Author**: Harids Irawan
 
 ### Research Overview
 Exhaustive progressive-collapse and element-disruption assessment across large structural portfolios is computationally intensive—even when accelerated by Graph Neural Network (GNN) surrogates. This dissertation introduces and validates the **Adjusted Redundancy Index (ARI)** and **Criticality Index (CI)** as a mechanics-informed, intact-model pre-analysis screening framework for linear-elastic structures.
