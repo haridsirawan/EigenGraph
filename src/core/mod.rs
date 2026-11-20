@@ -174,11 +174,12 @@ pub use ifc::{
     StepValue,
 };
 pub use gis::{
-    ContourPolyline, CutFillVolumeReport, DemTerrainPreset, GeoProjectionEngine,
-    IfcMapConversionMatrix, SiteGeodeticPin, SlippyMapState, SlippyMapTelemetry, TileSource,
-    TinPoint, TinSurfaceMesh, TinTriangle, UtmZoneInfo, WebMercator,
-    EARTH_HALF_CIRCUMFERENCE, EARTH_RADIUS_METERS, MAX_LATITUDE, MIN_LATITUDE,
-    UTM_FALSE_EASTING, UTM_FALSE_NORTHING_SOUTH, UTM_SCALE_FACTOR_CENTRAL,
+    build_tin_from_3d_triangles, ContourPolyline, CutFillVolumeReport, DemTerrainPreset,
+    GeoProjectionEngine, IfcMapConversionMatrix, SiteGeodeticPin, SlippyMapState,
+    SlippyMapTelemetry, TileSource, TinPoint, TinSurfaceMesh, TinTriangle, UtmZoneInfo,
+    VectorEarthPalette, VectorEarthTheme, WebMercator, EARTH_HALF_CIRCUMFERENCE,
+    EARTH_RADIUS_METERS, MAX_LATITUDE, MIN_LATITUDE, UTM_FALSE_EASTING,
+    UTM_FALSE_NORTHING_SOUTH, UTM_SCALE_FACTOR_CENTRAL,
 };
 pub use lifecycle_ops::{
     compute_mep_engineering_sizing, compute_site_environmental_coupling,

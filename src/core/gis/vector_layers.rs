@@ -1,10 +1,9 @@
-//! vector_layers.rs — Streaming OpenStreetMap Vector & GeoJSON Cadastral Layer (Phase 59 / v0.5.9).
+//! vector_layers.rs — Pure-Rust Offline Vector Site & Cadastral Layer Cache (Phase 64 / v0.6.4).
 //!
-//! Provides pure-Rust GeoJSON parsing (roads, rivers, parcel boundaries, and context building
-//! footprints), async OSM Overpass vector tile caching (both WASM & Native), and vector edge/vertex
-//! OSNAP snapping for crisp zero-blur site engineering overlays on Earth 3D.
+//! Provides offline pure-Rust GeoJSON and IFC site vector feature storage (roads, waterways,
+//! parcel boundaries, and context building footprints) plus vector edge/vertex OSNAP snapping
+//! with zero external OSM/Overpass network requests.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -45,20 +44,10 @@ pub struct UrbanVectorFeature {
     pub height_m: f32,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CellFetchState {
-    Loading,
-    Ready,
-    Failed,
-}
-
-/// Bounded cache managing GeoJSON imports and streamed OSM Overpass urban vector features.
+/// Bounded offline cache managing local Vault GeoJSON and IFC urban vector features.
 #[derive(Clone, Default)]
 pub struct UrbanVectorLayerCache {
     pub features: Arc<Mutex<Vec<UrbanVectorFeature>>>,
-    cell_states: Arc<Mutex<HashMap<(i32, i32), CellFetchState>>>,
-    pub live_osm_streaming: bool,
 }
 
 impl std::fmt::Debug for UrbanVectorLayerCache {
@@ -66,17 +55,25 @@ impl std::fmt::Debug for UrbanVectorLayerCache {
         let count = self.features.lock().map(|v| v.len()).unwrap_or(0);
         f.debug_struct("UrbanVectorLayerCache")
             .field("feature_count", &count)
-            .field("live_osm_streaming", &self.live_osm_streaming)
             .finish()
     }
 }
 
 impl UrbanVectorLayerCache {
-    const CELL_DEG: f64 = 0.015; // ~1.6 km per vector tile cell
     const MAX_CACHED_FEATURES: usize = 4500;
 
     pub fn feature_count(&self) -> usize {
         self.features.lock().map(|v| v.len()).unwrap_or(0)
+    }
+
+    pub fn add_features(&self, items: Vec<UrbanVectorFeature>) {
+        if let Ok(mut guard) = self.features.lock() {
+            guard.extend(items);
+            if guard.len() > Self::MAX_CACHED_FEATURES {
+                let excess = guard.len() - Self::MAX_CACHED_FEATURES;
+                guard.drain(0..excess);
+            }
+        }
     }
 
     pub fn snapshot_visible(
@@ -135,113 +132,6 @@ impl UrbanVectorLayerCache {
         Ok((added, centroid))
     }
 
-    /// Requests asynchronous OpenStreetMap Overpass vector data around `(lat, lon)` when zoomed in (`>= 14.5`).
-    pub fn ensure_osm_cell_loaded(&self, ctx: &egui::Context, lat: f64, lon: f64, zoom_level: f32) {
-        if !self.live_osm_streaming || zoom_level < 14.5 {
-            return;
-        }
-        let ci = (lat / Self::CELL_DEG).floor() as i32;
-        let cj = (lon / Self::CELL_DEG).floor() as i32;
-        {
-            let Ok(mut states) = self.cell_states.lock() else {
-                return;
-            };
-            if states.contains_key(&(ci, cj)) {
-                return;
-            }
-            if states.len() > 24 {
-                states.clear();
-            }
-            states.insert((ci, cj), CellFetchState::Loading);
-        }
-
-        let s = ci as f64 * Self::CELL_DEG;
-        let n = s + Self::CELL_DEG;
-        let w = cj as f64 * Self::CELL_DEG;
-        let e = w + Self::CELL_DEG;
-        let query = format!(
-            "[out:json][timeout:12];(way[\"highway\"]({s:.5},{w:.5},{n:.5},{e:.5});way[\"waterway\"]({s:.5},{w:.5},{n:.5},{e:.5});way[\"building\"]({s:.5},{w:.5},{n:.5},{e:.5}););out geom qt;"
-        );
-        let encoded: String = query
-            .bytes()
-            .map(|b| match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => (b as char).to_string(),
-                _ => format!("%{b:02X}"),
-            })
-            .collect();
-        let url = format!("https://overpass-api.de/api/interpreter?data={encoded}");
-        let _ = (ctx, &url);
-
-        #[cfg(all(not(target_arch = "wasm32"), not(test)))]
-        {
-            let features_arc = self.features.clone();
-            let states_arc = self.cell_states.clone();
-            let ctx_clone = ctx.clone();
-            std::thread::spawn(move || {
-                let body = std::process::Command::new("curl")
-                    .args([
-                        "-sL",
-                        "--max-time",
-                        "12",
-                        "-A",
-                        "EigenGraph-BIM/0.6.2 (https://eigengraph.net)",
-                        &url,
-                    ])
-                    .output()
-                    .ok()
-                    .and_then(|o| {
-                        if o.status.success() {
-                            String::from_utf8(o.stdout).ok()
-                        } else {
-                            None
-                        }
-                    });
-                let parsed = body.as_deref().and_then(|txt| parse_overpass_json(txt).ok());
-                if let Some(items) = parsed {
-                    if let Ok(mut fg) = features_arc.lock() {
-                        fg.extend(items);
-                        if fg.len() > Self::MAX_CACHED_FEATURES {
-                            let excess = fg.len() - Self::MAX_CACHED_FEATURES;
-                            fg.drain(0..excess);
-                        }
-                    }
-                    if let Ok(mut sg) = states_arc.lock() {
-                        sg.insert((ci, cj), CellFetchState::Ready);
-                    }
-                } else if let Ok(mut sg) = states_arc.lock() {
-                    sg.insert((ci, cj), CellFetchState::Failed);
-                }
-                ctx_clone.request_repaint();
-            });
-        }
-
-        #[cfg(all(target_arch = "wasm32", not(test)))]
-        {
-            let features_arc = self.features.clone();
-            let states_arc = self.cell_states.clone();
-            let ctx_clone = ctx.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                let text = fetch_text_wasm(&url).await;
-                let parsed = text.as_deref().and_then(|txt| parse_overpass_json(txt).ok());
-                if let Some(items) = parsed {
-                    if let Ok(mut fg) = features_arc.lock() {
-                        fg.extend(items);
-                        if fg.len() > Self::MAX_CACHED_FEATURES {
-                            let excess = fg.len() - Self::MAX_CACHED_FEATURES;
-                            fg.drain(0..excess);
-                        }
-                    }
-                    if let Ok(mut sg) = states_arc.lock() {
-                        sg.insert((ci, cj), CellFetchState::Ready);
-                    }
-                } else if let Ok(mut sg) = states_arc.lock() {
-                    sg.insert((ci, cj), CellFetchState::Failed);
-                }
-                ctx_clone.request_repaint();
-            });
-        }
-    }
-
     /// Snaps `(lat, lon)` onto the nearest loaded road or parcel boundary edge within `max_dist_m`,
     /// returning `(snapped_lat, snapped_lon, segment_azimuth_deg)`.
     pub fn snap_lat_lon_to_vector_edge(
@@ -289,26 +179,6 @@ impl UrbanVectorLayerCache {
         }
         best
     }
-}
-
-#[cfg(all(target_arch = "wasm32", not(test)))]
-async fn fetch_text_wasm(url: &str) -> Option<String> {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen_futures::JsFuture;
-
-    let window = web_sys::window()?;
-    let opts = web_sys::RequestInit::new();
-    opts.set_method("GET");
-    opts.set_mode(web_sys::RequestMode::Cors);
-    let request = web_sys::Request::new_with_str_and_init(url, &opts).ok()?;
-    let resp_val = JsFuture::from(window.fetch_with_request(&request)).await.ok()?;
-    let resp: web_sys::Response = resp_val.dyn_into().ok()?;
-    if !resp.ok() {
-        return None;
-    }
-    let text_promise = resp.text().ok()?;
-    let txt_val = JsFuture::from(text_promise).await.ok()?;
-    txt_val.as_string()
 }
 
 fn stable_vector_id(seed: &str, idx: usize) -> u64 {
@@ -455,61 +325,12 @@ fn classify_props_kind(props: Option<&serde_json::Map<String, Value>>) -> UrbanV
     UrbanVectorKind::RoadMinor
 }
 
-/// Parses OpenStreetMap Overpass JSON `elements` (`out geom`) into `UrbanVectorFeature`.
-pub fn parse_overpass_json(raw: &str) -> Result<Vec<UrbanVectorFeature>, String> {
-    let v: Value = serde_json::from_str(raw).map_err(|e| format!("Invalid Overpass JSON: {e}"))?;
-    let Some(elems) = v.get("elements").and_then(|e| e.as_array()) else {
-        return Ok(Vec::new());
-    };
-    let mut out = Vec::with_capacity(elems.len().min(600));
-    for el in elems {
-        let Some(geom) = el.get("geometry").and_then(|g| g.as_array()) else {
-            continue;
-        };
-        let pts: Vec<(f64, f64)> = geom
-            .iter()
-            .filter_map(|pt| Some((pt.get("lat")?.as_f64()?, pt.get("lon")?.as_f64()?)))
-            .collect();
-        if pts.len() < 2 {
-            continue;
-        }
-        let tags = el.get("tags").and_then(|t| t.as_object());
-        let kind = classify_props_kind(tags);
-        let closed = kind == UrbanVectorKind::ContextBuilding || kind == UrbanVectorKind::ParcelBoundary;
-        let name = tags
-            .and_then(|t| t.get("name"))
-            .and_then(|n| n.as_str())
-            .unwrap_or("")
-            .to_string();
-        let height_m = tags
-            .and_then(|t| {
-                t.get("height")
-                    .and_then(|v| v.as_str().and_then(|s| s.parse::<f64>().ok()))
-                    .or_else(|| {
-                        t.get("building:levels")
-                            .and_then(|v| v.as_str().and_then(|s| s.parse::<f64>().ok()))
-                            .map(|lv| lv * 3.5)
-                    })
-            })
-            .unwrap_or(10.5) as f32;
-        out.push(UrbanVectorFeature {
-            id: el.get("id").and_then(|i| i.as_u64()).unwrap_or(0),
-            kind,
-            name,
-            points_lat_lon: pts,
-            closed,
-            height_m,
-        });
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_phase59_geojson_and_overpass_parsing_plus_vector_snap() {
+    fn test_phase64_offline_geojson_parsing_and_vector_snap() {
         let geojson = r#"{
             "type": "FeatureCollection",
             "features": [
@@ -544,18 +365,5 @@ mod tests {
             .expect("Point within 25m of road should snap cleanly");
         assert!((snapped.0 - (-6.2200)).abs() < 1e-5);
         assert!((snapped.2 - 90.0).abs() < 2.0);
-
-        let overpass = r#"{
-            "elements": [
-                {
-                    "id": 9001,
-                    "tags": { "name": "Ciliwung River", "waterway": "river" },
-                    "geometry": [{ "lat": -6.210, "lon": 106.850 }, { "lat": -6.215, "lon": 106.852 }]
-                }
-            ]
-        }"#;
-        let osm_feats = parse_overpass_json(overpass).expect("Parse Overpass JSON");
-        assert_eq!(osm_feats.len(), 1);
-        assert_eq!(osm_feats[0].kind, UrbanVectorKind::RiverWaterway);
     }
 }

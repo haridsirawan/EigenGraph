@@ -884,14 +884,13 @@ impl ResearchConceptView {
 
         ui.add_space(10.0);
 
-        // Phase 37 (1D-04): Live Raster Map Tile Cache & CSV/XYZ Survey DEM Importer
-        let (ready_tiles, cached_total) = self.slippy_map.tile_cache.stats();
+        // Phase 64 (1D-04): Pure-Rust Vector Earth Themes & Offline IFC / Survey TIN Importer
         ui_kit::feature_slot_card(ui, theme, features, FeatureId::LiveRasterMapTileFetcher, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if icons::icon_button(
                     ui,
                     AppIcon::Globe,
-                    &format!("Live Raster Tiles ({ready_tiles}/{cached_total} cached)"),
+                    &format!("Vector Theme: {}", self.slippy_map.tile_provider.short_name()),
                     11.5,
                     Color32::WHITE,
                     theme.accent_blue,
@@ -901,15 +900,12 @@ impl ResearchConceptView {
                 )
                 .clicked()
                 {
-                    if self.slippy_map.tile_provider == TileSource::SyntheticVectorTerrain {
-                        self.slippy_map.tile_provider = TileSource::OpenStreetMap;
-                    }
-                    self.slippy_map.tile_cache.clear();
+                    self.slippy_map.cycle_basemap_visual_mode();
                 }
                 if icons::icon_button(
                     ui,
                     AppIcon::Document,
-                    "Load Survey Point Cloud (.csv / .xyz)...",
+                    "Load IFC / Survey Terrain (.ifc / .csv / .xyz)...",
                     11.5,
                     theme.text_primary,
                     theme.bg_canvas,
@@ -919,11 +915,11 @@ impl ResearchConceptView {
                 )
                 .clicked()
                 {
-                    crate::core::web_bridge::trigger_file_picker(".csv,.xyz,.txt");
+                    crate::core::web_bridge::trigger_file_picker(".ifc,.csv,.xyz,.txt");
                 }
                 ui.label(
                     RichText::new(format!(
-                        "Provider: {} • TIN Vertices: {}",
+                        "Engine: {} • TIN Vertices: {}",
                         self.slippy_map.tile_provider.display_name(),
                         self.tin_mesh.points.len()
                     ))
@@ -1009,31 +1005,13 @@ impl ResearchConceptView {
                         .selected_text(self.slippy_map.tile_provider.display_name())
                         .width(combo_w)
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.slippy_map.tile_provider,
-                                TileSource::SyntheticVectorTerrain,
-                                TileSource::SyntheticVectorTerrain.display_name(),
-                            );
-                            ui.selectable_value(
-                                &mut self.slippy_map.tile_provider,
-                                TileSource::OpenStreetMap,
-                                TileSource::OpenStreetMap.display_name(),
-                            );
-                            ui.selectable_value(
-                                &mut self.slippy_map.tile_provider,
-                                TileSource::EsriWorldImagery,
-                                TileSource::EsriWorldImagery.display_name(),
-                            );
-                            ui.selectable_value(
-                                &mut self.slippy_map.tile_provider,
-                                TileSource::OpenTopoMap,
-                                TileSource::OpenTopoMap.display_name(),
-                            );
-                            ui.selectable_value(
-                                &mut self.slippy_map.tile_provider,
-                                TileSource::CartoDbDarkMatter,
-                                TileSource::CartoDbDarkMatter.display_name(),
-                            );
+                            for vt in TileSource::ALL {
+                                ui.selectable_value(
+                                    &mut self.slippy_map.tile_provider,
+                                    vt,
+                                    vt.display_name(),
+                                );
+                            }
                         });
 
                     ui.add_space(12.0);

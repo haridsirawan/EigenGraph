@@ -2345,6 +2345,105 @@ impl IfcModel {
         )
     }
 
+    /// Extracts pure-vector 3D topographic TIN terrain directly from OpenBIM IFC4 / IFC4.3
+    /// `IFCSITE` or `IFCGEOGRAPHICELEMENT` representations containing an `IFCTRIANGULATEDFACESET`
+    /// + `IFCCARTESIANPOINTLIST3D` (replacing external raster DEM tiles cleanly).
+    pub fn extract_site_terrain_tin(&self) -> Option<crate::core::gis::TinSurfaceMesh> {
+        let mut candidate_face_sets: Vec<usize> = Vec::new();
+        for cls in ["IFCSITE", "IFCGEOGRAPHICELEMENT"] {
+            for site in self.raw_step.get_entities_of_type(cls) {
+                let Some(prod_shape_id) = site.get_ref(6) else {
+                    continue;
+                };
+                let Some(prod_shape) = self.raw_step.entities.get(&prod_shape_id) else {
+                    continue;
+                };
+                for rep_id in prod_shape.get_ref_list(2) {
+                    let Some(rep) = self.raw_step.entities.get(&rep_id) else {
+                        continue;
+                    };
+                    for item_id in rep.get_ref_list(3) {
+                        if let Some(item) = self.raw_step.entities.get(&item_id) {
+                            if item.type_name.eq_ignore_ascii_case("IFCTRIANGULATEDFACESET") {
+                                candidate_face_sets.push(item_id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if candidate_face_sets.is_empty() {
+            return None;
+        }
+        let scale = if self.unit_scale > 0.0 && self.unit_scale.is_finite() {
+            self.unit_scale
+        } else {
+            1.0
+        };
+        let mut all_coords: Vec<(f64, f64, f64)> = Vec::new();
+        let mut all_tris: Vec<[usize; 3]> = Vec::new();
+
+        for fs_id in candidate_face_sets {
+            let Some(fs) = self.raw_step.entities.get(&fs_id) else {
+                continue;
+            };
+            let Some(pl_id) = fs.get_ref(0) else {
+                continue;
+            };
+            let Some(pl) = self.raw_step.entities.get(&pl_id) else {
+                continue;
+            };
+            let Some(rows) = pl.parameters.first().and_then(|v| v.as_list()) else {
+                continue;
+            };
+            let base_idx = all_coords.len();
+            let mut local_count = 0usize;
+            for row in rows {
+                if let Some(c) = row.as_list() {
+                    let x = c.first().and_then(|v| v.as_f64()).unwrap_or(0.0) * scale;
+                    let y = c.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0) * scale;
+                    let z = c.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0) * scale;
+                    if x.is_finite() && y.is_finite() && z.is_finite() {
+                        all_coords.push((x, y, z));
+                        local_count += 1;
+                    }
+                }
+            }
+            if local_count < 3 {
+                continue;
+            }
+            if let Some(idx_rows) = fs.parameters.get(3).and_then(|v| v.as_list()) {
+                for tri_val in idx_rows {
+                    if let Some(t) = tri_val.as_list() {
+                        if t.len() >= 3 {
+                            let i0 = t[0].as_f64().unwrap_or(0.0).round() as isize;
+                            let i1 = t[1].as_f64().unwrap_or(0.0).round() as isize;
+                            let i2 = t[2].as_f64().unwrap_or(0.0).round() as isize;
+                            if i0 >= 1 && i1 >= 1 && i2 >= 1 {
+                                let u0 = (i0 - 1) as usize;
+                                let u1 = (i1 - 1) as usize;
+                                let u2 = (i2 - 1) as usize;
+                                if u0 < local_count && u1 < local_count && u2 < local_count {
+                                    all_tris.push([base_idx + u0, base_idx + u1, base_idx + u2]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if all_coords.len() < 3 {
+            return None;
+        }
+        crate::core::gis::build_tin_from_3d_triangles(&all_coords, &all_tris).ok()
+    }
+
+    /// Convenience helper extracting an optional `IfcSite` pure-vector TIN directly from raw IFC STEP text.
+    pub fn extract_site_terrain_tin_from_raw(raw_content: &str) -> Option<crate::core::gis::TinSurfaceMesh> {
+        let model = Self::parse(raw_content.trim_start_matches('\u{FEFF}')).ok()?;
+        model.extract_site_terrain_tin()
+    }
+
     /// Computes compact local footprint polygon `[east_m, north_m]` around centroid and total Z height in meters.
     pub fn bounding_footprint_and_height_m(&self) -> (Vec<[f64; 2]>, f64) {
         let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
@@ -5525,6 +5624,39 @@ END-ISO-10303-21;"#;
         assert!((hdg - 32.5).abs() < 0.05, "hdg={hdg}");
         let addr = parsed.extract_postal_address().unwrap_or_default();
         assert!(addr.contains("IKN Nusantara"), "addr={addr}");
+    }
+
+    #[test]
+    fn test_phase64_ifc_site_triangulated_face_set_terrain_tin() {
+        let ifc_site_tin = r#"ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [ReferenceView_V1.2]'),'2;1');
+FILE_NAME('site_terrain.ifc','2026-11-20T11:30:00',('Harids'),('EigenGraph'),'','','');
+FILE_SCHEMA(('IFC4X3'));
+ENDSEC;
+DATA;
+#1=IFCPROJECT('0Proj64',$,'Vector Earth Site',$,$,$,$,(#4),#5);
+#2=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);
+#5=IFCUNITASSIGNMENT((#2));
+#4=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,#6,$);
+#6=IFCAXIS2PLACEMENT3D(#7,$,$);
+#7=IFCCARTESIANPOINT((0.,0.,0.));
+#10=IFCCARTESIANPOINTLIST3D(((0.,0.,10.),(40.,0.,12.),(40.,40.,38.),(0.,40.,14.),(20.,20.,26.)));
+#11=IFCTRIANGULATEDFACESET(#10,$,.F.,((1,2,5),(2,3,5),(3,4,5),(4,1,5)),$);
+#12=IFCSHAPEREPRESENTATION(#4,'Surface','Tessellation',(#11));
+#13=IFCPRODUCTDEFINITIONSHAPE($,$,(#12));
+#14=IFCSITE('0Site64',$,'Slope Site',$,$,$,#13,$,.ELEMENT.,(-6,-55,0),(107,37,0),710.,$,$);
+ENDSEC;
+END-ISO-10303-21;"#;
+
+        let tin = IfcModel::extract_site_terrain_tin_from_raw(ifc_site_tin)
+            .expect("IFCSITE IFCTRIANGULATEDFACESET should build pure-vector TIN");
+        assert_eq!(tin.points.len(), 5);
+        assert_eq!(tin.triangles.len(), 4);
+        assert!((tin.min_elevation - 10.0).abs() < 1e-3);
+        assert!((tin.max_elevation - 38.0).abs() < 1e-3);
+        // Steep facet from (20,20,26) to (40,40,38) / (40,0,12) triggers SNI 8460 steep-slope detection
+        assert!(tin.triangle_metrics.iter().any(|tm| tm.slope_deg > 25.0));
     }
 }
 

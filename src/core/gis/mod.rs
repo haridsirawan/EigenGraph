@@ -11,9 +11,15 @@ pub mod world_index;
 pub mod vector_layers;
 pub mod dem_stream;
 pub mod neighborhood_physics;
+pub mod world_vectors;
+
+pub use world_vectors::{
+    TileSource, VectorEarthPalette, VectorEarthTheme, WORLD_LANDMASSES, WORLD_MAJOR_RIVERS,
+    WORLD_MOUNTAIN_RIDGES,
+};
 
 pub use map_widget::{
-    SiteGeodeticPin, SlippyMapState, SlippyMapTelemetry, TileSource, WebMercator,
+    SiteGeodeticPin, SlippyMapState, SlippyMapTelemetry, WebMercator,
     EARTH_HALF_CIRCUMFERENCE, EARTH_RADIUS_METERS, GLOBAL_CITY_CATALOG, MAX_LATITUDE, MIN_LATITUDE,
 };
 
@@ -23,11 +29,10 @@ pub use world_index::{
 };
 
 pub use vector_layers::{
-    parse_geojson_features, parse_overpass_json, UrbanVectorFeature, UrbanVectorKind,
-    UrbanVectorLayerCache,
+    parse_geojson_features, UrbanVectorFeature, UrbanVectorKind, UrbanVectorLayerCache,
 };
 
-pub use dem_stream::{decode_terrarium_rgb, parse_survey_xyz_to_tin, DecodedDemTile, DemTileCache};
+pub use dem_stream::{build_tin_from_3d_triangles, parse_survey_xyz_to_tin};
 
 pub use neighborhood_physics::{
     bim_footprint_hull_m, evaluate_neighborhood_coupling, polygon_min_distance_m,

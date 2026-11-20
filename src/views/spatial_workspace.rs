@@ -2645,9 +2645,9 @@ impl SpatialWorkspaceState {
                 }
                 PlannedProposalAction::SwitchPureVector => {
                     universal_canvas.world_map.tile_provider =
-                        crate::core::gis::TileSource::SyntheticVectorTerrain;
+                        crate::core::gis::VectorEarthTheme::CoastalBlueprint;
                     universal_canvas.world_map.vector_site_overlay = true;
-                    self.push_trace("Switched Earth 3D to Pure Rust Vector (anti-blur)", true);
+                    self.push_trace("Activated Coastal Blueprint Pure-Rust Vector Earth", true);
                 }
                 PlannedProposalAction::ApplyDeformedLens => {
                     self.apply_lens_to_views(SpatialLens::DeformedShape, build_view, universal_canvas);
@@ -10232,7 +10232,7 @@ impl SpatialWorkspaceState {
                                         deck_w,
                                         |ui| {
                                             let map_lbl = format!(
-                                                "Map: {}",
+                                                "Theme: {}",
                                                 universal_canvas.world_map.visual_layer_label()
                                             );
                                             if Self::glass_pill_button(
@@ -10242,22 +10242,22 @@ impl SpatialWorkspaceState {
                                                 map_lbl,
                                                 false,
                                                 theme.accent_blue,
-                                                "Cycle Earth 3D layer: Satellite+Vector / Pure Rust Vector (anti-blur) / OSM+Vector / Dark+Vector",
+                                                "Cycle Pure-Rust Vector Earth theme: Coastal Blueprint / City Daylight / Night Cyber-Twin / Topographic",
                                             )
                                             .clicked()
                                             {
                                                 universal_canvas.world_map.cycle_basemap_visual_mode();
                                                 self.push_trace(
                                                     format!(
-                                                        "Map layer: {}",
-                                                        universal_canvas.world_map.visual_layer_label()
+                                                        "Vector Earth theme: {}",
+                                                        universal_canvas.world_map.tile_provider.display_name()
                                                     ),
                                                     true,
                                                 );
                                             }
                                             let topo_lbl = if universal_canvas.show_terrain_contours {
-                                                if universal_canvas.site_tin_is_live_dem {
-                                                    "Topo DEM ON"
+                                                if universal_canvas.site_tin_from_ifc {
+                                                    "Topo IFC"
                                                 } else {
                                                     "Topo ON"
                                                 }
@@ -10271,7 +10271,7 @@ impl SpatialWorkspaceState {
                                                 topo_lbl,
                                                 universal_canvas.show_terrain_contours,
                                                 theme.accent_green,
-                                                "Toggle live Terrarium DEM / 3D TIN terrain contours & SNI 8460:2017 steep slope (>30°) overlay on Earth 3D",
+                                                "Toggle pure-vector 3D TIN terrain contours (IFC IfcSite / survey / procedural) & SNI 8460:2017 steep slope (>30°) overlay",
                                             )
                                             .clicked()
                                             {
@@ -10280,22 +10280,6 @@ impl SpatialWorkspaceState {
                                                 if universal_canvas.show_terrain_contours {
                                                     universal_canvas.ensure_site_tin_generated();
                                                 }
-                                            }
-                                            let osm_on =
-                                                universal_canvas.urban_vectors.live_osm_streaming;
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                None,
-                                                if osm_on { "OSM Vec ON" } else { "OSM Vec" },
-                                                osm_on,
-                                                theme.accent_blue,
-                                                "Stream crisp OpenStreetMap vector streets, rivers & buildings over Earth 3D",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.urban_vectors.live_osm_streaming =
-                                                    !osm_on;
                                             }
                                             ui.separator();
                                             if Self::glass_pill_button(
@@ -12707,13 +12691,13 @@ END-ISO-10303-21;\r\n";
         let mut db_components = Vec::new();
         let theme = crate::theme::MacTheme::default();
 
-        // 1. Visual mode cycling covers Satellite+Vector -> Pure Vector -> OSM+Vector -> Dark+Vector
-        assert_eq!(canvas.world_map.visual_layer_label(), "Sat + Vec");
+        // 1. Vector theme cycling covers CoastalBlueprint -> CityDaylight -> NightTwin -> Topographic
+        assert_eq!(canvas.world_map.visual_layer_label(), "Blueprint");
         canvas.world_map.cycle_basemap_visual_mode();
-        assert_eq!(canvas.world_map.visual_layer_label(), "Pure Vector");
+        assert_eq!(canvas.world_map.visual_layer_label(), "Daylight");
         assert_eq!(
             canvas.world_map.tile_provider,
-            crate::core::gis::TileSource::SyntheticVectorTerrain
+            crate::core::gis::VectorEarthTheme::CityDaylight
         );
 
         // 2. Site TIN generation & local terrain relief sampling on Earth 3D
@@ -12880,7 +12864,7 @@ END-ISO-10303-21;\r\n";
         assert!(canvas.show_terrain_contours);
         assert_eq!(
             canvas.world_map.tile_provider,
-            crate::core::gis::TileSource::SyntheticVectorTerrain
+            crate::core::gis::VectorEarthTheme::CoastalBlueprint
         );
 
         // 4. Expanded Dynamic Island + Neighborhood Pill + Batch Pin Vault Drawer stay inside bounds on Desktop & Mobile
@@ -13457,5 +13441,72 @@ END-ISO-10303-21;\r\n";
                 GeminiDirective::RestoreN1,
             ]
         );
+    }
+
+    #[test]
+    fn test_phase64_pure_vector_earth_themes_and_zero_hud_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = crate::theme::MacTheme::default();
+
+        // Default startup uses 100% Pure-Rust Vector Earth CoastalBlueprint theme
+        assert_eq!(
+            canvas.world_map.tile_provider,
+            crate::core::gis::VectorEarthTheme::CoastalBlueprint
+        );
+        spatial.mobile_deck_pinned = true;
+        spatial.studio_tab = DynamicIslandStudioTab::GisAndSite;
+
+        for vt in crate::core::gis::VectorEarthTheme::ALL {
+            canvas.world_map.tile_provider = vt;
+            for win_w in [1200.0_f32, 768.0, 390.0] {
+                let ctx = egui::Context::default();
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 820.0))),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let full = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 820.0));
+                        let painter = ui.painter_at(full);
+                        let _xf = canvas.earth_world.render_3d_globe(
+                            ui,
+                            &painter,
+                            full,
+                            &theme,
+                            &canvas.world_map,
+                            canvas.ground_origin_lat_lon,
+                            canvas.ground_origin_anchored,
+                            true,
+                            None,
+                            canvas.cursor_lat_lon,
+                            false,
+                        );
+                        let _ = spatial.render_hud_overlays(
+                            ui.ctx(),
+                            &theme,
+                            &mut canvas,
+                            &mut build,
+                            &mut ai,
+                            &members,
+                            &projects,
+                            &mut db_components,
+                        );
+                    },
+                );
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 64 Dynamic Island overflowed viewport {win_w} on theme {vt:?}: {r:?}"
+                );
+            }
+        }
     }
 }

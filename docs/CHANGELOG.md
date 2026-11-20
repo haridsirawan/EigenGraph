@@ -7,6 +7,23 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.6.4] - 2026-11-20 — Phase 64: 100% Pure-Rust Vector Earth & OpenBIM IFC 4.3 Site TIN, Zero External Raster/OSM/DEM Dependencies & Minimalist Loading Splash
+
+### Added & Changed
+- **100% Pure-Rust Vector Earth & Complete Raster / External Map Removal (`Cargo.toml`, `src/core/gis/world_vectors.rs`, `src/core/gis/map_widget.rs`, `src/core/gis/earth_globe.rs`, `src/core/gis/vector_layers.rs`, `src/core/gis/dem_stream.rs`, `src/views/build/viewport_3d.rs`)**:
+  - Removed the direct `image` crate (`png`, `jpeg`) from `Cargo.toml`, leaving EigenGraph with a lean 4-crate core (`eframe`/`glow`, `egui`, `serde`, `serde_json`).
+  - Retired all external raster basemaps (`EsriWorldImagery`, `OpenStreetMap`, `OpenTopoMap`, `CartoDbDarkMatter`), `WorldTileCache` HTTP fetchers/decoders, live OSM Overpass API streaming (`overpass-api.de`), AWS Terrarium RGB PNG tile fetching, and desktop PNG `image::save_buffer` dependency (replaced by pure-vector SVG / P6 PPM capture).
+  - Introduced `VectorEarthTheme` (`CoastalBlueprint` default, `CityDaylight`, `NightTwin`, `Topographic`) with `serde` aliases preserving seamless deserialization of legacy `.eigen.json` archives.
+  - Added `src/core/gis/world_vectors.rs` with higher-clarity embedded pure-Rust Natural Earth continents, an extra-detailed Indonesian archipelago (Sumatra, Java, Madura, Bangka, Belitung, Kalimantan/Borneo, authentic 4-peninsula Sulawesi, Bali, Nusa Tenggara, Maluku, Papua), coastal shelf halos, topographic mountain ridge spines, major hydrological rivers, and a buildable city-builder parcel/avenue + adaptive metric grid (`1 m – 150 m`) at site scale.
+- **OpenBIM IFC 4.3 `IfcSite` Pure-Vector TIN Extraction (`src/core/ifc.rs`, `src/core/gis/tin_surface.rs`, `src/core/gis/dem_stream.rs`, `src/app.rs`)**:
+  - Added `TinSurfaceMesh::from_explicit_triangles`, `build_tin_from_3d_triangles`, and `IfcModel::extract_site_terrain_tin()` parsing `IFCSITE` / `IFCGEOGRAPHICELEMENT` `IFCTRIANGULATEDFACESET` + `IFCCARTESIANPOINTLIST3D` meshes directly into 3D terrain contours with SNI 8460 steep-slope hazard metrics on Earth Vector.
+- **Dynamic Island Vector Theme Controls, Auto-Synced Phase Version & Minimalist Loading Screen (`src/views/spatial_workspace.rs`, `src/views/universal_canvas.rs`, `src/views/research.rs`, `src/views/settings.rs`, `index.html`)**:
+  - Updated Dynamic Island `GIS & Site` tab to cycle Pure-Rust `VectorEarthTheme` presets (`Theme: Blueprint / Daylight / Night Twin / Topo Vec`) and display `Topo IFC` status, removing the legacy `OSM Vec` streaming button.
+  - Derived the About panel Phase number dynamically from `CARGO_PKG_VERSION` in `src/views/settings.rs` so semantic version and phase number never desync.
+  - Simplified the initial web loading screen in `index.html` cleanly to `EigenGraph` with Coastal Marine Teal styling and no subtitle/tagline.
+
+---
+
 ## [v0.6.3] - 2026-11-19 — Phase 63: True 6-DOF Site-Coupled FEM on Earth 3D, O(1) Cached BIM-FEM Lookup, Live Deformed & Animated Modal Eigenmodes, Interactive N-1 Disruption & Dissertation README
 
 ### Added & Changed

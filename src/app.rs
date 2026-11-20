@@ -917,33 +917,37 @@ impl App for EigenGraphApp {
         // 7. CAD SHORTCUTS, CLI SYNTAX & MODULE QUICK-JUMP PALETTE (Ctrl/Cmd+K or ? Shortcuts)
         self.render_shortcuts_quick_jump_modal_if_open(&ctx);
 
-        // 8. SCREENSHOT HOOK (AUTOMATED QA & PREVIEWS)
+        // 8. PURE-RUST VECTOR / PPM SCREENSHOT HOOK (AUTOMATED QA — ZERO `image` CRATE)
         #[cfg(not(target_arch = "wasm32"))]
         if let Ok(path) = std::env::var("EIGENGRAPH_SCREENSHOT_PATH") {
             let mut screenshot_saved = false;
-            ui.ctx().input(|i| {
-                for event in &i.raw.events {
-                    if let egui::Event::Screenshot { image, .. } = event {
-                        let width = image.size[0] as u32;
-                        let height = image.size[1] as u32;
-                        let mut bytes = Vec::with_capacity((width * height * 4) as usize);
-                        for p in &image.pixels {
-                            bytes.push(p.r());
-                            bytes.push(p.g());
-                            bytes.push(p.b());
-                            bytes.push(p.a());
+            if path.to_lowercase().ends_with(".svg") {
+                let svg = self.universal_canvas.export_svg(
+                    &self.build_view.bim_bus.project,
+                    self.active_pillar,
+                );
+                let _ = std::fs::write(&path, svg);
+                screenshot_saved = true;
+            } else {
+                ui.ctx().input(|i| {
+                    for event in &i.raw.events {
+                        if let egui::Event::Screenshot { image, .. } = event {
+                            let width = image.size[0];
+                            let height = image.size[1];
+                            let header = format!("P6\n{width} {height}\n255\n");
+                            let mut bytes = Vec::with_capacity(header.len() + width * height * 3);
+                            bytes.extend_from_slice(header.as_bytes());
+                            for p in &image.pixels {
+                                bytes.push(p.r());
+                                bytes.push(p.g());
+                                bytes.push(p.b());
+                            }
+                            let _ = std::fs::write(&path, bytes);
+                            screenshot_saved = true;
                         }
-                        let _ = image::save_buffer(
-                            &path,
-                            &bytes,
-                            width,
-                            height,
-                            image::ColorType::Rgba8,
-                        );
-                        screenshot_saved = true;
                     }
-                }
-            });
+                });
+            }
 
             if screenshot_saved {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1845,10 +1849,10 @@ impl EigenGraphApp {
             if let Ok(tin) = crate::core::gis::parse_survey_xyz_to_tin(clean_raw) {
                 let npts = tin.points.len();
                 self.universal_canvas.active_site_tin = Some(tin);
-                self.universal_canvas.site_tin_is_live_dem = false;
+                self.universal_canvas.site_tin_from_ifc = false;
                 self.universal_canvas.show_terrain_contours = true;
                 self.universal_canvas.globe_mode = true;
-                let msg = format!("Loaded {npts} survey terrain point(s) from '{filename}' into Earth 3D TIN.");
+                let msg = format!("Loaded {npts} survey terrain point(s) from '{filename}' into Earth Vector TIN.");
                 self.universal_canvas.status_message = Some(msg.clone());
                 self.spatial_workspace.vault_feedback = Some(msg.clone());
                 self.spatial_workspace.push_trace(msg, true);
@@ -1902,6 +1906,13 @@ impl EigenGraphApp {
                 self.universal_canvas.ground_origin_lat_lon = target_geo;
                 self.universal_canvas.ground_origin_anchored = true;
                 self.universal_canvas.globe_mode = true;
+                if let Some(ifc_tin) =
+                    crate::core::ifc::IfcModel::extract_site_terrain_tin_from_raw(clean_raw)
+                {
+                    self.universal_canvas.active_site_tin = Some(ifc_tin);
+                    self.universal_canvas.site_tin_from_ifc = true;
+                    self.universal_canvas.show_terrain_contours = true;
+                }
                 self.universal_canvas.active_world_project_rel_path = Some(rel_path.to_string());
                 self.universal_canvas.earth_world.camera.tilt_deg = 42.0;
                 self.universal_canvas.earth_world.start_fly_to(
@@ -3136,7 +3147,7 @@ impl EigenGraphApp {
                 Ok(cnt) => {
                     if let Ok(tin) = crate::core::gis::parse_survey_xyz_to_tin(&payload.content) {
                         self.universal_canvas.active_site_tin = Some(tin);
-                        self.universal_canvas.site_tin_is_live_dem = false;
+                        self.universal_canvas.site_tin_from_ifc = false;
                         self.universal_canvas.show_terrain_contours = true;
                     }
                     self.universal_canvas.status_message = Some(format!(

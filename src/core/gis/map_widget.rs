@@ -1,13 +1,16 @@
-//! map_widget.rs — Slippy Map & Web Mercator Quadtree Engine for GIS Site Inception (Phase 23 / v0.2.3).
+//! map_widget.rs — Pure-Rust Vector Map & Web Mercator Geodetic Engine (Phase 64 / v0.6.4).
 //!
-//! Provides mathematically rigorous Web Mercator (EPSG:3857) projection, quadtree tile indexing,
-//! smooth continuous panning/zooming, geodetic site pinning, and interactive cartographic HUD telemetry.
+//! Provides mathematically rigorous Web Mercator (EPSG:3857) projection, geodetic site pinning,
+//! smooth continuous panning/zooming, and 100% pure-Rust vector cartography with zero external
+//! raster tiles or image decoding dependencies.
 
-use std::collections::HashMap;
 use std::f64::consts::PI;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use egui::{Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Ui, Vec2};
+
+pub use super::world_vectors::{
+    TileSource, VectorEarthPalette, VectorEarthTheme, WORLD_LANDMASSES, WORLD_MAJOR_RIVERS,
+    WORLD_MOUNTAIN_RIDGES,
+};
 
 /// WGS84 Earth semi-major axis radius in meters (EPSG:3857 / WGS84 ellipsoid spherical approximation).
 pub const EARTH_RADIUS_METERS: f64 = 6378137.0;
@@ -63,455 +66,10 @@ pub const GLOBAL_CITY_CATALOG: &[(&str, f64, f64, f32)] = &[
     ("Cairo", 30.0444, 31.2357, 15.0),
 ];
 
-/// Supported tile provider themes and raster/vector sources.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum TileSource {
-    OpenStreetMap,
-    OpenTopoMap,
-    EsriWorldImagery,
-    CartoDbDarkMatter,
-    SyntheticVectorTerrain,
-}
-
-impl TileSource {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::OpenStreetMap => "OpenStreetMap Standard",
-            Self::OpenTopoMap => "OpenTopoMap Elevation",
-            Self::EsriWorldImagery => "Esri World Imagery (Satellite)",
-            Self::CartoDbDarkMatter => "CartoDB Dark Matter",
-            Self::SyntheticVectorTerrain => "Synthetic Vector Terrain (Offline)",
-        }
-    }
-
-    pub fn url_template(&self) -> &'static str {
-        match self {
-            Self::OpenStreetMap => "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-            Self::OpenTopoMap => "https://tile.opentopomap.org/{z}/{x}/{y}.png",
-            Self::EsriWorldImagery => "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-            Self::CartoDbDarkMatter => "https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
-            Self::SyntheticVectorTerrain => "internal://procedural/vector/{z}/{x}/{y}",
-        }
-    }
-
-    pub fn provider_id(&self) -> u8 {
-        match self {
-            Self::OpenStreetMap => 1,
-            Self::OpenTopoMap => 2,
-            Self::EsriWorldImagery => 3,
-            Self::CartoDbDarkMatter => 4,
-            Self::SyntheticVectorTerrain => 0,
-        }
-    }
-
-    pub fn attribution_text(&self) -> &'static str {
-        match self {
-            Self::OpenStreetMap => "© OpenStreetMap contributors",
-            Self::OpenTopoMap => "© OpenTopoMap (CC-BY-SA)",
-            Self::EsriWorldImagery => "Tiles © Esri World Imagery",
-            Self::CartoDbDarkMatter => "© OpenStreetMap / CARTO",
-            Self::SyntheticVectorTerrain => "EigenGraph Offline Global Vector Basemap",
-        }
-    }
-
-    pub fn tile_url(&self, z: u8, x: u32, y: u32) -> String {
-        self.url_template()
-            .replace("{z}", &z.to_string())
-            .replace("{x}", &x.to_string())
-            .replace("{y}", &y.to_string())
-    }
-
-    pub fn max_zoom(&self) -> i32 {
-        match self {
-            Self::OpenTopoMap => 17,
-            Self::EsriWorldImagery => 18,
-            _ => 19,
-        }
-    }
-}
-
-#[derive(Clone)]
-enum TileEntryState {
-    Loading,
-    Failed,
-    Ready {
-        image: Option<egui::ColorImage>,
-        texture: Option<egui::TextureHandle>,
-    },
-}
-
-#[derive(Clone)]
-struct CachedTileEntry {
-    state: TileEntryState,
-    last_used_tick: u64,
-}
-
-/// Thread-safe / WASM-safe LRU raster slippy-tile cache for crisp streaming at arbitrary 3D zoom.
-#[derive(Clone, Default)]
-pub struct WorldTileCache {
-    inner: Arc<Mutex<HashMap<(u8, u8, u32, u32), CachedTileEntry>>>,
-    access_tick: Arc<AtomicU64>,
-}
-
-const MAX_CACHED_TILES: usize = 640;
-const LRU_EVICT_BATCH: usize = 160;
-const MAX_INFLIGHT_TILE_REQUESTS: usize = 20;
-
-impl std::fmt::Debug for WorldTileCache {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let count = self.inner.lock().map(|g| g.len()).unwrap_or(0);
-        f.debug_struct("WorldTileCache").field("cached_tiles", &count).finish()
-    }
-}
-
-impl WorldTileCache {
-    fn next_tick(&self) -> u64 {
-        self.access_tick.fetch_add(1, Ordering::Relaxed) + 1
-    }
-
-    pub fn clear(&self) {
-        if let Ok(mut guard) = self.inner.lock() {
-            guard.clear();
-        }
-    }
-
-    pub fn stats(&self) -> (usize, usize) {
-        let Ok(guard) = self.inner.lock() else {
-            return (0, 0);
-        };
-        let total = guard.len();
-        let ready = guard
-            .values()
-            .filter(|v| matches!(v.state, TileEntryState::Ready { .. }))
-            .count();
-        (ready, total)
-    }
-
-    fn request_tile(&self, ctx: &egui::Context, provider: TileSource, z: u8, x: u32, y: u32) {
-        if provider == TileSource::SyntheticVectorTerrain {
-            return;
-        }
-        let key = (provider.provider_id(), z, x, y);
-        let tick = self.next_tick();
-        {
-            let Ok(mut guard) = self.inner.lock() else {
-                return;
-            };
-            if let Some(existing) = guard.get_mut(&key) {
-                existing.last_used_tick = tick;
-                return;
-            }
-            let inflight = guard
-                .values()
-                .filter(|s| matches!(s.state, TileEntryState::Loading))
-                .count();
-            if inflight >= MAX_INFLIGHT_TILE_REQUESTS {
-                return;
-            }
-            if guard.len() >= MAX_CACHED_TILES {
-                // Evict only oldest least-recently-used non-loading entries so crisp parent tiles remain resident.
-                let mut candidates: Vec<((u8, u8, u32, u32), u64)> = guard
-                    .iter()
-                    .filter(|(_, v)| !matches!(v.state, TileEntryState::Loading))
-                    .map(|(k, v)| (*k, v.last_used_tick))
-                    .collect();
-                candidates.sort_by_key(|(_, t)| *t);
-                for (old_k, _) in candidates.into_iter().take(LRU_EVICT_BATCH) {
-                    guard.remove(&old_k);
-                }
-            }
-            guard.insert(
-                key,
-                CachedTileEntry {
-                    state: TileEntryState::Loading,
-                    last_used_tick: tick,
-                },
-            );
-        }
-
-        let url = provider.tile_url(z, x, y);
-        #[cfg(test)]
-        {
-            let _ = (ctx, url);
-            if let Ok(mut guard) = self.inner.lock() {
-                guard.insert(
-                    key,
-                    CachedTileEntry {
-                        state: TileEntryState::Failed,
-                        last_used_tick: tick,
-                    },
-                );
-            }
-        }
-
-        #[cfg(all(not(target_arch = "wasm32"), not(test)))]
-        {
-            let inner = self.inner.clone();
-            let ctx_clone = ctx.clone();
-            let access_tick = self.access_tick.clone();
-            std::thread::spawn(move || {
-                let output = std::process::Command::new("curl")
-                    .args([
-                        "-s",
-                        "-L",
-                        "-f",
-                        "--max-time",
-                        "8",
-                        "-A",
-                        "EigenGraph-BIM/0.5.6 (https://eigengraph.net)",
-                        &url,
-                    ])
-                    .output();
-                let decoded = output.ok().and_then(|out| {
-                    if out.status.success() && !out.stdout.is_empty() {
-                        decode_tile_bytes_to_color_image(&out.stdout)
-                    } else {
-                        None
-                    }
-                });
-                let done_tick = access_tick.fetch_add(1, Ordering::Relaxed) + 1;
-                if let Ok(mut guard) = inner.lock() {
-                    if let Some(image) = decoded {
-                        guard.insert(
-                            key,
-                            CachedTileEntry {
-                                state: TileEntryState::Ready {
-                                    image: Some(image),
-                                    texture: None,
-                                },
-                                last_used_tick: done_tick,
-                            },
-                        );
-                    } else {
-                        guard.insert(
-                            key,
-                            CachedTileEntry {
-                                state: TileEntryState::Failed,
-                                last_used_tick: done_tick,
-                            },
-                        );
-                    }
-                }
-                ctx_clone.request_repaint();
-            });
-        }
-
-        #[cfg(all(target_arch = "wasm32", not(test)))]
-        {
-            let inner = self.inner.clone();
-            let ctx_clone = ctx.clone();
-            let access_tick = self.access_tick.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                let fetched = fetch_tile_wasm(&url).await;
-                let decoded = fetched.and_then(|bytes| decode_tile_bytes_to_color_image(&bytes));
-                let done_tick = access_tick.fetch_add(1, Ordering::Relaxed) + 1;
-                if let Ok(mut guard) = inner.lock() {
-                    if let Some(image) = decoded {
-                        guard.insert(
-                            key,
-                            CachedTileEntry {
-                                state: TileEntryState::Ready {
-                                    image: Some(image),
-                                    texture: None,
-                                },
-                                last_used_tick: done_tick,
-                            },
-                        );
-                    } else {
-                        guard.insert(
-                            key,
-                            CachedTileEntry {
-                                state: TileEntryState::Failed,
-                                last_used_tick: done_tick,
-                            },
-                        );
-                    }
-                }
-                ctx_clone.request_repaint();
-            });
-        }
-    }
-
-    fn get_or_upload_texture(
-        &self,
-        ctx: &egui::Context,
-        provider: TileSource,
-        z: u8,
-        x: u32,
-        y: u32,
-    ) -> Option<egui::TextureId> {
-        let p = provider.provider_id();
-        let key = (p, z, x, y);
-        let tick = self.next_tick();
-        let Ok(mut guard) = self.inner.lock() else {
-            return None;
-        };
-        let entry = guard.get_mut(&key)?;
-        entry.last_used_tick = tick;
-        if let TileEntryState::Ready { image, texture } = &mut entry.state {
-            if let Some(tex) = texture {
-                return Some(tex.id());
-            }
-            if let Some(img) = image.take() {
-                let tex = ctx.load_texture(
-                    format!("eigengraph_tile_{}_{}_{}_{}", p, z, x, y),
-                    img,
-                    egui::TextureOptions::LINEAR,
-                );
-                let id = tex.id();
-                *texture = Some(tex);
-                return Some(id);
-            }
-        }
-        None
-    }
-}
-
-fn decode_tile_bytes_to_color_image(bytes: &[u8]) -> Option<egui::ColorImage> {
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let size = [img.width() as usize, img.height() as usize];
-    Some(egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()))
-}
-
-#[cfg(all(target_arch = "wasm32", not(test)))]
-async fn fetch_tile_wasm(url: &str) -> Option<Vec<u8>> {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen_futures::JsFuture;
-
-    let window = web_sys::window()?;
-    let opts = web_sys::RequestInit::new();
-    opts.set_method("GET");
-    opts.set_mode(web_sys::RequestMode::Cors);
-
-    let request = web_sys::Request::new_with_str_and_init(url, &opts).ok()?;
-    let resp_val = JsFuture::from(window.fetch_with_request(&request)).await.ok()?;
-    let resp: web_sys::Response = resp_val.dyn_into().ok()?;
-    if !resp.ok() {
-        return None;
-    }
-    let buf_promise = resp.array_buffer().ok()?;
-    let buf_val = JsFuture::from(buf_promise).await.ok()?;
-    let uint8 = js_sys::Uint8Array::new(&buf_val);
-    Some(uint8.to_vec())
-}
-
 /// Triangulates a simple concave 2D screen polygon via ear-clipping for clean continent landmass fills.
 pub fn ear_clip_polygon(pts: &[Pos2], fill_color: Color32) -> Option<egui::epaint::Mesh> {
     triangulate_polygon_2d(pts, fill_color)
 }
-
-/// Geographical tile quad ready for 2D or 3D perspective ground rendering.
-#[derive(Debug, Clone, Copy)]
-pub struct TileGeoQuad {
-    pub tex_id: egui::TextureId,
-    pub north_lat: f64,
-    pub west_lon: f64,
-    pub south_lat: f64,
-    pub east_lon: f64,
-    pub uv_rect: Rect,
-}
-
-/// Low-dependency global coastline & continent polygons (lat, lon) shared by 2D and 3D Earth views.
-pub const WORLD_LANDMASSES: &[&[(f64, f64)]] = &[
-    // North & Central America
-    &[
-        (70.0, -162.0), (71.3, -156.0), (70.0, -135.0), (68.0, -95.0), (62.0, -78.0),
-        (58.0, -64.0), (52.0, -56.0), (45.0, -61.0), (42.0, -70.0), (35.0, -76.0),
-        (25.2, -80.2), (29.5, -84.0), (29.0, -95.0), (22.0, -97.5), (19.0, -96.0),
-        (21.4, -87.0), (16.0, -88.5), (15.0, -83.5), (9.0, -80.0), (8.5, -77.5),
-        (7.5, -80.5), (10.5, -85.5), (14.5, -92.5), (16.5, -100.0), (23.0, -106.5),
-        (31.5, -114.0), (23.5, -110.0), (32.5, -117.1), (38.0, -123.0), (48.5, -124.7),
-        (56.0, -133.0), (60.5, -145.0), (58.0, -156.0), (63.5, -166.0),
-    ],
-    // Greenland
-    &[
-        (82.5, -32.0), (81.5, -18.0), (76.0, -19.0), (70.0, -22.0), (60.0, -43.0),
-        (65.0, -52.0), (73.0, -56.0), (78.0, -72.0), (81.5, -62.0),
-    ],
-    // South America
-    &[
-        (12.2, -71.5), (10.5, -62.0), (5.0, -52.0), (0.0, -50.0), (-5.5, -35.0),
-        (-13.0, -38.5), (-23.0, -42.0), (-34.0, -53.5), (-41.0, -64.0), (-52.0, -68.5),
-        (-55.5, -67.5), (-52.5, -74.5), (-42.0, -74.0), (-33.0, -71.6), (-18.5, -70.5),
-        (-12.0, -77.2), (-4.5, -81.2), (1.0, -79.5), (9.0, -77.0),
-    ],
-    // Europe Mainland + Scandinavia
-    &[
-        (36.0, -5.6), (37.0, -9.0), (43.5, -9.2), (43.5, -1.8), (48.4, -4.7),
-        (51.0, 2.0), (54.0, 8.5), (57.2, 8.6), (55.5, 11.5), (59.5, 10.5),
-        (62.5, 5.5), (69.0, 16.0), (71.1, 26.0), (69.5, 32.0), (65.0, 25.5),
-        (60.0, 22.0), (59.5, 28.0), (55.0, 20.5), (54.0, 13.5), (53.5, 10.0),
-        (45.5, 13.8), (40.0, 18.4), (38.0, 15.6), (44.0, 9.5), (43.0, 5.5),
-        (41.4, 2.2), (36.8, -2.5),
-    ],
-    // Great Britain & Ireland
-    &[
-        (50.0, -5.5), (51.5, -4.5), (54.0, -3.2), (58.6, -5.0), (58.6, -3.0),
-        (56.0, -2.5), (52.8, 1.7), (51.1, 1.4), (50.6, -1.5),
-    ],
-    &[(51.5, -9.8), (54.3, -10.0), (55.2, -6.5), (52.2, -6.3)],
-    // Africa Mainland
-    &[
-        (35.8, -5.5), (37.2, 10.5), (32.5, 15.0), (31.2, 32.3), (22.0, 36.8),
-        (15.5, 39.5), (12.0, 43.5), (11.9, 51.3), (2.0, 45.3), (-4.0, 39.7),
-        (-11.0, 40.6), (-20.0, 34.8), (-26.0, 32.9), (-34.8, 20.0), (-33.9, 18.4),
-        (-22.5, 14.4), (-12.5, 13.4), (-4.5, 11.8), (4.0, 9.5), (4.5, 3.5),
-        (4.7, -7.5), (8.5, -13.2), (14.7, -17.5), (21.0, -17.0), (30.5, -9.6),
-    ],
-    // Madagascar
-    &[(-12.0, 49.2), (-16.0, 50.0), (-25.2, 47.0), (-25.0, 44.0), (-16.5, 44.4)],
-    // Asia + Middle East + India + Indochina + Siberia
-    &[
-        (69.5, 32.0), (73.5, 70.0), (77.5, 104.0), (72.5, 128.0), (70.0, 162.0),
-        (66.0, 179.0), (60.0, 165.0), (52.0, 156.5), (60.0, 150.0), (54.0, 138.0),
-        (43.0, 132.0), (38.5, 128.5), (35.1, 129.0), (35.0, 126.5), (39.5, 124.0),
-        (37.5, 121.0), (31.2, 121.8), (22.3, 114.2), (20.5, 107.0), (12.5, 109.4),
-        (8.6, 105.0), (13.5, 100.5), (1.3, 103.8), (6.5, 100.2), (16.5, 96.2),
-        (22.0, 91.5), (16.0, 81.0), (8.1, 77.5), (19.0, 72.8), (24.5, 67.0),
-        (25.5, 57.5), (30.0, 48.0), (24.0, 52.0), (22.5, 59.8), (12.6, 43.5),
-        (28.0, 34.5), (36.5, 36.0), (41.0, 29.0), (46.5, 31.0), (42.0, 41.5),
-        (45.5, 48.0), (54.0, 38.0),
-    ],
-    // Sri Lanka, Taiwan, Philippines, Japan
-    &[(9.8, 80.2), (7.5, 81.8), (6.0, 80.5), (7.8, 79.8)],
-    &[(25.2, 121.6), (22.0, 120.8), (23.8, 120.2)],
-    &[(18.5, 121.0), (18.2, 122.3), (13.0, 124.0), (6.0, 126.2), (6.8, 122.0), (14.5, 120.4)],
-    &[
-        (45.5, 141.9), (43.0, 145.5), (38.0, 141.0), (35.0, 139.8), (31.0, 130.7),
-        (34.0, 130.9), (37.5, 137.0), (41.5, 140.2),
-    ],
-    // Indonesia: Sumatra
-    &[(5.5, 95.3), (4.0, 98.5), (2.0, 100.5), (-0.5, 103.5), (-3.0, 106.0), (-5.8, 105.8), (-5.0, 103.5), (-3.5, 102.0), (-0.5, 99.5), (2.5, 96.5)],
-    // Indonesia: Java
-    &[(-6.0, 105.2), (-5.9, 106.8), (-6.2, 108.5), (-6.8, 111.5), (-7.0, 114.6), (-7.8, 114.5), (-8.3, 113.2), (-8.4, 110.5), (-7.7, 108.5), (-7.0, 106.5), (-6.8, 105.1)],
-    // Indonesia / Malaysia: Kalimantan / Borneo
-    &[(7.0, 116.5), (4.5, 118.5), (1.5, 119.0), (-1.2, 117.2), (-3.5, 116.0), (-4.2, 114.5), (-3.5, 110.5), (-1.0, 109.0), (1.5, 109.5), (4.0, 114.0)],
-    // Indonesia: Sulawesi
-    &[(1.8, 125.0), (0.5, 120.0), (-1.0, 119.5), (-5.5, 119.5), (-5.0, 120.5), (-3.0, 121.5), (-5.0, 123.0), (-3.0, 123.0), (-1.0, 121.5), (0.8, 123.5)],
-    // Indonesia: Bali & Nusa Tenggara
-    &[(-8.1, 114.4), (-8.1, 115.7), (-8.8, 115.6), (-8.7, 114.5)],
-    &[(-8.2, 115.9), (-8.2, 119.2), (-8.9, 119.0), (-8.9, 116.0)],
-    &[(-8.3, 119.5), (-8.3, 123.5), (-9.2, 123.4), (-9.0, 119.7)],
-    &[(-8.4, 123.6), (-8.4, 127.3), (-10.4, 123.6), (-9.2, 123.4)],
-    // Papua / New Guinea
-    &[(-0.8, 131.0), (-2.5, 140.0), (-6.5, 147.8), (-10.5, 150.7), (-8.5, 141.0), (-8.0, 137.5), (-4.5, 135.0), (-3.0, 131.5)],
-    // Australia & Tasmania
-    &[
-        (-11.0, 130.0), (-12.5, 136.8), (-15.0, 136.0), (-10.7, 142.5), (-19.0, 147.0),
-        (-25.0, 153.2), (-33.8, 151.3), (-37.8, 149.9), (-38.5, 144.0), (-35.0, 135.5),
-        (-31.7, 128.0), (-35.1, 117.8), (-32.0, 115.7), (-22.0, 114.0), (-16.0, 123.0),
-    ],
-    &[(-40.8, 144.7), (-41.0, 148.3), (-43.5, 147.2), (-43.0, 145.5)],
-    // New Zealand
-    &[(-34.5, 172.7), (-37.7, 178.5), (-41.3, 175.3), (-41.1, 174.0), (-36.8, 174.3)],
-    &[(-40.7, 172.5), (-42.4, 173.7), (-46.5, 168.5), (-45.8, 166.5)],
-    // Antarctica Continental Rim
-    &[
-        (-65.0, -179.9), (-77.5, -165.0), (-73.0, -100.0), (-63.5, -58.0),
-        (-70.0, -5.0), (-68.5, 45.0), (-66.5, 95.0), (-66.5, 140.0),
-        (-72.0, 170.0), (-65.0, 179.9), (-84.5, 179.9), (-84.5, -179.9),
-    ],
-];
 
 fn triangulate_polygon_2d(pts: &[Pos2], fill_color: Color32) -> Option<egui::epaint::Mesh> {
     if pts.len() < 3 {
@@ -708,12 +266,12 @@ pub struct SlippyMapTelemetry {
     pub pins_count: usize,
 }
 
-/// Interactive Slippy Map State Container for Pillar 1D (Research & GIS Site Inception).
+/// Interactive Pure-Vector Map State Container for Pillar 1D & Earth Vector 3D.
 #[derive(Debug, Clone)]
 pub struct SlippyMapState {
     pub center_lat_lon: (f64, f64),
     pub zoom_level: f32, // Continuous zoom 1.0 to 19.0
-    pub tile_provider: TileSource,
+    pub tile_provider: VectorEarthTheme,
     pub vector_site_overlay: bool,
     pub active_pin: Option<(f64, f64)>,
     pub site_pins: Vec<SiteGeodeticPin>,
@@ -725,16 +283,15 @@ pub struct SlippyMapState {
     pub drag_start_mouse: Option<Pos2>,
     pub drag_start_center: (f64, f64),
     pub next_pin_id: usize,
-    pub tile_cache: WorldTileCache,
 }
 
 impl Default for SlippyMapState {
     fn default() -> Self {
         Self {
-            // Phase 43: Start on Satellite imagery framed around the curved 3D Earth overview
-            center_lat_lon: (5.0, 98.0),
-            zoom_level: 1.65,
-            tile_provider: TileSource::EsriWorldImagery,
+            // Phase 64: Pure-Rust Vector Earth default centered on the Indonesian Archipelago & Asia-Pacific
+            center_lat_lon: (-2.0, 114.0),
+            zoom_level: 2.15,
+            tile_provider: VectorEarthTheme::CoastalBlueprint,
             vector_site_overlay: true,
             active_pin: None,
             site_pins: Vec::new(),
@@ -744,9 +301,8 @@ impl Default for SlippyMapState {
             show_elevation_contours: false,
             is_dragging: false,
             drag_start_mouse: None,
-            drag_start_center: (5.0, 98.0),
+            drag_start_center: (-2.0, 114.0),
             next_pin_id: 1,
-            tile_cache: WorldTileCache::default(),
         }
     }
 }
@@ -756,53 +312,16 @@ impl SlippyMapState {
         Self::default()
     }
 
-    /// Short mode label describing the active vector/satellite rendering layer.
+    /// Short mode label describing the active pure-vector Earth cartography theme.
     pub fn visual_layer_label(&self) -> &'static str {
-        if self.tile_provider == TileSource::SyntheticVectorTerrain {
-            "Pure Vector"
-        } else if self.vector_site_overlay {
-            match self.tile_provider {
-                TileSource::EsriWorldImagery => "Sat + Vec",
-                TileSource::OpenStreetMap => "OSM + Vec",
-                TileSource::OpenTopoMap => "Topo + Vec",
-                TileSource::CartoDbDarkMatter => "Dark + Vec",
-                TileSource::SyntheticVectorTerrain => "Pure Vector",
-            }
-        } else {
-            match self.tile_provider {
-                TileSource::EsriWorldImagery => "Satellite",
-                TileSource::OpenStreetMap => "OSM Streets",
-                TileSource::OpenTopoMap => "OpenTopo",
-                TileSource::CartoDbDarkMatter => "Dark Map",
-                TileSource::SyntheticVectorTerrain => "Pure Vector",
-            }
-        }
+        self.tile_provider.short_name()
     }
 
-    /// Cycles through Satellite Hybrid Vector -> Pure Rust Vector -> OSM Hybrid Vector -> Dark Hybrid Vector -> Raster Only.
+    /// Cycles cleanly through the four built-in Pure-Rust Vector Earth themes:
+    /// `CoastalBlueprint` -> `CityDaylight` -> `NightTwin` -> `Topographic`.
     pub fn cycle_basemap_visual_mode(&mut self) {
-        match (self.tile_provider, self.vector_site_overlay) {
-            (TileSource::EsriWorldImagery, true) => {
-                self.tile_provider = TileSource::SyntheticVectorTerrain;
-                self.vector_site_overlay = true;
-            }
-            (TileSource::SyntheticVectorTerrain, _) => {
-                self.tile_provider = TileSource::OpenStreetMap;
-                self.vector_site_overlay = true;
-            }
-            (TileSource::OpenStreetMap, true) => {
-                self.tile_provider = TileSource::CartoDbDarkMatter;
-                self.vector_site_overlay = true;
-            }
-            (TileSource::CartoDbDarkMatter, true) => {
-                self.tile_provider = TileSource::EsriWorldImagery;
-                self.vector_site_overlay = false;
-            }
-            _ => {
-                self.tile_provider = TileSource::EsriWorldImagery;
-                self.vector_site_overlay = true;
-            }
-        }
+        self.tile_provider = self.tile_provider.cycle_next();
+        self.vector_site_overlay = true;
     }
 
     /// Pans the map center by delta pixel offset on screen.
@@ -913,351 +432,10 @@ impl SlippyMapState {
         )
     }
 
-    /// Returns `(ocean_color, land_color, coast_color)` matching the active basemap style and theme.
-    pub fn basemap_colors(&self, theme: &crate::theme::MacTheme) -> (Color32, Color32, Color32) {
-        let ocean_color = match self.tile_provider {
-            TileSource::CartoDbDarkMatter => Color32::from_rgb(11, 16, 24),
-            TileSource::EsriWorldImagery => Color32::from_rgb(13, 27, 46),
-            TileSource::OpenTopoMap => Color32::from_rgb(184, 214, 232),
-            TileSource::OpenStreetMap if !theme.is_dark() => Color32::from_rgb(170, 211, 223),
-            TileSource::OpenStreetMap => Color32::from_rgb(18, 30, 44),
-            TileSource::SyntheticVectorTerrain if !theme.is_dark() => Color32::from_rgb(206, 224, 236),
-            TileSource::SyntheticVectorTerrain => Color32::from_rgb(17, 25, 36),
-        };
-        let (land_color, coast_color) = match self.tile_provider {
-            TileSource::CartoDbDarkMatter => (
-                Color32::from_rgb(28, 34, 46),
-                Color32::from_rgb(64, 78, 98),
-            ),
-            TileSource::EsriWorldImagery => (
-                Color32::from_rgb(38, 58, 42),
-                Color32::from_rgb(76, 108, 82),
-            ),
-            TileSource::OpenTopoMap => (
-                Color32::from_rgb(228, 224, 198),
-                Color32::from_rgb(154, 148, 122),
-            ),
-            TileSource::OpenStreetMap if !theme.is_dark() => (
-                Color32::from_rgb(236, 233, 222),
-                Color32::from_rgb(168, 165, 152),
-            ),
-            TileSource::OpenStreetMap => (
-                Color32::from_rgb(36, 48, 60),
-                Color32::from_rgb(72, 92, 112),
-            ),
-            TileSource::SyntheticVectorTerrain if !theme.is_dark() => (
-                Color32::from_rgb(230, 234, 224),
-                Color32::from_rgb(142, 156, 146),
-            ),
-            TileSource::SyntheticVectorTerrain => (
-                Color32::from_rgb(34, 46, 56),
-                Color32::from_rgb(68, 88, 104),
-            ),
-        };
-        (ocean_color, land_color, coast_color)
-    }
-
-    /// Requests visible Web Mercator tiles and collects textured geographic quads for 2D/3D ground projection.
-    pub fn collect_visible_tile_quads(
-        &self,
-        ctx: &egui::Context,
-        view_w: f32,
-        view_h: f32,
-    ) -> Vec<TileGeoQuad> {
-        if self.tile_provider == TileSource::SyntheticVectorTerrain {
-            return Vec::new();
-        }
-        let max_z = self.tile_provider.max_zoom();
-        let z_int = (self.zoom_level.floor() as i32).clamp(1, max_z) as u8;
-        let n_tiles = 1_i64 << z_int;
-        let scale = 2.0_f64.powf(self.zoom_level as f64 - z_int as f64);
-
-        let (cx, cy) = WebMercator::lat_lon_to_tile_coords(
-            self.center_lat_lon.0,
-            self.center_lat_lon.1,
-            self.zoom_level,
-        );
-        let tile_px = (256.0 * scale) as f32;
-        if tile_px <= 1.0 {
-            return Vec::new();
-        }
-
-        let half_w = (view_w.max(240.0) * 0.72) as f64;
-        let half_h = (view_h.max(200.0) * 0.72) as f64;
-
-        let min_tx = ((cx - half_w / 256.0) / scale).floor() as i64;
-        let max_tx = ((cx + half_w / 256.0) / scale).floor() as i64;
-        let min_ty = (((cy - half_h / 256.0) / scale).floor() as i64).clamp(0, n_tiles - 1);
-        let max_ty = (((cy + half_h / 256.0) / scale).floor() as i64).clamp(0, n_tiles - 1);
-
-        let mut out = Vec::new();
-        let mut budget = 0usize;
-        let n_f = n_tiles as f64;
-
-        for ty_i in min_ty..=max_ty {
-            let ty = ty_i as u32;
-            let (north_lat, _) = WebMercator::tile_coords_to_lat_lon(0.0, ty_i as f64, z_int as f32);
-            let (south_lat, _) = WebMercator::tile_coords_to_lat_lon(0.0, (ty_i + 1) as f64, z_int as f32);
-            for tx_raw in min_tx..=max_tx {
-                if budget >= 120 {
-                    break;
-                }
-                budget += 1;
-                let tx_wrapped = tx_raw.rem_euclid(n_tiles) as u32;
-                let west_lon = (tx_raw as f64 / n_f) * 360.0 - 180.0;
-                let east_lon = ((tx_raw + 1) as f64 / n_f) * 360.0 - 180.0;
-
-                self.tile_cache.request_tile(ctx, self.tile_provider, z_int, tx_wrapped, ty);
-
-                if let Some(tex_id) =
-                    self.tile_cache.get_or_upload_texture(ctx, self.tile_provider, z_int, tx_wrapped, ty)
-                {
-                    out.push(TileGeoQuad {
-                        tex_id,
-                        north_lat,
-                        west_lon,
-                        south_lat,
-                        east_lon,
-                        uv_rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                    });
-                } else {
-                    for ancestor in 1..=5_u8 {
-                        if z_int <= ancestor {
-                            break;
-                        }
-                        let pz = z_int - ancestor;
-                        let factor = 1_u32 << ancestor;
-                        let px = tx_wrapped / factor;
-                        let py = ty / factor;
-                        if let Some(ptex) = self.tile_cache.get_or_upload_texture(ctx, self.tile_provider, pz, px, py) {
-                            let sx = (tx_wrapped % factor) as f32 / factor as f32;
-                            let sy = (ty % factor) as f32 / factor as f32;
-                            let sw = 1.0 / factor as f32;
-                            out.push(TileGeoQuad {
-                                tex_id: ptex,
-                                north_lat,
-                                west_lon,
-                                south_lat,
-                                east_lon,
-                                uv_rect: Rect::from_min_max(Pos2::new(sx, sy), Pos2::new(sx + sw, sy + sw)),
-                            });
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        out
-    }
-
-    /// Computes exact physical-pixel-calibrated Slippy tile zoom level `z` for the 3D globe camera.
-    pub fn resolved_3d_tile_zoom(
-        &self,
-        xform: &super::earth_globe::GlobeScreenTransform,
-        pixels_per_point: f32,
-    ) -> u8 {
-        let ppp = (pixels_per_point as f64).clamp(1.0, 4.0);
-        let m_per_phys_px = (xform.d_surf / (xform.f_px * ppp).max(120.0)) * EARTH_RADIUS_METERS;
-        let cos_lat = xform.center_lat_deg.to_radians().cos().clamp(0.15, 1.0);
-        let exact_z = (156543.03392 * cos_lat / m_per_phys_px.max(0.05)).log2();
-        let max_z = self.tile_provider.max_zoom();
-        ((exact_z + 0.35).floor() as i32).clamp(2, max_z) as u8
-    }
-
-    /// Streams 3D-perspective & HiDPI calibrated Mercator tiles for curved globe zoom (`zoom >= 4.5`).
-    pub fn collect_globe_site_tile_quads(
-        &self,
-        ctx: &egui::Context,
-        xform: &super::earth_globe::GlobeScreenTransform,
-    ) -> Vec<TileGeoQuad> {
-        if self.tile_provider == TileSource::SyntheticVectorTerrain {
-            return Vec::new();
-        }
-        let z_int = self.resolved_3d_tile_zoom(xform, ctx.pixels_per_point());
-        let n_tiles = 1_i64 << z_int;
-        let n_f = n_tiles as f64;
-        let (ctx_f, cty_f) = WebMercator::lat_lon_to_tile_coords(
-            xform.center_lat_deg,
-            xform.center_lon_deg,
-            z_int as f32,
-        );
-
-        let mut min_tx = ctx_f.floor() as i64 - 1;
-        let mut max_tx = ctx_f.floor() as i64 + 1;
-        let mut min_ty = (cty_f.floor() as i64 - 1).clamp(0, n_tiles - 1);
-        let mut max_ty = (cty_f.floor() as i64 + 1).clamp(0, n_tiles - 1);
-
-        for gy in 0..=4 {
-            let fy = -0.06 + (gy as f32) * 0.28;
-            for gx in 0..=4 {
-                let fx = -0.06 + (gx as f32) * 0.28;
-                let sp = Pos2::new(
-                    xform.rect.min.x + xform.rect.width() * fx,
-                    xform.rect.min.y + xform.rect.height() * fy,
-                );
-                let (lat, lon, hit) = xform.screen_to_lat_lon(sp);
-                if !hit {
-                    continue;
-                }
-                let (mut tx_f, ty_f) = WebMercator::lat_lon_to_tile_coords(lat, lon, z_int as f32);
-                while tx_f - ctx_f > n_f * 0.5 {
-                    tx_f -= n_f;
-                }
-                while tx_f - ctx_f < -n_f * 0.5 {
-                    tx_f += n_f;
-                }
-                let txi = tx_f.floor() as i64;
-                let tyi = (ty_f.floor() as i64).clamp(0, n_tiles - 1);
-                min_tx = min_tx.min(txi);
-                max_tx = max_tx.max(txi);
-                min_ty = min_ty.min(tyi);
-                max_ty = max_ty.max(tyi);
-            }
-        }
-
-        // Clamp radial spread around focus center so tilted horizon views stay within crisp tile budget
-        let c_txi = ctx_f.floor() as i64;
-        let c_tyi = cty_f.floor() as i64;
-        min_tx = min_tx.max(c_txi - 5);
-        max_tx = max_tx.min(c_txi + 5);
-        min_ty = min_ty.max(c_tyi - 5).clamp(0, n_tiles - 1);
-        max_ty = max_ty.min(c_tyi + 5).clamp(0, n_tiles - 1);
-
-        let mut coords: Vec<(i64, i64, f64)> = Vec::new();
-        for ty_i in min_ty..=max_ty {
-            for tx_raw in min_tx..=max_tx {
-                let dx = tx_raw as f64 + 0.5 - ctx_f;
-                let dy = ty_i as f64 + 0.5 - cty_f;
-                coords.push((tx_raw, ty_i, dx * dx + dy * dy));
-            }
-        }
-        coords.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-
-        let mut out = Vec::with_capacity(coords.len().min(120));
-        for (tx_raw, ty_i, _) in coords.into_iter().take(120) {
-            let ty = ty_i as u32;
-            let (north_lat, _) = WebMercator::tile_coords_to_lat_lon(0.0, ty_i as f64, z_int as f32);
-            let (south_lat, _) = WebMercator::tile_coords_to_lat_lon(0.0, (ty_i + 1) as f64, z_int as f32);
-            let tx_wrapped = tx_raw.rem_euclid(n_tiles) as u32;
-            let west_lon = (tx_raw as f64 / n_f) * 360.0 - 180.0;
-            let east_lon = ((tx_raw + 1) as f64 / n_f) * 360.0 - 180.0;
-
-            self.tile_cache.request_tile(ctx, self.tile_provider, z_int, tx_wrapped, ty);
-
-            if let Some(tex_id) =
-                self.tile_cache.get_or_upload_texture(ctx, self.tile_provider, z_int, tx_wrapped, ty)
-            {
-                out.push(TileGeoQuad {
-                    tex_id,
-                    north_lat,
-                    west_lon,
-                    south_lat,
-                    east_lon,
-                    uv_rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                });
-            } else {
-                for ancestor in 1..=5_u8 {
-                    if z_int <= ancestor {
-                        break;
-                    }
-                    let pz = z_int - ancestor;
-                    let factor = 1_u32 << ancestor;
-                    let px = tx_wrapped / factor;
-                    let py = ty / factor;
-                    if let Some(ptex) = self.tile_cache.get_or_upload_texture(ctx, self.tile_provider, pz, px, py) {
-                        let sx = (tx_wrapped % factor) as f32 / factor as f32;
-                        let sy = (ty % factor) as f32 / factor as f32;
-                        let sw = 1.0 / factor as f32;
-                        out.push(TileGeoQuad {
-                            tex_id: ptex,
-                            north_lat,
-                            west_lon,
-                            south_lat,
-                            east_lon,
-                            uv_rect: Rect::from_min_max(Pos2::new(sx, sy), Pos2::new(sx + sw, sy + sw)),
-                        });
-                        break;
-                    }
-                }
-            }
-        }
-        out
-    }
-
-    /// Streams front-hemisphere Web Mercator tiles sized for curved 3D Earth orbital zoom (`zoom < 4.5`).
-    pub fn collect_globe_tile_quads(
-        &self,
-        ctx: &egui::Context,
-        min_z: u8,
-        center_lat: f64,
-        center_lon: f64,
-    ) -> Vec<TileGeoQuad> {
-        if self.tile_provider == TileSource::SyntheticVectorTerrain {
-            return Vec::new();
-        }
-        let max_z = self.tile_provider.max_zoom();
-        let dpi_boost = ctx.pixels_per_point().max(1.0).log2();
-        let z_int = ((self.zoom_level + dpi_boost).round() as i32 + 1).clamp(min_z as i32, max_z.min(5)) as u8;
-        let n_tiles = 1_i64 << z_int;
-        let n_f = n_tiles as f64;
-        let c_vec = super::earth_globe::lat_lon_to_unit_sphere(center_lat, center_lon);
-        let mut out = Vec::new();
-
-        for ty_i in 0..n_tiles {
-            let ty = ty_i as u32;
-            let (north_lat, _) = WebMercator::tile_coords_to_lat_lon(0.0, ty_i as f64, z_int as f32);
-            let (south_lat, _) = WebMercator::tile_coords_to_lat_lon(0.0, (ty_i + 1) as f64, z_int as f32);
-            let mid_lat = 0.5 * (north_lat + south_lat);
-            for tx_i in 0..n_tiles {
-                let tx = tx_i as u32;
-                let west_lon = (tx_i as f64 / n_f) * 360.0 - 180.0;
-                let east_lon = ((tx_i + 1) as f64 / n_f) * 360.0 - 180.0;
-                let mid_lon = 0.5 * (west_lon + east_lon);
-                let t_vec = super::earth_globe::lat_lon_to_unit_sphere(mid_lat, mid_lon);
-                let dot = t_vec[0] * c_vec[0] + t_vec[1] * c_vec[1] + t_vec[2] * c_vec[2];
-                if dot < -0.25 {
-                    continue;
-                }
-                self.tile_cache.request_tile(ctx, self.tile_provider, z_int, tx, ty);
-                if let Some(tex_id) =
-                    self.tile_cache.get_or_upload_texture(ctx, self.tile_provider, z_int, tx, ty)
-                {
-                    out.push(TileGeoQuad {
-                        tex_id,
-                        north_lat,
-                        west_lon,
-                        south_lat,
-                        east_lon,
-                        uv_rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                    });
-                } else {
-                    for ancestor in 1..=3_u8 {
-                        if z_int <= ancestor {
-                            break;
-                        }
-                        let pz = z_int - ancestor;
-                        let factor = 1_u32 << ancestor;
-                        let px = tx / factor;
-                        let py = ty / factor;
-                        if let Some(ptex) = self.tile_cache.get_or_upload_texture(ctx, self.tile_provider, pz, px, py) {
-                            let sx = (tx % factor) as f32 / factor as f32;
-                            let sy = (ty % factor) as f32 / factor as f32;
-                            let sw = 1.0 / factor as f32;
-                            out.push(TileGeoQuad {
-                                tex_id: ptex,
-                                north_lat,
-                                west_lon,
-                                south_lat,
-                                east_lon,
-                                uv_rect: Rect::from_min_max(Pos2::new(sx, sy), Pos2::new(sx + sw, sy + sw)),
-                            });
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        out
+    /// Returns `(ocean_color, land_color, coast_color)` matching the active `VectorEarthTheme`.
+    pub fn basemap_colors(&self, _theme: &crate::theme::MacTheme) -> (Color32, Color32, Color32) {
+        let pal = self.tile_provider.palette();
+        (pal.deep_ocean, pal.land_base, pal.coast_stroke)
     }
 
     /// Converts local CAD ground offset `[east_mm, north_mm]` around `origin_lat_lon` to `(lat, lon)`.
@@ -1601,15 +779,16 @@ impl SlippyMapState {
 
     fn render_cartographic_basemap(
         &self,
-        ui: &Ui,
+        _ui: &Ui,
         painter: &egui::Painter,
         rect: Rect,
         theme: &crate::theme::MacTheme,
     ) {
+        let pal = self.tile_provider.palette();
         let (ocean_color, land_color, coast_color) = self.basemap_colors(theme);
         painter.rect_filled(rect, CornerRadius::same(8), ocean_color);
 
-        // 2. Global Vector Continents & Islands (triangulated for concave shapes + wrap offsets)
+        // 2. Global Pure-Rust Vector Continents, Indonesian Archipelago, Ridges & Rivers
         for &wrap_deg in &[-360.0_f64, 0.0_f64, 360.0_f64] {
             for land in WORLD_LANDMASSES {
                 let pts: Vec<Pos2> = land
@@ -1631,89 +810,26 @@ impl SlippyMapState {
                 }
                 painter.add(egui::epaint::PathShape::closed_line(
                     pts,
-                    Stroke::new(0.9, coast_color),
+                    Stroke::new(1.0, coast_color),
                 ));
             }
-        }
-
-        // 3. Stream live online raster tiles over vector continents (fallback already drawn underneath)
-        if self.tile_provider != TileSource::SyntheticVectorTerrain {
-            self.render_raster_tiles(ui, painter, rect);
-        }
-    }
-
-    fn render_raster_tiles(&self, ui: &Ui, painter: &egui::Painter, rect: Rect) {
-        let max_z = self.tile_provider.max_zoom();
-        let z_int = (self.zoom_level.floor() as i32).clamp(1, max_z) as u8;
-        let n_tiles = 1_i64 << z_int;
-        let scale = 2.0_f64.powf(self.zoom_level as f64 - z_int as f64);
-
-        let (cx, cy) = WebMercator::lat_lon_to_tile_coords(
-            self.center_lat_lon.0,
-            self.center_lat_lon.1,
-            self.zoom_level,
-        );
-        let tile_px = (256.0 * scale) as f32;
-        if tile_px <= 1.0 {
-            return;
-        }
-
-        let min_tx = ((cx + (rect.min.x - rect.center().x) as f64 / 256.0) / scale).floor() as i64;
-        let max_tx = ((cx + (rect.max.x - rect.center().x) as f64 / 256.0) / scale).floor() as i64;
-        let min_ty = (((cy + (rect.min.y - rect.center().y) as f64 / 256.0) / scale).floor() as i64)
-            .clamp(0, n_tiles - 1);
-        let max_ty = (((cy + (rect.max.y - rect.center().y) as f64 / 256.0) / scale).floor() as i64)
-            .clamp(0, n_tiles - 1);
-
-        let mut drawn_budget = 0usize;
-        for ty_i in min_ty..=max_ty {
-            let ty = ty_i as u32;
-            for tx_raw in min_tx..=max_tx {
-                if drawn_budget >= 64 {
-                    break;
+            if self.zoom_level >= 2.0 {
+                for ridge in WORLD_MOUNTAIN_RIDGES {
+                    let pts: Vec<Pos2> = ridge
+                        .iter()
+                        .map(|&(lat, lon)| self.lat_lon_to_screen_unwrapped(lat, lon + wrap_deg, rect))
+                        .collect();
+                    if pts.len() >= 2 && pts.iter().any(|p| rect.expand(30.0).contains(*p)) {
+                        painter.add(egui::Shape::line(pts, Stroke::new(1.1, pal.ridge_stroke)));
+                    }
                 }
-                drawn_budget += 1;
-                let tx_wrapped = tx_raw.rem_euclid(n_tiles) as u32;
-                let x0 = rect.center().x + ((tx_raw as f64 * scale - cx) * 256.0) as f32;
-                let y0 = rect.center().y + ((ty_i as f64 * scale - cy) * 256.0) as f32;
-                let tile_rect = Rect::from_min_size(Pos2::new(x0, y0), Vec2::splat(tile_px + 0.5));
-                if !tile_rect.intersects(rect) {
-                    continue;
-                }
-
-                self.tile_cache.request_tile(ui.ctx(), self.tile_provider, z_int, tx_wrapped, ty);
-
-                if let Some(tex_id) =
-                    self.tile_cache.get_or_upload_texture(ui.ctx(), self.tile_provider, z_int, tx_wrapped, ty)
-                {
-                    painter.image(
-                        tex_id,
-                        tile_rect,
-                        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
-                } else {
-                    // Progressive parent-tile fallback while zooming or waiting for HTTP response
-                    for ancestor in 1..=2_u8 {
-                        if z_int <= ancestor {
-                            break;
-                        }
-                        let pz = z_int - ancestor;
-                        let factor = 1_u32 << ancestor;
-                        let px = tx_wrapped / factor;
-                        let py = ty / factor;
-                        if let Some(ptex) = self.tile_cache.get_or_upload_texture(ui.ctx(), self.tile_provider, pz, px, py) {
-                            let sx = (tx_wrapped % factor) as f32 / factor as f32;
-                            let sy = (ty % factor) as f32 / factor as f32;
-                            let sw = 1.0 / factor as f32;
-                            painter.image(
-                                ptex,
-                                tile_rect,
-                                Rect::from_min_max(Pos2::new(sx, sy), Pos2::new(sx + sw, sy + sw)),
-                                Color32::WHITE,
-                            );
-                            break;
-                        }
+                for river in WORLD_MAJOR_RIVERS {
+                    let pts: Vec<Pos2> = river
+                        .iter()
+                        .map(|&(lat, lon)| self.lat_lon_to_screen_unwrapped(lat, lon + wrap_deg, rect))
+                        .collect();
+                    if pts.len() >= 2 && pts.iter().any(|p| rect.expand(30.0).contains(*p)) {
+                        painter.add(egui::Shape::line(pts, Stroke::new(1.3, pal.river_stroke)));
                     }
                 }
             }
@@ -2052,78 +1168,18 @@ mod tests {
     }
 
     #[test]
-    fn test_world_tile_cache_decode_and_ready_state() {
-        let mut png_bytes = Vec::new();
-        let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([40, 120, 220, 255]));
-        image::DynamicImage::ImageRgba8(img)
-            .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
-            .expect("encode 2x2 PNG tile");
-
-        let color_img = decode_tile_bytes_to_color_image(&png_bytes).expect("decode PNG tile");
-        assert_eq!(color_img.size, [2, 2]);
-        assert!(decode_tile_bytes_to_color_image(b"not-a-valid-image").is_none());
-
-        let cache = WorldTileCache::default();
-        if let Ok(mut guard) = cache.inner.lock() {
-            guard.insert(
-                (1, 14, 12000, 8000),
-                CachedTileEntry {
-                    state: TileEntryState::Ready {
-                        image: Some(color_img),
-                        texture: None,
-                    },
-                    last_used_tick: 1,
-                },
-            );
-        }
-        let (ready, total) = cache.stats();
-        assert_eq!(ready, 1);
-        assert_eq!(total, 1);
-    }
-
-    #[test]
-    fn test_phase56_earth3d_pixel_calibrated_tile_lod_and_lru_cache() {
+    fn test_phase64_pure_vector_theme_cycling_and_zero_raster_state() {
         let mut map = SlippyMapState::default();
-        map.tile_provider = TileSource::EsriWorldImagery;
-        map.center_lat_lon = (-6.2088, 106.8456);
-        map.zoom_level = 15.0;
-
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 900.0));
-        let cam = crate::core::gis::earth_globe::GlobeCamera::default();
-        let xform = crate::core::gis::earth_globe::GlobeScreenTransform::from_view(
-            rect,
-            map.center_lat_lon.0,
-            map.center_lat_lon.1,
-            map.zoom_level,
-            &cam,
-        );
-
-        // At zoom=15 on a 900px viewport, 3D camera surface scale is ~1.3 m/px -> must request >= Z17 (not blurry Z15)
-        let z_1x = map.resolved_3d_tile_zoom(&xform, 1.0);
-        let z_retina = map.resolved_3d_tile_zoom(&xform, 2.0);
-        assert!(z_1x >= 17, "Expected >= Z17 at camera zoom=15.0 (1x DPI), got Z{z_1x}");
-        assert!(z_retina >= 18, "Expected >= Z18 on HiDPI 2x screen, got Z{z_retina}");
-
-        // Verify LRU eviction preserves newest ready entries instead of flushing the entire cache
-        let cache = WorldTileCache::default();
-        if let Ok(mut guard) = cache.inner.lock() {
-            for idx in 0..(MAX_CACHED_TILES + 10) {
-                let tick = cache.next_tick();
-                guard.insert(
-                    (3, 17, idx as u32, 100),
-                    CachedTileEntry {
-                        state: TileEntryState::Failed,
-                        last_used_tick: tick,
-                    },
-                );
-            }
-        }
-        let ctx = egui::Context::default();
-        cache.request_tile(&ctx, TileSource::EsriWorldImagery, 17, 999999, 100);
-        let (_, remaining) = cache.stats();
-        assert!(remaining > 400 && remaining < MAX_CACHED_TILES, "LRU must retain recent tiles (remaining={remaining})");
-        let guard = cache.inner.lock().unwrap();
-        assert!(guard.contains_key(&(3, 17, (MAX_CACHED_TILES + 5) as u32, 100)));
-        assert!(!guard.contains_key(&(3, 17, 0, 100)));
+        assert_eq!(map.tile_provider, VectorEarthTheme::CoastalBlueprint);
+        assert_eq!(map.visual_layer_label(), "Blueprint");
+        map.cycle_basemap_visual_mode();
+        assert_eq!(map.tile_provider, VectorEarthTheme::CityDaylight);
+        assert_eq!(map.visual_layer_label(), "Daylight");
+        map.cycle_basemap_visual_mode();
+        assert_eq!(map.tile_provider, VectorEarthTheme::NightTwin);
+        map.cycle_basemap_visual_mode();
+        assert_eq!(map.tile_provider, VectorEarthTheme::Topographic);
+        map.cycle_basemap_visual_mode();
+        assert_eq!(map.tile_provider, VectorEarthTheme::CoastalBlueprint);
     }
 }

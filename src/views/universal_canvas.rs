@@ -691,11 +691,9 @@ pub struct UniversalCanvasState {
     pub site_tin_preset: crate::core::gis::DemTerrainPreset,
     pub show_terrain_contours: bool,
     pub hovered_world_building_rel_path: Option<String>,
-    // Phase 59: Urban Vector Streaming (OSM/GeoJSON), Live Terrarium DEM & Neighborhood Physics
+    // Phase 59 & 64: Offline Pure-Vector Site Layer, OpenBIM IFC Site TIN & Neighborhood Physics
     pub urban_vectors: crate::core::gis::UrbanVectorLayerCache,
-    pub dem_cache: crate::core::gis::DemTileCache,
-    pub use_live_dem_tiles: bool,
-    pub site_tin_is_live_dem: bool,
+    pub site_tin_from_ifc: bool,
     pub neighborhood_report: crate::core::gis::NeighborhoodAuditReport,
     pub show_neighborhood_hazards: bool,
     pub active_vector_snap_az_deg: Option<f64>,
@@ -787,9 +785,7 @@ impl Default for UniversalCanvasState {
             show_terrain_contours: false,
             hovered_world_building_rel_path: None,
             urban_vectors: crate::core::gis::UrbanVectorLayerCache::default(),
-            dem_cache: crate::core::gis::DemTileCache::default(),
-            use_live_dem_tiles: true,
-            site_tin_is_live_dem: false,
+            site_tin_from_ifc: false,
             neighborhood_report: crate::core::gis::NeighborhoodAuditReport::default(),
             show_neighborhood_hazards: true,
             active_vector_snap_az_deg: None,
@@ -835,19 +831,9 @@ impl UniversalCanvasState {
         compute_site_environmental_coupling(lat, lon, &self.earth_world)
     }
 
-    /// Generates `active_site_tin` on demand, preferring live Terrarium DEM elevation tiles when cached
-    /// and falling back cleanly to `site_tin_preset` (local 400m x 400m geotechnical TIN).
+    /// Generates `active_site_tin` on demand using pure-Rust procedural `site_tin_preset`
+    /// when no OpenBIM IFC `IfcSite` or local XYZ survey TIN has been loaded yet.
     pub fn ensure_site_tin_generated(&mut self) {
-        if self.use_live_dem_tiles {
-            if let Some(dem_tin) = self
-                .dem_cache
-                .build_site_tin(self.ground_origin_lat_lon, 400.0, 20)
-            {
-                self.active_site_tin = Some(dem_tin);
-                self.site_tin_is_live_dem = true;
-                return;
-            }
-        }
         if self.active_site_tin.is_none() {
             self.active_site_tin = Some(crate::core::gis::TinSurfaceMesh::generate_from_dem_preset(
                 self.site_tin_preset,
@@ -857,7 +843,7 @@ impl UniversalCanvasState {
                 28,
                 1.0,
             ));
-            self.site_tin_is_live_dem = false;
+            self.site_tin_from_ifc = false;
         }
     }
 
@@ -2818,41 +2804,17 @@ impl UniversalCanvasState {
             None
         };
 
-        // 1b. Refresh live DEM TIN before immutable canvas borrows, then render Grid, Vector Urban, TIN & World Buildings
-        if self.globe_mode && self.show_terrain_contours && self.use_live_dem_tiles {
-            self.dem_cache.ensure_tile_for_lat_lon(
-                ui.ctx(),
-                self.ground_origin_lat_lon.0,
-                self.ground_origin_lat_lon.1,
-                self.world_map.zoom_level,
-            );
-            if !self.site_tin_is_live_dem {
-                if let Some(live_tin) = self.dem_cache.build_site_tin(self.ground_origin_lat_lon, 400.0, 20) {
-                    self.active_site_tin = Some(live_tin);
-                    self.site_tin_is_live_dem = true;
-                }
-            }
-        }
+        // 1b. Render Pure-Vector Grid, Local Vault Vector Layers, IFC/Survey TIN & World Buildings
         let world_to_screen = |w: [f64; 2]| self.world_to_screen(rect, w);
         if self.show_grid && self.world_map.zoom_level >= 15.5 {
             self.paint_grid(&painter, rect, theme, &world_to_screen);
         }
         if self.globe_mode {
             if let Some(ref xform) = active_globe_xform {
-                if self.world_map.vector_site_overlay
-                    || self.world_map.tile_provider == crate::core::gis::TileSource::SyntheticVectorTerrain
-                {
-                    self.urban_vectors.ensure_osm_cell_loaded(
-                        ui.ctx(),
-                        self.world_map.center_lat_lon.0,
-                        self.world_map.center_lat_lon.1,
-                        self.world_map.zoom_level,
-                    );
-                    if self.world_map.zoom_level >= 12.5 && self.urban_vectors.feature_count() > 0 {
-                        let (min_la, max_la, min_lo, max_lo) = self.visible_geo_bbox(xform);
-                        let vis_feats = self.urban_vectors.snapshot_visible(min_la, max_la, min_lo, max_lo, 900);
-                        self.earth_world.paint_urban_vector_features(&painter, xform, theme, &vis_feats);
-                    }
+                if self.world_map.zoom_level >= 12.5 && self.urban_vectors.feature_count() > 0 {
+                    let (min_la, max_la, min_lo, max_lo) = self.visible_geo_bbox(xform);
+                    let vis_feats = self.urban_vectors.snapshot_visible(min_la, max_la, min_lo, max_lo, 900);
+                    self.earth_world.paint_urban_vector_features(&painter, xform, theme, &vis_feats);
                 }
             }
             if self.show_terrain_contours {
@@ -4000,29 +3962,13 @@ impl UniversalCanvasState {
             });
         }
 
-        let short_name = |src: TileSource| -> &'static str {
-            match src {
-                TileSource::OpenStreetMap => "OSM Streets",
-                TileSource::EsriWorldImagery => "Satellite",
-                TileSource::OpenTopoMap => "Topo",
-                TileSource::CartoDbDarkMatter => "Dark Map",
-                TileSource::SyntheticVectorTerrain => "Offline Vector",
-            }
-        };
-
         let combo_w = crate::ui_kit::clamped_row_width(ui, 64.0, 102.0, 28.0);
         crate::ui_kit::wrap_before(ui, combo_w + 32.0);
         egui::ComboBox::from_id_salt("universal_world_basemap_combo")
             .width(combo_w)
-            .selected_text(short_name(self.world_map.tile_provider))
+            .selected_text(self.world_map.tile_provider.short_name())
             .show_ui(ui, |ui| {
-                for src in [
-                    TileSource::OpenStreetMap,
-                    TileSource::EsriWorldImagery,
-                    TileSource::OpenTopoMap,
-                    TileSource::CartoDbDarkMatter,
-                    TileSource::SyntheticVectorTerrain,
-                ] {
+                for src in TileSource::ALL {
                     ui.selectable_value(
                         &mut self.world_map.tile_provider,
                         src,
@@ -9185,11 +9131,11 @@ mod tests {
 
     #[test]
     fn test_phase43_default_3d_google_earth_mode_and_archive_roundtrip() {
-        use crate::core::gis::{EarthBrushAction, MegastructureKind, TileSource};
+        use crate::core::gis::{EarthBrushAction, MegastructureKind, VectorEarthTheme};
 
         let mut canvas = UniversalCanvasState::default();
         assert!(canvas.globe_mode);
-        assert_eq!(canvas.world_map.tile_provider, TileSource::EsriWorldImagery);
+        assert_eq!(canvas.world_map.tile_provider, VectorEarthTheme::CoastalBlueprint);
         assert!(canvas.world_map.zoom_level < 3.0);
 
         let before_co2 = canvas.earth_world.vitals.co2_ppm;

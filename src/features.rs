@@ -315,10 +315,10 @@ impl FeatureRegistry {
                 id: FeatureId::LiveRasterMapTileFetcher,
                 pillar: NavigationPillar::ResearchConcept,
                 code: "1D-04",
-                title: "Live Raster Tile Cache & GeoTIFF/CSV DEM Importer",
-                description: "Async OSM/Esri raster tile texture streaming and browser survey point-cloud CSV/XYZ ingestion.",
+                title: "Pure-Rust Vector Earth & OpenBIM IFC Site TIN Importer",
+                description: "Zero-raster embedded global vector cartography, IFC 4.3 IfcSite TIN extraction, and offline CSV/XYZ survey ingestion.",
                 status: Active,
-                module_hint: "src/core/gis/map_widget.rs + src/core/web_bridge.rs",
+                module_hint: "src/core/gis/world_vectors.rs + src/core/ifc.rs",
                 prioritized: false,
             },
             FeatureEntry {

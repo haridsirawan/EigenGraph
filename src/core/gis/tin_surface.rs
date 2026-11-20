@@ -234,6 +234,49 @@ impl TinSurfaceMesh {
         }
     }
 
+    /// Constructs a `TinSurfaceMesh` directly from explicit pure-vector 3D vertices and triangle index triplets
+    /// (e.g., OpenBIM IFC 4.3 `IfcSite` / `IfcGeographicElement` `IfcTriangulatedFaceSet`).
+    pub fn from_explicit_triangles(mut points: Vec<TinPoint>, raw_triangles: Vec<[usize; 3]>) -> Self {
+        let n = points.len();
+        if n < 3 || raw_triangles.is_empty() {
+            return Self::triangulate_bowyer_watson(points);
+        }
+        let mut min_x = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        let mut min_z = f32::INFINITY;
+        let mut max_z = f32::NEG_INFINITY;
+        for (idx, p) in points.iter_mut().enumerate() {
+            p.id = idx;
+            min_x = min_x.min(p.x);
+            max_x = max_x.max(p.x);
+            min_y = min_y.min(p.y);
+            max_y = max_y.max(p.y);
+            min_z = min_z.min(p.z);
+            max_z = max_z.max(p.z);
+        }
+        let mut triangles = Vec::with_capacity(raw_triangles.len());
+        let mut triangle_metrics = Vec::with_capacity(raw_triangles.len());
+        for tri in raw_triangles {
+            if tri[0] < n && tri[1] < n && tri[2] < n && tri[0] != tri[1] && tri[1] != tri[2] && tri[0] != tri[2] {
+                triangles.push(tri);
+                triangle_metrics.push(Self::compute_triangle_metrics(&points, tri));
+            }
+        }
+        Self {
+            points,
+            triangles,
+            triangle_metrics,
+            min_elevation: if min_z.is_finite() { min_z } else { 0.0 },
+            max_elevation: if max_z.is_finite() { max_z } else { 0.0 },
+            extent_x_m: (max_x - min_x).max(10.0),
+            extent_y_m: (max_y - min_y).max(10.0),
+            grid_cols: 0,
+            grid_rows: 0,
+        }
+    }
+
     /// Pure-Rust Bowyer-Watson 2D Delaunay Triangulation for arbitrary irregular survey point clouds.
     /// Maximizes minimum interior angles across all triangles by enforcing the empty circumcircle property.
     pub fn triangulate_bowyer_watson(mut points: Vec<TinPoint>) -> Self {

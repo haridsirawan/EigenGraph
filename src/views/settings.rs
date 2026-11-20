@@ -687,10 +687,18 @@ impl SettingsView {
 
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
+                let phase_num: u32 = {
+                    let mut parts = env!("CARGO_PKG_VERSION").split('.');
+                    let major: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                    let minor: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                    let patch: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                    major * 100 + minor * 10 + patch
+                };
                 ui.label(
                     RichText::new(format!(
-                        "v{} — Phase 63 True 6-DOF Site-Coupled FEM on Earth 3D, O(1) Cached BIM-FEM Sync, Live Deformed & Animated Modal Eigenmodes, and Interactive N-1 Disruption Simulation",
-                        env!("CARGO_PKG_VERSION")
+                        "v{} — Phase {} 100% Pure-Rust Vector Earth & OpenBIM IFC 4.3 Site TIN (Zero Raster, Zero External Map APIs), 6-DOF Site-Coupled FEM & ARI",
+                        env!("CARGO_PKG_VERSION"),
+                        phase_num
                     ))
                     .size(13.0)
                     .color(theme.accent_green)

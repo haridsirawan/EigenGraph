@@ -3066,13 +3066,8 @@ impl BuildView {
             )
         };
 
-        // 1. Atmospheric Horizon Sky + Ocean Ground Plane
-        let sky_color = match universal_canvas.world_map.tile_provider {
-            crate::core::gis::TileSource::CartoDbDarkMatter => Color32::from_rgb(7, 10, 17),
-            crate::core::gis::TileSource::EsriWorldImagery => Color32::from_rgb(10, 20, 36),
-            _ if theme.is_dark() => Color32::from_rgb(15, 23, 38),
-            _ => Color32::from_rgb(206, 228, 248),
-        };
+        // 1. Atmospheric Horizon Sky + Ocean Ground Plane (100% Pure-Rust Vector Palette)
+        let sky_color = universal_canvas.world_map.tile_provider.palette().sky_horizon;
         if is_persp && cos_p > 0.02 {
             let horizon_sy = center_screen.y
                 + cam_pan.y
@@ -3208,72 +3203,8 @@ impl BuildView {
             }
         }
 
-        // 4. Live Streamed Web Mercator Raster Tiles Subdivided in 3D Perspective (4x4 Mesh per Tile)
-        let tile_span_mult = if cam_pitch.abs() < 1.25 { 1.55 } else { 1.15 };
-        let quads = universal_canvas.world_map.collect_visible_tile_quads(
-            ctx,
-            rect.width() * tile_span_mult,
-            rect.height() * tile_span_mult,
-        );
-        const TILE_SUB: usize = 4;
-        for quad in quads {
-            let nw_px = universal_canvas
-                .world_map
-                .lat_lon_to_map_px_offset(quad.north_lat, quad.west_lon);
-            let se_px = universal_canvas
-                .world_map
-                .lat_lon_to_map_px_offset(quad.south_lat, quad.east_lon);
-            let mut mesh = egui::epaint::Mesh::with_texture(quad.tex_id);
-
-            let corner_sample = |ix: usize, iy: usize| -> ([f32; 3], Pos2) {
-                let fx = ix as f32 / TILE_SUB as f32;
-                let fy = iy as f32 / TILE_SUB as f32;
-                let off = Vec2::new(
-                    nw_px.x + (se_px.x - nw_px.x) * fx,
-                    nw_px.y + (se_px.y - nw_px.y) * fy,
-                );
-                let c = map_px_to_cam(off);
-                let uv = Pos2::new(
-                    quad.uv_rect.min.x + quad.uv_rect.width() * fx,
-                    quad.uv_rect.min.y + quad.uv_rect.height() * fy,
-                );
-                ([c.0, c.1, c.2], uv)
-            };
-
-            for iy in 0..TILE_SUB {
-                for ix in 0..TILE_SUB {
-                    let cell = [
-                        corner_sample(ix, iy),
-                        corner_sample(ix + 1, iy),
-                        corner_sample(ix + 1, iy + 1),
-                        corner_sample(ix, iy + 1),
-                    ];
-                    let clipped = Self::near_clip_uv_poly(&cell, min_depth);
-                    if clipped.len() < 3 {
-                        continue;
-                    }
-                    let start_idx = mesh.vertices.len() as u32;
-                    for (cam_p, uv) in &clipped {
-                        let sp = cam_to_screen(cam_p[0], cam_p[1], cam_p[2]);
-                        mesh.vertices.push(egui::epaint::Vertex {
-                            pos: sp,
-                            uv: *uv,
-                            color: Color32::WHITE,
-                        });
-                    }
-                    for k in 1..(clipped.len() as u32 - 1) {
-                        mesh.indices.push(start_idx);
-                        mesh.indices.push(start_idx + k);
-                        mesh.indices.push(start_idx + k + 1);
-                    }
-                }
-            }
-            if !mesh.indices.is_empty() {
-                map_painter.add(egui::Shape::mesh(mesh));
-            }
-        }
-
-        // 5. Local Site Surveying Grid, Cardinal N/E Markers & Geodetic Ground Origin Marker
+        // 4. Local Site Surveying Grid, Cardinal N/E Markers & Geodetic Ground Origin Marker
+        let _ = ctx;
         if self.show_grid {
             let grid_size = 6;
             let grid_step = 4.0_f32;
@@ -3361,48 +3292,6 @@ impl BuildView {
                 Some(((a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, min_depth), b))
             }
         }
-    }
-
-    fn near_clip_uv_poly(verts: &[([f32; 3], Pos2)], min_depth: f32) -> Vec<([f32; 3], Pos2)> {
-        let n = verts.len();
-        if n < 3 {
-            return Vec::new();
-        }
-        let lerp_v = |a: &([f32; 3], Pos2), b: &([f32; 3], Pos2)| -> ([f32; 3], Pos2) {
-            let denom = b.0[2] - a.0[2];
-            let t = if denom.abs() > 1e-6 {
-                ((min_depth - a.0[2]) / denom).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            (
-                [
-                    a.0[0] + (b.0[0] - a.0[0]) * t,
-                    a.0[1] + (b.0[1] - a.0[1]) * t,
-                    min_depth,
-                ],
-                Pos2::new(
-                    a.1.x + (b.1.x - a.1.x) * t,
-                    a.1.y + (b.1.y - a.1.y) * t,
-                ),
-            )
-        };
-        let mut out = Vec::with_capacity(n + 2);
-        for i in 0..n {
-            let a = &verts[i];
-            let b = &verts[(i + 1) % n];
-            let a_in = a.0[2] >= min_depth;
-            let b_in = b.0[2] >= min_depth;
-            if a_in && b_in {
-                out.push(*b);
-            } else if a_in && !b_in {
-                out.push(lerp_v(a, b));
-            } else if !a_in && b_in {
-                out.push(lerp_v(a, b));
-                out.push(*b);
-            }
-        }
-        out
     }
 
     /// Builds 3D coordinates and elements based on active architectural archetype.

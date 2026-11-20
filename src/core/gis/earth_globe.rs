@@ -13,8 +13,8 @@ use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Vec2};
 use serde::{Deserialize, Serialize};
 
 use super::map_widget::{
-    ear_clip_polygon, SlippyMapState, TileSource, EARTH_RADIUS_METERS, GLOBAL_CITY_CATALOG,
-    WORLD_LANDMASSES,
+    ear_clip_polygon, SlippyMapState, VectorEarthPalette, VectorEarthTheme, EARTH_RADIUS_METERS,
+    GLOBAL_CITY_CATALOG, WORLD_LANDMASSES, WORLD_MAJOR_RIVERS, WORLD_MOUNTAIN_RIDGES,
 };
 use super::tin_surface::TinSurfaceMesh;
 use crate::theme::MacTheme;
@@ -1282,13 +1282,13 @@ impl PlanetaryWorldState {
         });
     }
 
-    /// Renders the interactive 3D Spherical Earth Globe (`Google Earth` view) with cosmos backdrop,
-    /// atmosphere glow, sunlit day/night shading, vector & live satellite imagery tiles,
-    /// terraformed terrain/biome cells, flooded zones, megastructures, and brush reticle.
+    /// Renders the interactive 3D Pure-Rust Vector Earth Globe with cosmos backdrop,
+    /// atmosphere glow, sunlit day/night shading, embedded coastlines/ridges/rivers,
+    /// buildable city-builder parcel grid, terraformed cells, megastructures, and brush reticle.
     #[allow(clippy::too_many_arguments)]
     pub fn render_3d_globe(
         &self,
-        ui: &egui::Ui,
+        _ui: &egui::Ui,
         painter: &egui::Painter,
         rect: Rect,
         theme: &MacTheme,
@@ -1309,26 +1309,24 @@ impl PlanetaryWorldState {
             &self.camera,
         );
 
+        let pal = world_map.tile_provider.palette();
+
         // 1. Deep Space Starfield Backdrop + Outer Atmosphere Limb Glow
-        let space_bg = match world_map.tile_provider {
-            TileSource::CartoDbDarkMatter => Color32::from_rgb(5, 8, 15),
-            _ if theme.is_dark() => Color32::from_rgb(7, 11, 22),
-            _ => Color32::from_rgb(12, 22, 42),
-        };
-        gp.rect_filled(rect, CornerRadius::same(10), space_bg);
+        gp.rect_filled(rect, CornerRadius::same(10), pal.space_bg);
         paint_starfield(&gp, rect, world_map.center_lat_lon);
 
         let r_limb = xform.globe_limb_radius_px();
+        let [ar, ag, ab] = pal.atmosphere_rgb;
         if self.show_atmosphere && xform.d_surf > 0.25 && r_limb < rect.height() * 2.2 {
-            // Soft outer Rayleigh blue halo around the planetary limb
+            // Soft outer Rayleigh halo around the planetary limb
             let limb_center = xform
                 .project_tangent_h([0.0, 0.0, 0.0])
                 .map_or(rect.center(), |(p, _, _)| p);
-            for (scale, alpha) in [(1.09_f32, 16_u8), (1.045, 32), (1.015, 60)] {
+            for (scale, alpha) in [(1.09_f32, 16_u8), (1.045, 34), (1.015, 64)] {
                 gp.circle_filled(
                     limb_center,
                     r_limb * scale,
-                    Color32::from_rgba_unmultiplied(56, 165, 255, alpha),
+                    Color32::from_rgba_unmultiplied(ar, ag, ab, alpha),
                 );
             }
         }
@@ -1336,29 +1334,27 @@ impl PlanetaryWorldState {
         // 2. Tessellated Lit Ocean Sphere Dome (handles arbitrary tilt, poles & horizon curvature)
         self.paint_ocean_sphere_dome(&gp, &xform, theme, world_map);
 
-        // 3. Spherical Vector Continents (`WORLD_LANDMASSES`) subdivided & hemisphere-clipped
+        // 3. Spherical Pure-Rust Vector Continents & Indonesian Archipelago (`WORLD_LANDMASSES`)
         self.paint_spherical_continents(&gp, &xform, theme, world_map);
 
-        // 4. Live Streamed Web Mercator Satellite/Street Tiles wrapped onto Curved 3D Sphere
-        if world_map.tile_provider != TileSource::SyntheticVectorTerrain {
-            self.paint_spherical_raster_tiles(ui.ctx(), &gp, &xform, world_map);
+        // 3b. Stylized Pure-Vector Topographic Mountain Ridges & Major River Corridors
+        if world_map.zoom_level < 13.5 {
+            self.paint_spherical_ridges_and_rivers(&gp, &xform, &pal, world_map.zoom_level);
         }
 
-        // 4b. Crisp Full-Rust Vector Urban Arterials, Metric Cadastre & Compass Rose (zero-blur at any zoom)
-        if world_map.tile_provider == TileSource::SyntheticVectorTerrain || world_map.vector_site_overlay {
-            self.paint_vector_urban_and_cadastral_layer(
-                &gp,
-                &xform,
-                theme,
-                world_map,
-                ground_origin_lat_lon,
-                ground_origin_anchored,
-            );
-        }
+        // 4. Crisp Pure-Rust Vector Urban Corridors, Buildable Parcel Grid & Engineering Cadastre
+        self.paint_vector_urban_and_cadastral_layer(
+            &gp,
+            &xform,
+            theme,
+            world_map,
+            ground_origin_lat_lon,
+            ground_origin_anchored,
+        );
 
-        // 5. Geodetic Graticule Arcs (15 deg parallels & meridians on front hemisphere)
+        // 5. Geodetic Graticule Arcs (parallels & meridians on front hemisphere)
         if show_grid {
-            self.paint_spherical_graticule(&gp, &xform, theme, world_map.zoom_level);
+            self.paint_spherical_graticule(&gp, &xform, &pal, world_map.zoom_level);
         }
 
         // 6. Planetary Terraformed Cells, Biomes, Flooded Zones & Seawalls
@@ -1385,7 +1381,7 @@ impl PlanetaryWorldState {
                 gp.circle_stroke(
                     limb_center,
                     r_limb,
-                    Stroke::new(1.5, Color32::from_rgba_unmultiplied(96, 185, 255, 110)),
+                    Stroke::new(1.5, Color32::from_rgba_unmultiplied(ar, ag, ab, 128)),
                 );
             }
         }
@@ -1405,8 +1401,9 @@ impl PlanetaryWorldState {
         xform
     }
 
-    /// Renders zero-blur full-Rust vector city corridors, metric cadastral grids (`100m`/`25m`/`5m`/`1m`),
-    /// range rings, and directional compass bearings onto the 3D globe surface.
+    /// Renders zero-blur full-Rust vector city corridors, buildable city-builder parcel blocks,
+    /// adaptive metric cadastral grids (`150m`/`50m`/`20m`/`5m`/`2m`/`1m`), range rings, and
+    /// directional compass bearings onto the 3D Pure Vector Earth surface.
     pub fn paint_vector_urban_and_cadastral_layer(
         &self,
         painter: &egui::Painter,
@@ -1416,9 +1413,9 @@ impl PlanetaryWorldState {
         ground_origin_lat_lon: (f64, f64),
         ground_origin_anchored: bool,
     ) {
-        let is_pure_vec = world_map.tile_provider == TileSource::SyntheticVectorTerrain;
-        if is_pure_vec && world_map.zoom_level >= 3.5 && world_map.zoom_level < 13.5 {
-            // Crisp continental vector city hubs & inter-city regional corridors in Pure Vector mode
+        let pal = world_map.tile_provider.palette();
+        if world_map.zoom_level >= 3.0 && world_map.zoom_level < 13.5 {
+            // Crisp continental vector city hubs & inter-city regional corridors
             let mut visible_hubs: Vec<(&str, f64, f64, Pos2)> = Vec::new();
             for &(city, lat, lon, _) in GLOBAL_CITY_CATALOG {
                 if let Some((sp, _, true)) = xform.project_lat_lon_elev(lat, lon, 0.0) {
@@ -1427,7 +1424,7 @@ impl PlanetaryWorldState {
                     }
                 }
             }
-            let corr_stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(56, 189, 248, 48));
+            let corr_stroke = Stroke::new(1.0, pal.corridor_stroke);
             for i in 0..visible_hubs.len() {
                 let (c1, la1, lo1, sp1) = visible_hubs[i];
                 for &(c2, la2, lo2, sp2) in visible_hubs.iter().skip(i + 1).take(3) {
@@ -1436,20 +1433,20 @@ impl PlanetaryWorldState {
                         painter.line_segment([sp1, sp2], corr_stroke);
                     }
                 }
-                painter.circle_filled(sp1, 2.5, theme.accent_blue.gamma_multiply(0.75));
-                if world_map.zoom_level >= 5.2 {
+                painter.circle_filled(sp1, 2.7, pal.city_dot);
+                if world_map.zoom_level >= 4.6 {
                     painter.text(
                         sp1 + Vec2::new(0.0, -5.0),
                         Align2::CENTER_BOTTOM,
                         c1,
-                        FontId::proportional(9.2),
-                        theme.text_secondary,
+                        FontId::proportional(9.4),
+                        pal.city_label,
                     );
                 }
             }
         }
 
-        if world_map.zoom_level < 13.0 {
+        if world_map.zoom_level < 12.8 {
             return;
         }
 
@@ -1458,24 +1455,24 @@ impl PlanetaryWorldState {
         } else {
             (xform.center_lat_deg, xform.center_lon_deg)
         };
-        let (step_m, half_span_m) = if world_map.zoom_level >= 19.0 {
+        let (step_m, half_span_m) = if world_map.zoom_level >= 19.2 {
+            (1.0_f64, 16.0_f64)
+        } else if world_map.zoom_level >= 18.2 {
             (2.0_f64, 30.0_f64)
-        } else if world_map.zoom_level >= 17.5 {
+        } else if world_map.zoom_level >= 17.0 {
             (5.0, 75.0)
-        } else if world_map.zoom_level >= 16.0 {
+        } else if world_map.zoom_level >= 15.6 {
             (20.0, 200.0)
-        } else if world_map.zoom_level >= 14.5 {
+        } else if world_map.zoom_level >= 14.2 {
             (50.0, 450.0)
         } else {
             (150.0, 1200.0)
         };
 
-        let major_alpha = if is_pure_vec { 88 } else { 54 };
-        let minor_alpha = if is_pure_vec { 44 } else { 24 };
-        let major_stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(56, 189, 248, major_alpha));
-        let minor_stroke = Stroke::new(0.7, Color32::from_rgba_unmultiplied(148, 163, 184, minor_alpha));
-        let axis_n_stroke = Stroke::new(1.3, Color32::from_rgba_unmultiplied(34, 197, 94, if is_pure_vec { 160 } else { 110 }));
-        let axis_e_stroke = Stroke::new(1.3, Color32::from_rgba_unmultiplied(239, 68, 68, if is_pure_vec { 160 } else { 110 }));
+        let major_stroke = Stroke::new(1.0, pal.grid_major);
+        let minor_stroke = Stroke::new(0.7, pal.grid_minor);
+        let axis_n_stroke = Stroke::new(1.35, Color32::from_rgba_unmultiplied(34, 197, 94, 175));
+        let axis_e_stroke = Stroke::new(1.35, Color32::from_rgba_unmultiplied(239, 68, 68, 175));
 
         let proj_m = |east_m: f64, north_m: f64| -> Option<Pos2> {
             let ll = SlippyMapState::world_mm_to_lat_lon(origin, [east_m * 1000.0, north_m * 1000.0]);
@@ -1483,6 +1480,45 @@ impl PlanetaryWorldState {
                 .project_lat_lon_elev(ll.0, ll.1, 0.0)
                 .and_then(|(p, _, v)| if v { Some(p) } else { None })
         };
+
+        // Stylized buildable city-builder parcel pads & arterial/local vector avenues at city/site zoom
+        if world_map.zoom_level >= 13.2 {
+            let block_step = if world_map.zoom_level >= 16.5 { 60.0 } else { 180.0 };
+            let road_half = block_step * 0.065;
+            for bx in -2..=1 {
+                for by in -2..=1 {
+                    let x0 = bx as f64 * block_step + road_half;
+                    let x1 = (bx + 1) as f64 * block_step - road_half;
+                    let y0 = by as f64 * block_step + road_half;
+                    let y1 = (by + 1) as f64 * block_step - road_half;
+                    if let (Some(p0), Some(p1), Some(p2), Some(p3)) = (
+                        proj_m(x0, y0),
+                        proj_m(x1, y0),
+                        proj_m(x1, y1),
+                        proj_m(x0, y1),
+                    ) {
+                        painter.add(egui::Shape::convex_polygon(
+                            vec![p0, p1, p2, p3],
+                            pal.parcel_fill,
+                            Stroke::new(0.7, pal.road_local),
+                        ));
+                    }
+                }
+            }
+            let arterial_stroke = Stroke::new(2.2, pal.road_arterial);
+            let local_stroke = Stroke::new(1.2, pal.road_local);
+            let span = block_step * 3.0;
+            for b in -3..=3 {
+                let d = b as f64 * block_step;
+                let st = if b % 2 == 0 { arterial_stroke } else { local_stroke };
+                if let (Some(a), Some(b_pt)) = (proj_m(d, -span), proj_m(d, span)) {
+                    painter.line_segment([a, b_pt], st);
+                }
+                if let (Some(a), Some(b_pt)) = (proj_m(-span, d), proj_m(span, d)) {
+                    painter.line_segment([a, b_pt], st);
+                }
+            }
+        }
 
         let lines_per_side = (half_span_m / step_m).round() as i32;
         for k in -lines_per_side..=lines_per_side {
@@ -1509,23 +1545,6 @@ impl PlanetaryWorldState {
             }
         }
 
-        // Pure-Rust crisp vector street blocks when in Offline Pure Vector mode at city/site zoom
-        if is_pure_vec && world_map.zoom_level >= 13.5 {
-            let block_step = if world_map.zoom_level >= 16.5 { 60.0 } else { 180.0 };
-            let street_col = Color32::from_rgba_unmultiplied(245, 158, 11, 78);
-            let street_stroke = Stroke::new(2.0, street_col);
-            for b in -3..=3 {
-                let d = b as f64 * block_step;
-                let span = block_step * 3.5;
-                if let (Some(a), Some(b_pt)) = (proj_m(d, -span), proj_m(d, span)) {
-                    painter.line_segment([a, b_pt], street_stroke);
-                }
-                if let (Some(a), Some(b_pt)) = (proj_m(-span, d), proj_m(span, d)) {
-                    painter.line_segment([a, b_pt], street_stroke);
-                }
-            }
-        }
-
         // Metric range ring & True North / East vector compass labels
         let ring_r_m = step_m * 3.0;
         let mut ring_pts = Vec::with_capacity(33);
@@ -1538,7 +1557,7 @@ impl PlanetaryWorldState {
         if ring_pts.len() >= 12 {
             painter.add(egui::Shape::line(
                 ring_pts,
-                Stroke::new(0.9, theme.accent_blue.gamma_multiply(0.5)),
+                Stroke::new(0.95, pal.grid_major),
             ));
         }
         for (lbl, ex, ny, col) in [
@@ -1740,15 +1759,13 @@ impl PlanetaryWorldState {
         &self,
         painter: &egui::Painter,
         xform: &GlobeScreenTransform,
-        theme: &MacTheme,
+        _theme: &MacTheme,
         world_map: &SlippyMapState,
     ) {
-        let (ocean_base, _, _) = world_map.basemap_colors(theme);
-        let deep_ocean = match world_map.tile_provider {
-            TileSource::EsriWorldImagery => Color32::from_rgb(12, 52, 98),
-            TileSource::CartoDbDarkMatter => Color32::from_rgb(11, 20, 36),
-            _ => ocean_base,
-        };
+        let pal = world_map.tile_provider.palette();
+        let deep_ocean = pal.deep_ocean;
+        let [ar, ag, ab] = pal.atmosphere_rgb;
+        let atmo_col = Color32::from_rgb(ar, ag, ab);
 
         // Camera-centered horizon cap so limb is always circular even at polar latitudes
         let max_alpha = (1.0_f64 / (1.0 + xform.d_surf).max(1.0001)).acos().min(PI * 0.498);
@@ -1793,7 +1810,7 @@ impl PlanetaryWorldState {
                 if let Some((sp_pos, _, _)) = xform.project_tangent_h(p_h) {
                     let v_idx = mesh.vertices.len() as u32;
                     let rim_tint = if ri == RINGS && self.show_atmosphere {
-                        blend_colors(self.shade_color(deep_ocean, w, xform), Color32::from_rgb(56, 152, 236), 0.35)
+                        blend_colors(self.shade_color(deep_ocean, w, xform), atmo_col, 0.35)
                     } else {
                         self.shade_color(deep_ocean, w, xform)
                     };
@@ -1833,22 +1850,22 @@ impl PlanetaryWorldState {
         &self,
         painter: &egui::Painter,
         xform: &GlobeScreenTransform,
-        theme: &MacTheme,
+        _theme: &MacTheme,
         world_map: &SlippyMapState,
     ) {
-        let (_, land_base, coast_base) = world_map.basemap_colors(theme);
-        let desert_col = Color32::from_rgb(176, 152, 102);
-        let polar_col = Color32::from_rgb(225, 236, 248);
+        let pal = world_map.tile_provider.palette();
+        let draw_shelf = world_map.zoom_level < 12.5;
+        let shelf_width = if world_map.zoom_level >= 4.0 { 3.4 } else { 2.2 };
 
         for land in WORLD_LANDMASSES {
-            // Subdivide long continent edges every ~6 deg so arcs follow Earth curvature cleanly
+            // Subdivide long continent edges every ~5 deg so arcs follow Earth curvature cleanly
             let mut dense_world: Vec<([f64; 3], f64, f64)> = Vec::new();
             for i in 0..land.len() {
                 let a = land[i];
                 let b = land[(i + 1) % land.len()];
                 let dlat = (b.0 - a.0).abs();
                 let dlon = (b.1 - a.1).abs();
-                let steps = ((dlat.max(dlon) / 6.0).ceil() as usize).clamp(1, 14);
+                let steps = ((dlat.max(dlon) / 5.0).ceil() as usize).clamp(1, 16);
                 for s in 0..steps {
                     let t = s as f64 / steps as f64;
                     let la = a.0 + (b.0 - a.0) * t;
@@ -1860,7 +1877,7 @@ impl PlanetaryWorldState {
             if dense_world.len() < 3 {
                 continue;
             }
-            // Sutherland-Hodgman horizon clip in tangent frame: dot(P_h, C_h) >= 1.005
+            // Sutherland-Hodgman horizon clip in tangent frame: dot(P_h, C_h) >= 1.002
             let clipped_h = clip_poly_to_horizon(&dense_world, xform.cam_pos_h);
             if clipped_h.len() < 3 {
                 continue;
@@ -1883,136 +1900,84 @@ impl PlanetaryWorldState {
             avg_lat /= screen_pts.len() as f64;
             let n_w = normalize3(xform.tangent_h_to_world(sum_h));
             let abs_lat = avg_lat.abs();
-            let raw_land = if world_map.tile_provider == TileSource::EsriWorldImagery {
-                if abs_lat > 66.0 {
-                    polar_col
-                } else if (18.0..=31.0).contains(&abs_lat) {
-                    blend_colors(Color32::from_rgb(76, 128, 72), desert_col, 0.48)
-                } else {
-                    Color32::from_rgb(56, 114, 68)
-                }
-            } else if abs_lat > 66.0 {
-                blend_colors(land_base, polar_col, 0.65)
+            let raw_land = if abs_lat > 66.0 {
+                blend_colors(pal.land_base, pal.land_polar, 0.72)
+            } else if (18.0..=31.0).contains(&abs_lat) {
+                blend_colors(pal.land_base, pal.land_arid, 0.55)
             } else {
-                land_base
+                pal.land_base
             };
             let shaded_land = self.shade_color(raw_land, n_w, xform);
+            if draw_shelf {
+                painter.add(egui::epaint::PathShape::closed_line(
+                    screen_pts.clone(),
+                    Stroke::new(shelf_width, pal.shallow_shelf),
+                ));
+            }
             if let Some(mesh) = ear_clip_polygon(&screen_pts, shaded_land) {
                 painter.add(egui::Shape::mesh(mesh));
             }
-            let shaded_coast = self.shade_color(coast_base, n_w, xform);
+            let shaded_coast = self.shade_color(pal.coast_stroke, n_w, xform);
+            let coast_w = if world_map.tile_provider == VectorEarthTheme::CoastalBlueprint {
+                1.05
+            } else {
+                0.95
+            };
             painter.add(egui::epaint::PathShape::closed_line(
                 screen_pts,
-                Stroke::new(0.85, shaded_coast),
+                Stroke::new(coast_w, shaded_coast),
             ));
         }
     }
 
-    fn paint_spherical_raster_tiles(
+    fn paint_spherical_ridges_and_rivers(
         &self,
-        ctx: &egui::Context,
         painter: &egui::Painter,
         xform: &GlobeScreenTransform,
-        world_map: &SlippyMapState,
+        pal: &VectorEarthPalette,
+        zoom_level: f32,
     ) {
-        let tile_z_min = 2_u8;
-        let quads = if world_map.zoom_level < 4.5 {
-            world_map.collect_globe_tile_quads(ctx, tile_z_min, xform.center_lat_deg, xform.center_lon_deg)
-        } else {
-            world_map.collect_globe_site_tile_quads(ctx, xform)
-        };
-        let sub: usize = if world_map.zoom_level >= 10.5 { 2 } else { 4 };
-        let use_merc_interp = world_map.zoom_level < 10.0;
-        let max_provider_z = world_map.tile_provider.max_zoom() as f32;
-        let overzoom_fade = ((world_map.zoom_level - (max_provider_z + 0.5)).clamp(0.0, 2.0) / 2.0) * 0.16;
-        let base_tint = if overzoom_fade > 0.01 {
-            let v = (255.0 * (1.0 - overzoom_fade)).round() as u8;
-            Color32::from_rgb(v, v, (v as f32 * 1.02).min(255.0) as u8)
-        } else {
-            Color32::WHITE
-        };
-
-        for quad in quads {
-            let mid_lat = 0.5 * (quad.north_lat + quad.south_lat);
-            let mid_lon = 0.5 * (quad.west_lon + quad.east_lon);
-            let mid_w = lat_lon_to_unit_sphere(mid_lat, mid_lon);
-            let dot_vis = mid_w[0] * xform.cam_dir_world[0]
-                + mid_w[1] * xform.cam_dir_world[1]
-                + mid_w[2] * xform.cam_dir_world[2];
-            if world_map.zoom_level < 4.0 && dot_vis < -0.15 {
-                continue;
-            }
-
-            let (y_north, y_south) = if use_merc_interp {
-                let lat_to_merc_y = |deg: f64| -> f64 {
-                    let r = deg.clamp(-85.05, 85.05).to_radians();
-                    (std::f64::consts::FRAC_PI_4 + r * 0.5).tan().ln()
-                };
-                (lat_to_merc_y(quad.north_lat), lat_to_merc_y(quad.south_lat))
-            } else {
-                (0.0, 0.0)
-            };
-
-            let mut mesh = egui::epaint::Mesh::with_texture(quad.tex_id);
-            let sample = |ix: usize, iy: usize| -> Option<(Pos2, Pos2, Color32, bool)> {
-                let fx = ix as f64 / sub as f64;
-                let fy = iy as f64 / sub as f64;
-                let lat = if use_merc_interp {
-                    let my = y_north + (y_south - y_north) * fy;
-                    my.sinh().atan().to_degrees()
-                } else {
-                    quad.north_lat + (quad.south_lat - quad.north_lat) * fy
-                };
-                let lon = quad.west_lon + (quad.east_lon - quad.west_lon) * fx;
-                let w = lat_lon_to_unit_sphere(lat, lon);
-                let (sp, _, front) = xform.project_lat_lon_elev(lat, lon, 0.0)?;
-                let uv = Pos2::new(
-                    quad.uv_rect.min.x + quad.uv_rect.width() * fx as f32,
-                    quad.uv_rect.min.y + quad.uv_rect.height() * fy as f32,
-                );
-                let shade = self.shade_color(base_tint, w, xform);
-                Some((sp, uv, shade, front))
-            };
-
-            let mut grid: Vec<Vec<Option<(Pos2, Pos2, Color32, bool)>>> = Vec::with_capacity(sub + 1);
-            for iy in 0..=sub {
-                let mut row = Vec::with_capacity(sub + 1);
-                for ix in 0..=sub {
-                    row.push(sample(ix, iy));
-                }
-                grid.push(row);
-            }
-
-            for iy in 0..sub {
-                for ix in 0..sub {
-                    let (Some(a), Some(b), Some(c), Some(d)) = (
-                        grid[iy][ix],
-                        grid[iy][ix + 1],
-                        grid[iy + 1][ix + 1],
-                        grid[iy + 1][ix],
-                    ) else {
-                        continue;
-                    };
-                    if !(a.3 || b.3 || c.3 || d.3) {
-                        continue;
+        if zoom_level < 1.35 {
+            return;
+        }
+        let project_chain = |chain: &[(f64, f64)], stroke: Stroke| {
+            let mut seg = Vec::with_capacity(chain.len() * 2);
+            for w in chain.windows(2) {
+                let a = w[0];
+                let b = w[1];
+                let steps = (((b.0 - a.0).abs().max((b.1 - a.1).abs()) / 2.5).ceil() as usize).clamp(1, 6);
+                for s in 0..=steps {
+                    let t = s as f64 / steps as f64;
+                    let la = a.0 + (b.0 - a.0) * t;
+                    let lo = a.1 + (b.1 - a.1) * t;
+                    if let Some((sp, _, front)) = xform.project_lat_lon_elev(la, lo, 0.0) {
+                        if front {
+                            seg.push(sp);
+                            continue;
+                        }
                     }
-                    let base_idx = mesh.vertices.len() as u32;
-                    for (pos, uv, color, _) in [a, b, c, d] {
-                        mesh.vertices.push(egui::epaint::Vertex { pos, uv, color });
+                    if seg.len() >= 2 {
+                        painter.add(egui::Shape::line(std::mem::take(&mut seg), stroke));
+                    } else {
+                        seg.clear();
                     }
-                    mesh.indices.extend_from_slice(&[
-                        base_idx,
-                        base_idx + 1,
-                        base_idx + 2,
-                        base_idx,
-                        base_idx + 2,
-                        base_idx + 3,
-                    ]);
                 }
             }
-            if !mesh.indices.is_empty() {
-                painter.add(egui::Shape::mesh(mesh));
+            if seg.len() >= 2 {
+                painter.add(egui::Shape::line(seg, stroke));
             }
+        };
+
+        let ridge_w = if zoom_level >= 4.5 { 1.4 } else { 1.0 };
+        let river_w = if zoom_level >= 4.5 { 1.6 } else { 1.1 };
+        let ridge_stroke = Stroke::new(ridge_w, pal.ridge_stroke);
+        let river_stroke = Stroke::new(river_w, pal.river_stroke);
+
+        for ridge in WORLD_MOUNTAIN_RIDGES {
+            project_chain(ridge, ridge_stroke);
+        }
+        for river in WORLD_MAJOR_RIVERS {
+            project_chain(river, river_stroke);
         }
     }
 
@@ -2020,7 +1985,7 @@ impl PlanetaryWorldState {
         &self,
         painter: &egui::Painter,
         xform: &GlobeScreenTransform,
-        theme: &MacTheme,
+        pal: &VectorEarthPalette,
         zoom_level: f32,
     ) {
         let step_deg = if zoom_level < 3.5 {
@@ -2032,9 +1997,13 @@ impl PlanetaryWorldState {
         };
         let stroke = Stroke::new(
             0.7,
-            Color32::from_rgba_unmultiplied(148, 185, 225, if zoom_level > 9.0 { 32 } else { 52 }),
+            if zoom_level > 9.0 {
+                pal.graticule_stroke.gamma_multiply(0.65)
+            } else {
+                pal.graticule_stroke
+            },
         );
-        let equator_stroke = Stroke::new(1.1, theme.accent_blue.gamma_multiply(0.45));
+        let equator_stroke = Stroke::new(1.15, pal.equator_stroke);
 
         let mut lat = -75.0_f64;
         while lat <= 75.0 {
