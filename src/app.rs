@@ -180,6 +180,15 @@ const ALL_PILLARS: [NavigationPillar; 15] = [
 ];
 
 impl EigenGraphApp {
+    /// Initializes `EigenGraphApp` with native WebGL2 / OpenGL GPU Vector Earth shaders when `cc.gl` is present.
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut app = Self::default();
+        if let Some(gl) = &cc.gl {
+            app.universal_canvas.init_webgl_earth(gl);
+        }
+        app
+    }
+
     /// Renders sidebar navigation contents identically for both the docked panel and mobile/tablet drawer.
     fn render_sidebar_contents(&mut self, ui: &mut egui::Ui, is_overlay: bool, is_mobile: bool) {
         ui.vertical(|ui| {
@@ -917,50 +926,21 @@ impl App for EigenGraphApp {
         // 7. CAD SHORTCUTS, CLI SYNTAX & MODULE QUICK-JUMP PALETTE (Ctrl/Cmd+K or ? Shortcuts)
         self.render_shortcuts_quick_jump_modal_if_open(&ctx);
 
-        // 8. PURE-RUST VECTOR / PPM SCREENSHOT HOOK (AUTOMATED QA — ZERO `image` CRATE)
+        // 8. 100% PURE-VECTOR SVG CAPTURE HOOK (AUTOMATED QA — 0% RASTER PIXELS)
         #[cfg(not(target_arch = "wasm32"))]
         if let Ok(path) = std::env::var("EIGENGRAPH_SCREENSHOT_PATH") {
-            let mut screenshot_saved = false;
-            if path.to_lowercase().ends_with(".svg") {
-                let svg = self.universal_canvas.export_svg(
-                    &self.build_view.bim_bus.project,
-                    self.active_pillar,
-                );
-                let _ = std::fs::write(&path, svg);
-                screenshot_saved = true;
-            } else {
-                ui.ctx().input(|i| {
-                    for event in &i.raw.events {
-                        if let egui::Event::Screenshot { image, .. } = event {
-                            let width = image.size[0];
-                            let height = image.size[1];
-                            let header = format!("P6\n{width} {height}\n255\n");
-                            let mut bytes = Vec::with_capacity(header.len() + width * height * 3);
-                            bytes.extend_from_slice(header.as_bytes());
-                            for p in &image.pixels {
-                                bytes.push(p.r());
-                                bytes.push(p.g());
-                                bytes.push(p.b());
-                            }
-                            let _ = std::fs::write(&path, bytes);
-                            screenshot_saved = true;
-                        }
-                    }
-                });
-            }
+            let svg = self.universal_canvas.export_svg(
+                &self.build_view.bim_bus.project,
+                self.active_pillar,
+            );
+            let _ = std::fs::write(&path, svg);
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
 
-            if screenshot_saved {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-            } else {
-                static FRAME_COUNT: std::sync::atomic::AtomicUsize =
-                    std::sync::atomic::AtomicUsize::new(0);
-                let count = FRAME_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if count >= 3 {
-                    ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
-                }
-                ui.ctx().request_repaint();
-            }
+    fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        if let Some(gl) = gl {
+            self.universal_canvas.webgl_earth.destroy(gl);
         }
     }
 }

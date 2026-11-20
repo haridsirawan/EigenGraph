@@ -8,8 +8,10 @@ fn main() -> eframe::Result {
     use egui::Vec2;
 
     let mut native_options = NativeOptions::default();
+    // Phase 65: Request 24-bit hardware Z-buffer for WebGL2 / OpenGL 3D Vector Earth rendering
+    native_options.depth_buffer = 24;
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("EigenGraph — 10D BIM & Structural Analytics")
+        .with_title("EigenGraph")
         .with_inner_size(Vec2::new(1440.0, 900.0))
         .with_min_inner_size(Vec2::new(360.0, 600.0))
         .with_transparent(false)
@@ -37,7 +39,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "EigenGraph",
         native_options,
-        Box::new(|_cc| Ok(Box::new(EigenGraphApp::default()))),
+        Box::new(|cc| Ok(Box::new(EigenGraphApp::new(cc)))),
     )
 }
 
@@ -47,7 +49,8 @@ fn main() {
 
     eframe::WebLogger::init(log::LevelFilter::Info).ok();
 
-    let web_options = eframe::WebOptions::default();
+    let mut web_options = eframe::WebOptions::default();
+    web_options.depth_buffer = 24;
 
     wasm_bindgen_futures::spawn_local(async {
         let Some(window) = web_sys::window() else {
@@ -69,7 +72,7 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|_cc| Ok(Box::new(EigenGraphApp::default()))),
+                Box::new(|cc| Ok(Box::new(EigenGraphApp::new(cc)))),
             )
             .await;
 

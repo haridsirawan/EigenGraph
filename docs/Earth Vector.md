@@ -1,8 +1,8 @@
 # EigenGraph Earth Vector — 100% Pure-Rust Vector & OpenBIM IFC City-Builder Structural Simulator
 
-> **Status**: Active Roadmap — **Phase 64 (`v0.6.4`) Implemented**; Phases 65–67 Planned  
+> **Status**: Active Roadmap — **Phase 64 (`v0.6.4`) & Phase 65 (`v0.6.5`) Implemented**; Phases 66–67 Planned  
 > **Selected Direction**: **100% Pure-Rust Vector + OpenBIM IFC (`IFC4` / `IFC4.3`)** — Zero Raster Tiles, Zero `image` Crate, Zero OSM/Overpass, Zero AWS DEM PNGs, Zero External Map Servers or Third-Party Add-On SDKs  
-> **Current Platform**: EigenGraph `v0.6.4` (Phase 64 — Rust + WebAssembly + `eframe`/`glow` WebGL2)  
+> **Current Platform**: EigenGraph `v0.6.5` (Phase 65 — Rust + WebAssembly + Native WebGL2 `egui_glow` 3D Vector Earth)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Liquid Glass Dynamic Island and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---

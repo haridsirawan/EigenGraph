@@ -301,6 +301,10 @@ pub struct GlobeFlyTarget {
     pub label: String,
 }
 
+fn default_sun_time_of_day() -> f32 {
+    14.0
+}
+
 /// 3D Google Earth-style orbital camera orientation and atmospheric lighting controls.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GlobeCamera {
@@ -312,6 +316,9 @@ pub struct GlobeCamera {
     pub angular_vel_lon: f32,
     pub day_night_lighting: bool,
     pub sun_lon_deg: f32,
+    /// Local solar hour (`0.0..=24.0`) used for Day / Golden Hour / Night WebGL2 lighting (Phase 65).
+    #[serde(default = "default_sun_time_of_day")]
+    pub sun_time_of_day: f32,
     #[serde(skip)]
     pub fly_to: Option<GlobeFlyTarget>,
 }
@@ -326,8 +333,34 @@ impl Default for GlobeCamera {
             angular_vel_lat: 0.0,
             angular_vel_lon: 0.0,
             day_night_lighting: true,
-            sun_lon_deg: 105.0,
+            sun_lon_deg: 84.0,
+            sun_time_of_day: default_sun_time_of_day(),
             fly_to: None,
+        }
+    }
+}
+
+impl GlobeCamera {
+    /// Sets local solar time (`0.0..=24.0` hours) relative to the current camera longitude `center_lon_deg`.
+    pub fn set_local_sun_hour(&mut self, hour: f32, center_lon_deg: f64) {
+        let h = hour.rem_euclid(24.0);
+        self.sun_time_of_day = h;
+        self.day_night_lighting = true;
+        let subsolar_lon = crate::core::gis::WebMercator::normalize_lon(
+            center_lon_deg - ((h as f64) - 12.0) * 15.0,
+        );
+        self.sun_lon_deg = subsolar_lon as f32;
+    }
+
+    /// Short label for the active solar lighting regime (`Day`, `Dusk`, or `Night`).
+    pub fn lighting_preset_label(&self) -> &'static str {
+        let h = self.sun_time_of_day.rem_euclid(24.0);
+        if (7.5..16.5).contains(&h) {
+            "Day"
+        } else if (5.5..7.5).contains(&h) || (16.5..19.0).contains(&h) {
+            "Dusk"
+        } else {
+            "Night"
         }
     }
 }
@@ -500,6 +533,11 @@ impl GlobeScreenTransform {
     pub fn deg_per_pixel_y(&self) -> f64 {
         let cos_tilt = self.tilt_rad.cos().max(0.32);
         (self.deg_per_pixel() / cos_tilt).clamp(1e-8, 0.65)
+    }
+
+    /// Rotates a world-space unit vector into the camera's local tangent-H frame (`f64`).
+    pub fn world_to_tangent_h_pub(&self, v: [f64; 3]) -> [f64; 3] {
+        self.world_to_tangent_h(v)
     }
 
     fn world_to_tangent_h(&self, v: [f64; 3]) -> [f64; 3] {
@@ -1288,6 +1326,40 @@ impl PlanetaryWorldState {
     #[allow(clippy::too_many_arguments)]
     pub fn render_3d_globe(
         &self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        rect: Rect,
+        theme: &MacTheme,
+        world_map: &SlippyMapState,
+        ground_origin_lat_lon: (f64, f64),
+        ground_origin_anchored: bool,
+        show_grid: bool,
+        active_brush: Option<EarthBrushAction>,
+        cursor_lat_lon: (f64, f64),
+        is_frozen: bool,
+    ) -> GlobeScreenTransform {
+        self.render_3d_globe_with_gpu_mode(
+            ui,
+            painter,
+            rect,
+            theme,
+            world_map,
+            ground_origin_lat_lon,
+            ground_origin_anchored,
+            show_grid,
+            active_brush,
+            cursor_lat_lon,
+            is_frozen,
+            false,
+        )
+    }
+
+    /// Renders the 3D Vector Earth overlay; when `gpu_globe_active` is true, the ocean dome,
+    /// extruded continents, rivers, and ridges have already been rendered on WebGL2 hardware Z-buffer
+    /// and this method layers only crisp HUD vector grids, terraformed cells, megastructures, and markers.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_3d_globe_with_gpu_mode(
+        &self,
         _ui: &egui::Ui,
         painter: &egui::Painter,
         rect: Rect,
@@ -1299,6 +1371,7 @@ impl PlanetaryWorldState {
         active_brush: Option<EarthBrushAction>,
         cursor_lat_lon: (f64, f64),
         is_frozen: bool,
+        gpu_globe_active: bool,
     ) -> GlobeScreenTransform {
         let gp = painter.with_clip_rect(rect);
         let xform = GlobeScreenTransform::from_view(
@@ -1311,35 +1384,36 @@ impl PlanetaryWorldState {
 
         let pal = world_map.tile_provider.palette();
 
-        // 1. Deep Space Starfield Backdrop + Outer Atmosphere Limb Glow
-        gp.rect_filled(rect, CornerRadius::same(10), pal.space_bg);
-        paint_starfield(&gp, rect, world_map.center_lat_lon);
-
         let r_limb = xform.globe_limb_radius_px();
         let [ar, ag, ab] = pal.atmosphere_rgb;
-        if self.show_atmosphere && xform.d_surf > 0.25 && r_limb < rect.height() * 2.2 {
-            // Soft outer Rayleigh halo around the planetary limb
-            let limb_center = xform
-                .project_tangent_h([0.0, 0.0, 0.0])
-                .map_or(rect.center(), |(p, _, _)| p);
-            for (scale, alpha) in [(1.09_f32, 16_u8), (1.045, 34), (1.015, 64)] {
-                gp.circle_filled(
-                    limb_center,
-                    r_limb * scale,
-                    Color32::from_rgba_unmultiplied(ar, ag, ab, alpha),
-                );
+        if !gpu_globe_active {
+            // 1. Deep Space Starfield Backdrop + Outer Atmosphere Limb Glow (CPU fallback path)
+            gp.rect_filled(rect, CornerRadius::same(10), pal.space_bg);
+            paint_starfield(&gp, rect, world_map.center_lat_lon);
+
+            if self.show_atmosphere && xform.d_surf > 0.25 && r_limb < rect.height() * 2.2 {
+                let limb_center = xform
+                    .project_tangent_h([0.0, 0.0, 0.0])
+                    .map_or(rect.center(), |(p, _, _)| p);
+                for (scale, alpha) in [(1.09_f32, 16_u8), (1.045, 34), (1.015, 64)] {
+                    gp.circle_filled(
+                        limb_center,
+                        r_limb * scale,
+                        Color32::from_rgba_unmultiplied(ar, ag, ab, alpha),
+                    );
+                }
             }
-        }
 
-        // 2. Tessellated Lit Ocean Sphere Dome (handles arbitrary tilt, poles & horizon curvature)
-        self.paint_ocean_sphere_dome(&gp, &xform, theme, world_map);
+            // 2. Tessellated Lit Ocean Sphere Dome (handles arbitrary tilt, poles & horizon curvature)
+            self.paint_ocean_sphere_dome(&gp, &xform, theme, world_map);
 
-        // 3. Spherical Pure-Rust Vector Continents & Indonesian Archipelago (`WORLD_LANDMASSES`)
-        self.paint_spherical_continents(&gp, &xform, theme, world_map);
+            // 3. Spherical Pure-Rust Vector Continents & Indonesian Archipelago (`WORLD_LANDMASSES`)
+            self.paint_spherical_continents(&gp, &xform, theme, world_map);
 
-        // 3b. Stylized Pure-Vector Topographic Mountain Ridges & Major River Corridors
-        if world_map.zoom_level < 13.5 {
-            self.paint_spherical_ridges_and_rivers(&gp, &xform, &pal, world_map.zoom_level);
+            // 3b. Stylized Pure-Vector Topographic Mountain Ridges & Major River Corridors
+            if world_map.zoom_level < 13.5 {
+                self.paint_spherical_ridges_and_rivers(&gp, &xform, &pal, world_map.zoom_level);
+            }
         }
 
         // 4. Crisp Pure-Rust Vector Urban Corridors, Buildable Parcel Grid & Engineering Cadastre

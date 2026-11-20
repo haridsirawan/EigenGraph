@@ -982,6 +982,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Restore intact structure and clear any active N-1 disruption overlay",
         icon: AppIcon::CheckCircle,
     },
+    SlashCommandSpec {
+        cmd: "/day",
+        category: "Earth",
+        description: "Set Earth Vector solar lighting to crisp afternoon Daylight (13:30)",
+        icon: AppIcon::Sun,
+    },
+    SlashCommandSpec {
+        cmd: "/dusk",
+        category: "Earth",
+        description: "Set Earth Vector solar lighting to Golden Hour Dusk (17:30)",
+        icon: AppIcon::Sun,
+    },
+    SlashCommandSpec {
+        cmd: "/night",
+        category: "Earth",
+        description: "Set Earth Vector solar lighting to Night Cyber-Twin with glowing facades (22:00)",
+        icon: AppIcon::Moon,
+    },
+    SlashCommandSpec {
+        cmd: "/gpu",
+        category: "Earth",
+        description: "Toggle WebGL2 hardware-accelerated 3D Vector Earth pass vs. CPU vector fallback",
+        icon: AppIcon::Globe,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -3448,6 +3472,32 @@ impl SpatialWorkspaceState {
                 }
                 "/restore" | "/intact" => {
                     actions.restore_n1_simulation = true;
+                }
+                "/day" => {
+                    let lon = universal_canvas.world_map.center_lat_lon.1;
+                    universal_canvas.earth_world.camera.set_local_sun_hour(13.5, lon);
+                    self.push_trace("Earth Vector lighting set to Daylight (13:30)", true);
+                }
+                "/dusk" | "/sunset" => {
+                    let lon = universal_canvas.world_map.center_lat_lon.1;
+                    universal_canvas.earth_world.camera.set_local_sun_hour(17.4, lon);
+                    self.push_trace("Earth Vector lighting set to Golden Hour Dusk (17:24)", true);
+                }
+                "/night" => {
+                    let lon = universal_canvas.world_map.center_lat_lon.1;
+                    universal_canvas.earth_world.camera.set_local_sun_hour(22.0, lon);
+                    self.push_trace("Earth Vector lighting set to Night (22:00, procedural windows)", true);
+                }
+                "/gpu" => {
+                    universal_canvas.webgl_earth.enabled = !universal_canvas.webgl_earth.enabled;
+                    let mode = if universal_canvas.webgl_earth.is_active() {
+                        "WebGL2 GPU 3D active"
+                    } else if universal_canvas.webgl_earth.enabled {
+                        "GPU enabled (CPU fallback in headless context)"
+                    } else {
+                        "CPU Pure-Vector mode"
+                    };
+                    self.push_trace(format!("Earth Vector renderer: {mode}"), true);
                 }
                 "/section" | "/cut" => {
                     let elev_opt = arg
@@ -10281,6 +10331,68 @@ impl SpatialWorkspaceState {
                                                     universal_canvas.ensure_site_tin_generated();
                                                 }
                                             }
+                                            let sun_preset = universal_canvas
+                                                .earth_world
+                                                .camera
+                                                .lighting_preset_label();
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(if sun_preset == "Night" {
+                                                    AppIcon::Moon
+                                                } else {
+                                                    AppIcon::Sun
+                                                }),
+                                                format!("Sun: {sun_preset}"),
+                                                sun_preset != "Day",
+                                                theme.accent_orange,
+                                                "Cycle WebGL2 Earth Vector solar lighting: Day (13:30) / Golden Dusk (17:24) / Night (22:00)",
+                                            )
+                                            .clicked()
+                                            {
+                                                let lon = universal_canvas.world_map.center_lat_lon.1;
+                                                let next_h = match sun_preset {
+                                                    "Day" => 17.4,
+                                                    "Dusk" => 22.0,
+                                                    _ => 13.5,
+                                                };
+                                                universal_canvas
+                                                    .earth_world
+                                                    .camera
+                                                    .set_local_sun_hour(next_h, lon);
+                                                self.push_trace(
+                                                    format!(
+                                                        "Solar lighting: {}",
+                                                        universal_canvas
+                                                            .earth_world
+                                                            .camera
+                                                            .lighting_preset_label()
+                                                    ),
+                                                    true,
+                                                );
+                                            }
+                                            let gpu_on = universal_canvas.webgl_earth.is_active();
+                                            let gpu_lbl = if gpu_on {
+                                                "GPU 3D"
+                                            } else if universal_canvas.webgl_earth.is_available() {
+                                                "CPU Vec"
+                                            } else {
+                                                "Vec 3D"
+                                            };
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                gpu_lbl,
+                                                gpu_on,
+                                                theme.accent_blue,
+                                                "Toggle WebGL2 hardware Z-buffer 3D Vector Earth pass vs. CPU vector fallback",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.webgl_earth.enabled =
+                                                    !universal_canvas.webgl_earth.enabled;
+                                            }
                                             ui.separator();
                                             if Self::glass_pill_button(
                                                 ui,
@@ -13507,6 +13619,87 @@ END-ISO-10303-21;\r\n";
                     "Phase 64 Dynamic Island overflowed viewport {win_w} on theme {vt:?}: {r:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_phase65_day_dusk_night_sun_presets_and_zero_hud_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = crate::theme::MacTheme::default();
+
+        // 1. Slash commands control Day / Dusk / Night solar presets and WebGL2 GPU toggle
+        for cmd in ["/day", "/dusk", "/night", "/gpu"] {
+            assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == cmd));
+        }
+        let _ = spatial.execute_spatial_input(
+            "/dusk",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(canvas.earth_world.camera.lighting_preset_label(), "Dusk");
+
+        let _ = spatial.execute_spatial_input(
+            "/night",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(canvas.earth_world.camera.lighting_preset_label(), "Night");
+
+        let _ = spatial.execute_spatial_input(
+            "/day",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(canvas.earth_world.camera.lighting_preset_label(), "Day");
+
+        // 2. Expanded GIS & Site Dynamic Island with Sun + GPU 3D pills fits cleanly on Desktop, Tablet & Mobile
+        spatial.mobile_deck_pinned = true;
+        spatial.studio_tab = DynamicIslandStudioTab::GisAndSite;
+        for win_w in [1200.0_f32, 768.0, 390.0] {
+            let ctx = egui::Context::default();
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 820.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                },
+            );
+            out.textures_delta.clear();
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 65 GIS & Site Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
         }
     }
 }

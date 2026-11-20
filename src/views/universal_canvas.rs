@@ -699,6 +699,8 @@ pub struct UniversalCanvasState {
     pub active_vector_snap_az_deg: Option<f64>,
     // Phase 63: O(1) Cached BIM-FEM Lookup, True 6-DOF Displacements, Modal Eigenmodes & N-1 Disruption
     pub earth_fem_cache: EarthStructuralRenderCache,
+    // Phase 65: Native WebGL2 / OpenGL (`egui_glow`) 3D Pure-Vector Earth Renderer (0% Raster Pixels)
+    pub webgl_earth: crate::views::webgl_earth::WebGlEarthState,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -790,11 +792,16 @@ impl Default for UniversalCanvasState {
             show_neighborhood_hazards: true,
             active_vector_snap_az_deg: None,
             earth_fem_cache: EarthStructuralRenderCache::default(),
+            webgl_earth: crate::views::webgl_earth::WebGlEarthState::default(),
         }
     }
 }
 
 impl UniversalCanvasState {
+    /// Initializes native WebGL2 / OpenGL GPU Vector Earth shaders from `eframe::CreationContext::gl`.
+    pub fn init_webgl_earth(&mut self, gl: &std::sync::Arc<eframe::glow::Context>) {
+        self.webgl_earth.init_gl(gl);
+    }
     /// Computes crisp directional sun-lighting depth shading for 3D extruded Earth faces
     /// against an SE solar azimuth `(0.707, -0.707)`.
     pub fn directional_face_shade(base: Color32, p0: Pos2, p1: Pos2, is_top_cap: bool) -> Color32 {
@@ -2773,9 +2780,23 @@ impl UniversalCanvasState {
             pointer_in_freeze_pill || pointer_blocked_by_hud,
         );
 
-        // 1a. Phase 43 / Phase 35: 3D Google Earth Globe (default) or 2D Slippy World Map
+        // 1a. Phase 64–65: Native WebGL2 (`egui_glow`) 3D Pure-Vector Earth Globe + CPU Overlay Fallback
         let active_globe_xform = if self.globe_mode {
-            let xform = self.earth_world.render_3d_globe(
+            let gpu_globe_active = self.webgl_earth.schedule_paint_pass(
+                ui,
+                &painter,
+                rect,
+                &self.earth_world,
+                &self.world_map,
+                self.ground_origin_lat_lon,
+                self.ground_origin_anchored,
+                self.show_terrain_contours,
+                self.active_site_tin.as_ref(),
+                &self.world_index,
+                self.active_world_project_rel_path.as_deref(),
+                &self.urban_vectors,
+            );
+            let xform = self.earth_world.render_3d_globe_with_gpu_mode(
                 ui,
                 &painter,
                 rect,
@@ -2787,6 +2808,7 @@ impl UniversalCanvasState {
                 self.active_tool.earth_brush_action(),
                 self.cursor_lat_lon,
                 self.is_frozen,
+                gpu_globe_active,
             );
             self.last_globe_xform = Some(xform.clone());
             Some(xform)
@@ -7266,6 +7288,10 @@ impl UniversalCanvasState {
                 }
                 let is_hovered =
                     self.hovered_world_building_rel_path.as_deref() == Some(b.rel_path.as_str());
+                // When WebGL2 GPU Z-buffered extrusion is active at street scale, only paint hover highlight & badge on CPU
+                if self.webgl_earth.is_active() && self.world_map.zoom_level >= 14.5 && !is_hovered {
+                    continue;
+                }
                 let hull_mm = b.rotated_footprint_world_mm();
                 let mut base_pts = Vec::with_capacity(hull_mm.len());
                 let mut roof_pts = Vec::with_capacity(hull_mm.len());

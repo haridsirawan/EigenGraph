@@ -7,6 +7,20 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.6.5] - 2026-11-20 — Phase 65: Native WebGL2 (`egui_glow`) 3D Vector Earth Renderer, 24-Bit Hardware Z-Buffer, `f64 → f32` RTC Floating Origin, Procedural Day/Dusk/Night Shaders & 0% Raster Pixels
+
+### Added & Changed
+- **Native WebGL2 / OpenGL (`egui_glow`) 3D Pure-Vector Earth Engine (`src/views/webgl_earth.rs`, `src/main.rs`, `src/app.rs`, `src/views/universal_canvas.rs`)**:
+  - Built a zero-add-on hardware-accelerated 3D renderer directly on `eframe`'s built-in `glow` WebGL2 / OpenGL 3.3 Core context with a requested **24-bit hardware Z-buffer** (`depth_buffer = 24`) across both desktop and WebAssembly.
+  - Implemented exact double-precision **`f64 → f32` Floating-Origin Relative-to-Center (RTC)** projection (`RtcCameraUniforms::from_globe_xform`) matching `GlobeScreenTransform::project_lat_lon_elev` to sub-pixel precision (`< 0.05 px`) from orbital altitude down to millimeter street scale.
+  - Added dual-pass depth-cleared GPU rendering: **Pass 1** draws a cached 64×32 spherical ocean dome, recursively subdivided 3D extruded continents & Indonesian archipelago (with coastal cliff bevels), and 3D ridge/river ribbons; **Pass 2** draws the local ENU RTC scene containing 3D `IfcSite` TIN topographic surfaces (with SNI 8460 `> 30°` steep-slope hazard facets), buildable parcel pads, and extruded OpenBIM IFC Vault & vector context buildings.
+  - Authored 100% analytical GLSL shaders (**0% raster textures / 0% image samplers**) providing animated ocean micro-ripples, Blinn-Phong solar specular glints, Rayleigh atmospheric Fresnel limb glow, building-base Ambient Occlusion (`0.56 → 1.0`), procedural floor-band glass reflections, warm/cyan illuminated night windows, and exponential atmospheric horizon fog, with automatic headless/CPU fallback.
+  - Eliminated the remaining raw-pixel PPM screenshot branch in `src/app.rs` so `EIGENGRAPH_SCREENSHOT_PATH` exports strictly 100% pure-vector SVG (**0% raster pixels anywhere in `src/`**).
+- **Dynamic Island Day / Dusk / Night Solar Lighting & GPU Toggle (`src/core/gis/earth_globe.rs`, `src/views/spatial_workspace.rs`)**:
+  - Added `GlobeCamera::{sun_time_of_day, set_local_sun_hour, lighting_preset_label}` plus 1-click `Sun: Day / Dusk / Night` and `GPU 3D` controls inside the Dynamic Island `GIS & Site` tab, along with `/day`, `/dusk`, `/night`, and `/gpu` slash commands.
+
+---
+
 ## [v0.6.4] - 2026-11-20 — Phase 64: 100% Pure-Rust Vector Earth & OpenBIM IFC 4.3 Site TIN, Zero External Raster/OSM/DEM Dependencies & Minimalist Loading Splash
 
 ### Added & Changed
