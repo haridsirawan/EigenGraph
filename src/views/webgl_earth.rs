@@ -15,10 +15,14 @@ use egui::{Color32, Pos2, Rect};
 
 use crate::core::bim::{BimElementKind, BimProject};
 use crate::core::gis::city_builder::{IfcxCityScene, IfcxZoneKind};
+use crate::core::gis::district_hazard::{
+    evaluate_seismic_wave_displacement_m, DistrictHazardConfig, DistrictMultiHazardReport,
+};
 use crate::core::gis::earth_globe::{
     lat_lon_to_unit_sphere, GlobeCamera, GlobeScreenTransform, PlanetaryWorldState,
 };
 use crate::core::gis::map_widget::{SlippyMapState, VectorEarthTheme, EARTH_RADIUS_METERS};
+use crate::core::gis::neighborhood_physics::{NeighborhoodAuditReport, PoundingSeverity};
 use crate::core::gis::tin_surface::TinSurfaceMesh;
 use crate::core::gis::vector_layers::{UrbanVectorKind, UrbanVectorLayerCache};
 use crate::core::gis::world_index::WorldSpatialIndex;
@@ -1137,6 +1141,315 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
     }
 }
 
+/// District multi-hazard input bundle rendered in the shared 24-bit Z-buffered WebGL2 RTC pass.
+pub struct DistrictHazardGpuInput<'a> {
+    pub config: &'a DistrictHazardConfig,
+    pub report: &'a DistrictMultiHazardReport,
+    pub neighborhood: &'a NeighborhoodAuditReport,
+    pub origin_lat_lon: (f64, f64),
+    pub active_building_height_m: f64,
+    pub active_site_tin: Option<&'a TinSurfaceMesh>,
+}
+
+/// Builds the Floating-Origin RTC 3D GPU mesh for animated SNI 1726 seismic wave rings,
+/// inter-building seismic pounding corridors, Venturi urban wind streamlines, and 3D flood
+/// sea-level plane against `IfcSite` TIN contours.
+pub fn build_rtc_district_hazard_mesh(input: &DistrictHazardGpuInput<'_>) -> GpuMeshPayload {
+    let cfg = input.config;
+    if !cfg.any_active() {
+        return GpuMeshPayload::default();
+    }
+
+    let mut verts = Vec::with_capacity(1_536);
+    let mut idxs = Vec::with_capacity(3_072);
+
+    let push_quad_double = |vs: &mut Vec<GpuEarthVertex>,
+                            is: &mut Vec<u32>,
+                            p0: [f32; 3],
+                            p1: [f32; 3],
+                            p2: [f32; 3],
+                            p3: [f32; 3],
+                            n: [f32; 3],
+                            col: [f32; 4],
+                            kind: f32| {
+        let base = vs.len() as u32;
+        for &p in &[p0, p1, p2, p3] {
+            vs.push(GpuEarthVertex {
+                pos: p,
+                normal: n,
+                color: col,
+                meta: [kind, p[2], 1.0, 0.0],
+            });
+        }
+        is.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    };
+
+    // 1. Traveling SNI 1726 / ASCE 7 Seismic Wave Rings
+    if cfg.seismic_wave_active {
+        let segs = 48usize;
+        let ring_count = 6usize;
+        let ring_w = 4.5_f64;
+        for rk in 0..ring_count {
+            let r_center = ((cfg.sim_time_sec.max(0.0) * 42.0 + (rk as f64) * 52.0) % 310.0)
+                .clamp(8.0, 310.0);
+            let r_in = (r_center - ring_w * 0.5).max(3.5);
+            let r_out = r_center + ring_w * 0.5;
+            let fade = (1.0 - r_center / 320.0).clamp(0.12, 1.0) as f32;
+            let pga_boost = (cfg.seismic_pga_g / 0.5).clamp(0.6, 1.4) as f32;
+            let col = [
+                0.98,
+                (0.58 - 0.34 * (rk as f32 / ring_count as f32)).max(0.16),
+                0.14,
+                (0.56 * fade * pga_boost).min(0.78),
+            ];
+            let base = verts.len() as u32;
+            for i in 0..=segs {
+                let a = (i as f64 / segs as f64) * std::f64::consts::TAU;
+                let (sa, ca) = (a.sin(), a.cos());
+                let xi = r_in * ca;
+                let yi = r_in * sa;
+                let xo = r_out * ca;
+                let yo = r_out * sa;
+                let di = evaluate_seismic_wave_displacement_m(xi, yi, cfg.sim_time_sec, cfg);
+                let do_ = evaluate_seismic_wave_displacement_m(xo, yo, cfg.sim_time_sec, cfg);
+                let zi = 0.28 + di[2];
+                let zo = 0.28 + do_[2];
+                verts.push(GpuEarthVertex {
+                    pos: [xi as f32 + di[0], yi as f32 + di[1], zi],
+                    normal: [0.0, 0.0, 1.0],
+                    color: col,
+                    meta: [1.0, zi, 1.0, 0.0],
+                });
+                verts.push(GpuEarthVertex {
+                    pos: [xo as f32 + do_[0], yo as f32 + do_[1], zo],
+                    normal: [0.0, 0.0, 1.0],
+                    color: col,
+                    meta: [1.0, zo, 1.0, 0.0],
+                });
+            }
+            for i in 0..segs {
+                let k = base + (i as u32) * 2;
+                idxs.extend_from_slice(&[k, k + 2, k + 3, k, k + 3, k + 1]);
+            }
+        }
+    }
+
+    // 2. Inter-Building Seismic Pounding Corridors
+    if cfg.pounding_overlay_active {
+        let pulse = (0.75 + 0.25 * (cfg.sim_time_sec * 5.2).sin()) as f32;
+        for c in &input.neighborhood.contacts {
+            let a_mm = SlippyMapState::lat_lon_to_world_mm(
+                input.origin_lat_lon,
+                c.closest_active_ll.0,
+                c.closest_active_ll.1,
+            );
+            let b_mm = SlippyMapState::lat_lon_to_world_mm(
+                input.origin_lat_lon,
+                c.closest_neighbor_ll.0,
+                c.closest_neighbor_ll.1,
+            );
+            let ax = a_mm[0] * 0.001;
+            let ay = a_mm[1] * 0.001;
+            let bx = b_mm[0] * 0.001;
+            let by = b_mm[1] * 0.001;
+            let dx = bx - ax;
+            let dy = by - ay;
+            let len = dx.hypot(dy).max(0.4);
+            let hw = match c.severity {
+                PoundingSeverity::PoundingRisk => 1.35,
+                PoundingSeverity::TightBuffer => 0.95,
+                PoundingSeverity::SafeClearance => 0.60,
+            };
+            let nx = -dy / len * hw;
+            let ny = dx / len * hw;
+            let z_link = (input.active_building_height_m.min(c.neighbor_height_m).clamp(4.0, 28.0)
+                * 0.65) as f32;
+            let col = match c.severity {
+                PoundingSeverity::PoundingRisk => [0.96, 0.16, 0.24, (0.82 * pulse).min(0.92)],
+                PoundingSeverity::TightBuffer => [0.96, 0.68, 0.16, 0.68],
+                PoundingSeverity::SafeClearance => [0.22, 0.80, 0.72, 0.42],
+            };
+            let fp = [
+                [ax - nx, ay - ny],
+                [bx - nx, by - ny],
+                [bx + nx, by + ny],
+                [ax + nx, ay + ny],
+            ];
+            push_box_prism_enu(&mut verts, &mut idxs, &fp, z_link - 0.35, z_link + 0.35, col, 3.0);
+
+            if c.severity == PoundingSeverity::PoundingRisk {
+                let mx = 0.5 * (ax + bx);
+                let my = 0.5 * (ay + by);
+                let p_fp = [
+                    [mx - 0.45, my - 0.45],
+                    [mx + 0.45, my - 0.45],
+                    [mx + 0.45, my + 0.45],
+                    [mx - 0.45, my + 0.45],
+                ];
+                push_box_prism_enu(
+                    &mut verts,
+                    &mut idxs,
+                    &p_fp,
+                    0.0,
+                    z_link + 3.5,
+                    [0.98, 0.20, 0.28, 0.72],
+                    3.0,
+                );
+            }
+        }
+    }
+
+    // 3. Animated Venturi Urban Wind Streamlines
+    if cfg.venturi_wind_active {
+        for (si, seg) in input.report.streamlines.iter().enumerate() {
+            let ax = seg.start_enu_m[0];
+            let ay = seg.start_enu_m[1];
+            let az = seg.start_enu_m[2];
+            let bx = seg.end_enu_m[0];
+            let by = seg.end_enu_m[1];
+            let dx = bx - ax;
+            let dy = by - ay;
+            let len = dx.hypot(dy).max(1.0);
+            let ux = dx / len;
+            let uy = dy / len;
+            let nx = -uy;
+            let ny = ux;
+            let speed_gain = if seg.is_corridor_accelerated { 0.48 } else { 0.28 };
+            let width_m = if seg.is_corridor_accelerated { 1.15 } else { 0.75 };
+            let col = if seg.is_corridor_accelerated {
+                [0.22, 0.88, 1.0, 0.80]
+            } else {
+                [0.72, 0.90, 0.98, 0.48]
+            };
+
+            for packet in 0..3 {
+                let t = ((cfg.sim_time_sec.max(0.0) * speed_gain
+                    + (si as f64) * 0.13
+                    + (packet as f64) * 0.333)
+                    % 1.0)
+                    .clamp(0.05, 0.90);
+                let seg_len = if seg.is_corridor_accelerated { 16.0 } else { 22.0 };
+                let s0 = t * (len - seg_len).max(4.0);
+                let s1 = (s0 + seg_len).min(len);
+                let p0 = [
+                    (ax + ux * s0 - nx * width_m) as f32,
+                    (ay + uy * s0 - ny * width_m) as f32,
+                    az as f32,
+                ];
+                let p1 = [
+                    (ax + ux * s1 - nx * width_m * 0.35) as f32,
+                    (ay + uy * s1 - ny * width_m * 0.35) as f32,
+                    az as f32,
+                ];
+                let p2 = [
+                    (ax + ux * s1 + nx * width_m * 0.35) as f32,
+                    (ay + uy * s1 + ny * width_m * 0.35) as f32,
+                    az as f32,
+                ];
+                let p3 = [
+                    (ax + ux * s0 + nx * width_m) as f32,
+                    (ay + uy * s0 + ny * width_m) as f32,
+                    az as f32,
+                ];
+                push_quad_double(&mut verts, &mut idxs, p0, p1, p2, p3, [0.0, 0.0, 1.0], col, 1.0);
+            }
+        }
+    }
+
+    // 4. Interactive 3D Flood / Sea-Level Plane vs. IfcSite TIN Contours
+    if cfg.flood_plane_active {
+        let wl = cfg.flood_water_level_m as f32;
+        let span = 210.0_f32;
+        let grid = 16usize;
+        let water_col = [0.12, 0.48, 0.74, 0.58];
+        let base_v = verts.len() as u32;
+        for gy in 0..=grid {
+            let fy = gy as f32 / grid as f32;
+            let y = -span + fy * span * 2.0;
+            for gx in 0..=grid {
+                let fx = gx as f32 / grid as f32;
+                let x = -span + fx * span * 2.0;
+                verts.push(GpuEarthVertex {
+                    pos: [x, y, wl],
+                    normal: [0.0, 0.0, 1.0],
+                    color: water_col,
+                    // `kind = 0.0` uses the GLSL analytical ocean micro-ripple & solar glint shader
+                    meta: [0.0, wl, 1.0, 0.0],
+                });
+            }
+        }
+        let stride = (grid + 1) as u32;
+        for gy in 0..grid as u32 {
+            for gx in 0..grid as u32 {
+                let i00 = base_v + gy * stride + gx;
+                let i10 = i00 + 1;
+                let i01 = i00 + stride;
+                let i11 = i01 + 1;
+                idxs.extend_from_slice(&[i00, i10, i11, i00, i11, i01]);
+            }
+        }
+
+        // Crisp shoreline foam ribbons wherever IfcSite TIN triangles cross `water_level_m`
+        if let Some(tin) = input.active_site_tin {
+            let foam_col = [0.86, 0.96, 1.0, 0.72];
+            for tri in &tin.triangles {
+                let (Some(a), Some(b), Some(c)) = (
+                    tin.points.get(tri[0]),
+                    tin.points.get(tri[1]),
+                    tin.points.get(tri[2]),
+                ) else {
+                    continue;
+                };
+                let pts = [a, b, c];
+                let below: Vec<&crate::core::gis::tin_surface::TinPoint> =
+                    pts.iter().copied().filter(|p| p.z < wl).collect();
+                let above: Vec<&crate::core::gis::tin_surface::TinPoint> =
+                    pts.iter().copied().filter(|p| p.z >= wl).collect();
+                if below.is_empty() || above.is_empty() {
+                    continue;
+                }
+                let interp = |p0: &crate::core::gis::tin_surface::TinPoint,
+                              p1: &crate::core::gis::tin_surface::TinPoint|
+                 -> [f32; 3] {
+                    let dz = (p1.z - p0.z).abs().max(1e-4);
+                    let t = ((wl - p0.z).abs() / dz).clamp(0.0, 1.0);
+                    [
+                        p0.x + (p1.x - p0.x) * t,
+                        p0.y + (p1.y - p0.y) * t,
+                        wl + 0.08,
+                    ]
+                };
+                let (e0, e1) = if below.len() == 1 && above.len() == 2 {
+                    (interp(below[0], above[0]), interp(below[0], above[1]))
+                } else {
+                    (interp(above[0], below[0]), interp(above[0], below[1]))
+                };
+                let dx = e1[0] - e0[0];
+                let dy = e1[1] - e0[1];
+                let l = dx.hypot(dy).max(0.1);
+                let nx = -dy / l * 0.45;
+                let ny = dx / l * 0.45;
+                push_quad_double(
+                    &mut verts,
+                    &mut idxs,
+                    [e0[0] - nx, e0[1] - ny, e0[2]],
+                    [e1[0] - nx, e1[1] - ny, e1[2]],
+                    [e1[0] + nx, e1[1] + ny, e1[2]],
+                    [e0[0] + nx, e0[1] + ny, e0[2]],
+                    [0.0, 0.0, 1.0],
+                    foam_col,
+                    1.0,
+                );
+            }
+        }
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
 /// Builds the local Floating-Origin RTC GPU mesh for Pass 2 (all vertices in ENU meters relative to
 /// `origin_lat_lon`):
 /// - Stylized ground apron & city-builder buildable parcel pads (when zoomed to street/district scale)
@@ -1373,6 +1686,11 @@ struct GpuEarthPipeline {
     bim_ibo: glow::Buffer,
     bim_index_count: i32,
     bim_revision_uploaded: u64,
+    hazard_vao: glow::VertexArray,
+    hazard_vbo: glow::Buffer,
+    hazard_ibo: glow::Buffer,
+    hazard_index_count: i32,
+    hazard_revision_uploaded: u64,
 }
 
 impl GpuEarthPipeline {
@@ -1563,6 +1881,7 @@ impl GpuEarthPipeline {
             let (planet_vao, planet_vbo, planet_ibo) = setup_vao_pair()?;
             let (site_vao, site_vbo, site_ibo) = setup_vao_pair()?;
             let (bim_vao, bim_vbo, bim_ibo) = setup_vao_pair()?;
+            let (hazard_vao, hazard_vbo, hazard_ibo) = setup_vao_pair()?;
 
             Ok(Self {
                 program,
@@ -1581,6 +1900,11 @@ impl GpuEarthPipeline {
                 bim_ibo,
                 bim_index_count: 0,
                 bim_revision_uploaded: 0,
+                hazard_vao,
+                hazard_vbo,
+                hazard_ibo,
+                hazard_index_count: 0,
+                hazard_revision_uploaded: 0,
             })
         }
     }
@@ -1648,6 +1972,27 @@ impl GpuEarthPipeline {
         self.bim_revision_uploaded = rev;
     }
 
+    fn upload_hazard(&mut self, gl: &glow::Context, rev: u64, mesh: &GpuMeshPayload) {
+        unsafe {
+            gl.bind_vertex_array(Some(self.hazard_vao));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.hazard_vbo));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                vertices_as_u8_slice(&mesh.vertices),
+                glow::DYNAMIC_DRAW,
+            );
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.hazard_ibo));
+            gl.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                indices_as_u8_slice(&mesh.indices),
+                glow::DYNAMIC_DRAW,
+            );
+            gl.bind_vertex_array(None);
+        }
+        self.hazard_index_count = mesh.indices.len() as i32;
+        self.hazard_revision_uploaded = rev;
+    }
+
     fn paint(&self, gl: &glow::Context, u: &RtcCameraUniforms) {
         unsafe {
             gl.use_program(Some(self.program));
@@ -1688,8 +2033,10 @@ impl GpuEarthPipeline {
                 gl.draw_elements(glow::TRIANGLES, self.planet_index_count, glow::UNSIGNED_INT, 0);
             }
 
-            // --- Pass 2: Floating-Origin RTC Local Site Scene (3D IfcSite TIN + City-Builder + Extruded IFCX + Active BIM/FEM/Modal/N-1) ---
-            if u.render_site_pass && (self.site_index_count > 0 || self.bim_index_count > 0) {
+            // --- Pass 2: Floating-Origin RTC Local Site Scene (3D IfcSite TIN + City-Builder + Extruded IFCX + Active BIM/FEM/Modal/N-1 + Multi-Hazard) ---
+            if u.render_site_pass
+                && (self.site_index_count > 0 || self.bim_index_count > 0 || self.hazard_index_count > 0)
+            {
                 gl.clear_depth_f32(1.0);
                 gl.clear(glow::DEPTH_BUFFER_BIT);
                 gl.uniform_matrix_4_f32_slice(loc_mvp.as_ref(), false, &u.site_mvp);
@@ -1703,6 +2050,12 @@ impl GpuEarthPipeline {
                 if self.bim_index_count > 0 {
                     gl.bind_vertex_array(Some(self.bim_vao));
                     gl.draw_elements(glow::TRIANGLES, self.bim_index_count, glow::UNSIGNED_INT, 0);
+                }
+                if self.hazard_index_count > 0 {
+                    gl.depth_mask(false);
+                    gl.bind_vertex_array(Some(self.hazard_vao));
+                    gl.draw_elements(glow::TRIANGLES, self.hazard_index_count, glow::UNSIGNED_INT, 0);
+                    gl.depth_mask(true);
                 }
             }
 
@@ -1724,6 +2077,9 @@ impl GpuEarthPipeline {
             gl.delete_vertex_array(self.bim_vao);
             gl.delete_buffer(self.bim_vbo);
             gl.delete_buffer(self.bim_ibo);
+            gl.delete_vertex_array(self.hazard_vao);
+            gl.delete_buffer(self.hazard_vbo);
+            gl.delete_buffer(self.hazard_ibo);
         }
     }
 }
@@ -1737,9 +2093,11 @@ pub struct WebGlEarthState {
     cached_planet_theme: Option<VectorEarthTheme>,
     cached_site_hash: u64,
     cached_bim_hash: u64,
+    cached_hazard_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
+    pub last_hazard_tris: usize,
 }
 
 impl std::fmt::Debug for WebGlEarthState {
@@ -1878,6 +2236,7 @@ impl WebGlEarthState {
         urban_vectors: &UrbanVectorLayerCache,
         city_scene: Option<&IfcxCityScene>,
         active_bim: Option<ActiveBimGpuInput<'_>>,
+        hazard_input: Option<DistrictHazardGpuInput<'_>>,
     ) -> bool {
         let Some(pipe_arc) = self.pipeline.clone() else {
             return false;
@@ -1996,9 +2355,35 @@ impl WebGlEarthState {
             None
         };
 
+        // Prepare District Multi-Hazard (Seismic waves, Pounding corridors, Venturi wind, 3D Flood) GPU mesh
+        let pending_hazard = if render_site_pass {
+            if let Some(ref hz_in) = hazard_input {
+                let rev = hz_in.config.content_revision_hash()
+                    ^ ((hz_in.report.resilience_score * 100.0).round() as u64).wrapping_mul(2654435761)
+                    ^ (hz_in.neighborhood.contacts.len() as u64).wrapping_mul(1_000_003);
+                if rev != self.cached_hazard_hash {
+                    let mesh = build_rtc_district_hazard_mesh(hz_in);
+                    self.last_hazard_tris = mesh.indices.len() / 3;
+                    self.cached_hazard_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_hazard_hash != 0 {
+                self.cached_hazard_hash = 0;
+                self.last_hazard_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let planet_payload = Arc::new(Mutex::new(pending_planet));
         let site_payload = Arc::new(Mutex::new(pending_site));
         let bim_payload = Arc::new(Mutex::new(pending_bim));
+        let hazard_payload = Arc::new(Mutex::new(pending_hazard));
 
         let cb = egui_glow::CallbackFn::new(move |_info, glow_painter| {
             let gl = glow_painter.gl();
@@ -2024,6 +2409,13 @@ impl WebGlEarthState {
                         }
                     }
                 }
+                if let Ok(mut slot) = hazard_payload.lock() {
+                    if let Some((rev, mesh)) = slot.take() {
+                        if pipe.hazard_revision_uploaded != rev {
+                            pipe.upload_hazard(gl, rev, &mesh);
+                        }
+                    }
+                }
                 pipe.paint(gl, &uniforms);
             }
         });
@@ -2032,10 +2424,14 @@ impl WebGlEarthState {
             rect,
             callback: Arc::new(cb),
         });
-        // Smooth ocean shimmer & 60 FPS GPU modal oscillation
-        let frame_ms = if active_bim
+        // Smooth ocean shimmer, 60 FPS GPU modal oscillation, and animated seismic waves/wind
+        let hazard_animated = hazard_input
             .as_ref()
-            .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)
+            .is_some_and(|h| h.config.is_animated());
+        let frame_ms = if hazard_animated
+            || active_bim
+                .as_ref()
+                .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)
         {
             16
         } else {
@@ -2243,5 +2639,93 @@ mod tests {
         assert!(max_x_modal > max_x_clean + 0.25);
         // N-1 removed column renders with translucent crimson ghost alpha
         assert!(modal_n1_mesh.vertices.iter().any(|v| v.color[0] > 0.90 && v.color[3] < 0.55));
+    }
+
+    #[test]
+    fn test_phase68_gpu_district_multi_hazard_mesh_generation() {
+        use crate::core::gis::district_hazard::evaluate_district_multi_hazard;
+        use crate::core::gis::neighborhood_physics::NeighborPoundingContact;
+
+        let mut cfg = DistrictHazardConfig::default();
+        let nb = NeighborhoodAuditReport {
+            neighbors_evaluated: 1,
+            pounding_risk_count: 1,
+            venturi_corridor_count: 1,
+            venturi_speedup_factor: 1.08,
+            contacts: vec![NeighborPoundingContact {
+                neighbor_rel_path: "nb.ifcx".to_string(),
+                neighbor_name: "Tower NB".to_string(),
+                neighbor_lat: -6.9176,
+                neighbor_lon: 107.6193,
+                neighbor_height_m: 24.0,
+                neighbor_min_ari: 0.58,
+                clear_gap_m: 0.22,
+                required_gap_m: 0.52,
+                severity: PoundingSeverity::PoundingRisk,
+                closest_active_ll: (-6.9175, 107.6191),
+                closest_neighbor_ll: (-6.9176, 107.6193),
+                venturi_channel: true,
+                inside_collapse_fall_zone: true,
+            }],
+            ..Default::default()
+        };
+        let tin = TinSurfaceMesh::generate_from_dem_preset(
+            DemTerrainPreset::CoastalAlluvialBasin,
+            240.0,
+            240.0,
+            12,
+            12,
+            1.0,
+        );
+        let proj = BimProject::sample_bimcraft_building();
+        let city = IfcxCityScene::default();
+        let rep = evaluate_district_multi_hazard(
+            &cfg,
+            &nb,
+            Some(&tin),
+            &WorldSpatialIndex::default(),
+            (-6.9175, 107.6191),
+            &proj,
+            &city,
+        );
+
+        let empty_mesh = build_rtc_district_hazard_mesh(&DistrictHazardGpuInput {
+            config: &cfg,
+            report: &rep,
+            neighborhood: &nb,
+            origin_lat_lon: (-6.9175, 107.6191),
+            active_building_height_m: 12.0,
+            active_site_tin: Some(&tin),
+        });
+        assert!(empty_mesh.vertices.is_empty());
+
+        cfg.seismic_wave_active = true;
+        cfg.pounding_overlay_active = true;
+        cfg.venturi_wind_active = true;
+        cfg.flood_plane_active = true;
+        cfg.flood_water_level_m = 4.0;
+        cfg.sim_time_sec = 0.75;
+        let rep_on = evaluate_district_multi_hazard(
+            &cfg,
+            &nb,
+            Some(&tin),
+            &WorldSpatialIndex::default(),
+            (-6.9175, 107.6191),
+            &proj,
+            &city,
+        );
+        let full_mesh = build_rtc_district_hazard_mesh(&DistrictHazardGpuInput {
+            config: &cfg,
+            report: &rep_on,
+            neighborhood: &nb,
+            origin_lat_lon: (-6.9175, 107.6191),
+            active_building_height_m: 12.0,
+            active_site_tin: Some(&tin),
+        });
+        assert!(full_mesh.indices.len() / 3 > 250);
+        assert!(full_mesh
+            .vertices
+            .iter()
+            .all(|v| v.pos.iter().all(|f| f.is_finite()) && v.normal.iter().all(|f| f.is_finite())));
     }
 }

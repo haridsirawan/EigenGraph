@@ -7,6 +7,19 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.6.8] - 2026-11-21 — District-Scale Multi-Hazard GPU Simulation & Streaming AI Real-Building-to-IFCX Frame Inference
+
+### Added & Changed
+- **District-Scale Multi-Hazard Simulation Kernel (`src/core/gis/district_hazard.rs`, `src/views/webgl_earth.rs`, `src/views/universal_canvas.rs`)**:
+  - Added pure-Rust district multi-hazard physics evaluation (`DistrictHazardConfig`, `DistrictMultiHazardReport`, `evaluate_seismic_wave_displacement_m`, `evaluate_district_flood`, `evaluate_district_multi_hazard`) covering SNI 1726 / ASCE 7 traveling seismic waves, phase-lag pounding amplification across adjacent buildings, urban Venturi wind channeling streamlines, 3D flood plane vs. `IfcSite` TIN inundation & building freeboard analysis, and composite Resilience scoring (`0–100`).
+  - Added dedicated WebGL2 GPU multi-hazard pipeline (`hazard_vao` / `hazard_vbo` / `hazard_ibo`, `build_rtc_district_hazard_mesh`) rendering expanding seismic wave rings, pounding corridors/pylons, animated Venturi wind chevrons, and an analytical wave-rippled 3D flood surface with shoreline foam edges in the shared 24-bit Z-buffered RTC pass (with pure-vector CPU fallback and `.eigen.json` + `.ifcx` `eigengraph::hazard::district` persistence).
+- **Streaming AI Real-Building-to-IFCX Frame Inference & Instant 6-DOF ARI Triage (`src/core/ifcx.rs`, `src/app.rs`)**:
+  - Implemented `IfcxDocument::infer_structural_frame_for_bim`, `IfcxDocument::ingest_ai_real_building_with_frame_inference`, and `IfcxDocument::sample_ai_massing_tower_capture_ifcx`, automatically synthesizing editable multi-storey 3D columns, orthogonal beams, slabs, and footings from exterior AI massing `.ifcx` scans (or partial frames) and immediately executing 6-DOF FEM + fast ARI redundancy screening with embedded `eigengraph::ari::v2` telemetry.
+- **Dynamic Island Multi-Hazard & AI Scan Controls (`src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Integrated the `Multi-Hazard:` pill group (`Seismic`, `Pounding`, `Venturi`, `Flood 3D` with `-0.5m / +0.5m` elevation steppers, and `AI Scan -> IFCX`) inside the Dynamic Island `GIS & Site` studio tab, an inline `Resilience` telemetry badge inside the active strip, and `/seismic`, `/wind`, `/flood`, `/hazard`, `/ai-capture` slash commands—preserving strictly one Dynamic Island frame (`hud_rects.len() == 1`) with zero detached pop-ups across `1280px`, `768px`, and `390px`.
+
+---
+
 ## [v0.6.7] - 2026-11-21 — IFCX City-Builder Authoring, Unified WebGL2 GPU BIM/FEM/Modal/N-1 Fusion & 100% Unified Dynamic Island
 
 ### Added & Changed

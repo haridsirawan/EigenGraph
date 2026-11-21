@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Active Roadmap — **`v0.6.4`, `v0.6.5`, `v0.6.6`, and `v0.6.7` Implemented**; `v0.6.8` Planned  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4`, `v0.6.5`, `v0.6.6`, `v0.6.7`, and `v0.6.8` Delivered**  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% Raster Pixels**  
-> **Current Platform**: EigenGraph `v0.6.7` (IFCX City-Builder Authoring, Unified WebGL2 GPU BIM/FEM/Modal/N-1 Fusion & 100% Unified Dynamic Island)  
+> **Current Platform**: EigenGraph `v0.6.8` (District-Scale Multi-Hazard GPU Simulation & Streaming AI Real-Building-to-IFCX Frame Inference)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -145,6 +145,8 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
   - Moved **every** Spatial Mode pop-up—Settings & About, Smart Element Inspector, Vault Startup Setup, Unified Workspace Import, CAD Shortcuts/Quick-Jump, and all 15 Engineering Module Sheets—natively inside the single morphing Liquid Glass Dynamic Island (`SpatialIslandHost`), smoothly expanding up to `1040 px` on desktop with zero detached `egui::Window` or `egui::Area` pop-ups and exact centered positioning across Desktop, Tablet, and Mobile.
   - Cleaned Settings → About EigenGraph to display concise semantic versioning (`v0.6.7`) without internal phase labels.
 
-### Phase 68 (`v0.6.8`) — District-Scale Multi-Hazard & AI Real-Building-to-IFCX Streaming *(Planned)*
-- Animated SNI 1726 / ASCE 7 seismic wavefield propagation coupled to inter-building pounding & Venturi wind channeling (`neighborhood_physics.rs`), plus interactive 3D flood/sea-level plane against `IfcSite` contours.
-- Streaming ingestion of AI-reconstructed real-world building `.ifcx` layers directly onto Earth parcels with automatic structural frame inference (`IfcColumn` / `IfcBeam` / `IfcSlab`) and instant 6-DOF ARI triage.
+### Phase 68 (`v0.6.8`) — District-Scale Multi-Hazard & AI Real-Building-to-IFCX Streaming *(Implemented)*
+- **Pure-Rust District Multi-Hazard Engine (`src/core/gis/district_hazard.rs`, `src/views/webgl_earth.rs`)**:
+  - Evaluates animated SNI 1726 / ASCE 7 traveling seismic surface wavefields, phase-lag amplified inter-building pounding corridors, urban Venturi wind channeling streamlines with dynamic pressure (`Pa`), and interactive 3D flood / sea-level inundation planes against `IfcSite` TIN triangles, active ground-floor freeboard, neighbor buildings, and IFCX City-Builder roads/zones—emitting non-destructive `eigengraph::hazard::district` IFCX overlay nodes and GPU depth-masked WebGL2 overlays.
+- **Streaming AI Real-Building-to-IFCX Frame Inference & Instant 6-DOF ARI Triage (`src/core/ifcx.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - `IfcxDocument::ingest_ai_real_building_with_frame_inference` consumes exterior AI massing `.ifcx` scans (e.g. `sample_ai_massing_tower_capture_ifcx`) or partial frames, synthesizes multi-storey 3D RC columns, beams, slabs, and footings (`infer_structural_frame_for_bim`), executes instant `FemSolver::solve` + `AriEngine::evaluate_redundancy_fast` screening, and outputs composed `.ifcx` models embedded with `eigengraph::ari::v2` telemetry—accessible directly via the Dynamic Island `Multi-Hazard:` bar and `/seismic`, `/wind`, `/flood`, `/hazard`, `/ai-capture` slash commands.

@@ -166,18 +166,21 @@ pub use fire::{
     FireEngine, FireMemberKind, FireProtectionKind, FireTimeStep, ThermalRestraintKind,
 };
 pub use ifcx::{
-    IfcxAriOverlay, IfcxAuditItem, IfcxAuditStatus, IfcxClashItem, IfcxClashReport,
-    IfcxClashSeverity, IfcxDiffKind, IfcxDiffReport, IfcxDocument, IfcxEditSession, IfcxGeoWgs84,
-    IfcxHeader, IfcxHealthReport, IfcxImport, IfcxNode, IfcxNodeDiff, IfcxStage, IfcxUnits,
-    UsdGeomMesh, IFCX_DATA_VERSION, IFCX_SCHEMA_VERSION,
+    AiBuildingFrameInferenceReport, IfcxAriOverlay, IfcxAuditItem, IfcxAuditStatus,
+    IfcxClashItem, IfcxClashReport, IfcxClashSeverity, IfcxDiffKind, IfcxDiffReport,
+    IfcxDocument, IfcxEditSession, IfcxGeoWgs84, IfcxHeader, IfcxHealthReport, IfcxImport,
+    IfcxNode, IfcxNodeDiff, IfcxStage, IfcxUnits, UsdGeomMesh, IFCX_DATA_VERSION,
+    IFCX_SCHEMA_VERSION,
 };
 pub use gis::{
-    build_tin_from_3d_triangles, ContourPolyline, CutFillVolumeReport, DemTerrainPreset,
+    build_tin_from_3d_triangles, evaluate_district_flood, evaluate_district_multi_hazard,
+    evaluate_seismic_wave_displacement_m, to_ifcx_hazard_node, ContourPolyline, CutFillVolumeReport,
+    DemTerrainPreset, DistrictFloodAssessment, DistrictHazardConfig, DistrictMultiHazardReport,
     GeoProjectionEngine, IfcMapConversionMatrix, IfcxCityScene, IfcxGradedPad, IfcxRoadKind,
     IfcxRoadSegment, IfcxSpatialZone, IfcxZoneKind, RoadParcelSnapHit, SiteGeodeticPin,
     SlippyMapState, SlippyMapTelemetry, TileSource, TinPoint, TinSurfaceMesh, TinTriangle,
-    UtmZoneInfo, VectorEarthPalette, VectorEarthTheme, WebMercator, EARTH_HALF_CIRCUMFERENCE,
-    EARTH_RADIUS_METERS, MAX_LATITUDE, MIN_LATITUDE, UTM_FALSE_EASTING,
+    UtmZoneInfo, VectorEarthPalette, VectorEarthTheme, VenturiStreamlineSegment, WebMercator,
+    EARTH_HALF_CIRCUMFERENCE, EARTH_RADIUS_METERS, MAX_LATITUDE, MIN_LATITUDE, UTM_FALSE_EASTING,
     UTM_FALSE_NORTHING_SOUTH, UTM_SCALE_FACTOR_CENTRAL,
 };
 pub use lifecycle_ops::{

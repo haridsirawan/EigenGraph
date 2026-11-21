@@ -20,12 +20,13 @@ use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::core::ari::RedundancyAssessment;
+use crate::core::ari::{AriEngine, RedundancyAssessment};
 use crate::core::bim::{
     BimColumn, BimFooting, BimLevel, BimProject, BimRun, BimSlab, BimWall, RunCategory, RunJustify,
 };
 use crate::core::geom::P2;
 use crate::core::gis::dem_stream::build_tin_from_3d_triangles;
+use crate::core::gis::district_hazard::{to_ifcx_hazard_node, DistrictMultiHazardReport};
 use crate::core::gis::earth_globe::lat_lon_to_unit_sphere;
 use crate::core::gis::map_widget::{
     VectorEarthTheme, EARTH_RADIUS_METERS, GLOBAL_CITY_CATALOG, WORLD_LANDMASSES,
@@ -37,6 +38,7 @@ use crate::core::model::{
     BoundaryFixity, CrossSection, Element3D, ElementType, Material, NodalLoad, Node3D,
     StructuralModel,
 };
+use crate::core::solver::FemSolver;
 use crate::models::StructuralMember;
 
 // =============================================================================
@@ -327,6 +329,27 @@ pub struct IfcxAriOverlay {
     pub svd_rank_deficiency: usize,
     #[serde(rename = "isKinematicallyStable")]
     pub is_kinematically_stable: bool,
+}
+
+/// Result summary produced when streaming an AI-reconstructed real-world building `.ifcx`
+/// capture through automatic structural frame inference and 6-DOF ARI redundancy triage.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AiBuildingFrameInferenceReport {
+    pub building_name: String,
+    pub lat_lon: Option<(f64, f64)>,
+    pub massing_synthesized: bool,
+    pub inferred_storeys: usize,
+    pub inferred_columns: usize,
+    pub inferred_beams: usize,
+    pub inferred_slabs: usize,
+    pub inferred_footings: usize,
+    pub total_fem_elements: usize,
+    pub min_ari: f64,
+    pub average_ari: f64,
+    pub max_dcr_pct: f64,
+    pub critical_member_count: usize,
+    pub svd_nullspace_dim: usize,
+    pub triage_grade: String,
 }
 
 impl IfcxNode {
@@ -1016,6 +1039,39 @@ impl IfcxStage {
         doc
     }
 
+    /// Composes the Living Earth base layer (`earth_globe.ifcx`), active `BimProject` site layer,
+    /// optional `IfcxCityScene` (`IfcRoad`/`IfcBridge`/`IfcSpatialZone`), ARI overlay, and
+    /// optional `DistrictMultiHazardReport` non-destructive hazard node into one unified `.ifcx` graph.
+    #[allow(clippy::too_many_arguments)]
+    pub fn compose_earth_with_site_city_and_hazard(
+        theme: VectorEarthTheme,
+        project: &BimProject,
+        geo_opt: Option<(f64, f64, f64)>,
+        heading_deg: f64,
+        address: Option<&str>,
+        members: Option<&[StructuralMember]>,
+        ari: Option<&RedundancyAssessment>,
+        city: Option<&crate::core::gis::IfcxCityScene>,
+        hazard: Option<&DistrictMultiHazardReport>,
+    ) -> IfcxDocument {
+        let earth = Self::build_earth_globe_layer(theme);
+        let mut site = IfcxDocument::from_bim_project(project, geo_opt, heading_deg, address, members, ari);
+        let site_path = format!("/earth/sites/{}", sanitize_slug(&project.project_name));
+        if let Some(c) = city.filter(|c| !c.is_empty()) {
+            for cn in c.to_ifcx_nodes(&site_path) {
+                site.add_node(cn);
+            }
+        }
+        if let Some(hz) = hazard {
+            site.add_node(to_ifcx_hazard_node(&site_path, hz));
+        }
+        let stage = Self::compose(&[earth, site]);
+        stage.to_composed_document(&format!(
+            "living_earth_{}",
+            sanitize_slug(&project.project_name)
+        ))
+    }
+
     /// Composes the Living Earth base layer (`earth_globe.ifcx`) with an active `BimProject` site
     /// layer, optional `IfcxCityScene` (`IfcRoad`/`IfcBridge`/`IfcSpatialZone`), and ARI overlay.
     #[allow(clippy::too_many_arguments)]
@@ -1029,19 +1085,9 @@ impl IfcxStage {
         ari: Option<&RedundancyAssessment>,
         city: Option<&crate::core::gis::IfcxCityScene>,
     ) -> IfcxDocument {
-        let earth = Self::build_earth_globe_layer(theme);
-        let mut site = IfcxDocument::from_bim_project(project, geo_opt, heading_deg, address, members, ari);
-        if let Some(c) = city.filter(|c| !c.is_empty()) {
-            let site_path = format!("/earth/sites/{}", sanitize_slug(&project.project_name));
-            for cn in c.to_ifcx_nodes(&site_path) {
-                site.add_node(cn);
-            }
-        }
-        let stage = Self::compose(&[earth, site]);
-        stage.to_composed_document(&format!(
-            "living_earth_{}",
-            sanitize_slug(&project.project_name)
-        ))
+        Self::compose_earth_with_site_city_and_hazard(
+            theme, project, geo_opt, heading_deg, address, members, ari, city, None,
+        )
     }
 
     /// Composes the Living Earth base layer (`earth_globe.ifcx`) with an active `BimProject` site
@@ -1495,6 +1541,14 @@ impl IfcxDocument {
 
     /// Converts an `IfcxDocument` into an editable `BimProject`.
     pub fn to_bim_project(&self, fallback_name: &str) -> Result<(BimProject, String), String> {
+        self.to_bim_project_with_bay(fallback_name, 6.0)
+    }
+
+    fn to_bim_project_with_bay(
+        &self,
+        fallback_name: &str,
+        target_bay_m: f64,
+    ) -> Result<(BimProject, String), String> {
         // Path A: Lossless EigenGraph BIM continuation snapshot
         for node in &self.data {
             if let Some(val) = node.attributes.get(ns::EG_BIM_PROJECT) {
@@ -1757,7 +1811,31 @@ impl IfcxDocument {
         proj.next_id = next_id;
 
         if proj.is_empty() {
-            return Err("IFCX document contains no reconstructable building geometry (IfcColumn, IfcBeam, IfcWall, IfcSlab, or IfcFooting).".to_string());
+            // Fallback for pure AI exterior massing envelopes (`IfcBuilding` / `IfcBuildingElementProxy`
+            // containing `usd::usdgeom::mesh` without explicit internal columns/beams/slabs).
+            let envelope_m = self
+                .data
+                .iter()
+                .filter(|n| {
+                    matches!(
+                        n.ifc_class(),
+                        Some("IfcBuilding" | "IfcBuildingElementProxy" | "IfcSpatialZone")
+                    )
+                })
+                .filter_map(|n| n.world_bbox_m())
+                .reduce(|(amn, amx), (bmn, bmx)| {
+                    (
+                        [amn[0].min(bmn[0]), amn[1].min(bmn[1]), amn[2].min(bmn[2])],
+                        [amx[0].max(bmx[0]), amx[1].max(bmx[1]), amx[2].max(bmx[2])],
+                    )
+                });
+            if let Some(env) = envelope_m {
+                Self::infer_structural_frame_for_bim(&mut proj, Some(env), target_bay_m);
+            }
+        }
+
+        if proj.is_empty() {
+            return Err("IFCX document contains no reconstructable building geometry (IfcColumn, IfcBeam, IfcWall, IfcSlab, IfcFooting, or IfcBuilding massing).".to_string());
         }
 
         let summary = format!(
@@ -1771,6 +1849,452 @@ impl IfcxDocument {
             proj.footings.len()
         );
         Ok((proj, summary))
+    }
+
+    /// Automatic structural frame synthesis for AI-reconstructed real-world building `.ifcx`
+    /// captures (either an exterior massing envelope or partial columns lacking beams/slabs/footings).
+    /// Returns `(massing_synthesized, added_cols, added_beams, added_slabs, added_footings)`.
+    pub fn infer_structural_frame_for_bim(
+        proj: &mut BimProject,
+        envelope_m: Option<([f64; 3], [f64; 3])>,
+        target_bay_m: f64,
+    ) -> (bool, usize, usize, usize, usize) {
+        let mut massing_synthesized = false;
+        let mut added_cols = 0usize;
+        let mut added_beams = 0usize;
+        let mut added_slabs = 0usize;
+        let mut added_footings = 0usize;
+        let mut next_id = proj.next_id.max(10);
+
+        // Case A: Pure AI massing shell (`IfcBuilding` bbox only -> infer complete regular RC moment frame)
+        if proj.columns.is_empty() && proj.walls.is_empty() {
+            if let Some((mn, mx)) = envelope_m {
+                massing_synthesized = true;
+                let lx_m = (mx[0] - mn[0]).clamp(6.0, 48.0);
+                let ly_m = (mx[1] - mn[1]).clamp(6.0, 48.0);
+                let h_m = (mx[2] - mn[2]).clamp(3.2, 72.0);
+                let n_storeys = ((h_m / 3.6).round() as usize).clamp(1, 16);
+                let story_h_mm = (h_m * 1000.0 / n_storeys as f64).round().clamp(3000.0, 5000.0);
+
+                proj.levels = (0..=n_storeys)
+                    .map(|i| BimLevel {
+                        id: i + 1,
+                        name: if i == 0 {
+                            "Ground Level (+0.00m)".to_string()
+                        } else if i == n_storeys {
+                            format!("Roof Level (+{:.2}m)", (i as f64 * story_h_mm) * 0.001)
+                        } else {
+                            format!("Level {} (+{:.2}m)", i + 1, (i as f64 * story_h_mm) * 0.001)
+                        },
+                        elevation_mm: i as f64 * story_h_mm,
+                    })
+                    .collect();
+
+                let bay_pref = target_bay_m.clamp(4.0, 7.5);
+                let nx = (lx_m / bay_pref).round().clamp(1.0, 6.0) as usize;
+                let ny = (ly_m / bay_pref).round().clamp(1.0, 6.0) as usize;
+                let cx0_m = 0.5 * (mn[0] + mx[0]);
+                let cy0_m = 0.5 * (mn[1] + mx[1]);
+                let dx_mm = (lx_m * 1000.0) / nx as f64;
+                let dy_mm = (ly_m * 1000.0) / ny as f64;
+                let x_start_mm = (cx0_m - 0.5 * lx_m) * 1000.0;
+                let y_start_mm = (cy0_m - 0.5 * ly_m) * 1000.0;
+
+                let col_size_mm = match n_storeys {
+                    0..=2 => 350.0,
+                    3..=5 => 450.0,
+                    6..=9 => 550.0,
+                    _ => 650.0,
+                };
+                let beam_w_mm = 300.0;
+                let beam_d_mm = 500.0;
+
+                for s in 0..n_storeys {
+                    let base_id = proj.levels[s].id;
+                    let top_id = proj.levels[s + 1].id;
+                    for iy in 0..=ny {
+                        for ix in 0..=nx {
+                            let x_mm = x_start_mm + ix as f64 * dx_mm;
+                            let y_mm = y_start_mm + iy as f64 * dy_mm;
+                            let cid = next_id;
+                            next_id += 1;
+                            proj.columns.push(BimColumn {
+                                id: cid,
+                                name: format!("AI_C{}_{}_{}", s + 1, ix + 1, iy + 1),
+                                base_level_id: base_id,
+                                top_level_id: top_id,
+                                pos: P2(x_mm, y_mm),
+                                width_mm: col_size_mm,
+                                depth_mm: col_size_mm,
+                                rotation_deg: 0.0,
+                                is_round: false,
+                                is_wf_profile: false,
+                                profile_name: format!("RC {col_size_mm:.0}x{col_size_mm:.0}"),
+                            });
+                            added_cols += 1;
+
+                            if s == 0 {
+                                let fid = next_id;
+                                next_id += 1;
+                                proj.footings.push(BimFooting {
+                                    id: fid,
+                                    name: format!("AI_F{}_{}", ix + 1, iy + 1),
+                                    level_id: proj.levels[0].id,
+                                    pos: P2(x_mm, y_mm),
+                                    width_mm: 1800.0,
+                                    length_mm: 1800.0,
+                                    thickness_mm: 500.0,
+                                });
+                                added_footings += 1;
+                            }
+                        }
+                    }
+
+                    // Orthogonal X and Y primary frame beams at storey top level
+                    for iy in 0..=ny {
+                        let y_mm = y_start_mm + iy as f64 * dy_mm;
+                        for ix in 0..nx {
+                            let x0 = x_start_mm + ix as f64 * dx_mm;
+                            let x1 = x0 + dx_mm;
+                            let bid = next_id;
+                            next_id += 1;
+                            proj.runs.push(BimRun {
+                                id: bid,
+                                name: format!("AI_BX_{}_{}_{}", s + 1, ix + 1, iy + 1),
+                                category: RunCategory::StructuralBeam,
+                                level_id: top_id,
+                                start: P2(x0, y_mm),
+                                end: P2(x1, y_mm),
+                                start_offset_mm: 0.0,
+                                end_offset_mm: 0.0,
+                                justify: RunJustify::Top,
+                                profile_name: format!("RC {beam_w_mm:.0}x{beam_d_mm:.0}"),
+                                width_mm: beam_w_mm,
+                                depth_mm: beam_d_mm,
+                                is_round: false,
+                                is_wf_profile: false,
+                                system_name: "AI Inferred Frame".to_string(),
+                            });
+                            added_beams += 1;
+                        }
+                    }
+                    for ix in 0..=nx {
+                        let x_mm = x_start_mm + ix as f64 * dx_mm;
+                        for iy in 0..ny {
+                            let y0 = y_start_mm + iy as f64 * dy_mm;
+                            let y1 = y0 + dy_mm;
+                            let bid = next_id;
+                            next_id += 1;
+                            proj.runs.push(BimRun {
+                                id: bid,
+                                name: format!("AI_BY_{}_{}_{}", s + 1, ix + 1, iy + 1),
+                                category: RunCategory::StructuralBeam,
+                                level_id: top_id,
+                                start: P2(x_mm, y0),
+                                end: P2(x_mm, y1),
+                                start_offset_mm: 0.0,
+                                end_offset_mm: 0.0,
+                                justify: RunJustify::Top,
+                                profile_name: format!("RC {beam_w_mm:.0}x{beam_d_mm:.0}"),
+                                width_mm: beam_w_mm,
+                                depth_mm: beam_d_mm,
+                                is_round: false,
+                                is_wf_profile: false,
+                                system_name: "AI Inferred Frame".to_string(),
+                            });
+                            added_beams += 1;
+                        }
+                    }
+
+                    let x_end_mm = x_start_mm + lx_m * 1000.0;
+                    let y_end_mm = y_start_mm + ly_m * 1000.0;
+                    let sid = next_id;
+                    next_id += 1;
+                    let is_roof = s + 1 == n_storeys;
+                    proj.slabs.push(BimSlab {
+                        id: sid,
+                        name: if is_roof {
+                            "AI_Roof_Slab".to_string()
+                        } else {
+                            format!("AI_Slab_L{}", s + 2)
+                        },
+                        level_id: top_id,
+                        boundary: vec![
+                            P2(x_start_mm - 300.0, y_start_mm - 300.0),
+                            P2(x_end_mm + 300.0, y_start_mm - 300.0),
+                            P2(x_end_mm + 300.0, y_end_mm + 300.0),
+                            P2(x_start_mm - 300.0, y_end_mm + 300.0),
+                        ],
+                        openings: Vec::new(),
+                        thickness_mm: if is_roof { 140.0 } else { 160.0 },
+                        is_roof,
+                        roof_slope_deg: 0.0,
+                    });
+                    added_slabs += 1;
+                }
+                proj.next_id = next_id.max(proj.next_id);
+                return (
+                    massing_synthesized,
+                    added_cols,
+                    added_beams,
+                    added_slabs,
+                    added_footings,
+                );
+            }
+        }
+
+        // Case B: Partial AI capture (has explicit columns, auto-synthesize missing beams/slabs/footings)
+        if proj.runs.is_empty() && proj.columns.len() >= 2 {
+            let cols_snapshot = proj.columns.clone();
+            for i in 0..cols_snapshot.len() {
+                for j in (i + 1)..cols_snapshot.len() {
+                    let a = &cols_snapshot[i];
+                    let b = &cols_snapshot[j];
+                    if a.top_level_id != b.top_level_id {
+                        continue;
+                    }
+                    let dx_m = (b.pos.0 - a.pos.0) * 0.001;
+                    let dy_m = (b.pos.1 - a.pos.1) * 0.001;
+                    let dist_m = dx_m.hypot(dy_m);
+                    if (2.0..=9.5).contains(&dist_m)
+                        && (dx_m.abs() < 0.6 || dy_m.abs() < 0.6)
+                    {
+                        let bid = next_id;
+                        next_id += 1;
+                        proj.runs.push(BimRun {
+                            id: bid,
+                            name: format!("AI_Inferred_B{}", added_beams + 1),
+                            category: RunCategory::StructuralBeam,
+                            level_id: a.top_level_id,
+                            start: a.pos,
+                            end: b.pos,
+                            start_offset_mm: 0.0,
+                            end_offset_mm: 0.0,
+                            justify: RunJustify::Top,
+                            profile_name: "RC 300x500".to_string(),
+                            width_mm: 300.0,
+                            depth_mm: 500.0,
+                            is_round: false,
+                            is_wf_profile: false,
+                            system_name: "AI Inferred Frame".to_string(),
+                        });
+                        added_beams += 1;
+                    }
+                }
+            }
+        }
+        if proj.slabs.is_empty() && proj.columns.len() >= 3 && proj.levels.len() >= 2 {
+            let mut min_x = f64::INFINITY;
+            let mut max_x = f64::NEG_INFINITY;
+            let mut min_y = f64::INFINITY;
+            let mut max_y = f64::NEG_INFINITY;
+            for c in &proj.columns {
+                min_x = min_x.min(c.pos.0);
+                max_x = max_x.max(c.pos.0);
+                min_y = min_y.min(c.pos.1);
+                max_y = max_y.max(c.pos.1);
+            }
+            if min_x.is_finite() && (max_x - min_x) > 500.0 && (max_y - min_y) > 500.0 {
+                let n_lvls = proj.levels.len();
+                for (li, lvl) in proj.levels.iter().enumerate().skip(1) {
+                    let is_roof = li + 1 == n_lvls;
+                    let sid = next_id;
+                    next_id += 1;
+                    proj.slabs.push(BimSlab {
+                        id: sid,
+                        name: if is_roof {
+                            "AI_Roof_Slab".to_string()
+                        } else {
+                            format!("AI_Slab_L{}", li + 1)
+                        },
+                        level_id: lvl.id,
+                        boundary: vec![
+                            P2(min_x - 250.0, min_y - 250.0),
+                            P2(max_x + 250.0, min_y - 250.0),
+                            P2(max_x + 250.0, max_y + 250.0),
+                            P2(min_x - 250.0, max_y + 250.0),
+                        ],
+                        openings: Vec::new(),
+                        thickness_mm: 150.0,
+                        is_roof,
+                        roof_slope_deg: 0.0,
+                    });
+                    added_slabs += 1;
+                }
+            }
+        }
+        if proj.footings.is_empty() && !proj.levels.is_empty() {
+            let ground_lvl_id = proj.levels[0].id;
+            let ground_cols: Vec<BimColumn> = proj
+                .columns
+                .iter()
+                .filter(|c| c.base_level_id == ground_lvl_id)
+                .cloned()
+                .collect();
+            for c in ground_cols {
+                let fid = next_id;
+                next_id += 1;
+                proj.footings.push(BimFooting {
+                    id: fid,
+                    name: format!("AI_F{}", added_footings + 1),
+                    level_id: ground_lvl_id,
+                    pos: c.pos,
+                    width_mm: 1600.0,
+                    length_mm: 1600.0,
+                    thickness_mm: 450.0,
+                });
+                added_footings += 1;
+            }
+        }
+        proj.next_id = next_id.max(proj.next_id);
+        (
+            massing_synthesized,
+            added_cols,
+            added_beams,
+            added_slabs,
+            added_footings,
+        )
+    }
+
+    /// Streams an external or AI-reconstructed real-building `.ifcx` payload, automatically infers
+    /// any missing primary structural framing (`IfcColumn` / `IfcBeam` / `IfcSlab` / `IfcFooting`),
+    /// runs an instant 6-DOF FEM + ARI screening pass, and emits a composed `.ifcx` document with
+    /// embedded `eigengraph::ari::v2` telemetry.
+    pub fn ingest_ai_real_building_with_frame_inference(
+        raw: &str,
+        filename: &str,
+        parcel_origin_override: Option<(f64, f64)>,
+        target_bay_m: f64,
+    ) -> Result<(IfcxDocument, BimProject, AiBuildingFrameInferenceReport), String> {
+        let doc = Self::parse(raw)?;
+        let mut geo_opt: Option<(f64, f64)> = None;
+        let mut elev_m = 0.0_f64;
+        let mut heading_deg = 0.0_f64;
+        let mut address = String::new();
+        for node in &doc.data {
+            if let Some(g) = node.geo_wgs84() {
+                if !g.address.trim().is_empty() && address.is_empty() {
+                    address = g.address.clone();
+                }
+                elev_m = g.elev_m;
+                heading_deg = g.heading_deg;
+                if (g.lat.abs() > 1e-4 || g.lon.abs() > 1e-4)
+                    && (-90.0..=90.0).contains(&g.lat)
+                    && (-180.0..=180.0).contains(&g.lon)
+                {
+                    geo_opt = Some((g.lat, g.lon));
+                    break;
+                }
+            }
+        }
+        if geo_opt.is_none() {
+            geo_opt = parcel_origin_override;
+        }
+
+        let had_no_explicit_frame = !doc.data.iter().any(|n| {
+            n.attributes.contains_key(ns::EG_BIM_PROJECT)
+                || matches!(
+                    n.ifc_class(),
+                    Some("IfcColumn" | "IfcBeam" | "IfcMember" | "IfcWall")
+                )
+        });
+        let (mut proj, _) = doc.to_bim_project_with_bay(filename, target_bay_m)?;
+        let envelope_m = doc
+            .data
+            .iter()
+            .filter(|n| {
+                matches!(
+                    n.ifc_class(),
+                    Some("IfcBuilding" | "IfcBuildingElementProxy" | "IfcSpatialZone")
+                )
+            })
+            .filter_map(|n| n.world_bbox_m())
+            .reduce(|(amn, amx), (bmn, bmx)| {
+                (
+                    [amn[0].min(bmn[0]), amn[1].min(bmn[1]), amn[2].min(bmn[2])],
+                    [amx[0].max(bmx[0]), amx[1].max(bmx[1]), amx[2].max(bmx[2])],
+                )
+            });
+        let (massing_flag, _, _, _, _) =
+            Self::infer_structural_frame_for_bim(&mut proj, envelope_m, target_bay_m);
+        let massing_synthesized = massing_flag || (had_no_explicit_frame && !proj.columns.is_empty());
+
+        let model = proj.to_structural_model();
+        let total_fem_elements = model.elements.len();
+        let (max_dcr_pct, avg_dcr, fem_ok) = match FemSolver::solve(&model) {
+            Ok(analysis) => {
+                let mx = analysis
+                    .member_dcr_interactions
+                    .iter()
+                    .copied()
+                    .fold(0.0_f64, f64::max)
+                    * 100.0;
+                let cnt = analysis.member_dcr_interactions.len().max(1) as f64;
+                let avg = analysis.member_dcr_interactions.iter().sum::<f64>() / cnt;
+                (mx, avg, true)
+            }
+            Err(_) => (100.0, 1.0, false),
+        };
+        let ari_res = if total_fem_elements <= 72 {
+            AriEngine::evaluate_redundancy_fast(&model).ok()
+        } else {
+            None
+        };
+        let (min_ari, average_ari, critical_member_count, svd_nullspace_dim) =
+            if let Some(ref a) = ari_res {
+                (
+                    a.min_system_ari,
+                    a.average_ari,
+                    a.critical_members_count,
+                    a.kinematic_guard.nullspace_dimension,
+                )
+            } else if fem_ok && total_fem_elements > 72 {
+                // Fast FEM-DCR fallback screening for large multi-bay skyscraper scans (> 72 members)
+                let est_min = (1.0 - (max_dcr_pct * 0.0055)).clamp(0.15, 0.92);
+                let est_avg = (1.0 - (avg_dcr * 0.50)).clamp(0.25, 0.96);
+                let est_crit = if max_dcr_pct > 90.0 { 1 } else { 0 };
+                (est_min, est_avg, est_crit, 0)
+            } else {
+                (0.0, 0.0, total_fem_elements, 1)
+            };
+
+        let triage_grade = if svd_nullspace_dim == 0 && min_ari >= 0.70 && max_dcr_pct <= 95.0 {
+            "GREEN (Redundant)".to_string()
+        } else if svd_nullspace_dim == 0 && min_ari >= 0.45 && max_dcr_pct <= 115.0 {
+            "AMBER (Monitor)".to_string()
+        } else {
+            "RED (Retrofit Required)".to_string()
+        };
+
+        let geo_3d = geo_opt.map(|(la, lo)| (la, lo, elev_m));
+        let composed_doc = Self::from_bim_project(
+            &proj,
+            geo_3d,
+            heading_deg,
+            (!address.trim().is_empty()).then_some(address.as_str()),
+            None,
+            ari_res.as_ref(),
+        );
+
+        let report = AiBuildingFrameInferenceReport {
+            building_name: proj.project_name.clone(),
+            lat_lon: geo_opt,
+            massing_synthesized,
+            inferred_storeys: proj.levels.len().saturating_sub(1),
+            inferred_columns: proj.columns.len(),
+            inferred_beams: proj.runs.len(),
+            inferred_slabs: proj.slabs.len(),
+            inferred_footings: proj.footings.len(),
+            total_fem_elements,
+            min_ari,
+            average_ari,
+            max_dcr_pct,
+            critical_member_count,
+            svd_nullspace_dim,
+            triage_grade,
+        };
+
+        Ok((composed_doc, proj, report))
     }
 
     // =========================================================================
@@ -2246,6 +2770,57 @@ impl IfcxDocument {
                 .with_class("IfcRoof")
                 .with_prop("AI_Roof_Slab", "Concrete Slab 160mm", "AI-Detected Roof Deck")
                 .with_mesh(&slab_mesh),
+        );
+        doc
+    }
+
+    /// Generates a pure exterior massing AI real-world building capture `.ifcx` containing ONLY an
+    /// `IfcSite` geodetic anchor and one `IfcBuilding` `usd::usdgeom::mesh` envelope (`12m x 6m x 10.8m`,
+    /// zero explicit internal columns/beams/slabs), exercising automatic structural frame inference
+    /// and instant 6-DOF ARI screening upon ingestion.
+    pub fn sample_ai_massing_tower_capture_ifcx(
+        lat: f64,
+        lon: f64,
+        elev_m: f64,
+        label: &str,
+    ) -> Self {
+        let slug = sanitize_slug(label);
+        let mut doc = Self::new(format!("ai_massing_{slug}"));
+        doc.imports.push(IfcxImport {
+            uri: "eigengraph://earth_globe.ifcx".to_string(),
+            integrity: None,
+            role: Some("earth-base".to_string()),
+        });
+        let site = format!("/earth/sites/{slug}");
+        let bldg = format!("{site}/buildings/ai_scan_01");
+        let utm_zone = (((lon + 180.0) / 6.0).floor() as i32).clamp(1, 60) as u8;
+        let geo = IfcxGeoWgs84 {
+            lat,
+            lon,
+            elev_m,
+            heading_deg: 0.0,
+            address: label.to_string(),
+            utm_zone,
+            south_hemisphere: lat < 0.0,
+        };
+        doc.add_node(IfcxNode::new("/earth").with_class("IfcProject"));
+        doc.add_node(
+            IfcxNode::new(&site)
+                .with_class("IfcSite")
+                .with_prop(&format!("{label} Parcel"), "AI Vision Scan", "Real-World Massing Capture")
+                .with_geo(&geo),
+        );
+        let massing_mesh = UsdGeomMesh::from_box_m(
+            [-6.0, -3.0, 0.0],
+            [6.0, 3.0, 10.8],
+            [0.42, 0.64, 0.74, 1.0],
+            2.0,
+        );
+        doc.add_node(
+            IfcxNode::new(&bldg)
+                .with_class("IfcBuilding")
+                .with_prop(label, "Inferred RC Frame", "AI Exterior Photogrammetry Envelope (12m x 6m x 10.8m)")
+                .with_mesh(&massing_mesh),
         );
         doc
     }
@@ -2933,5 +3508,39 @@ mod tests {
         assert_eq!(diff.added, 1);
         assert!(session.undo(&mut doc));
         assert_eq!(doc.data.len(), baseline.data.len());
+    }
+
+    #[test]
+    fn phase68_ai_real_building_massing_frame_inference_and_instant_ari_triage() {
+        let massing_doc = IfcxDocument::sample_ai_massing_tower_capture_ifcx(
+            -6.2088,
+            106.8456,
+            12.0,
+            "Jakarta_AI_Scan_Tower",
+        );
+        let raw = massing_doc.to_json_pretty();
+        let (composed, proj, report) = IfcxDocument::ingest_ai_real_building_with_frame_inference(
+            &raw,
+            "ai_scan_tower.ifcx",
+            None,
+            6.0,
+        )
+        .expect("AI massing frame inference & ARI triage");
+
+        assert!(report.massing_synthesized);
+        assert_eq!(report.inferred_storeys, 3);
+        assert!(proj.columns.len() >= 18);
+        assert!(proj.runs.len() >= 20);
+        assert!(proj.slabs.len() >= 3);
+        assert!(proj.footings.len() >= 6);
+        assert_eq!(report.svd_nullspace_dim, 0);
+        assert!(report.min_ari.is_finite() && report.max_dcr_pct.is_finite());
+        assert!(
+            composed
+                .data
+                .iter()
+                .any(|n| n.attributes.contains_key(ns::EG_ARI)),
+            "Composed IFCX output should embed eigengraph::ari::v2 triage overlay"
+        );
     }
 }

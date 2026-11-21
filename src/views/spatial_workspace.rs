@@ -1042,6 +1042,36 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Auto-grade flat foundation pad onto IfcSite TIN terrain & compute Cut/Fill m3",
         icon: AppIcon::Layers,
     },
+    SlashCommandSpec {
+        cmd: "/seismic",
+        category: "Hazard",
+        description: "Toggle animated SNI 1726 / ASCE 7 traveling seismic wavefield & pounding simulation",
+        icon: AppIcon::Pulse,
+    },
+    SlashCommandSpec {
+        cmd: "/wind",
+        category: "Hazard",
+        description: "Toggle Venturi urban wind channeling streamlines & speed-up audit",
+        icon: AppIcon::Wind,
+    },
+    SlashCommandSpec {
+        cmd: "/flood",
+        category: "Hazard",
+        description: "Toggle 3D flood / sea-level plane against IfcSite TIN contours (optional meters)",
+        icon: AppIcon::Waves,
+    },
+    SlashCommandSpec {
+        cmd: "/hazard",
+        category: "Hazard",
+        description: "Run coupled District Multi-Hazard audit (seismic + pounding + Venturi + flood)",
+        icon: AppIcon::AlertTriangle,
+    },
+    SlashCommandSpec {
+        cmd: "/ai-capture",
+        category: "IFCX",
+        description: "Stream AI real-building massing .ifcx onto Earth parcel with auto frame inference & ARI triage",
+        icon: AppIcon::Sparkles,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1074,6 +1104,8 @@ pub struct SpatialHudActions {
     pub rotate_active_world_heading_deg: Option<f64>,
     pub undo: bool,
     pub redo: bool,
+    pub run_district_hazard_audit: bool,
+    pub ingest_ai_real_building_capture: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3608,6 +3640,88 @@ impl SpatialWorkspaceState {
                         true,
                     );
                 }
+                "/seismic" | "/wave" => {
+                    let next = !universal_canvas.district_hazard.seismic_wave_active;
+                    universal_canvas.district_hazard.seismic_wave_active = next;
+                    if next {
+                        universal_canvas.district_hazard.pounding_overlay_active = true;
+                        universal_canvas.show_neighborhood_hazards = true;
+                        let c = universal_canvas.active_site_coupling();
+                        universal_canvas.district_hazard.seismic_pga_g =
+                            f64::from(c.seismic_pga_ss_g).clamp(0.15, 1.5);
+                    }
+                    actions.run_district_hazard_audit = true;
+                    self.push_trace(
+                        format!(
+                            "District Seismic Wave + Pounding: {}",
+                            if next { "ON" } else { "OFF" }
+                        ),
+                        true,
+                    );
+                }
+                "/wind" | "/venturi" => {
+                    let next = !universal_canvas.district_hazard.venturi_wind_active;
+                    universal_canvas.district_hazard.venturi_wind_active = next;
+                    if next {
+                        let c = universal_canvas.active_site_coupling();
+                        universal_canvas.district_hazard.base_wind_ms =
+                            f64::from(c.design_wind_ms).clamp(18.0, 65.0);
+                    }
+                    actions.run_district_hazard_audit = true;
+                    self.push_trace(
+                        format!(
+                            "Venturi Urban Wind Streamlines: {}",
+                            if next { "ON" } else { "OFF" }
+                        ),
+                        true,
+                    );
+                }
+                "/flood" => {
+                    let wl_opt = arg
+                        .trim_end_matches('m')
+                        .trim()
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|v| v.is_finite());
+                    if let Some(wl) = wl_opt {
+                        universal_canvas.district_hazard.flood_water_level_m =
+                            wl.clamp(-5.0, 25.0);
+                        universal_canvas.district_hazard.flood_plane_active = true;
+                    } else {
+                        universal_canvas.district_hazard.flood_plane_active =
+                            !universal_canvas.district_hazard.flood_plane_active;
+                    }
+                    if universal_canvas.district_hazard.flood_plane_active {
+                        universal_canvas.ensure_site_tin_generated();
+                        universal_canvas.show_terrain_contours = true;
+                    }
+                    actions.run_district_hazard_audit = true;
+                    self.push_trace(
+                        format!(
+                            "3D Flood Plane ({:+.1}m MSL): {}",
+                            universal_canvas.district_hazard.flood_water_level_m,
+                            if universal_canvas.district_hazard.flood_plane_active {
+                                "ON"
+                            } else {
+                                "OFF"
+                            }
+                        ),
+                        true,
+                    );
+                }
+                "/hazard" | "/multihazard" => {
+                    universal_canvas.ensure_site_tin_generated();
+                    universal_canvas.show_terrain_contours = true;
+                    universal_canvas.show_neighborhood_hazards = true;
+                    universal_canvas.district_hazard.seismic_wave_active = true;
+                    universal_canvas.district_hazard.pounding_overlay_active = true;
+                    universal_canvas.district_hazard.venturi_wind_active = true;
+                    universal_canvas.district_hazard.flood_plane_active = true;
+                    actions.run_district_hazard_audit = true;
+                }
+                "/ai-capture" | "/aicapture" | "/scan-ifcx" => {
+                    actions.ingest_ai_real_building_capture = true;
+                }
                 "/section" | "/cut" => {
                     let elev_opt = arg
                         .trim_end_matches('m')
@@ -4736,6 +4850,7 @@ impl SpatialWorkspaceState {
     ) {
         let has_active = self.active_lens != SpatialLens::Clean
             || universal_canvas.earth_fem_cache.n1_simulation.is_some()
+            || universal_canvas.district_hazard.any_active()
             || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
             || universal_canvas.earth_bim_author.active_tool
                 != crate::views::universal_canvas::EarthBimTool::None
@@ -5474,6 +5589,28 @@ impl SpatialWorkspaceState {
                     .color(theme.text_muted),
                 );
             }
+            if universal_canvas.district_hazard.any_active() {
+                let rep = &universal_canvas.district_hazard_report;
+                let res_col = if rep.resilience_score >= 75.0 {
+                    theme.accent_green
+                } else if rep.resilience_score >= 45.0 {
+                    theme.accent_orange
+                } else {
+                    theme.accent_red
+                };
+                icons::pill_badge(
+                    ui,
+                    AppIcon::AlertTriangle,
+                    format!(
+                        "Resilience {:.0}/100 • Sds {:.2}g • Wind {:.0}m/s • Flood {:.0}%",
+                        rep.resilience_score,
+                        rep.spectral_sds_g,
+                        rep.effective_wind_ms,
+                        rep.flood.inundated_area_pct
+                    ),
+                    res_col,
+                );
+            }
             let (rst_fg, rst_bg, rst_st) = theme.glass_chip_style(false, theme.accent_red);
             if icons::icon_only_button(
                 ui,
@@ -5489,6 +5626,10 @@ impl SpatialWorkspaceState {
             {
                 self.apply_lens_to_views(SpatialLens::Clean, build_view, universal_canvas);
                 self.reset_manual_tools_to_orbit(build_view, universal_canvas);
+                universal_canvas.district_hazard.seismic_wave_active = false;
+                universal_canvas.district_hazard.pounding_overlay_active = false;
+                universal_canvas.district_hazard.venturi_wind_active = false;
+                universal_canvas.district_hazard.flood_plane_active = false;
             }
         });
     }
@@ -10974,6 +11115,152 @@ impl SpatialWorkspaceState {
                                             }
                                         },
                                     );
+                                    ui.add_space(4.0);
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new("Multi-Hazard:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            let seis_on = universal_canvas.district_hazard.seismic_wave_active;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Pulse),
+                                                "Seismic",
+                                                seis_on,
+                                                theme.accent_orange,
+                                                "Toggle SNI 1726 / ASCE 7 traveling seismic wavefield",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.district_hazard.seismic_wave_active = !seis_on;
+                                                actions.run_district_hazard_audit = true;
+                                            }
+                                            let pound_on = universal_canvas.district_hazard.pounding_overlay_active;
+                                            let p_cnt = universal_canvas.district_hazard_report.pounding_risk_count;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::AlertTriangle),
+                                                if p_cnt > 0 {
+                                                    format!("Pounding ({p_cnt})")
+                                                } else {
+                                                    "Pounding".to_string()
+                                                },
+                                                pound_on,
+                                                theme.accent_red,
+                                                "Highlight phase-amplified seismic pounding corridors",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.district_hazard.pounding_overlay_active = !pound_on;
+                                                universal_canvas.show_neighborhood_hazards = true;
+                                                actions.run_district_hazard_audit = true;
+                                            }
+                                            let wind_on = universal_canvas.district_hazard.venturi_wind_active;
+                                            let v_fac = universal_canvas.district_hazard_report.venturi_speedup_factor;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Wind),
+                                                if wind_on && v_fac > 1.01 {
+                                                    format!("Venturi x{v_fac:.2}")
+                                                } else {
+                                                    "Venturi".to_string()
+                                                },
+                                                wind_on,
+                                                theme.accent_blue,
+                                                "Toggle urban Venturi wind channeling streamlines",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.district_hazard.venturi_wind_active = !wind_on;
+                                                actions.run_district_hazard_audit = true;
+                                            }
+                                            let flood_on = universal_canvas.district_hazard.flood_plane_active;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Waves),
+                                                if flood_on {
+                                                    format!(
+                                                        "Flood {:+.1}m",
+                                                        universal_canvas.district_hazard.flood_water_level_m
+                                                    )
+                                                } else {
+                                                    "Flood 3D".to_string()
+                                                },
+                                                flood_on,
+                                                theme.accent_blue,
+                                                "Toggle 3D flood plane against IfcSite TIN contours",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.district_hazard.flood_plane_active = !flood_on;
+                                                if !flood_on {
+                                                    universal_canvas.ensure_site_tin_generated();
+                                                    universal_canvas.show_terrain_contours = true;
+                                                }
+                                                actions.run_district_hazard_audit = true;
+                                            }
+                                            if flood_on {
+                                                if Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    None,
+                                                    "-0.5m",
+                                                    false,
+                                                    theme.text_secondary,
+                                                    "Lower 3D flood elevation by 0.5m",
+                                                )
+                                                .clicked()
+                                                {
+                                                    universal_canvas.district_hazard.flood_water_level_m =
+                                                        (universal_canvas.district_hazard.flood_water_level_m - 0.5)
+                                                            .clamp(-5.0, 25.0);
+                                                    actions.run_district_hazard_audit = true;
+                                                }
+                                                if Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    None,
+                                                    "+0.5m",
+                                                    false,
+                                                    theme.text_secondary,
+                                                    "Raise 3D flood elevation by 0.5m",
+                                                )
+                                                .clicked()
+                                                {
+                                                    universal_canvas.district_hazard.flood_water_level_m =
+                                                        (universal_canvas.district_hazard.flood_water_level_m + 0.5)
+                                                            .clamp(-5.0, 25.0);
+                                                    actions.run_district_hazard_audit = true;
+                                                }
+                                            }
+                                            ui.separator();
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Sparkles),
+                                                "AI Scan -> IFCX",
+                                                false,
+                                                theme.accent_green,
+                                                "Stream AI real-building massing .ifcx onto Earth with automatic frame inference & instant 6-DOF ARI triage",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.ingest_ai_real_building_capture = true;
+                                            }
+                                        },
+                                    );
                                 }
                                 DynamicIslandStudioTab::CadAndExport => {
                                     Self::glass_subpill_group(
@@ -11485,6 +11772,8 @@ impl SpatialHudActions {
         }
         self.undo |= other.undo;
         self.redo |= other.redo;
+        self.run_district_hazard_audit |= other.run_district_hazard_audit;
+        self.ingest_ai_real_building_capture |= other.ingest_ai_real_building_capture;
     }
 }
 
@@ -14303,6 +14592,95 @@ mod tests {
                     compact_w_desktop
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_phase68_multi_hazard_and_ai_capture_slash_commands_and_zero_hud_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus = crate::core::BimCommandBus::from_project(
+            crate::core::BimProject::sample_bimcraft_building(),
+        );
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = crate::theme::MacTheme::default();
+
+        for cmd in ["/seismic", "/wind", "/flood", "/hazard", "/ai-capture"] {
+            assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == cmd));
+        }
+
+        let act_f = spatial.execute_spatial_input(
+            "/flood 3.5",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_f.run_district_hazard_audit);
+        assert!(canvas.district_hazard.flood_plane_active);
+        assert!((canvas.district_hazard.flood_water_level_m - 3.5).abs() < 1e-6);
+
+        let act_h = spatial.execute_spatial_input(
+            "/hazard",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_h.run_district_hazard_audit);
+        assert!(canvas.district_hazard.seismic_wave_active);
+        assert!(canvas.district_hazard.venturi_wind_active);
+        assert!(canvas.district_hazard.pounding_overlay_active);
+        canvas.refresh_district_hazard(&build.bim_bus.project);
+
+        let act_ai = spatial.execute_spatial_input(
+            "/ai-capture",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_ai.ingest_ai_real_building_capture);
+
+        spatial.mobile_deck_pinned = true;
+        spatial.studio_tab = DynamicIslandStudioTab::GisAndSite;
+        for win_w in [1280.0_f32, 768.0, 390.0] {
+            let ctx = egui::Context::default();
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 844.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                },
+            );
+            out.textures_delta.clear();
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 68 Multi-Hazard Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
         }
     }
 }

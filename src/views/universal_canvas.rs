@@ -266,6 +266,8 @@ pub struct UnifiedWorkspaceArchive {
     pub lifecycle_ops: LifecycleOpsState,
     #[serde(default)]
     pub city_scene: crate::core::gis::IfcxCityScene,
+    #[serde(default)]
+    pub district_hazard: crate::core::gis::DistrictHazardConfig,
     pub sha256_seal: String,
 }
 
@@ -708,6 +710,10 @@ pub struct UniversalCanvasState {
     pub webgl_earth: crate::views::webgl_earth::WebGlEarthState,
     // Phase 67: IFCX City-Builder Authoring (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`, Auto Cut/Fill Pads)
     pub city_scene: crate::core::gis::IfcxCityScene,
+    // Phase 68: District-Scale Multi-Hazard & AI Real-Building Frame Inference Telemetry
+    pub district_hazard: crate::core::gis::DistrictHazardConfig,
+    pub district_hazard_report: crate::core::gis::DistrictMultiHazardReport,
+    pub last_ai_capture_report: Option<crate::core::ifcx::AiBuildingFrameInferenceReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -801,6 +807,9 @@ impl Default for UniversalCanvasState {
             earth_fem_cache: EarthStructuralRenderCache::default(),
             webgl_earth: crate::views::webgl_earth::WebGlEarthState::default(),
             city_scene: crate::core::gis::IfcxCityScene::default(),
+            district_hazard: crate::core::gis::DistrictHazardConfig::default(),
+            district_hazard_report: crate::core::gis::DistrictMultiHazardReport::default(),
+            last_ai_capture_report: None,
         }
     }
 }
@@ -883,6 +892,22 @@ impl UniversalCanvasState {
             h_m,
             self.active_world_project_rel_path.as_deref(),
             &self.world_index,
+        );
+    }
+
+    /// Evaluates coupled district multi-hazard metrics (SNI 1726 seismic wave & pounding phase-lag,
+    /// ASCE 7 Venturi wind channeling streamlines, 3D flood inundation vs. `IfcSite` TIN contours,
+    /// and overall resilience score).
+    pub fn refresh_district_hazard(&mut self, bim_project: &BimProject) {
+        self.refresh_neighborhood_coupling(bim_project);
+        self.district_hazard_report = crate::core::gis::evaluate_district_multi_hazard(
+            &self.district_hazard,
+            &self.neighborhood_report,
+            self.active_site_tin.as_ref(),
+            &self.world_index,
+            self.ground_origin_lat_lon,
+            bim_project,
+            &self.city_scene,
         );
     }
 
@@ -2408,6 +2433,7 @@ impl UniversalCanvasState {
                 ops
             },
             city_scene: self.city_scene.clone(),
+            district_hazard: self.district_hazard.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -2493,6 +2519,12 @@ impl UniversalCanvasState {
         self.lifecycle_ops = archive.lifecycle_ops;
         self.lifecycle_ops.site_coupling = self.active_site_coupling();
         self.city_scene = archive.city_scene;
+        self.district_hazard = archive.district_hazard;
+        if self.district_hazard.any_active() {
+            self.refresh_district_hazard(bim_project);
+        } else {
+            self.district_hazard_report = crate::core::gis::DistrictMultiHazardReport::default();
+        }
         self.status_message = Some(format!(
             "Imported verified 1-file workspace '{}' ({} canvas objects)",
             archive.project_name,
@@ -2803,6 +2835,35 @@ impl UniversalCanvasState {
             } else {
                 1.0_f32
             };
+            if self.district_hazard.any_active() {
+                self.district_hazard.sim_time_sec = ui.ctx().input(|i| i.time);
+                if self.district_hazard_report.streamlines.is_empty() {
+                    self.refresh_district_hazard(bim_project);
+                }
+            }
+            let active_bldg_h_m = bim_project
+                .levels
+                .iter()
+                .map(|l| l.elevation_mm * 0.001)
+                .fold(0.0_f64, f64::max)
+                .max(6.0);
+            let hazard_site_origin = if self.ground_origin_anchored {
+                self.ground_origin_lat_lon
+            } else {
+                self.world_map.center_lat_lon
+            };
+            let hazard_gpu_input = if self.district_hazard.any_active() {
+                Some(crate::views::webgl_earth::DistrictHazardGpuInput {
+                    config: &self.district_hazard,
+                    report: &self.district_hazard_report,
+                    neighborhood: &self.neighborhood_report,
+                    origin_lat_lon: hazard_site_origin,
+                    active_building_height_m: active_bldg_h_m,
+                    active_site_tin: self.active_site_tin.as_ref(),
+                })
+            } else {
+                None
+            };
             let n1_removed_bim = self
                 .earth_fem_cache
                 .n1_simulation
@@ -2838,6 +2899,7 @@ impl UniversalCanvasState {
                 &self.urban_vectors,
                 Some(&self.city_scene),
                 active_bim_gpu,
+                hazard_gpu_input,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
                 ui,
@@ -2853,6 +2915,9 @@ impl UniversalCanvasState {
                 self.is_frozen,
                 gpu_globe_active,
             );
+            if !gpu_globe_active && self.district_hazard.any_active() {
+                self.paint_cpu_district_hazard_fallback(&painter, rect, theme, &xform);
+            }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)
         } else {
@@ -7720,6 +7785,99 @@ impl UniversalCanvasState {
                         theme.accent_red,
                     );
                 }
+            }
+        }
+    }
+
+    /// Pure-vector CPU fallback rendering for district seismic waves, Venturi wind streamlines,
+    /// and 3D flood plane when WebGL2 hardware acceleration is inactive (e.g. headless CI).
+    fn paint_cpu_district_hazard_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        theme: &MacTheme,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if self.world_map.zoom_level < 12.5 {
+            return;
+        }
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+
+        if self.district_hazard.seismic_wave_active {
+            for r_m in [35.0_f64, 70.0, 110.0] {
+                let mut ring_pts = Vec::with_capacity(25);
+                for k in 0..=24 {
+                    let a = (k as f64 / 24.0) * std::f64::consts::TAU;
+                    let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                        origin,
+                        [r_m * a.cos() * 1000.0, r_m * a.sin() * 1000.0],
+                    );
+                    if let Some((sp, _, true)) = xform.project_lat_lon_elev(ll.0, ll.1, 0.25) {
+                        ring_pts.push(sp);
+                    }
+                }
+                if ring_pts.len() >= 4 {
+                    clip.add(egui::Shape::line(
+                        ring_pts,
+                        Stroke::new(1.4, theme.accent_orange.gamma_multiply(0.65)),
+                    ));
+                }
+            }
+        }
+
+        if self.district_hazard.venturi_wind_active {
+            for seg in &self.district_hazard_report.streamlines {
+                let ll0 = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                    origin,
+                    [seg.start_enu_m[0] * 1000.0, seg.start_enu_m[1] * 1000.0],
+                );
+                let ll1 = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                    origin,
+                    [seg.end_enu_m[0] * 1000.0, seg.end_enu_m[1] * 1000.0],
+                );
+                if let (Some((p0, _, true)), Some((p1, _, true))) = (
+                    xform.project_lat_lon_elev(ll0.0, ll0.1, seg.start_enu_m[2]),
+                    xform.project_lat_lon_elev(ll1.0, ll1.1, seg.end_enu_m[2]),
+                ) {
+                    let col = if seg.is_corridor_accelerated {
+                        Color32::from_rgba_unmultiplied(56, 224, 255, 200)
+                    } else {
+                        theme.accent_blue.gamma_multiply(0.55)
+                    };
+                    clip.line_segment([p0, p1], Stroke::new(1.6, col));
+                }
+            }
+        }
+
+        if self.district_hazard.flood_plane_active {
+            let wl = self.district_hazard.flood_water_level_m;
+            let corners = [
+                [-140.0_f64, -140.0],
+                [140.0, -140.0],
+                [140.0, 140.0],
+                [-140.0, 140.0],
+            ];
+            let mut poly = Vec::with_capacity(4);
+            for [ex, ny] in corners {
+                let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                    origin,
+                    [ex * 1000.0, ny * 1000.0],
+                );
+                if let Some((sp, _, true)) = xform.project_lat_lon_elev(ll.0, ll.1, wl) {
+                    poly.push(sp);
+                }
+            }
+            if poly.len() == 4 {
+                clip.add(egui::Shape::convex_polygon(
+                    poly,
+                    Color32::from_rgba_unmultiplied(30, 122, 188, 72),
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(120, 210, 255, 140)),
+                ));
             }
         }
     }

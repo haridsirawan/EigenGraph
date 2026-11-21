@@ -1349,8 +1349,13 @@ impl EigenGraphApp {
             let geo_opt = if has_geo { Some((lat, lon, elev_m)) } else { None };
             let city_opt = (!self.universal_canvas.city_scene.is_empty())
                 .then_some(&self.universal_canvas.city_scene);
+            let hazard_opt = self
+                .universal_canvas
+                .district_hazard
+                .any_active()
+                .then_some(&self.universal_canvas.district_hazard_report);
             let ifcx_doc = if hud_actions.export_earth_ifcx {
-                crate::core::ifcx::IfcxStage::compose_earth_with_site_and_city(
+                crate::core::ifcx::IfcxStage::compose_earth_with_site_city_and_hazard(
                     self.universal_canvas.world_map.tile_provider,
                     &self.build_view.bim_bus.project,
                     geo_opt,
@@ -1359,6 +1364,7 @@ impl EigenGraphApp {
                     Some(&self.members),
                     None,
                     city_opt,
+                    hazard_opt,
                 )
             } else {
                 let mut doc = crate::core::ifcx::IfcxDocument::from_bim_project(
@@ -1369,20 +1375,23 @@ impl EigenGraphApp {
                     Some(&self.members),
                     None,
                 );
+                let site_path = format!(
+                    "/site/{}",
+                    self.build_view
+                        .bim_bus
+                        .project
+                        .project_name
+                        .chars()
+                        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+                        .collect::<String>()
+                );
                 if let Some(c) = city_opt {
-                    let site_path = format!(
-                        "/site/{}",
-                        self.build_view
-                            .bim_bus
-                            .project
-                            .project_name
-                            .chars()
-                            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-                            .collect::<String>()
-                    );
                     for node in c.to_ifcx_nodes(&site_path) {
                         doc.data.push(node);
                     }
+                }
+                if let Some(hz) = hazard_opt {
+                    doc.data.push(crate::core::gis::to_ifcx_hazard_node(&site_path, hz));
                 }
                 doc
             };
@@ -1828,6 +1837,82 @@ impl EigenGraphApp {
                 self.build_view.bim_bus.undo_stack.len(),
                 self.universal_canvas.undo_stack.len(),
             );
+        }
+        if hud_actions.run_district_hazard_audit {
+            let coupling = self.universal_canvas.active_site_coupling();
+            self.universal_canvas.district_hazard.seismic_pga_g =
+                f64::from(coupling.seismic_pga_ss_g).clamp(0.15, 1.5);
+            self.universal_canvas.district_hazard.base_wind_ms =
+                f64::from(coupling.design_wind_ms).clamp(18.0, 65.0);
+            self.universal_canvas
+                .refresh_district_hazard(&self.build_view.bim_bus.project);
+            let rep = &self.universal_canvas.district_hazard_report;
+            self.spatial_workspace.push_trace(
+                format!(
+                    "Multi-Hazard: Resilience {:.0}/100 ({}) | Pounding {} | Wind {:.1}m/s | Flood {:.0}%",
+                    rep.resilience_score,
+                    rep.triage_label,
+                    rep.pounding_risk_count,
+                    rep.effective_wind_ms,
+                    rep.flood.inundated_area_pct
+                ),
+                rep.resilience_score >= 45.0,
+            );
+        }
+        if hud_actions.ingest_ai_real_building_capture {
+            let (lat, lon) = if self.universal_canvas.ground_origin_anchored {
+                self.universal_canvas.ground_origin_lat_lon
+            } else {
+                self.universal_canvas.world_map.center_lat_lon
+            };
+            let elev_m = self
+                .universal_canvas
+                .earth_world
+                .effective_elevation_m(lat, lon) as f64;
+            let raw_capture = crate::core::ifcx::IfcxDocument::sample_ai_massing_tower_capture_ifcx(
+                lat,
+                lon,
+                elev_m,
+                "AI_RealBuilding_Parcel",
+            )
+            .to_json_pretty();
+            match crate::core::ifcx::IfcxDocument::ingest_ai_real_building_with_frame_inference(
+                &raw_capture,
+                "ai_parcel_capture.ifcx",
+                Some((lat, lon)),
+                6.0,
+            ) {
+                Ok((_, proj, rep)) => {
+                    self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
+                    self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
+                    self.parametric_view.active_level_idx = 0;
+                    self.universal_canvas.ground_origin_lat_lon = (lat, lon);
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.universal_canvas.globe_mode = true;
+                    self.universal_canvas.last_ai_capture_report = Some(rep.clone());
+                    self.sync_bim_to_fem();
+                    self.sync_earth_maps();
+                    self.build_view
+                        .fit_view_to_project(&mut self.universal_canvas, &self.members);
+                    self.spatial_workspace.push_trace(
+                        format!(
+                            "AI -> IFCX '{}': {}F ({}C, {}B, {}S) | min ARI {:.2} | max DCR {:.0}% | {}",
+                            rep.building_name,
+                            rep.inferred_storeys,
+                            rep.inferred_columns,
+                            rep.inferred_beams,
+                            rep.inferred_slabs,
+                            rep.min_ari,
+                            rep.max_dcr_pct,
+                            rep.triage_grade
+                        ),
+                        rep.svd_nullspace_dim == 0,
+                    );
+                }
+                Err(err) => {
+                    self.spatial_workspace.push_trace(err, false);
+                }
+            }
         }
     }
 
@@ -3277,6 +3362,10 @@ impl EigenGraphApp {
         self.last_uc_earth = synced;
         self.last_res_earth = synced;
         self.sync_site_coupling();
+        if self.universal_canvas.district_hazard.any_active() {
+            self.universal_canvas
+                .refresh_district_hazard(&self.build_view.bim_bus.project);
+        }
     }
 
     fn sync_site_coupling(&mut self) {
@@ -3299,6 +3388,10 @@ impl EigenGraphApp {
         self.planning_view.daily_diary = self.universal_canvas.lifecycle_ops.daily_diary.clone();
         self.lean_view.qa_qc = self.universal_canvas.lifecycle_ops.qa_qc.clone();
         self.sync_site_coupling();
+        if self.universal_canvas.district_hazard.any_active() {
+            self.universal_canvas
+                .refresh_district_hazard(&self.build_view.bim_bus.project);
+        }
     }
 
     fn handle_imported_file(&mut self, payload: crate::core::web_bridge::ImportedFilePayload) {

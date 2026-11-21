@@ -13,6 +13,14 @@ pub mod dem_stream;
 pub mod neighborhood_physics;
 pub mod world_vectors;
 pub mod city_builder;
+pub mod district_hazard;
+
+pub use district_hazard::{
+    evaluate_district_flood, evaluate_district_multi_hazard,
+    evaluate_seismic_wave_displacement_m, to_ifcx_hazard_node, DistrictFloodAssessment,
+    DistrictHazardConfig, DistrictMultiHazardReport, VenturiStreamlineSegment,
+    NS_EG_DISTRICT_HAZARD,
+};
 
 pub use city_builder::{
     IfcxCityScene, IfcxGradedPad, IfcxRoadKind, IfcxRoadSegment, IfcxSpatialZone, IfcxZoneKind,
