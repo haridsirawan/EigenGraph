@@ -61,6 +61,7 @@ pub mod ns {
     pub const EG_FEM_NODE: &str = "eigengraph::fem::node";
     pub const EG_FEM_MEMBER: &str = "eigengraph::fem::member";
     pub const EG_ARI: &str = "eigengraph::ari::v2";
+    pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
 }
 
 fn default_ifcx_version() -> String {
@@ -1102,6 +1103,20 @@ impl IfcxStage {
         ari: Option<&RedundancyAssessment>,
     ) -> IfcxDocument {
         Self::compose_earth_with_site_and_city(theme, project, geo_opt, heading_deg, address, members, ari, None)
+    }
+
+    /// Composes an existing base `.ifcx` document with a non-destructive structural retrofit
+    /// delta layer (`eigengraph::bim::retrofit_delta`), applying updated meshes, properties,
+    /// new BRB/shear-wall nodes, and refreshed `eigengraph::ari::v2` screening overlays.
+    pub fn compose_with_retrofit_delta(
+        base_doc: &IfcxDocument,
+        retrofit_report: &crate::core::retrofit::StructuralRetrofitReport,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[
+            base_doc.clone(),
+            retrofit_report.retrofit_delta_ifcx.clone(),
+        ]);
+        stage.to_composed_document(&format!("{}_retrofitted", base_doc.header.id))
     }
 }
 
@@ -3182,7 +3197,7 @@ impl IfcxEditSession {
 // 7. INTERNAL PURE-VECTOR MATH HELPERS
 // =============================================================================
 
-fn sanitize_slug(raw: &str) -> String {
+pub(crate) fn sanitize_slug(raw: &str) -> String {
     let s: String = raw
         .trim()
         .chars()

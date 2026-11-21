@@ -2254,8 +2254,40 @@ impl BimProject {
                 let n1 = find_or_add_node(&mut model, r.start.0 * 1e-3, z0_m, r.start.1 * 1e-3);
                 let n2 = find_or_add_node(&mut model, r.end.0 * 1e-3, z1_m, r.end.1 * 1e-3);
                 if n1 != n2 {
-                    let (sec, mat) =
-                        build_section_and_material(&r.profile_name, r.width_mm, r.depth_mm, false);
+                    let (mut sec, mat) = if r.category == RunCategory::StructuralBrace {
+                        let rw = (r.width_mm / 200.0).clamp(0.5, 4.0);
+                        let rd = (r.depth_mm / 200.0).clamp(0.5, 4.0);
+                        let base = CrossSection::box_200x200x8();
+                        let a_fac = rw * rd;
+                        let i_fac = rw * rd.powi(3).max(rw.powi(3) * rd);
+                        let enc_i = base.iy * i_fac.max(a_fac) * 20.0;
+                        let brace_sec = CrossSection {
+                            name: r.profile_name.clone(),
+                            area: base.area * a_fac,
+                            iy: enc_i,
+                            iz: enc_i,
+                            j_torsion: base.j_torsion * a_fac,
+                            depth: (r.depth_mm * 1e-3).max(0.12),
+                            width: (r.width_mm * 1e-3).max(0.12),
+                        };
+                        let mut brace_mat = Material::steel_q355();
+                        brace_mat.yield_strength = 650.0e6;
+                        (brace_sec, brace_mat)
+                    } else {
+                        let (mut b_sec, b_mat) = build_section_and_material(
+                            &r.profile_name,
+                            r.width_mm,
+                            r.depth_mm,
+                            false,
+                        );
+                        if r.category == RunCategory::StructuralBeam {
+                            b_sec.iy = b_sec.iy.max(b_sec.iz * 2.5);
+                        }
+                        (b_sec, b_mat)
+                    };
+                    if r.category == RunCategory::StructuralBrace {
+                        sec.iy = sec.iy.max(sec.iz);
+                    }
                     let elem = Element3D::new(elem_id, r.name.clone(), n1, n2)
                         .with_type(ElementType::Frame3D)
                         .with_section(sec)
@@ -2281,13 +2313,15 @@ impl BimProject {
                 let n_tr = find_or_add_node(&mut model, w.end.0 * 1e-3, z1_m, w.end.1 * 1e-3);
                 let t_m = (w.thickness_mm * 1e-3).clamp(0.12, 0.80);
                 let strut_w_m = (w.length_mm() * 1e-3 * 0.18).clamp(0.25, 1.2);
-                let wall_sec = CrossSection::rectangular_rc(
+                let mut wall_sec = CrossSection::rectangular_rc(
                     format!("RC Wall {:.0}mm", w.thickness_mm),
                     t_m,
                     strut_w_m,
                     0.50,
                 );
-                let wall_mat = Material::reinforced_concrete_fc30();
+                wall_sec.iy = wall_sec.iz * 4.0;
+                let mut wall_mat = Material::reinforced_concrete_fc30();
+                wall_mat.yield_strength = 48.0e6;
 
                 if n_bl != n_tr {
                     let strut = Element3D::new(

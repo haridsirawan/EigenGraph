@@ -1072,6 +1072,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Stream AI real-building massing .ifcx onto Earth parcel with auto frame inference & ARI triage",
         icon: AppIcon::Sparkles,
     },
+    SlashCommandSpec {
+        cmd: "/retrofit",
+        category: "AI",
+        description: "Synthesize automated structural retrofit (BRB, RC jacketing, shear wall) & .ifcx delta",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/brb",
+        category: "AI",
+        description: "Inject 3D Buckling-Restrained Braces (BRB) across low-ARI structural bays",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/jacket",
+        category: "AI",
+        description: "Apply RC column/beam jacketing & foundation footing enlargement",
+        icon: AppIcon::Wrench,
+    },
+    SlashCommandSpec {
+        cmd: "/retrofit-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::bim::retrofit_delta .ifcx strengthening layer",
+        icon: AppIcon::Cube3D,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1106,6 +1130,9 @@ pub struct SpatialHudActions {
     pub redo: bool,
     pub run_district_hazard_audit: bool,
     pub ingest_ai_real_building_capture: bool,
+    pub run_structural_retrofit: Option<crate::core::retrofit::RetrofitStrategy>,
+    pub toggle_retrofit_before_after: bool,
+    pub export_retrofit_delta_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3722,6 +3749,31 @@ impl SpatialWorkspaceState {
                 "/ai-capture" | "/aicapture" | "/scan-ifcx" => {
                     actions.ingest_ai_real_building_capture = true;
                 }
+                "/retrofit" => {
+                    let strat = if arg.trim().is_empty() {
+                        universal_canvas.retrofit_strategy
+                    } else {
+                        crate::core::retrofit::RetrofitStrategy::from_arg(arg)
+                    };
+                    universal_canvas.retrofit_strategy = strat;
+                    actions.run_structural_retrofit = Some(strat);
+                }
+                "/brb" | "/brace" => {
+                    let strat = crate::core::retrofit::RetrofitStrategy::BrbBracingOnly;
+                    universal_canvas.retrofit_strategy = strat;
+                    actions.run_structural_retrofit = Some(strat);
+                }
+                "/jacket" | "/jacketing" => {
+                    let strat = crate::core::retrofit::RetrofitStrategy::RcJacketingOnly;
+                    universal_canvas.retrofit_strategy = strat;
+                    actions.run_structural_retrofit = Some(strat);
+                }
+                "/retrofit-ifcx" | "/delta-ifcx" => {
+                    actions.export_retrofit_delta_ifcx = true;
+                }
+                "/before-after" | "/compare-retrofit" => {
+                    actions.toggle_retrofit_before_after = true;
+                }
                 "/section" | "/cut" => {
                     let elev_opt = arg
                         .trim_end_matches('m')
@@ -4851,6 +4903,7 @@ impl SpatialWorkspaceState {
         let has_active = self.active_lens != SpatialLens::Clean
             || universal_canvas.earth_fem_cache.n1_simulation.is_some()
             || universal_canvas.district_hazard.any_active()
+            || universal_canvas.last_retrofit_report.is_some()
             || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
             || universal_canvas.earth_bim_author.active_tool
                 != crate::views::universal_canvas::EarthBimTool::None
@@ -5611,6 +5664,58 @@ impl SpatialWorkspaceState {
                     res_col,
                 );
             }
+            if let Some(ref rep) = universal_canvas.last_retrofit_report {
+                let badge_col = if universal_canvas.viewing_pre_retrofit_baseline {
+                    theme.accent_orange
+                } else {
+                    theme.accent_green
+                };
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Shield,
+                    format!(
+                        "Retrofit: ARI {:.2}→{:.2} • DCR {:.0}%→{:.0}% • +{} BRB +{} Jkt • ${:.1}k",
+                        rep.before_min_ari,
+                        rep.after_min_ari,
+                        rep.before_max_dcr_pct,
+                        rep.after_max_dcr_pct,
+                        rep.added_brb_braces,
+                        rep.jacketed_columns,
+                        rep.estimated_cost_usd / 1000.0
+                    ),
+                    badge_col,
+                );
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    if universal_canvas.viewing_pre_retrofit_baseline {
+                        "View: Before"
+                    } else {
+                        "View: After"
+                    },
+                    !universal_canvas.viewing_pre_retrofit_baseline,
+                    theme.accent_blue,
+                    "Toggle Before vs. After Retrofit 3D structural comparison",
+                )
+                .clicked()
+                {
+                    actions.toggle_retrofit_before_after = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    "Delta .ifcx",
+                    false,
+                    theme.accent_green,
+                    "Export non-destructive eigengraph::bim::retrofit_delta .ifcx layer",
+                )
+                .clicked()
+                {
+                    actions.export_retrofit_delta_ifcx = true;
+                }
+            }
             let (rst_fg, rst_bg, rst_st) = theme.glass_chip_style(false, theme.accent_red);
             if icons::icon_only_button(
                 ui,
@@ -5630,6 +5735,8 @@ impl SpatialWorkspaceState {
                 universal_canvas.district_hazard.pounding_overlay_active = false;
                 universal_canvas.district_hazard.venturi_wind_active = false;
                 universal_canvas.district_hazard.flood_plane_active = false;
+                universal_canvas.last_retrofit_report = None;
+                universal_canvas.viewing_pre_retrofit_baseline = false;
             }
         });
     }
@@ -10704,6 +10811,117 @@ impl SpatialWorkspaceState {
                                             }
                                         },
                                     );
+                                    ui.add_space(4.0);
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new("Retrofit:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                format!("Mode: {}", universal_canvas.retrofit_strategy.short_label()),
+                                                false,
+                                                theme.accent_blue,
+                                                "Cycle automated retrofit strategy: Auto / BRB / Jacket / Shear Wall",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.retrofit_strategy =
+                                                    universal_canvas.retrofit_strategy.cycle_next();
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Shield),
+                                                "Auto-Retrofit",
+                                                universal_canvas.last_retrofit_report.is_some(),
+                                                theme.accent_green,
+                                                "Synthesize code-verified structural retrofit & non-destructive .ifcx strengthening layer",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.run_structural_retrofit =
+                                                    Some(universal_canvas.retrofit_strategy);
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Bolt),
+                                                "+ BRB",
+                                                false,
+                                                theme.accent_orange,
+                                                "Inject 3D Buckling-Restrained Braces (BRB) across low-ARI structural bays",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.retrofit_strategy =
+                                                    crate::core::retrofit::RetrofitStrategy::BrbBracingOnly;
+                                                actions.run_structural_retrofit = Some(
+                                                    crate::core::retrofit::RetrofitStrategy::BrbBracingOnly,
+                                                );
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Wrench),
+                                                "+ Jacket",
+                                                false,
+                                                theme.accent_blue,
+                                                "Apply RC column/beam jacketing & foundation footing enlargement",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.retrofit_strategy =
+                                                    crate::core::retrofit::RetrofitStrategy::RcJacketingOnly;
+                                                actions.run_structural_retrofit = Some(
+                                                    crate::core::retrofit::RetrofitStrategy::RcJacketingOnly,
+                                                );
+                                            }
+                                            if universal_canvas.last_retrofit_report.is_some() {
+                                                ui.separator();
+                                                if Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    None,
+                                                    if universal_canvas.viewing_pre_retrofit_baseline {
+                                                        "View: Before"
+                                                    } else {
+                                                        "View: After"
+                                                    },
+                                                    !universal_canvas.viewing_pre_retrofit_baseline,
+                                                    theme.accent_blue,
+                                                    "Compare intact pre-retrofit baseline vs. strengthened 3D structure",
+                                                )
+                                                .clicked()
+                                                {
+                                                    actions.toggle_retrofit_before_after = true;
+                                                }
+                                                if Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    Some(AppIcon::Cube3D),
+                                                    "Delta .ifcx",
+                                                    false,
+                                                    theme.accent_green,
+                                                    "Export non-destructive eigengraph::bim::retrofit_delta .ifcx strengthening layer",
+                                                )
+                                                .clicked()
+                                                {
+                                                    actions.export_retrofit_delta_ifcx = true;
+                                                }
+                                            }
+                                        },
+                                    );
                                 }
                                 DynamicIslandStudioTab::GisAndSite => {
                                     Self::glass_subpill_group(
@@ -11774,6 +11992,11 @@ impl SpatialHudActions {
         self.redo |= other.redo;
         self.run_district_hazard_audit |= other.run_district_hazard_audit;
         self.ingest_ai_real_building_capture |= other.ingest_ai_real_building_capture;
+        if other.run_structural_retrofit.is_some() {
+            self.run_structural_retrofit = other.run_structural_retrofit;
+        }
+        self.toggle_retrofit_before_after |= other.toggle_retrofit_before_after;
+        self.export_retrofit_delta_ifcx |= other.export_retrofit_delta_ifcx;
     }
 }
 
@@ -14680,6 +14903,106 @@ mod tests {
             assert!(
                 r.right() <= win_w + 1.0 && r.left() >= -1.0,
                 "Phase 68 Multi-Hazard Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_phase69_retrofit_slash_commands_and_zero_hud_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus = crate::core::BimCommandBus::from_project(
+            crate::core::BimProject::sample_bimcraft_building(),
+        );
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = crate::theme::MacTheme::default();
+
+        for cmd in ["/retrofit", "/brb", "/jacket", "/retrofit-ifcx"] {
+            assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == cmd));
+        }
+
+        let act_brb = spatial.execute_spatial_input(
+            "/brb",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(
+            act_brb.run_structural_retrofit,
+            Some(crate::core::retrofit::RetrofitStrategy::BrbBracingOnly)
+        );
+
+        let act_jkt = spatial.execute_spatial_input(
+            "/jacket",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(
+            act_jkt.run_structural_retrofit,
+            Some(crate::core::retrofit::RetrofitStrategy::RcJacketingOnly)
+        );
+
+        let act_ifcx = spatial.execute_spatial_input(
+            "/retrofit-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_ifcx.export_retrofit_delta_ifcx);
+
+        let site = canvas.active_site_coupling();
+        let rep = crate::core::retrofit::synthesize_structural_retrofit(
+            &build.bim_bus.project,
+            crate::core::retrofit::RetrofitStrategy::AutoBalanced,
+            &site,
+        )
+        .expect("Phase 69 retrofit report");
+        canvas.pre_retrofit_baseline = Some(build.bim_bus.project.clone());
+        build.bim_bus.project = rep.retrofitted_project.clone();
+        canvas.last_retrofit_report = Some(rep);
+
+        spatial.mobile_deck_pinned = true;
+        spatial.studio_tab = DynamicIslandStudioTab::BimAndStory;
+        for win_w in [1280.0_f32, 768.0, 390.0] {
+            let ctx = egui::Context::default();
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 844.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                },
+            );
+            out.textures_delta.clear();
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 69 Retrofit Dynamic Island overflowed viewport {win_w}: {r:?}"
             );
         }
     }

@@ -167,6 +167,8 @@ impl Material {
             || up.starts_with("BOX")
             || up.starts_with("SHS")
             || up.starts_with("RHS")
+            || up.starts_with("BRB")
+            || up.contains("BRB")
             || up.contains("STEEL")
     }
 

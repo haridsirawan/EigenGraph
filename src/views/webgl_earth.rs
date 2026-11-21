@@ -685,6 +685,111 @@ fn push_box_prism_enu(
     idxs.extend_from_slice(&[tb, tb + 1, tb + 2, tb, tb + 2, tb + 3]);
 }
 
+/// Pushes an oriented 3D rectangular prism strut between arbitrary 3D ENU endpoints
+/// (used for inclined Buckling-Restrained Braces `BRB` and sloped structural members).
+#[allow(clippy::too_many_arguments)]
+fn push_inclined_3d_strut_enu(
+    verts: &mut Vec<GpuEarthVertex>,
+    idxs: &mut Vec<u32>,
+    p0_enu: [f64; 3],
+    p1_enu: [f64; 3],
+    width_m: f64,
+    depth_m: f64,
+    col: [f32; 4],
+) {
+    let dx = p1_enu[0] - p0_enu[0];
+    let dy = p1_enu[1] - p0_enu[1];
+    let dz = p1_enu[2] - p0_enu[2];
+    let len = (dx * dx + dy * dy + dz * dz).sqrt();
+    if len < 1e-4 {
+        return;
+    }
+    let u = [dx / len, dy / len, dz / len];
+    let ref_up = if u[2].abs() < 0.92 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [1.0, 0.0, 0.0]
+    };
+    let cross = |a: [f64; 3], b: [f64; 3]| -> [f64; 3] {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let norm = |v: [f64; 3]| -> [f64; 3] {
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-9);
+        [v[0] / l, v[1] / l, v[2] / l]
+    };
+    let side = norm(cross(u, ref_up));
+    let up_perp = norm(cross(side, u));
+    let hw = (width_m * 0.5).max(0.06);
+    let hd = (depth_m * 0.5).max(0.06);
+
+    let offset_pt = |p: [f64; 3], sx: f64, sy: f64| -> [f32; 3] {
+        [
+            (p[0] + side[0] * sx * hw + up_perp[0] * sy * hd) as f32,
+            (p[1] + side[1] * sx * hw + up_perp[1] * sy * hd) as f32,
+            (p[2] + side[2] * sx * hw + up_perp[2] * sy * hd) as f32,
+        ]
+    };
+    let a = [
+        offset_pt(p0_enu, -1.0, -1.0),
+        offset_pt(p0_enu, 1.0, -1.0),
+        offset_pt(p0_enu, 1.0, 1.0),
+        offset_pt(p0_enu, -1.0, 1.0),
+    ];
+    let b = [
+        offset_pt(p1_enu, -1.0, -1.0),
+        offset_pt(p1_enu, 1.0, -1.0),
+        offset_pt(p1_enu, 1.0, 1.0),
+        offset_pt(p1_enu, -1.0, 1.0),
+    ];
+
+    let side_normals = [
+        [-up_perp[0] as f32, -up_perp[1] as f32, -up_perp[2] as f32],
+        [side[0] as f32, side[1] as f32, side[2] as f32],
+        [up_perp[0] as f32, up_perp[1] as f32, up_perp[2] as f32],
+        [-side[0] as f32, -side[1] as f32, -side[2] as f32],
+    ];
+    let top_col = mix_rgb(col, [1.0, 0.96, 0.86, 1.0], 0.14);
+    for i in 0..4 {
+        let ni = (i + 1) % 4;
+        let base = verts.len() as u32;
+        let face_col = if i == 2 { top_col } else { col };
+        for (pos, ao) in [
+            (a[i], 0.82_f32),
+            (a[ni], 0.82),
+            (b[ni], 1.0),
+            (b[i], 1.0),
+        ] {
+            verts.push(GpuEarthVertex {
+                pos,
+                normal: side_normals[i],
+                color: face_col,
+                meta: [3.0, pos[2].max(0.0), ao, 0.0],
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    // Start & End Caps
+    for (pts, n_dir) in [
+        ([a[0], a[3], a[2], a[1]], [-u[0] as f32, -u[1] as f32, -u[2] as f32]),
+        ([b[0], b[1], b[2], b[3]], [u[0] as f32, u[1] as f32, u[2] as f32]),
+    ] {
+        let cap_base = verts.len() as u32;
+        for pos in pts {
+            verts.push(GpuEarthVertex {
+                pos,
+                normal: n_dir,
+                color: col,
+                meta: [3.0, pos[2].max(0.0), 0.90, 0.0],
+            });
+        }
+        idxs.extend_from_slice(&[cap_base, cap_base + 1, cap_base + 2, cap_base, cap_base + 2, cap_base + 3]);
+    }
+}
+
 /// Appends authored IFCX City-Builder objects (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`,
 /// context towers, instanced stylized trees, and `IfcGradedPad`) into the RTC site mesh.
 fn push_city_builder_scene_enu(
@@ -1039,21 +1144,52 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             rot_xy(cx + hw, cy + hd, z_mid),
             rot_xy(cx - hw, cy + hd, z_mid),
         ];
-        let col = elem_color(BimElementKind::Column, c.id, [0.35, 0.62, 0.74, 1.0]);
+        let default_col = if c.profile_name.contains("Jacket") {
+            [0.22, 0.82, 0.68, 1.0]
+        } else {
+            [0.35, 0.62, 0.74, 1.0]
+        };
+        let col = elem_color(BimElementKind::Column, c.id, default_col);
         push_box_prism_enu(&mut verts, &mut idxs, &fp, z0 as f32, z1 as f32, col, 3.0);
     }
 
-    // 3. Structural Beams & Braces (`BimRun`)
+    // 3. Structural Beams & Inclined BRB Braces (`BimRun`)
     for (idx, r) in proj.runs.iter().enumerate() {
         if input.lens == EarthBimLens::Erection4D && idx + 12 > input.erection_day_limit {
             continue;
         }
-        let z_top = level_elev_m(r.level_id) + r.start_offset_mm * 0.001;
-        let z_bot = z_top - (r.depth_mm * 0.001).max(0.2);
+        let is_inclined_brace = r.category == crate::core::bim::RunCategory::StructuralBrace
+            || (r.end_offset_mm - r.start_offset_mm).abs() > 10.0;
+        let default_col = if r.category == crate::core::bim::RunCategory::StructuralBrace {
+            [0.96, 0.68, 0.16, 1.0]
+        } else if r.profile_name.contains("Jacket") {
+            [0.22, 0.82, 0.68, 1.0]
+        } else {
+            [0.46, 0.72, 0.80, 1.0]
+        };
+        let col = elem_color(BimElementKind::Run, r.id, default_col);
         let ax = r.start.0 * 0.001;
         let ay = r.start.1 * 0.001;
         let bx = r.end.0 * 0.001;
         let by = r.end.1 * 0.001;
+        if is_inclined_brace {
+            let z0 = level_elev_m(r.level_id) + r.start_offset_mm * 0.001;
+            let z1 = level_elev_m(r.level_id) + r.end_offset_mm * 0.001;
+            let p0_xy = rot_xy(ax, ay, z0);
+            let p1_xy = rot_xy(bx, by, z1);
+            push_inclined_3d_strut_enu(
+                &mut verts,
+                &mut idxs,
+                [p0_xy[0], p0_xy[1], z0],
+                [p1_xy[0], p1_xy[1], z1],
+                (r.width_mm * 0.001).max(0.18),
+                (r.depth_mm * 0.001).max(0.18),
+                col,
+            );
+            continue;
+        }
+        let z_top = level_elev_m(r.level_id) + r.start_offset_mm * 0.001;
+        let z_bot = z_top - (r.depth_mm * 0.001).max(0.2);
         let dx = bx - ax;
         let dy = by - ay;
         let len = dx.hypot(dy).max(0.05);
@@ -1066,7 +1202,6 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             rot_xy(bx + nx, by + ny, z_top),
             rot_xy(ax + nx, ay + ny, z_top),
         ];
-        let col = elem_color(BimElementKind::Run, r.id, [0.46, 0.72, 0.80, 1.0]);
         push_box_prism_enu(&mut verts, &mut idxs, &fp, z_bot as f32, z_top as f32, col, 3.0);
     }
 
@@ -1098,7 +1233,9 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             rot_xy(bx + nx, by + ny, z_mid),
             rot_xy(ax + nx, ay + ny, z_mid),
         ];
-        let default_w = if w.is_structural {
+        let default_w = if w.name.contains("Retrofit") {
+            [0.22, 0.82, 0.68, 0.94]
+        } else if w.is_structural {
             [0.64, 0.74, 0.80, 0.92]
         } else {
             [0.80, 0.84, 0.88, 0.88]
@@ -2201,6 +2338,18 @@ impl WebGlEarthState {
             *acc = acc.wrapping_mul(0x0000_0100_0000_01b3);
         };
         mix(&mut h, input.project.content_revision_hash());
+        for c in &input.project.columns {
+            mix(&mut h, u64::from(c.profile_name.contains("Jacket")));
+        }
+        for r in &input.project.runs {
+            mix(&mut h, r.start_offset_mm.to_bits());
+            mix(&mut h, r.end_offset_mm.to_bits());
+            mix(&mut h, u64::from(r.profile_name.contains("Jacket")));
+            mix(&mut h, r.category as u64);
+        }
+        for w in &input.project.walls {
+            mix(&mut h, u64::from(w.name.contains("Retrofit")));
+        }
         mix(&mut h, input.lens as u64 + 1);
         mix(&mut h, input.erection_day_limit as u64);
         mix(&mut h, (input.deform_scale * 100.0) as u64);

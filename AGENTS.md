@@ -46,6 +46,7 @@ Keep the 15 engineering workflow modules accessible in navigation (sidebar/drawe
 
 ## ⚡ Continuous Deployment & Verification Protocol
 - Validate UI modifications, `cargo test --lib`, `cargo check --bin eigengraph --target wasm32-unknown-unknown`, and `trunk build` before publishing.
+- **Automatic Git Commit & Push Rule**: Upon completing and verifying any implementation or documentation task, agents **must automatically stage, commit (with a concise professional English commit message), and push changes to `origin main`** without waiting for a separate user prompt.
 - Every push to `main` automatically deploys `./dist` to Cloudflare Workers (`eigengraph.net` and `www.eigengraph.net`).
 
 ---

@@ -7,6 +7,19 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.6.9] - 2026-11-21 — Automated Structural Retrofit & Non-Destructive `.ifcx` Strengthening Engine
+
+### Added & Changed
+- **Automated Structural Retrofit Synthesis Kernel (`src/core/retrofit.rs`, `src/core/mod.rs`)**:
+  - Added `synthesize_structural_retrofit` with four selectable strategies (`RetrofitStrategy`: `AutoBalanced`, `BrbBracingOnly`, `RcJacketingOnly`, `ShearWallCore`) driving site-coupled 6-DOF FEM + `ARI v2` bottleneck identification, RC column/beam jacketing (`+120 mm` columns, `+60×120 mm` beams, pad footing enlargement), 3D Buckling-Restrained Brace (`BRB`) bay injection, and RC Structural Shear Wall core infill with Pareto efficiency, cost (`USD`), and embodied carbon (`kgCO2e`) telemetry.
+  - Added non-destructive IFCX Retrofit Delta layer generation (`eigengraph::bim::retrofit_delta` + refreshed `eigengraph::ari::v2`) and `IfcxStage::compose_with_retrofit_delta` in `src/core/ifcx.rs` so retrofit deltas compose cleanly atop existing building `.ifcx` layers without mutating baseline geometry.
+- **WebGL2 3D Inclined BRB Strut & Retrofit Highlighting (`src/views/webgl_earth.rs`, `src/views/universal_canvas.rs`)**:
+  - Added `push_inclined_3d_strut_enu` inside the shared 24-bit Z-buffered WebGL2 RTC pass (plus CPU fallback rendering) to render inclined Buckling-Restrained Braces (`BRB`) in high-contrast amber-gold and jacketed columns/beams/shear walls in seafoam-teal.
+- **Dynamic Island Retrofit Studio, Before/After Comparison & Delta `.ifcx` Export (`src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Added the `Retrofit:` sub-pill bar inside the Dynamic Island `BIM & Story` tab (`Mode`, `Auto-Retrofit`, `+ BRB`, `+ Jacket`, `View: Before/After`, `Delta .ifcx`), an active retrofit telemetry strip (`ARI`, `DCR%`, cost delta), and `/retrofit`, `/brb`, `/jacket`, `/retrofit-ifcx`, and `/before-after` slash commands—preserving strictly one Dynamic Island capsule (`hud_rects.len() == 1`) with zero overflow across `1280px`, `768px`, and `390px`.
+
+---
+
 ## [v0.6.8] - 2026-11-21 — District-Scale Multi-Hazard GPU Simulation & Streaming AI Real-Building-to-IFCX Frame Inference
 
 ### Added & Changed

@@ -1914,6 +1914,157 @@ impl EigenGraphApp {
                 }
             }
         }
+        if let Some(strategy) = hud_actions.run_structural_retrofit {
+            if self.build_view.bim_bus.project.is_empty() {
+                if let Ok(msg) = self
+                    .build_view
+                    .bim_bus
+                    .execute_natural_language("portal 3x2 @6m 2floors")
+                {
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.spatial_workspace.push_trace(msg, true);
+                }
+            }
+            let baseline = if self.universal_canvas.viewing_pre_retrofit_baseline {
+                self.build_view.bim_bus.project.clone()
+            } else if self.universal_canvas.last_retrofit_report.is_some() {
+                self.universal_canvas
+                    .pre_retrofit_baseline
+                    .clone()
+                    .unwrap_or_else(|| self.build_view.bim_bus.project.clone())
+            } else {
+                self.build_view.bim_bus.project.clone()
+            };
+            let coupling = self.universal_canvas.active_site_coupling();
+            match crate::core::retrofit::synthesize_structural_retrofit(
+                &baseline,
+                strategy,
+                &coupling,
+            ) {
+                Ok(rep) => {
+                    let undo_snapshot = self.build_view.bim_bus.project.clone();
+                    self.build_view.bim_bus.undo_stack.push(undo_snapshot);
+                    self.build_view.bim_bus.redo_stack.clear();
+                    self.build_view.bim_bus.project = rep.retrofitted_project.clone();
+                    self.build_view.bim_bus.revision =
+                        self.build_view.bim_bus.revision.wrapping_add(1);
+                    self.build_view.bim_bus.log.push(rep.summary.clone());
+                    self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+                    self.universal_canvas.pre_retrofit_baseline = Some(baseline);
+                    self.universal_canvas.viewing_pre_retrofit_baseline = false;
+                    self.universal_canvas.last_retrofit_report = Some(rep.clone());
+                    self.sync_bim_to_fem();
+                    self.sync_earth_maps();
+                    self.build_view
+                        .fit_view_to_project(&mut self.universal_canvas, &self.members);
+                    self.spatial_workspace
+                        .push_trace(rep.summary.clone(), rep.after_svd_mechanisms == 0);
+                    self.ai_assistant_view
+                        .chat_history
+                        .push(crate::models::ChatMessage {
+                            is_user: false,
+                            message: format!("[EigenAI Structural Retrofit]: {}", rep.summary),
+                            time: crate::core::web_bridge::unix_timestamp_label(),
+                        });
+                }
+                Err(err) => {
+                    self.spatial_workspace.push_trace(err, false);
+                }
+            }
+        }
+        if hud_actions.toggle_retrofit_before_after {
+            if let (Some(baseline), Some(rep)) = (
+                self.universal_canvas.pre_retrofit_baseline.clone(),
+                self.universal_canvas.last_retrofit_report.clone(),
+            ) {
+                let next_before = !self.universal_canvas.viewing_pre_retrofit_baseline;
+                self.universal_canvas.viewing_pre_retrofit_baseline = next_before;
+                self.build_view.bim_bus.project = if next_before {
+                    baseline
+                } else {
+                    rep.retrofitted_project
+                };
+                self.build_view.bim_bus.revision =
+                    self.build_view.bim_bus.revision.wrapping_add(1);
+                self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+                self.sync_bim_to_fem();
+                self.sync_earth_maps();
+                self.spatial_workspace.push_trace(
+                    if next_before {
+                        format!(
+                            "Viewing Pre-Retrofit Baseline (ARI {:.2}, DCR {:.0}%)",
+                            rep.before_min_ari, rep.before_max_dcr_pct
+                        )
+                    } else {
+                        format!(
+                            "Viewing Retrofitted Structure (ARI {:.2}, DCR {:.0}%)",
+                            rep.after_min_ari, rep.after_max_dcr_pct
+                        )
+                    },
+                    true,
+                );
+            } else {
+                self.spatial_workspace
+                    .push_trace("Run /retrofit first to compare Before vs. After.", false);
+            }
+        }
+        if hud_actions.export_retrofit_delta_ifcx {
+            if self.universal_canvas.last_retrofit_report.is_none()
+                && !self.build_view.bim_bus.project.is_empty()
+            {
+                let coupling = self.universal_canvas.active_site_coupling();
+                if let Ok(rep) = crate::core::retrofit::synthesize_structural_retrofit(
+                    &self.build_view.bim_bus.project,
+                    self.universal_canvas.retrofit_strategy,
+                    &coupling,
+                ) {
+                    self.universal_canvas.pre_retrofit_baseline =
+                        Some(self.build_view.bim_bus.project.clone());
+                    self.universal_canvas.last_retrofit_report = Some(rep);
+                }
+            }
+            if let Some(ref rep) = self.universal_canvas.last_retrofit_report {
+                let raw_name = if self.build_view.bim_bus.project.project_name.trim().is_empty() {
+                    "EigenGraph_BIM".to_string()
+                } else {
+                    self.build_view
+                        .bim_bus
+                        .project
+                        .project_name
+                        .trim()
+                        .chars()
+                        .map(|c| {
+                            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                                c
+                            } else {
+                                '_'
+                            }
+                        })
+                        .collect()
+                };
+                let fname = format!("{raw_name}_retrofit_delta.ifcx");
+                let json = rep.retrofit_delta_ifcx.to_json_pretty();
+                match crate::core::web_bridge::save_text_file(
+                    &fname,
+                    &json,
+                    "application/json;charset=utf-8",
+                ) {
+                    Ok(_) => {
+                        self.spatial_workspace.push_trace(
+                            format!(
+                                "Exported Non-Destructive Retrofit Delta IFCX ({fname}, {} nodes)",
+                                rep.retrofit_delta_ifcx.data.len()
+                            ),
+                            true,
+                        );
+                    }
+                    Err(err) => self.spatial_workspace.push_trace(err, false),
+                }
+            } else {
+                self.spatial_workspace
+                    .push_trace("No retrofit delta available to export.", false);
+            }
+        }
     }
 
     fn open_vault_project_entry(&mut self, entry: crate::core::vault::PersonalVaultProjectEntry) {

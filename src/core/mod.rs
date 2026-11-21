@@ -38,6 +38,7 @@ pub mod fema_p58;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
+pub mod retrofit;
 pub mod gis;
 pub mod lifecycle_ops;
 pub mod web_bridge;
@@ -171,6 +172,10 @@ pub use ifcx::{
     IfcxDocument, IfcxEditSession, IfcxGeoWgs84, IfcxHeader, IfcxHealthReport, IfcxImport,
     IfcxNode, IfcxNodeDiff, IfcxStage, IfcxUnits, UsdGeomMesh, IFCX_DATA_VERSION,
     IFCX_SCHEMA_VERSION,
+};
+pub use retrofit::{
+    synthesize_structural_retrofit, RetrofitActionKind, RetrofitElementAction, RetrofitStrategy,
+    StructuralRetrofitReport, NS_EG_RETROFIT,
 };
 pub use gis::{
     build_tin_from_3d_triangles, evaluate_district_flood, evaluate_district_multi_hazard,

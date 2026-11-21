@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4`, `v0.6.5`, `v0.6.6`, `v0.6.7`, and `v0.6.8` Delivered**  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.6.9` Delivered** (`v0.7.0 – v0.7.2` Planned)  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% Raster Pixels**  
-> **Current Platform**: EigenGraph `v0.6.8` (District-Scale Multi-Hazard GPU Simulation & Streaming AI Real-Building-to-IFCX Frame Inference)  
+> **Current Platform**: EigenGraph `v0.6.9` (Automated Structural Retrofit & Non-Destructive `.ifcx` Strengthening Engine)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -114,7 +114,7 @@ Because 100% of Earth and buildings live in analytical vector `.ifcx` nodes, cri
 
 ---
 
-## 6. Phased Implementation Roadmap (`v0.6.4 – v0.6.8`)
+## 6. Phased Implementation Roadmap (`v0.6.4 – v0.7.2`)
 
 Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.md` — advancing one patch digit per phase):
 
@@ -150,3 +150,13 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
   - Evaluates animated SNI 1726 / ASCE 7 traveling seismic surface wavefields, phase-lag amplified inter-building pounding corridors, urban Venturi wind channeling streamlines with dynamic pressure (`Pa`), and interactive 3D flood / sea-level inundation planes against `IfcSite` TIN triangles, active ground-floor freeboard, neighbor buildings, and IFCX City-Builder roads/zones—emitting non-destructive `eigengraph::hazard::district` IFCX overlay nodes and GPU depth-masked WebGL2 overlays.
 - **Streaming AI Real-Building-to-IFCX Frame Inference & Instant 6-DOF ARI Triage (`src/core/ifcx.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`)**:
   - `IfcxDocument::ingest_ai_real_building_with_frame_inference` consumes exterior AI massing `.ifcx` scans (e.g. `sample_ai_massing_tower_capture_ifcx`) or partial frames, synthesizes multi-storey 3D RC columns, beams, slabs, and footings (`infer_structural_frame_for_bim`), executes instant `FemSolver::solve` + `AriEngine::evaluate_redundancy_fast` screening, and outputs composed `.ifcx` models embedded with `eigengraph::ari::v2` telemetry—accessible directly via the Dynamic Island `Multi-Hazard:` bar and `/seismic`, `/wind`, `/flood`, `/hazard`, `/ai-capture` slash commands.
+
+### Phase 69 (`v0.6.9`) — Automated Structural Retrofit & Non-Destructive `.ifcx` Strengthening Engine *(Implemented)*
+- **Pure-Rust Multi-Strategy Retrofit Synthesis (`src/core/retrofit.rs`, `src/core/ifcx.rs`)**:
+  - Synthesizes code-informed strengthening options (`AutoBalanced`, `BrbBracingOnly`, `RcJacketingOnly`, `ShearWallCore`) targeting low-ARI / high-DCR bottlenecks via RC column/beam jacketing, pad footing enlargement, 3D Buckling-Restrained Brace (`BRB`) bay injection, and RC Structural Shear Wall infill—verified by site-coupled 6-DOF FEM + `ARI v2` re-analysis with 5D cost (`USD`) & 6D embodied carbon (`kgCO2e`) Pareto scoring.
+  - Emits non-destructive `eigengraph::bim::retrofit_delta` `.ifcx` delta layers composable via `IfcxStage::compose_with_retrofit_delta`, with 3D WebGL2 inclined BRB strut rendering (`push_inclined_3d_strut_enu`), interactive Before vs. After comparison, and Dynamic Island `/retrofit`, `/brb`, `/jacket`, `/retrofit-ifcx`, and `/before-after` workflows.
+
+### Planned Next Phases (`v0.7.0 – v0.7.2`)
+- **Phase 70 (`v0.7.0`) — Two-Stage `ARI v2 + StructGNN-CRC` District Portfolio Screening & Progressive Collapse Cascade**: Live district-scale conformal screening filter and animated DAF-driven progressive overload cascade on WebGL2.
+- **Phase 71 (`v0.7.1`) — 3D Subsurface Geotechnical Stratigraphy & Winkler SSI Coupling**: Subsurface $N$-SPT / liquefaction soil layers beneath `IfcSite` TIN coupled with 6-DOF foundation springs (`IfcFooting` pile caps & deep piles).
+- **Phase 72 (`v0.7.2`) — Multi-Layer IFCX Visual Diffing & Pure-Vector Engineering Dossier Exporter**: Layer-by-layer `.ifcx` visual diffing inside the Dynamic Island and publication-grade 100% vector SVG structural calculation dossiers.

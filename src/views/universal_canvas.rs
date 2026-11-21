@@ -714,6 +714,11 @@ pub struct UniversalCanvasState {
     pub district_hazard: crate::core::gis::DistrictHazardConfig,
     pub district_hazard_report: crate::core::gis::DistrictMultiHazardReport,
     pub last_ai_capture_report: Option<crate::core::ifcx::AiBuildingFrameInferenceReport>,
+    // Phase 69: Automated Structural Retrofit & Non-Destructive `.ifcx` Strengthening State
+    pub retrofit_strategy: crate::core::retrofit::RetrofitStrategy,
+    pub last_retrofit_report: Option<crate::core::retrofit::StructuralRetrofitReport>,
+    pub pre_retrofit_baseline: Option<BimProject>,
+    pub viewing_pre_retrofit_baseline: bool,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -810,6 +815,10 @@ impl Default for UniversalCanvasState {
             district_hazard: crate::core::gis::DistrictHazardConfig::default(),
             district_hazard_report: crate::core::gis::DistrictMultiHazardReport::default(),
             last_ai_capture_report: None,
+            retrofit_strategy: crate::core::retrofit::RetrofitStrategy::default(),
+            last_retrofit_report: None,
+            pre_retrofit_baseline: None,
+            viewing_pre_retrofit_baseline: false,
         }
     }
 }
@@ -6729,6 +6738,29 @@ impl UniversalCanvasState {
                             .fem_id(crate::core::BimElementKind::Run, run.id)
                             .is_some_and(|fid| s.report.newly_critical_fem_ids.contains(&fid))
                     });
+                    let is_brace = run.category == crate::core::bim::RunCategory::StructuralBrace
+                        || (run.end_offset_mm - run.start_offset_mm).abs() > 10.0;
+                    if is_brace {
+                        let z0_m = elev_m + run.start_offset_mm * 0.001;
+                        let z1_m = elev_m + run.end_offset_mm * 0.001;
+                        let brace_col = if active_lens == EarthBimLens::Clean {
+                            Color32::from_rgb(245, 174, 41)
+                        } else {
+                            beam_col
+                        };
+                        if let (Some(p0), Some(p1)) = (
+                            proj_def_mm(run.start.0, run.start.1, z0_m),
+                            proj_def_mm(run.end.0, run.end.1, z1_m),
+                        ) {
+                            if rect.expand(45.0).contains(p0) || rect.expand(45.0).contains(p1) {
+                                clip_painter.line_segment(
+                                    [p0, p1],
+                                    Stroke::new(if is_sel || is_n1_redist { 5.2 } else { 3.6 }, brace_col),
+                                );
+                            }
+                        }
+                        continue;
+                    }
                     if self.world_map.zoom_level >= 16.5 {
                         let z_bot = (elev_m - run.depth_mm * 0.001).max(0.0);
                         let ring = run.footprint_ring();
