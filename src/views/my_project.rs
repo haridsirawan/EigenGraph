@@ -527,7 +527,7 @@ impl MyProjectView {
                         if icons::icon_button(
                             ui,
                             AppIcon::Folder,
-                            "Import .eigen / .ifc / .json...",
+                            "Import .ifcx / .eigen / .json...",
                             11.0,
                             theme.text_primary,
                             theme.bg_sidebar,
@@ -537,7 +537,7 @@ impl MyProjectView {
                         )
                         .clicked()
                         {
-                            crate::core::web_bridge::trigger_file_picker(".eigen,.json,.ifc,.csv");
+                            crate::core::web_bridge::trigger_file_picker(".ifcx,.eigen,.json,.csv");
                         }
                         if icons::icon_button(
                             ui,
@@ -1436,7 +1436,7 @@ impl MyProjectView {
                             CornerRadius::same(6),
                             Vec2::new(btn_w, 28.0),
                         ).clicked() {
-                            self.export_success_msg = Some(format!("Exported ISO 10303-21 STEP specification for '{}'.", active_fam.name));
+                            self.export_success_msg = Some(format!("Exported pure IFCX (IFC 5) specification for '{}'.", active_fam.name));
                         }
                     });
                 });
@@ -1461,7 +1461,7 @@ impl MyProjectView {
             let containers = [
                 ("WORK IN PROGRESS (WIP)", wip_s.as_str(), "S0 — Authoring & Internal QA", theme.accent_orange),
                 ("SHARED COORDINATION", shared_s.as_str(), "S1–S4 — Interdisciplinary BIM Check", theme.accent_blue),
-                ("PUBLISHED RECORD (IFC4/DED)", pub_s.as_str(), "A1 — Authorized Construction Issue", theme.accent_green),
+                ("PUBLISHED RECORD (IFCX/DED)", pub_s.as_str(), "A1 — Authorized Construction Issue", theme.accent_green),
                 ("IMMUTABLE ARCHIVE", arch_s.as_str(), "SHA-256 Tamper-Evident Record", theme.text_primary),
             ];
             ui_kit::responsive_grid_n(ui, containers.len(), 175.0, |ui, idx| {

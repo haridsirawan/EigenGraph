@@ -37,7 +37,7 @@ pub mod time_history;
 pub mod fema_p58;
 pub mod blast;
 pub mod fire;
-pub mod ifc;
+pub mod ifcx;
 pub mod gis;
 pub mod lifecycle_ops;
 pub mod web_bridge;
@@ -58,9 +58,9 @@ pub use ari::{
 pub use parametric::{ParametricEngine, ParametricFormula};
 pub use interop::{
     DiskExporter, DossierExporter, DstvExporter, DstvPiece, DxfExporter, EigenProjectArchive,
-    EtabsE2kExporter, EtabsE2kImporter, HtmlViewerExporter, IfcExporter, IfcImporter, IfcSamExporter,
-    LatexExporter, PbgProjectMetadata, PbgReportGenerator, RebarBbsDetailer, RebarBbsSchedule,
-    Sap2000Exporter, Sha256Hasher,
+    EtabsE2kExporter, EtabsE2kImporter, HtmlViewerExporter, IfcxExporter, IfcxImporter,
+    IfcxSamExporter, LatexExporter, PbgProjectMetadata, PbgReportGenerator, RebarBbsDetailer,
+    RebarBbsSchedule, Sap2000Exporter, Sha256Hasher,
 };
 pub use optimizer::{AriTopologyOptimizer, BracingCandidate, BracingOptimizationReport};
 pub use cost::{AhspUnitRates, BoqLineItem, CostEngine, CostEstimationReport, ProfileQuantity};
@@ -165,13 +165,11 @@ pub use fire::{
     ConcreteAggregateKind, FireAnalysisInput, FireAnalysisReport, FireComplianceItem, FireCurveKind,
     FireEngine, FireMemberKind, FireProtectionKind, FireTimeStep, ThermalRestraintKind,
 };
-pub use ifc::{
-    IfcAuditCheckItem, IfcAuditStatus, IfcBcfTopic, IfcBoundingBox, IfcClashItem,
-    IfcClashReport, IfcClashSeverity, IfcDiffKind, IfcEditCommand, IfcEditSession,
-    IfcElementCreationSpec, IfcElementDiff, IfcElementSummary, IfcIdsReport,
-    IfcIdsRuleCheck, IfcModel, IfcModelDiff, IfcModelHealthReport, IfcPropertySetSummary,
-    IfcSchemaVersion, IfcSpatialNode, StepEntity, StepHeader, StepModel, StepParser,
-    StepValue,
+pub use ifcx::{
+    IfcxAriOverlay, IfcxAuditItem, IfcxAuditStatus, IfcxClashItem, IfcxClashReport,
+    IfcxClashSeverity, IfcxDiffKind, IfcxDiffReport, IfcxDocument, IfcxEditSession, IfcxGeoWgs84,
+    IfcxHeader, IfcxHealthReport, IfcxImport, IfcxNode, IfcxNodeDiff, IfcxStage, IfcxUnits,
+    UsdGeomMesh, IFCX_DATA_VERSION, IFCX_SCHEMA_VERSION,
 };
 pub use gis::{
     build_tin_from_3d_triangles, ContourPolyline, CutFillVolumeReport, DemTerrainPreset,

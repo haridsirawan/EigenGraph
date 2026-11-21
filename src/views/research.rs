@@ -3,7 +3,7 @@
 //! - Phase 25 (v0.2.5): Digital Elevation Model (DEM) & Topographic TIN Mesh (10,082 Delaunay triangles,
 //!   Marching-Triangles 1.0m/5.0m contours, >30° SNI 8460:2017 slope hazard shading, Cut/Fill earthwork)
 //! - Phase 23 (v0.2.3): EPSG:3857 Web Mercator Slippy Map Quadtree Engine (`walkers`)
-//! - Phase 24 (v0.2.4): Pure-Rust Geodetic CRS & UTM Projection Engine (`proj4rs`) + IFC4 IfcMapConversion
+//! - Phase 24 (v0.2.4): Pure-Rust Geodetic CRS & UTM Projection Engine + IFCX IfcMapConversion
 
 use egui::{
     Align, Align2, Color32, CornerRadius, FontId, Frame, Layout, Margin, Pos2, Rect, RichText,
@@ -905,7 +905,7 @@ impl ResearchConceptView {
                 if icons::icon_button(
                     ui,
                     AppIcon::Document,
-                    "Load IFC / Survey Terrain (.ifc / .csv / .xyz)...",
+                    "Load IFCX / Survey Terrain (.ifcx / .csv / .xyz)...",
                     11.5,
                     theme.text_primary,
                     theme.bg_canvas,
@@ -915,7 +915,7 @@ impl ResearchConceptView {
                 )
                 .clicked()
                 {
-                    crate::core::web_bridge::trigger_file_picker(".ifc,.csv,.xyz,.txt");
+                    crate::core::web_bridge::trigger_file_picker(".ifcx,.csv,.xyz,.txt");
                 }
                 ui.label(
                     RichText::new(format!(
@@ -1583,7 +1583,7 @@ impl ResearchConceptView {
                                 AppIcon::Building,
                                 14.0,
                                 theme.accent_blue,
-                                "ISO 16739 / IFC4 IfcMapConversion BIM Georeferencing Ledger",
+                                "OpenBIM IFCX Georeferencing Ledger (eigengraph::geo::mapConversion)",
                                 12.5,
                                 theme.accent_blue,
                                 true,
@@ -1636,13 +1636,13 @@ impl ResearchConceptView {
 
                         ui.add_space(8.0);
                         ui.label(
-                            RichText::new("Generated STEP SPF Record:")
+                            RichText::new("Generated IFCX Georeferencing Attribute:")
                                 .size(11.0)
                                 .color(theme.text_secondary),
                         );
-                        let step_spf = map_conv.to_step_spf();
+                        let ifcx_geo = map_conv.to_ifcx_json();
                         ui.label(
-                            RichText::new(&step_spf)
+                            RichText::new(&ifcx_geo)
                                 .size(10.5)
                                 .monospace()
                                 .color(theme.text_primary),

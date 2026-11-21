@@ -1,65 +1,64 @@
-//! views/industrialized/openbim_studio.rs — OpenBIM IFC Source Bar, Spatial Tree Workbench & Locked WASM Picker.
+//! views/industrialized/openbim_studio.rs — Pure-Rust OpenBIM IFCX (IFC 5 JSON ECS) Studio.
+//!
+//! Provides live composition & inspection of `earth_globe.ifcx`, active georeferenced building
+//! layers, AI-captured real-world `.ifcx` layers, non-destructive attribute editing with Undo/Redo,
+//! schema health audit, spatial clash detection, layer diffing, and 1-click `.ifcx` export.
 
 use super::*;
 
 impl IndustrializedView {
-    pub(super) fn render_openbim_ifc_studio(
+    pub(super) fn render_openbim_ifcx_studio(
         &mut self,
         ui: &mut Ui,
         theme: &MacTheme,
+        bim_project: &crate::core::BimProject,
         features: &mut FeatureRegistry,
     ) {
-        // 1. TOP KPI EXECUTIVE METRICS
-        let (schema_lbl, ent_count, prod_count, health_score, verdict_str) =
-            if let Some(ref m) = self.ifc_model {
+        let (schema_lbl, node_count, elem_count, health_score) =
+            if let Some(ref doc) = self.ifcx_doc {
+                let hr = self.health_report.as_ref();
                 (
-                    m.schema.display_label(),
-                    m.health_report.total_entities,
-                    m.elements.len(),
-                    format!("{:.1}%", m.health_report.conformance_score_pct),
-                    m.health_report.verdict.clone(),
+                    format!("IFC 5 ({})", doc.header.ifcx_version),
+                    doc.data.len(),
+                    hr.map(|h| h.building_elements).unwrap_or(0),
+                    hr.map(|h| format!("{:.1}%", h.conformance_score_pct))
+                        .unwrap_or_else(|| "100.0%".to_string()),
                 )
             } else {
-                (
-                    "No Model Loaded",
-                    0,
-                    0,
-                    "0.0%".to_string(),
-                    "Awaiting IFC File Input".to_string(),
-                )
+                ("No IFCX Loaded".to_string(), 0, 0, "0.0%".to_string())
             };
 
         let kpis = [
             (
                 "SCHEMA SPECIFICATION",
-                schema_lbl.to_string(),
-                "buildingSMART International Standard".to_string(),
+                schema_lbl,
+                "100% Pure-Rust IFCX JSON ECS".to_string(),
                 theme.accent_blue,
             ),
             (
-                "TOTAL STEP ENTITIES",
-                format!("{} Entities", ent_count),
-                "ISO 10303-21 Physical File".to_string(),
+                "SCENE GRAPH NODES",
+                format!("{node_count} Nodes"),
+                "Unified /earth/... Hierarchy".to_string(),
                 theme.text_primary,
             ),
             (
-                "CONTAINED BIM PRODUCTS",
-                format!("{} Elements", prod_count),
-                "Beams, Columns, Walls, Slabs".to_string(),
+                "STRUCTURAL ELEMENTS",
+                format!("{elem_count} Elements"),
+                "bsi::ifc::class + usd::usdgeom::mesh".to_string(),
                 theme.accent_green,
             ),
             (
                 "CONFORMANCE HEALTH",
                 health_score,
-                "Referential & Spatial Quality".to_string(),
+                "Zero Legacy STEP Dependencies".to_string(),
                 theme.accent_green,
             ),
         ];
         self.render_responsive_cards(ui, &kpis, theme);
 
-        ui.add_space(14.0);
+        ui.add_space(12.0);
 
-        // 2. FILE OPEN & PRESET SELECTOR TOOLBAR
+        // Source & Composition Toolbar
         Frame::new()
             .fill(theme.bg_card)
             .corner_radius(CornerRadius::same(10))
@@ -72,614 +71,425 @@ impl IndustrializedView {
                         crate::icons::AppIcon::Folder,
                         12.0,
                         theme.text_secondary,
-                        "OPEN IFC SOURCE:",
+                        "IFCX LAYER SOURCES:",
                         11.5,
                         theme.text_secondary,
                         true,
                     );
 
-                    let sources = [
-                        (IfcSourceMode::CustomPaste, crate::icons::AppIcon::Clipboard, "Paste STEP SPF"),
-                        (IfcSourceMode::FilePath, crate::icons::AppIcon::Folder, "Open Local File"),
-                    ];
-
-                    for (src, icon, label) in sources {
-                        let is_sel = self.ifc_source_mode == src;
-                        let bg = if is_sel { theme.accent_blue } else { theme.bg_canvas };
-                        let fg = if is_sel { Color32::WHITE } else { theme.text_primary };
-
-                        if crate::icons::icon_button(
-                            ui,
-                            icon,
-                            label,
-                            11.0,
-                            fg,
-                            bg,
-                            Stroke::NONE,
-                            CornerRadius::same(6),
-                            Vec2::ZERO,
-                        )
-                        .clicked()
-                        {
-                            self.ifc_source_mode = src;
-                        }
+                    if ui.button("Living Earth Globe").clicked() {
+                        self.source_mode = IfcxSourceMode::EarthGlobeIfcx;
+                        let earth = IfcxStage::build_earth_globe_layer(VectorEarthTheme::CoastalBlueprint);
+                        self.load_ifcx_document(earth, "earth_globe.ifcx");
+                    }
+                    if ui.button("Compose Earth + Active BIM").clicked() {
+                        let composed = IfcxStage::compose_earth_with_site(
+                            VectorEarthTheme::CoastalBlueprint,
+                            bim_project,
+                            None,
+                            0.0,
+                            None,
+                            None,
+                            None,
+                        );
+                        self.load_ifcx_document(composed, "living_earth_composed.ifcx");
+                    }
+                    if ui.button("Sample Duplex Villa").clicked() {
+                        self.source_mode = IfcxSourceMode::SampleVillaIfcx;
+                        self.load_ifcx_document(IfcxDocument::sample_villa_ifcx(), "duplex_villa.ifcx");
+                    }
+                    if ui.button("AI Real-Building Capture").clicked() {
+                        self.source_mode = IfcxSourceMode::AiRealBuildingIfcx;
+                        self.load_ifcx_document(
+                            IfcxDocument::sample_ai_real_building_capture_ifcx(),
+                            "ai_capture_bandung.ifcx",
+                        );
+                    }
+                    if ui.button("Paste IFCX JSON").clicked() {
+                        self.source_mode = IfcxSourceMode::CustomPaste;
+                    }
+                    if ui.button("Open Local .ifcx").clicked() {
+                        self.source_mode = IfcxSourceMode::FilePath;
                     }
                 });
 
-                // Custom Paste or File Path Sub-Panel
-                if self.ifc_source_mode == IfcSourceMode::CustomPaste {
+                if self.source_mode == IfcxSourceMode::CustomPaste {
                     ui.add_space(8.0);
                     ui.label(
-                        RichText::new(
-                            "Paste ISO-10303-21 STEP physical file text (HEADER & DATA sections):",
-                        )
-                        .size(10.5)
-                        .color(theme.text_muted),
+                        RichText::new("Paste IFCX (IFC 5) JSON document:")
+                            .size(10.5)
+                            .color(theme.text_muted),
                     );
                     ui.add(
-                        egui::TextEdit::multiline(&mut self.custom_ifc_paste)
-                            .font(egui::TextStyle::Monospace)
-                            .desired_rows(6)
-                            .desired_width(f32::INFINITY),
+                        egui::TextEdit::multiline(&mut self.custom_ifcx_paste)
+                            .desired_rows(5)
+                            .desired_width(f32::INFINITY)
+                            .code_editor(),
                     );
-                    ui.add_space(4.0);
-                    if crate::icons::icon_button(
-                        ui,
-                        crate::icons::AppIcon::Bolt,
-                        "Parse & Decompose Pasted IFC",
-                        11.5,
-                        Color32::WHITE,
-                        theme.accent_green,
-                        Stroke::NONE,
-                        CornerRadius::same(6),
-                        Vec2::ZERO,
-                    )
-                    .clicked()
-                    {
-                        match IfcModel::parse(&self.custom_ifc_paste) {
-                            Ok(m) => {
-                                self.export_status = Some(format!(
-                                    "Successfully parsed {} entities and {} elements from pasted IFC.",
-                                    m.health_report.total_entities,
-                                    m.elements.len()
-                                ));
-                                self.selected_element_id = m.elements.first().map(|e| e.step_id);
-                                self.baseline_model = Some(m.clone());
-                                self.ifc_model = Some(m);
-                                self.clash_report = None;
-                                self.model_diff = None;
-                                self.ids_report = None;
-                            }
-                            Err(e) => {
-                                self.export_status = Some(format!("IFC Parse Error: {}", e));
-                            }
+                    ui.add_space(6.0);
+                    if ui.button("Parse & Load IFCX").clicked() {
+                        match IfcxDocument::parse(&self.custom_ifcx_paste) {
+                            Ok(doc) => self.load_ifcx_document(doc, "pasted.ifcx"),
+                            Err(err) => self.export_status = Some(format!("IFCX parse error: {err}")),
                         }
                     }
-                } else if self.ifc_source_mode == IfcSourceMode::FilePath {
+                } else if self.source_mode == IfcxSourceMode::FilePath {
                     ui.add_space(8.0);
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(
-                            RichText::new("Local File Path:")
-                                .size(11.0)
-                                .color(theme.text_secondary),
-                        );
-                        let w = ui.available_width().min(260.0).max(140.0);
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.custom_ifc_path)
-                                .desired_width(w),
+                            egui::TextEdit::singleline(&mut self.custom_ifcx_path)
+                                .hint_text("/path/to/building.ifcx")
+                                .desired_width(320.0),
                         );
-                        if crate::icons::icon_button(
-                            ui,
-                            crate::icons::AppIcon::Folder,
-                            "Read & Inspect",
-                            11.0,
-                            Color32::WHITE,
-                            theme.accent_blue,
-                            Stroke::NONE,
-                            CornerRadius::same(6),
-                            Vec2::ZERO,
-                        )
-                        .clicked()
-                        {
-                            #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                match std::fs::read_to_string(&self.custom_ifc_path) {
-                                    Ok(content) => match IfcModel::parse(&content) {
-                                        Ok(m) => {
-                                            self.export_status = Some(format!(
-                                                "Successfully loaded '{}' ({} elements).",
-                                                self.custom_ifc_path,
-                                                m.elements.len()
-                                            ));
-                                            self.selected_element_id =
-                                                m.elements.first().map(|e| e.step_id);
-                                            self.baseline_model = Some(m.clone());
-                                            self.ifc_model = Some(m);
-                                            self.clash_report = None;
-                                            self.model_diff = None;
-                                            self.ids_report = None;
-                                        }
-                                        Err(e) => {
-                                            self.export_status =
-                                                Some(format!("IFC Parse Error: {}", e));
-                                        }
-                                    },
-                                    Err(e) => {
-                                        self.export_status = Some(format!(
-                                            "Cannot open file '{}': {}",
-                                            self.custom_ifc_path, e
-                                        ));
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if ui.button("Load File").clicked() {
+                            match std::fs::read_to_string(self.custom_ifcx_path.trim()) {
+                                Ok(raw) => match IfcxDocument::parse(&raw) {
+                                    Ok(doc) => {
+                                        let path_lbl = self.custom_ifcx_path.clone();
+                                        self.load_ifcx_document(doc, &path_lbl);
                                     }
+                                    Err(err) => {
+                                        self.export_status = Some(format!("IFCX parse error: {err}"));
+                                    }
+                                },
+                                Err(err) => {
+                                    self.export_status = Some(format!("File read error: {err}"));
                                 }
                             }
-                            #[cfg(target_arch = "wasm32")]
-                            {
-                                crate::core::web_bridge::trigger_file_picker(".ifc,.eigen,.json,.e2k");
-                                self.export_status = Some(
-                                    "Opened browser file picker for local .ifc / .eigen / .json import."
-                                        .to_string(),
-                                );
-                            }
+                        }
+                        if ui.button("Browse (.ifcx)").clicked() {
+                            crate::core::web_bridge::trigger_file_picker(".ifcx,.json");
                         }
                     });
                 }
-
-                ui.add_space(10.0);
-                // Live WASM Browser File Picker & Drag-and-Drop IFC (10D-03)
-                ui_kit::feature_slot_card(
-                    ui,
-                    theme,
-                    features,
-                    FeatureId::WasmLocalIfcFileDropPicker,
-                    |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            if crate::icons::icon_button(
-                                ui,
-                                crate::icons::AppIcon::Folder,
-                                "Choose Local .IFC / .EIGEN / .JSON File...",
-                                12.0,
-                                Color32::WHITE,
-                                theme.accent_blue,
-                                Stroke::NONE,
-                                CornerRadius::same(6),
-                                Vec2::ZERO,
-                            )
-                            .clicked()
-                            {
-                                crate::core::web_bridge::trigger_file_picker(".ifc,.eigen,.json,.e2k");
-                            }
-                            ui.label(
-                                RichText::new("Drag-and-Drop Zone Active (Drop .ifc / .eigen anywhere onto canvas)")
-                                    .size(11.0)
-                                    .color(theme.accent_green),
-                            );
-                        });
-                    },
-                );
             });
 
-        ui.add_space(14.0);
+        ui.add_space(12.0);
 
-        // 3. TWO-PANE WORKBENCH (Side-by-Side on Desktop, Stacked on Mobile/Tablet)
-        ui_kit::split_workspace_panes(
-            ui,
-            760.0,
-            0.42,
-            260.0,
-            420.0,
-            480.0,
-            |ui, pane, _| match pane {
-                0 => self.render_ifc_spatial_tree_pane(ui, theme),
-                _ => self.render_ifc_inspector_pane(ui, theme, &verdict_str),
-            },
-        );
-
-        ui.add_space(16.0);
-
-        // 4. BOTTOM ACTION & INTEROP BUTTONS
-        Frame::new()
-            .fill(theme.bg_card)
-            .corner_radius(CornerRadius::same(10))
-            .inner_margin(Margin::same(14))
-            .stroke(Stroke::new(1.0, theme.border_subtle))
-            .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    if crate::icons::icon_button(
-                        ui,
-                        crate::icons::AppIcon::Play,
-                        "Sync to 3D Viewport & Analytical Solver",
-                        12.0,
-                        Color32::WHITE,
-                        theme.accent_blue,
-                        Stroke::NONE,
-                        CornerRadius::same(6),
-                        Vec2::ZERO,
-                    )
-                    .clicked()
-                    {
-                        if let Some(ref m) = self.ifc_model {
-                            match m.to_structural_model() {
-                                Ok(fem) => {
-                                    self.export_status = Some(format!(
-                                        "Successfully converted IFC model '{}' into {} nodes & {} structural frame elements for live ARI analysis.",
-                                        fem.name,
-                                        fem.nodes.len(),
-                                        fem.elements.len()
-                                    ));
-                                }
-                                Err(e) => {
-                                    self.export_status = Some(format!(
-                                        "BIM to Structural Model Conversion Warning: {}",
-                                        e
-                                    ));
-                                }
+        // Action Bar (Undo/Redo, Apply to BIM, Export .ifcx)
+        if self.ifcx_doc.is_some() {
+            ui.horizontal_wrapped(|ui| {
+                let can_undo = self.edit_session.can_undo();
+                let can_redo = self.edit_session.can_redo();
+                if ui.add_enabled(can_undo, egui::Button::new("Undo")).clicked() {
+                    if let Some(ref mut doc) = self.ifcx_doc {
+                        if self.edit_session.undo(doc) {
+                            self.health_report = Some(doc.audit_health());
+                            let snap = doc.clone();
+                            self.sync_edit_buffers_from_doc(&snap);
+                        }
+                    }
+                }
+                if ui.add_enabled(can_redo, egui::Button::new("Redo")).clicked() {
+                    if let Some(ref mut doc) = self.ifcx_doc {
+                        if self.edit_session.redo(doc) {
+                            self.health_report = Some(doc.audit_health());
+                            let snap = doc.clone();
+                            self.sync_edit_buffers_from_doc(&snap);
+                        }
+                    }
+                }
+                if ui.button("Load into 3D Earth BIM").clicked() {
+                    if let Some(ref doc) = self.ifcx_doc {
+                        match doc.to_bim_project("IFCX_Import") {
+                            Ok((proj, msg)) => {
+                                self.request_apply_bim_project = Some(proj);
+                                self.export_status = Some(msg);
+                            }
+                            Err(err) => {
+                                self.export_status = Some(err);
                             }
                         }
                     }
-
-                    if crate::icons::icon_button(
-                        ui,
-                        crate::icons::AppIcon::Cube3D,
-                        "Convert IFC -> Editable BimProject",
-                        12.0,
-                        Color32::WHITE,
-                        theme.accent_green,
-                        Stroke::NONE,
-                        CornerRadius::same(6),
-                        Vec2::ZERO,
-                    )
-                    .clicked()
-                    {
-                        if let Some(ref m) = self.ifc_model {
-                            match m.to_bim_project() {
-                                Ok(proj) => {
-                                    let el_cnt = proj.element_count();
-                                    let lvl_cnt = proj.levels.len();
-                                    self.request_apply_bim_project = Some(proj);
-                                    self.export_status = Some(format!(
-                                        "Converted IFC model into editable BimProject ({el_cnt} elements, {lvl_cnt} levels) and synced workspace."
-                                    ));
-                                }
-                                Err(e) => {
-                                    self.export_status = Some(format!("IFC -> BimProject Conversion Warning: {e}"));
-                                }
+                }
+                if ui.button("Export .ifcx").clicked() {
+                    if let Some(ref doc) = self.ifcx_doc {
+                        let json_out = doc.to_json_pretty();
+                        let fname = format!("{}.ifcx", doc.header.id.replace(' ', "_"));
+                        match crate::core::web_bridge::save_text_file(
+                            &fname,
+                            &json_out,
+                            "application/json;charset=utf-8",
+                        ) {
+                            Ok(_) => {
+                                self.export_status = Some(format!("Exported IFCX layer '{fname}'."));
+                            }
+                            Err(e) => {
+                                self.export_status = Some(e);
                             }
                         }
                     }
-
-                    if crate::icons::icon_button(
-                        ui,
-                        crate::icons::AppIcon::Globe,
-                        "Export Clean IFC 4.3 (.ifc)",
-                        12.0,
-                        Color32::WHITE,
-                        theme.accent_green,
-                        Stroke::NONE,
-                        CornerRadius::same(6),
-                        Vec2::ZERO,
-                    )
-                    .clicked()
-                    {
-                        if let Some(ref _m) = self.ifc_model {
-                            let mut engine = crate::core::ParametricEngine::new();
-                            if let Ok(model) = engine.generate_warren_truss() {
-                                let ari =
-                                    crate::core::AriEngine::evaluate_redundancy(&model).ok();
-                                let ifc =
-                                    crate::core::IfcExporter::export_to_ifc(&model, ari.as_ref());
-                                self.export_status = Some(format!(
-                                    "Exported active model to ISO 16739-1:2024 IFC 4.3 ({} lines).",
-                                    ifc.lines().count()
-                                ));
-                            }
-                        }
-                    }
-
-                    if crate::icons::icon_button(
-                        ui,
-                        crate::icons::AppIcon::Cpu,
-                        "Export DSTV CNC (.nc1)",
-                        12.0,
-                        Color32::WHITE,
-                        Color32::from_rgb(139, 92, 246),
-                        Stroke::NONE,
-                        CornerRadius::same(6),
-                        Vec2::ZERO,
-                    )
-                    .clicked()
-                    {
-                        let mut engine = crate::core::ParametricEngine::new();
-                        if let Ok(model) = engine.generate_warren_truss() {
-                            let pieces = crate::core::DstvExporter::export_to_dstv(&model);
-                            self.export_status = Some(format!(
-                                "Generated {} DSTV .nc1 robotic instructions for steel fabrication.",
-                                pieces.len()
-                            ));
-                        }
-                    }
-
-                    if crate::icons::icon_button(
-                        ui,
-                        crate::icons::AppIcon::Document,
-                        "Export ifcJSON-4 (.json)",
-                        12.0,
-                        Color32::WHITE,
-                        Color32::from_rgb(234, 88, 12),
-                        Stroke::NONE,
-                        CornerRadius::same(6),
-                        Vec2::ZERO,
-                    )
-                    .clicked()
-                    {
-                        if let Some(ref m) = self.ifc_model {
-                            let json = m.to_ifc_json();
-                            self.export_status = Some(format!(
-                                "Exported buildingSMART ifcJSON-4 document ({} bytes, {} products).",
-                                json.len(),
-                                m.elements.len()
-                            ));
-                        }
-                    }
-
-                    if crate::icons::icon_button(
-                        ui,
-                        crate::icons::AppIcon::Document,
-                        "Export BCF Topics (.xml)",
-                        12.0,
-                        Color32::WHITE,
-                        Color32::from_rgb(14, 165, 233),
-                        Stroke::NONE,
-                        CornerRadius::same(6),
-                        Vec2::ZERO,
-                    )
-                    .clicked()
-                    {
-                        if let Some(ref m) = self.ifc_model {
-                            let empty = Vec::new();
-                            let clashes = self
-                                .clash_report
-                                .as_ref()
-                                .map(|r| r.clashes.as_slice())
-                                .unwrap_or(&empty);
-                            let xml = m.export_bcf_xml(clashes);
-                            self.export_status = Some(format!(
-                                "Exported {} BCF issue topics ({} bytes).",
-                                clashes.len(),
-                                xml.len()
-                            ));
-                        }
-                    }
-                });
+                }
             });
-    }
+            ui.add_space(10.0);
+        }
 
-    fn render_ifc_spatial_tree_pane(&mut self, ui: &mut Ui, theme: &MacTheme) {
-        Frame::new()
-            .fill(theme.bg_card)
-            .corner_radius(CornerRadius::same(10))
-            .inner_margin(Margin::same(14))
-            .stroke(Stroke::new(1.0, theme.border_subtle))
-            .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    crate::icons::icon_label(
-                        ui,
-                        crate::icons::AppIcon::Layers,
-                        12.0,
-                        theme.accent_blue,
-                        "SPATIAL HIERARCHY TREE",
-                        12.0,
-                        theme.accent_blue,
-                        true,
-                    );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if let Some(ref m) = self.ifc_model {
-                            ui.label(
-                                RichText::new(format!("{} Storeys", count_storeys(&m.spatial_root)))
-                                    .size(10.5)
-                                    .color(theme.text_muted),
-                            );
-                        }
-                    });
-                });
-                ui.add_space(6.0);
-
-                ui.horizontal(|ui| {
-                    crate::icons::draw_icon(ui, crate::icons::AppIcon::Search, 11.0, theme.text_muted);
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.element_search_query)
-                            .hint_text("Filter elements by name/class...")
-                            .desired_width((ui.available_width() - 4.0).max(120.0)),
-                    );
-                });
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(6.0);
-
-                ScrollArea::vertical()
-                    .id_salt("spatial_tree_scroll")
-                    .max_height(380.0)
-                    .show(ui, |ui| {
-                        let spatial_data = self
-                            .ifc_model
-                            .as_ref()
-                            .map(|m| (m.spatial_root.clone(), m.elements.clone()));
-                        if let Some((spatial_root, elements)) = spatial_data {
-                            self.render_spatial_node(ui, theme, &spatial_root, &elements);
-                        } else {
-                            ui.label(
-                                RichText::new(
-                                    "No IFC Model loaded. Please select a sample or paste file above.",
-                                )
-                                .size(11.0)
-                                .color(theme.text_muted),
-                            );
-                        }
-                    });
-            });
-    }
-
-    fn render_ifc_inspector_pane(&mut self, ui: &mut Ui, theme: &MacTheme, verdict_str: &str) {
-        Frame::new()
-            .fill(theme.bg_card)
-            .corner_radius(CornerRadius::same(10))
-            .inner_margin(Margin::same(14))
-            .stroke(Stroke::new(1.0, theme.border_subtle))
-            .show(ui, |ui| {
-                let tabs = [
-                    (IfcInspectorTab::Properties, "📋 Entity Property Inspector"),
-                    (IfcInspectorTab::HealthAudit, "🛡️ Conformance & Health Audit"),
-                    (IfcInspectorTab::GeometryBbox, "📐 3D Geometry & Bounding Box"),
-                    (IfcInspectorTab::ClashAndDiff, "⚔️ Clash, Diff & IDS"),
-                ];
-                ui_kit::subtab_bar(ui, theme, "ifc_inspector_tabs", &mut self.inspector_tab, &tabs);
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(8.0);
-
-                ScrollArea::vertical()
-                    .id_salt("inspector_tab_scroll")
-                    .max_height(390.0)
-                    .show(ui, |ui| match self.inspector_tab {
-                        IfcInspectorTab::Properties => self.render_properties_inspector(ui, theme),
-                        IfcInspectorTab::HealthAudit => {
-                            self.render_health_audit_tab(ui, theme, verdict_str)
-                        }
-                        IfcInspectorTab::GeometryBbox => self.render_geometry_bbox_tab(ui, theme),
-                        IfcInspectorTab::ClashAndDiff => self.render_clash_and_diff_tab(ui, theme),
-                    });
-            });
-    }
-
-    fn render_spatial_node(
-        &mut self,
-        ui: &mut Ui,
-        theme: &MacTheme,
-        node: &IfcSpatialNode,
-        elements: &[IfcElementSummary],
-    ) {
-        let is_expanded = *self.spatial_tree_expanded.get(&node.step_id).unwrap_or(&true);
-        let icon = match node.class_name.as_str() {
-            "IfcProject" => crate::icons::AppIcon::Building,
-            "IfcSite" => crate::icons::AppIcon::Globe,
-            "IfcBuilding" => crate::icons::AppIcon::Building,
-            "IFCBUILDINGSTOREY" => crate::icons::AppIcon::MapPin,
-            _ => crate::icons::AppIcon::Folder,
-        };
-
-        ui.horizontal_wrapped(|ui| {
-            let arrow_icon = if is_expanded {
-                crate::icons::AppIcon::ChevronDown
-            } else {
-                crate::icons::AppIcon::ArrowRight
-            };
-            if crate::icons::icon_only_button(
-                ui,
-                arrow_icon,
-                theme.text_muted,
-                Color32::TRANSPARENT,
-                Stroke::NONE,
-                CornerRadius::same(3),
-                Vec2::splat(16.0),
-                if is_expanded { "Collapse" } else { "Expand" },
-            )
-            .clicked()
-            {
-                self.spatial_tree_expanded.insert(node.step_id, !is_expanded);
-            }
-
-            let elev_str = node
-                .elevation_m
-                .map(|e| format!(" (El: {:.1}m)", e * 0.001))
-                .unwrap_or_default();
-            crate::icons::icon_label(
-                ui,
-                icon,
-                12.0,
-                theme.accent_blue,
-                format!("{}{}", node.name, elev_str),
-                11.0,
-                theme.text_primary,
-                true,
-            );
-
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        // Main Split Workbench (Node Tree + Inspector)
+        if self.ifcx_doc.is_none() {
+            theme.card_frame().show(ui, |ui| {
                 ui.label(
-                    RichText::new(format!("[{}]", node.total_contained_count()))
-                        .size(10.0)
+                    RichText::new("Select 'Living Earth Globe', 'Sample Duplex Villa', 'AI Real-Building Capture', or import any .ifcx layer above to inspect and edit.")
+                        .size(12.0)
                         .color(theme.text_muted),
                 );
             });
-        });
+            return;
+        }
 
-        if is_expanded {
-            ui.indent(format!("indent_node_{}", node.step_id), |ui| {
-                for child in &node.children {
-                    self.render_spatial_node(ui, theme, child, elements);
-                }
+        let wide = ui.available_width() >= 760.0;
+        let _ = (features, FeatureId::OpenBimIfcReaderEditorClashDiff);
 
-                let q_lower = self.element_search_query.to_lowercase();
-                for &el_id in &node.contained_element_ids {
-                    if let Some(el) = elements.iter().find(|e| e.step_id == el_id) {
-                        if !q_lower.is_empty()
-                            && !el.name.to_lowercase().contains(&q_lower)
-                            && !el.class_name.to_lowercase().contains(&q_lower)
+        if wide {
+            ui.columns(2, |cols| {
+                self.render_node_browser(&mut cols[0], theme);
+                self.render_inspector_panel(&mut cols[1], theme);
+            });
+        } else {
+            self.render_node_browser(ui, theme);
+            ui.add_space(10.0);
+            self.render_inspector_panel(ui, theme);
+        }
+    }
+
+    fn render_node_browser(&mut self, ui: &mut Ui, theme: &MacTheme) {
+        theme.card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("IFCX SCENE GRAPH (/earth/...)").strong().size(11.5).color(theme.text_secondary));
+            });
+            ui.add_space(4.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut self.node_search_query)
+                    .hint_text("Filter path or class (e.g. IfcColumn, ocean, land)...")
+                    .desired_width(f32::INFINITY),
+            );
+            ui.add_space(6.0);
+
+            let q = self.node_search_query.trim().to_lowercase();
+            let mut newly_selected: Option<String> = None;
+
+            if let Some(ref doc) = self.ifcx_doc {
+                ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
+                    for node in &doc.data {
+                        let cls = node.ifc_class().unwrap_or("Node");
+                        let dn = node.display_name();
+                        if !q.is_empty()
+                            && !node.path.to_lowercase().contains(&q)
+                            && !cls.to_lowercase().contains(&q)
+                            && !dn.to_lowercase().contains(&q)
                         {
                             continue;
                         }
+                        let is_sel = self.selected_node_path.as_deref() == Some(&node.path);
+                        let lbl = format!("[{cls}] {}  ({})", dn, node.path);
+                        if ui.selectable_label(is_sel, RichText::new(lbl).size(11.0)).clicked() {
+                            newly_selected = Some(node.path.clone());
+                        }
+                    }
+                });
+            }
 
-                        let is_selected = self.selected_element_id == Some(el.step_id);
-                        let el_icon = match el.class_name.as_str() {
-                            "IFCCOLUMN" => crate::icons::AppIcon::Column,
-                            "IFCBEAM" => crate::icons::AppIcon::Beam,
-                            "IFCWALL" | "IFCWALLSTANDARDCASE" => crate::icons::AppIcon::Wall,
-                            "IFCSLAB" => crate::icons::AppIcon::Slab,
-                            "IFCDOOR" => crate::icons::AppIcon::Door,
-                            "IFCWINDOW" => crate::icons::AppIcon::Window,
-                            "IFCMEMBER" => crate::icons::AppIcon::NodesGraph,
-                            _ => crate::icons::AppIcon::BoxPackage,
-                        };
+            if let Some(path) = newly_selected {
+                self.selected_node_path = Some(path);
+                if let Some(doc) = self.ifcx_doc.clone() {
+                    self.sync_edit_buffers_from_doc(&doc);
+                }
+            }
+        });
+    }
 
-                        let bg = if is_selected {
-                            theme.accent_blue.linear_multiply(0.25)
-                        } else {
-                            Color32::TRANSPARENT
-                        };
-                        let fg = if is_selected {
-                            theme.accent_blue
-                        } else {
-                            theme.text_secondary
-                        };
+    fn render_inspector_panel(&mut self, ui: &mut Ui, theme: &MacTheme) {
+        theme.card_frame().show(ui, |ui| {
+            let tabs = [
+                (IfcxInspectorTab::NodeAttributes, "Attributes & Edit"),
+                (IfcxInspectorTab::HealthAudit, "Health Audit"),
+                (IfcxInspectorTab::ClashAndDiff, "Clash & Layer Diff"),
+                (IfcxInspectorTab::RawJson, "Node JSON"),
+            ];
+            ui_kit::subtab_bar(ui, theme, "ifcx_inspector_tabs", &mut self.inspector_tab, &tabs);
+            ui.add_space(8.0);
 
-                        Frame::new()
-                            .fill(bg)
-                            .corner_radius(CornerRadius::same(4))
-                            .inner_margin(Margin::symmetric(4, 2))
-                            .show(ui, |ui| {
-                                ui.horizontal_wrapped(|ui| {
-                                    crate::icons::draw_icon(ui, el_icon, 11.0, fg);
-                                    if ui
-                                        .selectable_label(
-                                            is_selected,
-                                            RichText::new(&el.name).size(10.5).color(fg),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.selected_element_id = Some(el.step_id);
-                                    }
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        ui.label(
-                                            RichText::new(&el.class_name)
-                                                .size(9.0)
-                                                .monospace()
-                                                .color(theme.text_muted),
+            match self.inspector_tab {
+                IfcxInspectorTab::NodeAttributes => {
+                    let sel_path = self.selected_node_path.clone();
+                    if let (Some(path), Some(doc)) = (sel_path, self.ifcx_doc.as_ref()) {
+                        if let Some(node) = doc.find_node(&path) {
+                            ui.label(RichText::new(&node.path).strong().size(12.0).color(theme.accent_blue));
+                            ui.label(
+                                RichText::new(format!(
+                                    "Class: {} | Children: {} | Namespaces: {}",
+                                    node.ifc_class().unwrap_or("Unclassified"),
+                                    node.children.len(),
+                                    node.attributes.len()
+                                ))
+                                .size(11.0)
+                                .color(theme.text_muted),
+                            );
+                            if let Some(mesh) = node.mesh() {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "usd::usdgeom::mesh: {} vertices, {} triangles",
+                                        mesh.points.len(),
+                                        mesh.triangulated_indices().len()
+                                    ))
+                                    .size(11.0)
+                                    .color(theme.accent_green),
+                                );
+                            }
+                            if let Some(geo) = node.geo_wgs84() {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "eigengraph::geo::wgs84: {:.5}°, {:.5}° (Elev {:.1} m, UTM {}{})",
+                                        geo.lat,
+                                        geo.lon,
+                                        geo.elev_m,
+                                        geo.utm_zone,
+                                        if geo.south_hemisphere { "S" } else { "N" }
+                                    ))
+                                    .size(11.0)
+                                    .color(theme.accent_blue),
+                                );
+                            }
+                            ui.add_space(8.0);
+                            ui.label(RichText::new("Name (bsi::ifc::prop):").size(10.5));
+                            ui.text_edit_singleline(&mut self.edit_name);
+                            ui.label(RichText::new("Material:").size(10.5));
+                            ui.text_edit_singleline(&mut self.edit_material);
+                            ui.label(RichText::new("Description:").size(10.5));
+                            ui.text_edit_singleline(&mut self.edit_description);
+                            ui.add_space(6.0);
+                            if ui.button("Apply Attribute Edit").clicked() {
+                                if let Some(ref mut mut_doc) = self.ifcx_doc {
+                                    self.edit_session.push_snapshot(mut_doc.clone());
+                                    if let Some(n) = mut_doc.find_node_mut(&path) {
+                                        n.set_prop(
+                                            &self.edit_name,
+                                            &self.edit_material,
+                                            &self.edit_description,
                                         );
-                                    });
-                                });
-                            });
+                                    }
+                                    self.health_report = Some(mut_doc.audit_health());
+                                    self.export_status = Some(format!("Updated attributes on '{path}'."));
+                                }
+                            }
+                        }
+                    } else {
+                        ui.label("Select a node in the IFCX Scene Graph to inspect.");
                     }
                 }
-            });
-        }
+                IfcxInspectorTab::HealthAudit => {
+                    if let Some(ref hr) = self.health_report {
+                        ui.label(
+                            RichText::new(format!(
+                                "{} — {:.1}% ({} nodes, {} meshes)",
+                                hr.verdict, hr.conformance_score_pct, hr.total_nodes, hr.mesh_nodes
+                            ))
+                            .strong()
+                            .size(12.0)
+                            .color(theme.accent_green),
+                        );
+                        ui.add_space(6.0);
+                        for chk in &hr.checks {
+                            let col = match chk.status {
+                                IfcxAuditStatus::Pass => theme.accent_green,
+                                IfcxAuditStatus::Warning => Color32::from_rgb(245, 158, 11),
+                                IfcxAuditStatus::Fail => Color32::from_rgb(239, 68, 68),
+                            };
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(RichText::new(&chk.code).strong().color(col).size(11.0));
+                                ui.label(RichText::new(&chk.title).strong().size(11.0));
+                            });
+                            ui.label(RichText::new(&chk.detail).size(10.5).color(theme.text_muted));
+                            ui.add_space(4.0);
+                        }
+                    }
+                }
+                IfcxInspectorTab::ClashAndDiff => {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Tolerance (mm):");
+                        ui.add(egui::DragValue::new(&mut self.clash_tolerance_mm).range(0.0..=200.0));
+                        if ui.button("Run Spatial Clash").clicked() {
+                            if let Some(ref doc) = self.ifcx_doc {
+                                self.clash_report = Some(doc.detect_clashes(self.clash_tolerance_mm as f64));
+                            }
+                        }
+                        if ui.button("Run Layer Diff").clicked() {
+                            if let (Some(ref doc), Some(ref base)) = (&self.ifcx_doc, &self.baseline_ifcx) {
+                                self.diff_report = Some(doc.diff_against(base));
+                            }
+                        }
+                    });
+                    ui.add_space(6.0);
+                    if let Some(ref cr) = self.clash_report {
+                        ui.label(
+                            RichText::new(format!(
+                                "Clash Check: {} pairs evaluated, {} clashes detected.",
+                                cr.checked_pairs,
+                                cr.clashes.len()
+                            ))
+                            .strong()
+                            .size(11.0),
+                        );
+                        for c in cr.clashes.iter().take(20) {
+                            let col = match c.severity {
+                                IfcxClashSeverity::Critical => Color32::from_rgb(239, 68, 68),
+                                IfcxClashSeverity::Major => Color32::from_rgb(249, 115, 22),
+                                IfcxClashSeverity::Clearance => Color32::from_rgb(234, 179, 8),
+                            };
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} <-> {} ({:.1} mm overlap)",
+                                    c.path_a, c.path_b, c.overlap_mm
+                                ))
+                                .size(10.5)
+                                .color(col),
+                            );
+                        }
+                    }
+                    if let Some(ref dr) = self.diff_report {
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "Layer Diff vs Baseline: +{} added, *{} modified, -{} deleted, ={} unchanged",
+                                dr.added, dr.modified, dr.deleted, dr.unchanged
+                            ))
+                            .strong()
+                            .size(11.0),
+                        );
+                        for d in dr.items.iter().filter(|i| i.kind != IfcxDiffKind::Unchanged).take(25) {
+                            let (col, tag) = match d.kind {
+                                IfcxDiffKind::Added => (theme.accent_green, "+"),
+                                IfcxDiffKind::Modified => (Color32::from_rgb(249, 115, 22), "*"),
+                                IfcxDiffKind::Deleted => (Color32::from_rgb(239, 68, 68), "-"),
+                                IfcxDiffKind::Unchanged => (theme.text_muted, "="),
+                            };
+                            ui.label(
+                                RichText::new(format!("{tag} [{}] {} — {}", d.class_code, d.path, d.detail))
+                                    .size(10.5)
+                                    .color(col),
+                            );
+                        }
+                    }
+                }
+                IfcxInspectorTab::RawJson => {
+                    if let (Some(ref path), Some(ref doc)) = (&self.selected_node_path, &self.ifcx_doc) {
+                        if let Some(node) = doc.find_node(path) {
+                            let mut txt = serde_json::to_string_pretty(node).unwrap_or_default();
+                            if txt.len() > 16_000 {
+                                txt.truncate(16_000);
+                                txt.push_str("\n... (truncated for preview; use Export .ifcx for full payload)");
+                            }
+                            ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut txt)
+                                        .code_editor()
+                                        .desired_width(f32::INFINITY),
+                                );
+                            });
+                        }
+                    }
+                }
+            }
+        });
     }
 }

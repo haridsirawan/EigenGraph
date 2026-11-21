@@ -205,7 +205,7 @@ impl ParametricView {
     }
 
     /// Body content for Properties Inspector: Component Metadata, Driving Parametric Variables,
-    /// 5D/6D Workflow Links, Bidirectional Sync, and OpenBIM Vector/IFC4 Deliverables.
+    /// 5D/6D Workflow Links, Bidirectional Sync, and OpenBIM Vector/IFCX Deliverables.
     pub(super) fn render_properties_body(
         &mut self,
         ui: &mut Ui,
@@ -337,7 +337,7 @@ impl ParametricView {
         if icons::icon_button(
             ui,
             AppIcon::Printer,
-            "Export PDF / SVG / IFC4",
+            "Export PDF / SVG / IFCX",
             10.5,
             Color32::WHITE,
             theme.accent_green,

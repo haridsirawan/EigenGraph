@@ -1,10 +1,10 @@
 [package]
 name = "eigengraph"
-version = "0.6.5"
+version = "0.6.6"
 edition = "2021"
 default-run = "eigengraph"
 authors = ["Harids Irawan <harids.irawan@gmail.com>"]
-description = "EigenGraph — Pure-Rust Vector Earth, OpenBIM IFC & Structural Graph Analytics (WebAssembly Web App)"
+description = "EigenGraph — 100% Pure-Rust Vector Earth, OpenBIM IFCX (IFC 5) & Structural Graph Analytics (WebAssembly Web App)"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/EigenGraph/EigenGraph"

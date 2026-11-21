@@ -867,7 +867,7 @@ impl BuildView {
 
             ui.add_space(4.0);
 
-            // 2. Spatial Breakdown Structure (SBS / buildingSMART IFC4 Tree)
+            // 2. Spatial Breakdown Structure (SBS / buildingSMART IFCX Tree)
             ui.collapsing("Spatial Breakdown Structure (IFC Tree)", |ui| {
                 ui.label(RichText::new("IfcProject: EigenGraph Master BIM").size(10.5).strong().color(theme.accent_blue));
                 ui.indent("site_indent", |ui| {

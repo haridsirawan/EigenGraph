@@ -1,13 +1,13 @@
 //! dem_stream.rs — Pure-Rust Offline Vector Topography & Survey-to-TIN Builder (Phase 64 / v0.6.4).
 //!
-//! Converts pure-vector 3D topographic geometry (OpenBIM IFC 4.3 `IfcSite` `IfcTriangulatedFaceSet`
+//! Converts pure-vector 3D topographic geometry (OpenBIM IFCX `IfcSite` `usd::usdgeom::mesh`
 //! meshes and local CSV/XYZ survey point clouds) into centered `TinSurfaceMesh` surfaces for Earth
 //! Vector rendering with zero external raster PNG downloads or `image` crate dependencies.
 
 use super::tin_surface::{TinPoint, TinSurfaceMesh};
 
 /// Converts explicit pure-vector 3D coordinates `(x_m, y_m, z_m)` and optional triangle index triplets
-/// (such as OpenBIM IFC4/IFC4.3 `IfcTriangulatedFaceSet`) into a centered `TinSurfaceMesh`.
+/// (such as OpenBIM IFCX `IfcSite` `usd::usdgeom::mesh`) into a centered `TinSurfaceMesh`.
 pub fn build_tin_from_3d_triangles(
     coords_m: &[(f64, f64, f64)],
     triangles: &[[usize; 3]],

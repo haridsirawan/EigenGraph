@@ -696,7 +696,7 @@ impl SettingsView {
                 };
                 ui.label(
                     RichText::new(format!(
-                        "v{} — Phase {} Native WebGL2 (`egui_glow`) 100% Pure-Rust Vector Earth (24-Bit Z-Buffer, f64 RTC Floating Origin, Day/Dusk/Night Shaders), OpenBIM IFC 4.3 Site TIN, 6-DOF FEM & ARI",
+                        "v{} — Phase {} 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth Globe (WebGL2 24-Bit Z-Buffer, f64 RTC, Multi-Layer Composition, Zero Legacy STEP, 0% Raster), 6-DOF FEM & ARI",
                         env!("CARGO_PKG_VERSION"),
                         phase_num
                     ))

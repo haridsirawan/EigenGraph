@@ -323,7 +323,7 @@ impl BuildView {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(">").strong().size(11.0).color(theme.accent_green));
                                 let resp = ui.add(egui::TextEdit::singleline(&mut self.bim_console_input)
-                                    .hint_text("Type BIM command e.g. bim.audit_clashes(), bim.export_ifc4()...")
+                                    .hint_text("Type BIM command e.g. bim.audit_clashes(), bim.export_ifcx()...")
                                     .desired_width((ui.available_width() - 80.0).max(100.0)));
                                 if (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) || ui.button("Execute").clicked() {
                                     if !self.bim_console_input.trim().is_empty() {

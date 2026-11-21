@@ -1006,6 +1006,18 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Toggle WebGL2 hardware-accelerated 3D Vector Earth pass vs. CPU vector fallback",
         icon: AppIcon::Globe,
     },
+    SlashCommandSpec {
+        cmd: "/ifcx",
+        category: "Export",
+        description: "Export active georeferenced site & BIM model as pure IFCX (IFC 5 JSON ECS)",
+        icon: AppIcon::Cube3D,
+    },
+    SlashCommandSpec {
+        cmd: "/earth-ifcx",
+        category: "Export",
+        description: "Export composed Living Earth Globe (earth_globe.ifcx) + active site layer",
+        icon: AppIcon::Globe,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1014,7 +1026,8 @@ pub struct SpatialHudActions {
     pub sync_fem_and_earth: bool,
     pub fit_camera: bool,
     pub export_archive: bool,
-    pub export_ifc4: bool,
+    pub export_ifcx: bool,
+    pub export_earth_ifcx: bool,
     pub save_audit_note: bool,
     pub toggle_theme: bool,
     pub open_settings: bool,
@@ -3498,6 +3511,12 @@ impl SpatialWorkspaceState {
                         "CPU Pure-Vector mode"
                     };
                     self.push_trace(format!("Earth Vector renderer: {mode}"), true);
+                }
+                "/ifcx" => {
+                    actions.export_ifcx = true;
+                }
+                "/earth-ifcx" | "/earth_ifcx" => {
+                    actions.export_earth_ifcx = true;
                 }
                 "/section" | "/cut" => {
                     let elev_opt = arg
@@ -8267,11 +8286,11 @@ impl SpatialWorkspaceState {
                                 actions.save_audit_note = true;
                             }
                             if ui
-                                .small_button("IFC4")
-                                .on_hover_text("Export active BIM model to IFC4 STEP file")
+                                .small_button("IFCX")
+                                .on_hover_text("Export active BIM model to pure IFCX (IFC 5 JSON ECS)")
                                 .clicked()
                             {
-                                actions.export_ifc4 = true;
+                                actions.export_ifcx = true;
                             }
                             if ui
                                 .small_button(if self.vault_note_composer_open {
@@ -8697,7 +8716,7 @@ impl SpatialWorkspaceState {
                                 {
                                     continue;
                                 }
-                                let is_ifc = vf.name.to_ascii_lowercase().ends_with(".ifc");
+                                let is_ifcx = vf.name.to_ascii_lowercase().ends_with(".ifcx");
                                 ui.horizontal(|ui| {
                                     if ui
                                         .small_button("+@")
@@ -8717,14 +8736,14 @@ impl SpatialWorkspaceState {
                                                 .size(10.0)
                                                 .color(theme.text_secondary),
                                         )
-                                        .on_hover_text(if is_ifc {
-                                            "Load this OpenBIM IFC file directly onto Earth 3D"
+                                        .on_hover_text(if is_ifcx {
+                                            "Load this OpenBIM IFCX (IFC 5) layer directly onto Earth 3D"
                                         } else {
                                             "Click to preview Obsidian Vault note / file"
                                         })
                                         .clicked()
                                     {
-                                        if is_ifc {
+                                        if is_ifcx {
                                             actions.open_vault_project = Some(
                                                 crate::core::vault::PersonalVaultProjectEntry {
                                                     name: vf.name.clone(),
@@ -9019,7 +9038,7 @@ impl SpatialWorkspaceState {
                         if icons::icon_button(
                             ui,
                             AppIcon::UploadImport,
-                            "Attach Local File (.ifc, .json, .csv, .md)...",
+                            "Attach Local File (.ifcx, .json, .csv, .md)...",
                             10.5,
                             theme.accent_blue,
                             theme.accent_blue.gamma_multiply(0.12),
@@ -10654,14 +10673,27 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 theme,
                                                 Some(AppIcon::Cube3D),
-                                                "IFC4",
+                                                "IFCX",
                                                 false,
                                                 theme.accent_blue,
-                                                "Export IFC4 STEP BIM file",
+                                                "Export georeferenced IFCX (IFC 5 JSON ECS) site layer",
                                             )
                                             .clicked()
                                             {
-                                                actions.export_ifc4 = true;
+                                                actions.export_ifcx = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Globe),
+                                                "Earth .ifcx",
+                                                false,
+                                                theme.accent_green,
+                                                "Export composed Living Earth Globe + Site IFCX graph",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.export_earth_ifcx = true;
                                             }
                                             if Self::glass_pill_button(
                                                 ui,
@@ -10999,7 +11031,8 @@ impl SpatialHudActions {
         self.sync_fem_and_earth |= other.sync_fem_and_earth;
         self.fit_camera |= other.fit_camera;
         self.export_archive |= other.export_archive;
-        self.export_ifc4 |= other.export_ifc4;
+        self.export_ifcx |= other.export_ifcx;
+        self.export_earth_ifcx |= other.export_earth_ifcx;
         self.save_audit_note |= other.save_audit_note;
         self.toggle_theme |= other.toggle_theme;
         self.open_settings |= other.open_settings;
@@ -12399,21 +12432,21 @@ mod tests {
         assert!(audit.contains("DCR 82.0%"));
         assert!(audit.contains("ARI 0.910"));
 
-        let ifc = build.bim_bus.project.export_ifc4_spatial();
-        assert!(ifc.contains("ISO-10303-21;"));
-        assert!(ifc.contains("IFC4"));
+        let ifcx = build.bim_bus.project.export_ifcx_spatial();
+        assert!(ifcx.contains("\"ifcxVersion\""));
+        assert!(ifcx.contains("IfcBuilding"));
 
         crate::core::InternalVault::reset_runtime_vault_dir();
         let _ = std::fs::remove_dir_all(&temp_vault);
     }
 
     #[test]
-    fn test_phase55_vault_recursive_ifc_discovery_and_zero_demo_files() {
+    fn test_phase66_vault_recursive_ifcx_discovery_and_zero_demo_files() {
         let _guard = crate::core::vault::TEST_VAULT_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let temp_vault = std::env::temp_dir().join(format!(
-            "eigengraph_phase55_ifc_vault_{}",
+            "eigengraph_phase66_ifcx_vault_{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&temp_vault);
@@ -12426,74 +12459,42 @@ mod tests {
         assert!(!temp_vault.join("_VAULT_NOTICE.txt").exists());
         assert!(!temp_vault.join("README_DO_NOT_DELETE.txt").exists());
 
-        // 2. Place a nested uppercase .IFC file with UTF-8 BOM, quoted semicolon, mapped item & IFCSITE lat/lon
+        // 2. Place a nested uppercase .IFCX file with UTF-8 BOM & native eigengraph::geo::wgs84
         let nested_dir = temp_vault.join("Imports").join("Client_A");
         std::fs::create_dir_all(&nested_dir).unwrap();
-        let ifc_path = nested_dir.join("Jakarta_Tower.IFC");
-        let ifc_content = "\u{FEFF}ISO-10303-21;\r\n\
-HEADER;\r\n\
-FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');\r\n\
-FILE_NAME('Jakarta_Tower.IFC','2026-11-18T12:00:00',('Engineer'),('Firm'),'Tool','Exporter','');\r\n\
-FILE_SCHEMA(('IFC4'));\r\n\
-ENDSEC;\r\n\
-DATA;\r\n\
-#1=IFCPROJECT('0Proj001',$,'Jakarta Tower; Phase 1',$,$,$,$,$,#2);\r\n\
-#2=IFCUNITASSIGNMENT((#3));\r\n\
-#3=IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);\r\n\
-#4=IFCSITE('0Site001',$,'Site A',$,$,#10,$,$,.ELEMENT.,(-6,-12,0),(106,50,0),12.,$,$);\r\n\
-#5=IFCBUILDINGSTOREY('0Lvl1',$,'Level 1',$,$,#10,$,$,.ELEMENT.,0.0);\r\n\
-#6=IFCBUILDINGSTOREY('0Lvl2',$,'Level 2',$,$,#12,$,$,.ELEMENT.,4000.0);\r\n\
-#10=IFCLOCALPLACEMENT($,#11);\r\n\
-#11=IFCAXIS2PLACEMENT3D(#20,#21,#22);\r\n\
-#12=IFCLOCALPLACEMENT(#10,#13);\r\n\
-#13=IFCAXIS2PLACEMENT3D(#23,#21,#22);\r\n\
-#20=IFCCARTESIANPOINT((0.,0.,0.));\r\n\
-#21=IFCDIRECTION((0.,0.,1.));\r\n\
-#22=IFCDIRECTION((1.,0.,0.));\r\n\
-#23=IFCCARTESIANPOINT((0.,0.,4000.));\r\n\
-#30=IFCCOLUMN('0Col001',$,'C1; Main','500x500',$,#10,#40,.COLUMN.);\r\n\
-#31=IFCBEAM('0Bm001',$,'B1_Span','300x600',$,#12,#41,.BEAM.);\r\n\
-#40=IFCPRODUCTDEFINITIONSHAPE($,$,(#50));\r\n\
-#41=IFCPRODUCTDEFINITIONSHAPE($,$,(#51));\r\n\
-#50=IFCSHAPEREPRESENTATION(#1,'Body','MappedRepresentation',(#60));\r\n\
-#51=IFCSHAPEREPRESENTATION(#1,'Axis','Curve3D',(#70));\r\n\
-#60=IFCMAPPEDITEM(#61,#62);\r\n\
-#61=IFCREPRESENTATIONMAP(#11,#63);\r\n\
-#62=IFCCARTESIANTRANSFORMATIONOPERATOR3D($,$,#20,1.,$);\r\n\
-#63=IFCSHAPEREPRESENTATION(#1,'Body','SweptSolid',(#64));\r\n\
-#64=IFCEXTRUDEDAREASOLID(#65,#11,#21,4000.);\r\n\
-#65=IFCRECTANGLEPROFILEDEF(.AREA.,'P500',#11,500.,500.);\r\n\
-#70=IFCPOLYLINE((#71,#72));\r\n\
-#71=IFCCARTESIANPOINT((0.,0.,4000.));\r\n\
-#72=IFCCARTESIANPOINT((6000.,0.,4000.));\r\n\
-ENDSEC;\r\n\
-END-ISO-10303-21;\r\n";
-        std::fs::write(&ifc_path, ifc_content).unwrap();
+        let ifcx_path = nested_dir.join("Jakarta_Tower.IFCX");
+        let ai_doc = crate::core::ifcx::IfcxDocument::sample_ai_real_building_capture_ifcx();
+        let ifcx_content = format!("\u{FEFF}{}", ai_doc.to_json_pretty());
+        std::fs::write(&ifcx_path, &ifcx_content).unwrap();
 
         let projs = crate::core::InternalVault::list_personal_vault_projects();
-        let ifc_entry = projs
+        let ifcx_entry = projs
             .iter()
-            .find(|p| p.filename == "Jakarta_Tower.IFC")
-            .expect("Nested .IFC file must be discovered in Vault projects");
-        assert_eq!(ifc_entry.rel_path, "Imports/Client_A/Jakarta_Tower.IFC");
-        assert!(ifc_entry.name.contains("[IFC]"));
-        assert!(ifc_entry.member_count >= 2);
+            .find(|p| p.filename == "Jakarta_Tower.IFCX")
+            .expect("Nested .IFCX file must be discovered in Vault projects");
+        assert_eq!(ifcx_entry.rel_path, "Imports/Client_A/Jakarta_Tower.IFCX");
+        assert!(ifcx_entry.name.contains("[IFCX]"));
+        assert!(ifcx_entry.member_count >= 4);
 
         let ctx_files = crate::core::InternalVault::list_vault_context_files(64);
-        assert!(ctx_files.iter().any(|f| f.rel_path == "Imports/Client_A/Jakarta_Tower.IFC"));
+        assert!(ctx_files.iter().any(|f| f.rel_path == "Imports/Client_A/Jakarta_Tower.IFCX"));
 
-        let raw = crate::core::InternalVault::load_personal_vault_raw(ifc_entry)
-            .expect("Loading Vault .IFC content should succeed");
-        let (bim, site_geo, summary) =
-            crate::core::ifc::IfcModel::parse_to_bim_project_with_fallback(&raw, &ifc_entry.filename)
-                .expect("IFC STEP file should convert cleanly into editable BimProject");
-        assert_eq!(bim.columns.len(), 1);
-        assert_eq!(bim.runs.len(), 1);
-        assert_eq!(bim.levels.len(), 2);
-        assert!(summary.contains("Imported IFC"));
-        let (lat, lon) = site_geo.expect("IFCSITE lat/lon should parse cleanly");
-        assert!((lat - (-6.2)).abs() < 1e-4);
-        assert!((lon - 106.833333).abs() < 1e-3);
+        let raw = crate::core::InternalVault::load_personal_vault_raw(ifcx_entry)
+            .expect("Loading Vault .IFCX content should succeed");
+        let (bim, site_geo, _src, _addr, summary) =
+            crate::core::ifcx::IfcxDocument::parse_to_bim_project_with_geo(
+                &raw,
+                &ifcx_entry.filename,
+                &ifcx_entry.rel_path,
+            )
+            .expect("IFCX file should convert cleanly into editable BimProject");
+        assert_eq!(bim.columns.len(), 4);
+        assert_eq!(bim.runs.len(), 4);
+        assert_eq!(bim.slabs.len(), 1);
+        assert!(summary.contains("IFCX"));
+        let (lat, lon) = site_geo.expect("eigengraph::geo::wgs84 lat/lon should parse cleanly");
+        assert!((lat - (-6.8915)).abs() < 1e-4);
+        assert!((lon - 107.6107).abs() < 1e-4);
 
         crate::core::InternalVault::reset_runtime_vault_dir();
         let _ = std::fs::remove_dir_all(&temp_vault);

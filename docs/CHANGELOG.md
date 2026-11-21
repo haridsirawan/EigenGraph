@@ -7,6 +7,22 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.6.6] - 2026-11-21 — Phase 66: 100% Pure-Rust IFCX (IFC 5 JSON ECS) Engine, Living `earth_globe.ifcx` WebGL2 Pipeline, Multi-Layer Non-Destructive Composition & Complete Retirement of Legacy STEP IFC
+
+### Added & Changed
+- **100% Pure-Rust IFCX (buildingSMART IFC 5 JSON ECS) Core Engine (`src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Built a clean, zero-extra-crate IFCX JSON ECS document and composition model (`IfcxDocument`, `IfcxHeader`, `IfcxImport`, `IfcxNode`, `IfcxStage`, `UsdGeomMesh`, `IfcxGeoWgs84`, `IfcxAriOverlay`) supporting standard `bsi::ifc::class`, `bsi::ifc::prop`, `usd::usdgeom::mesh`, `usd::xformop::transform`, and EigenGraph extension namespaces (`eigengraph::geo::wgs84`, `eigengraph::earth::globe`, `eigengraph::bim::project`, `eigengraph::fem::*`, `eigengraph::ari::v2`).
+  - Added **Non-Destructive Multi-Layer Composition (`IfcxStage::compose`)**, allowing base `earth_globe.ifcx`, future AI real-world building capture `.ifcx` layers, user continuation edit deltas, and 6-DOF FEM/ARI overlays to stack seamlessly without mutating earlier layers.
+  - Added lossless `BimProject ↔ .ifcx` serialization AND automatic reconstruction of editable `BimProject` / 6-DOF `StructuralModel` elements directly from external or AI-authored `bsi::ifc::class` + `usd::usdgeom::mesh` layers (`sample_ai_real_building_capture_ifcx`), plus `IfcSite` `usd::usdgeom::mesh` → `TinSurfaceMesh` extraction.
+- **100% IFCX-Driven 3D Earth Globe on WebGL2 (`src/views/webgl_earth.rs`, `src/core/ifcx.rs`)**:
+  - Implemented `IfcxStage::build_earth_globe_layer(theme)` modeling the entire 3D Earth Globe (64×32 spherical ocean dome `/earth/globe/ocean`, subdivided continents & Indonesian archipelago `/earth/globe/landmasses/*`, mountain ridges `/earth/globe/ridges/*`, and major rivers `/earth/globe/rivers/*`) as native `IfcxNode`s carrying `usd::usdgeom::mesh`.
+  - Wired `build_planetary_vector_globe_mesh(theme)` directly through `build_gpu_mesh_from_ifcx_earth_layer(&earth_ifcx)` for 1:1 `usd::usdgeom::mesh` → WebGL2 VBO/IBO rendering with **0% raster pixels**.
+- **Complete Retirement of Legacy STEP IFC (`IFC2x3` / `IFC4` / `IFC4.3`)**:
+  - Deleted `src/core/ifc.rs` (~5,650 lines) and `src/views/industrialized/ifc_inspector.rs`, removing all `ISO-10303-21` STEP parsers and writers across `src/core/bim.rs`, `src/core/interop.rs` (`IfcxExporter`, `IfcxImporter`, `IfcxSamExporter`), `src/core/gis/crs_projection.rs`, `src/core/vault.rs`, `index.html`, `src/app.rs`, and all views.
+  - Upgraded Vault recursive discovery (native + browser `index.html`), Dynamic Island `IFCX` / `Earth .ifcx` buttons, `/ifcx` & `/earth-ifcx` slash commands, and **OpenBIM IFCX (IFC 5) Studio** (`src/views/industrialized/openbim_studio.rs`) to 100% `.ifcx`.
+
+---
+
 ## [v0.6.5] - 2026-11-20 — Phase 65: Native WebGL2 (`egui_glow`) 3D Vector Earth Renderer, 24-Bit Hardware Z-Buffer, `f64 → f32` RTC Floating Origin, Procedural Day/Dusk/Night Shaders & 0% Raster Pixels
 
 ### Added & Changed

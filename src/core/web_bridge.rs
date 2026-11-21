@@ -473,7 +473,7 @@ pub fn trigger_file_picker(accept: &str) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = accept;
-        if let Some((filename, content)) = pick_file_native("Open EigenGraph File (.ifc, .eigen, .json, .csv)") {
+        if let Some((filename, content)) = pick_file_native("Open EigenGraph File (.ifcx, .eigen, .json, .csv)") {
             if let Ok(mut guard) = PENDING_NATIVE_IMPORTED_FILE.lock() {
                 *guard = Some(ImportedFilePayload { filename, content });
             }

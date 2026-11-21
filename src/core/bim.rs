@@ -7,7 +7,7 @@
 //! - Revit-Style Object Snaps (`SE, SM, SI, SC, SP, SN`), Angular Guides, and Graduated Ruler
 //! - Transactional Command Bus (`BimCommand`) with JSON execution and Unlimited Undo/Redo
 //! - Dual Physical-to-Analytical FEM & Live ARI Synchronization (`to_structural_model` + `AriEngine`)
-//! - Multi-View Projection (Floor Plan View Range, Live Section Cut Poché, Vector Sheet SVG/PDF & Full IFC4).
+//! - Multi-View Projection (Floor Plan View Range, Live Section Cut Poché, Vector Sheet SVG/PDF & Pure IFCX).
 
 use crate::core::ari::{AriEngine, RedundancyAssessment};
 use crate::core::csg::{
@@ -2990,202 +2990,29 @@ trailer << /Size 6 /Root 1 0 R >>\n%%EOF\n"
         dxf
     }
 
-    /// Exports the complete BIM project into an industry-standard **IFC4** STEP file with full
-    /// spatial hierarchy (`IfcProject -> IfcSite -> IfcBuilding -> IfcBuildingStorey`) and entities
-    /// (`IfcWall`, `IfcOpeningElement`, `IfcDoor`, `IfcWindow`, `IfcColumn`, `IfcBeam`, `IfcFooting`,
-    /// `IfcSlab`, `IfcSpace`, and `IfcReinforcingBar`).
-    /// Converts decimal degrees to IFC `IfcCompoundPlaneAngleMeasure` `(deg, min, sec, millionths)`
-    /// handling negative southern/western values even when `|deg| < 1.0`.
-    pub fn decimal_deg_to_ifc_dms(deg: f64) -> (i32, i32, i32, i32) {
-        let sign = if deg < 0.0 { -1 } else { 1 };
-        let abs = deg.abs();
-        let d = abs.floor() as i32;
-        let rem_m = (abs - d as f64) * 60.0;
-        let m = rem_m.floor() as i32;
-        let rem_s = (rem_m - m as f64) * 60.0;
-        let mut s = rem_s.floor() as i32;
-        let mut micro = ((rem_s - s as f64) * 1_000_000.0).round() as i32;
-        if micro >= 1_000_000 {
-            micro -= 1_000_000;
-            s += 1;
-        }
-        if sign < 0 {
-            if d > 0 {
-                (-d, -m, -s, -micro)
-            } else if m > 0 {
-                (0, -m, -s, -micro)
-            } else if s > 0 {
-                (0, 0, -s, -micro)
-            } else {
-                (0, 0, 0, -micro)
-            }
-        } else {
-            (d, m, s, micro)
-        }
+    /// Exports the complete BIM project into a composable **IFCX (IFC 5 JSON ECS)** document
+    /// rooted under `/earth/sites/<site>/buildings/<bldg>`.
+    pub fn export_ifcx_spatial(&self) -> String {
+        self.export_ifcx_spatial_georeferenced(None, 0.0, None)
     }
 
-    pub fn export_ifc4_spatial(&self) -> String {
-        self.export_ifc4_spatial_georeferenced(None, 0.0, None)
-    }
-
-    /// Exports BIM model to ISO 10303-21 IFC4 STEP with full OpenBIM georeferencing:
-    /// `IFCSITE` (`RefLatitude`, `RefLongitude`, `RefElevation`), `IFCPOSTALADDRESS`,
-    /// `IFCGEOMETRICREPRESENTATIONCONTEXT` (`TrueNorth`), `IFCPROJECTEDCRS` (UTM EPSG),
-    /// and `IFCMAPCONVERSION`.
-    pub fn export_ifc4_spatial_georeferenced(
+    /// Exports the BIM project to a georeferenced `.ifcx` JSON layer with `eigengraph::geo::wgs84`,
+    /// `bsi::ifc::class`, `usd::usdgeom::mesh`, and lossless `eigengraph::bim::project`.
+    pub fn export_ifcx_spatial_georeferenced(
         &self,
         geo_opt: Option<(f64, f64, f64)>,
         heading_deg: f64,
         postal_city: Option<&str>,
     ) -> String {
-        let step_clean = |s: &str| -> String { s.replace('\'', "") };
-        let mut out = String::with_capacity(8192);
-        out.push_str("ISO-10303-21;\nHEADER;\n");
-        out.push_str("FILE_DESCRIPTION(('ViewDefinition [ReferenceView_V1.2]'),'2;1');\n");
-        out.push_str(&format!(
-            "FILE_NAME('{}.ifc','2026-11-18T12:00:00',('EigenGraph BIMCraft Engine'),('EigenGraph 10D'),'EigenGraph v0.5.8','EigenGraph IFC4','');\n",
-            step_clean(&self.project_name)
-        ));
-        out.push_str("FILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n");
-
-        // Project units: put .MILLI.,.METRE. first so structural coordinates (mm) stay invariant on re-import,
-        // while #17 defines .METRE. specifically for IFCPROJECTEDCRS MapUnit.
-        out.push_str("#12=IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);\n");
-        out.push_str("#16=IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.);\n");
-        out.push_str("#15=IFCUNITASSIGNMENT((#12,#16));\n");
-        out.push_str("#19=IFCCARTESIANPOINT((0.,0.,0.));\n");
-        out.push_str("#4=IFCAXIS2PLACEMENT3D(#19,$,$);\n");
-        out.push_str("#5=IFCLOCALPLACEMENT($,#4);\n");
-        let h_rad = heading_deg.to_radians();
-        out.push_str(&format!(
-            "#6=IFCDIRECTION(({:.8},{:.8}));\n",
-            h_rad.sin(),
-            h_rad.cos()
-        ));
-        out.push_str("#7=IFCDIRECTION((1.,0.,0.));\n");
-        out.push_str("#8=IFCDIRECTION((0.,0.,1.));\n");
-        out.push_str("#9=IFCAXIS2PLACEMENT3D(#19,#8,#7);\n");
-        out.push_str("#10=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,#9,#6);\n");
-        out.push_str(&format!(
-            "#1=IFCPROJECT('0EigenGraphProj0000001',$,'{}',$,$,$,$,(#10),#15);\n",
-            step_clean(&self.project_name)
-        ));
-
-        let addr_ref = if let Some(city) = postal_city.map(str::trim).filter(|c| !c.is_empty()) {
-            out.push_str(&format!(
-                "#14=IFCPOSTALADDRESS($,$,$,$,$,$,'{}',$,$,$);\n",
-                step_clean(city)
-            ));
-            "#14".to_string()
-        } else {
-            "$".to_string()
-        };
-
-        if let Some((lat, lon, elev_m)) = geo_opt.filter(|(la, lo, _)| la.is_finite() && lo.is_finite() && (la.abs() > 1e-4 || lo.abs() > 1e-4)) {
-            let (ld, lm, ls, lu) = Self::decimal_deg_to_ifc_dms(lat);
-            let (od, om, os, ou) = Self::decimal_deg_to_ifc_dms(lon);
-            let zone = crate::core::gis::crs_projection::GeoProjectionEngine::auto_detect_zone(lon);
-            let is_south = lat < 0.0;
-            let engine = crate::core::gis::crs_projection::GeoProjectionEngine::new(zone, is_south);
-            let (easting_m, northing_m, _) = engine.wgs84_to_utm(lat, lon);
-            let epsg = if is_south { 32700 + zone as u32 } else { 32600 + zone as u32 };
-            let hem_ch = if is_south { 'S' } else { 'N' };
-            out.push_str(&format!(
-                "#2=IFCSITE('0EigenGraphSite0000001',$,'Georeferenced Site',$,$,#5,$,$,.ELEMENT.,({ld},{lm},{ls},{lu}),({od},{om},{os},{ou}),{elev_m:.3},$,{addr_ref});\n"
-            ));
-            out.push_str("#17=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);\n");
-            out.push_str(&format!(
-                "#11=IFCPROJECTEDCRS('EPSG:{epsg}','WGS 84 / UTM zone {zone}{hem_ch}','WGS84',$,'UTM',$,#17);\n"
-            ));
-            out.push_str(&format!(
-                "#13=IFCMAPCONVERSION(#10,#11,{easting_m:.4},{northing_m:.4},{elev_m:.3},{:.8},{:.8},1.0);\n",
-                h_rad.cos(),
-                h_rad.sin()
-            ));
-        } else {
-            out.push_str(&format!(
-                "#2=IFCSITE('0EigenGraphSite0000001',$,'Default Site',$,$,#5,$,$,.ELEMENT.,$,$,$,$,{addr_ref});\n"
-            ));
-        }
-        out.push_str("#3=IFCBUILDING('0EigenGraphBldg0000001',$,'Main Building',$,$,#5,$,$,.ELEMENT.,$,$,$);\n");
-
-        let mut step_id = 20usize;
-        for lvl in &self.levels {
-            out.push_str(&format!(
-                "#{step_id}=IFCBUILDINGSTOREY('0Storey{:015}',$,'{}',$,$,$,$,$,.ELEMENT.,{:.1});\n",
-                lvl.id, lvl.name, lvl.elevation_mm
-            ));
-            step_id += 1;
-        }
-        for w in &self.walls {
-            out.push_str(&format!(
-                "#{step_id}=IFCWALL('0Wall{:017}',$,'{}',$,$,$,$,$,.STANDARD.);\n",
-                w.id, w.name
-            ));
-            step_id += 1;
-            for op in &w.openings {
-                let class = match op.kind {
-                    OpeningKind::SingleDoor | OpeningKind::DoubleDoor | OpeningKind::SlidingDoor => "IFCDOOR",
-                    _ => "IFCWINDOW",
-                };
-                out.push_str(&format!(
-                    "#{step_id}=IFCOPENINGELEMENT('0Void{:017}',$,'Opening {}',$,$,$,$,$,.OPENING.);\n",
-                    op.id, op.mark
-                ));
-                step_id += 1;
-                out.push_str(&format!(
-                    "#{step_id}={class}('0Elem{:017}',$,'{}',$,$,$,$,$,{:.1},{:.1},.SINGLE_SWING_LEFT.,$,$);\n",
-                    op.id, op.mark, op.height_mm, op.width_mm
-                ));
-                step_id += 1;
-            }
-        }
-        for c in &self.columns {
-            out.push_str(&format!(
-                "#{step_id}=IFCCOLUMN('0Colm{:017}',$,'{}','{}',$,$,$,$,.COLUMN.);\n",
-                c.id, c.name, c.profile_name
-            ));
-            step_id += 1;
-        }
-        for r in &self.runs {
-            let (ifc_cls, pred) = r.category.ifc_class();
-            out.push_str(&format!(
-                "#{step_id}={ifc_cls}('0RunE{:017}',$,'{}','{}',$,$,$,$,{pred});\n",
-                r.id, r.name, r.profile_name
-            ));
-            step_id += 1;
-        }
-        for f in &self.footings {
-            out.push_str(&format!(
-                "#{step_id}=IFCFOOTING('0Foot{:017}',$,'{}',$,$,$,$,$,.PAD_FOOTING.);\n",
-                f.id, f.name
-            ));
-            step_id += 1;
-        }
-        for s in &self.slabs {
-            let kind = if s.is_roof { ".ROOF." } else { ".FLOOR." };
-            out.push_str(&format!(
-                "#{step_id}=IFCSLAB('0Slab{:017}',$,'{}',$,$,$,$,$,{kind});\n",
-                s.id, s.name
-            ));
-            step_id += 1;
-        }
-        for rm in &self.rooms {
-            out.push_str(&format!(
-                "#{step_id}=IFCSPACE('0Room{:017}',$,'{}','{}',$,$,$,$,.INTERNAL.,$);\n",
-                rm.id, rm.number, rm.name
-            ));
-            step_id += 1;
-        }
-        for rb in &self.rebars {
-            out.push_str(&format!(
-                "#{step_id}=IFCREINFORCINGBAR('0Rebr{:017}',$,'{}','{}',$,$,$,$,$,{:.1},$,$,.MAIN.);\n",
-                rb.id, rb.host_kind, rb.grade, rb.diameter_mm
-            ));
-            step_id += 1;
-        }
-        out.push_str("ENDSEC;\nEND-ISO-10303-21;\n");
-        out
+        crate::core::ifcx::IfcxDocument::from_bim_project(
+            self,
+            geo_opt,
+            heading_deg,
+            postal_city,
+            None,
+            None,
+        )
+        .to_json_pretty()
     }
 }
 
@@ -4565,7 +4392,7 @@ mod tests {
         bus.redo().expect("Redo should succeed");
         assert_eq!(bus.project.rooms.len(), 4);
 
-        // Live Section Cut & SVG/PDF/IFC4 Exports
+        // Live Section Cut & SVG/PDF/IFCX Exports
         let sec = bus
             .project
             .generate_section_cut(P2(-1000.0, 4500.0), P2(13000.0, 4500.0));
@@ -4578,8 +4405,8 @@ mod tests {
         let pdf = bus.project.export_sheet_pdf("A101", "Floor Plan & Section");
         assert!(pdf.starts_with(b"%PDF-1.4"));
 
-        let ifc = bus.project.export_ifc4_spatial();
-        assert!(ifc.contains("IFCBUILDINGSTOREY") && ifc.contains("IFCREINFORCINGBAR"));
+        let ifcx = bus.project.export_ifcx_spatial();
+        assert!(ifcx.contains("\"ifcxVersion\"") && ifcx.contains("IfcBuildingStorey") && ifcx.contains("usd::usdgeom::mesh"));
     }
 
     #[test]

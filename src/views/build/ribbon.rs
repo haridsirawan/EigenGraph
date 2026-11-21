@@ -264,8 +264,8 @@ impl BuildView {
                                 }
                                 BimRibbonTab::OpenBimSpec => {
                                     let tools = [
-                                        ("📥 Import IFC4 STEP", "Parse OpenBIM ISO 10303-21 physical file"),
-                                        ("📤 Export IFC4 RV", "Export buildingSMART certified IFC4 Reference View"),
+                                        ("Import IFCX (.ifcx)", "Compose OpenBIM IFC 5 JSON ECS layer"),
+                                        ("Export IFCX (.ifcx)", "Export pure IFCX (IFC 5) scene graph"),
                                         ("📋 Export ifcJSON-4", "Serialize spatial graph into buildingSMART JSON"),
                                         ("🌐 Speckle Sync", "Sync geometry stream with Speckle server"),
                                         ("🧊 Wavefront OBJ", "Export triangulated 3D mesh for visualization"),

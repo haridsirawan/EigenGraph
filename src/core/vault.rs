@@ -535,10 +535,10 @@ impl InternalVault {
                     continue;
                 }
                 let lower = fname.to_lowercase();
-                let is_ifc = lower.ends_with(".ifc");
+                let is_ifcx = lower.ends_with(".ifcx");
                 let is_eigen = lower.ends_with(".eigen") || lower.ends_with(".eigen.json");
                 let is_json = lower.ends_with(".json");
-                if !is_ifc && !is_eigen && !is_json {
+                if !is_ifcx && !is_eigen && !is_json {
                     continue;
                 }
                 let rel_path = path
@@ -563,75 +563,66 @@ impl InternalVault {
                     "Vault Root".to_string()
                 };
 
-                if is_ifc {
+                if is_ifcx {
                     let size_bytes = std::fs::metadata(&path).map(|m| m.len() as usize).unwrap_or(0);
                     let mut display_name = fname
-                        .trim_end_matches(".ifc")
-                        .trim_end_matches(".IFC")
+                        .trim_end_matches(".ifcx")
+                        .trim_end_matches(".IFCX")
                         .to_string();
                     let (mut node_count, mut member_count) = (0usize, 0usize);
-                    if let Ok(file) = std::fs::File::open(&path) {
-                        use std::io::Read;
-                        let mut reader = std::io::BufReader::with_capacity(65536, file);
-                        let mut chunk = [0_u8; 65536];
-                        let mut carry = Vec::<u8>::with_capacity(64);
-                        let mut head_captured = false;
-                        while let Ok(n) = reader.read(&mut chunk) {
-                            if n == 0 {
-                                break;
-                            }
-                            let mut window = Vec::with_capacity(carry.len() + n);
-                            window.extend_from_slice(&carry);
-                            window.extend_from_slice(&chunk[..n]);
-                            if !head_captured {
-                                head_captured = true;
-                                let head_str = String::from_utf8_lossy(&window[..window.len().min(65536)]);
-                                let clean_head = head_str.trim_start_matches('\u{FEFF}');
-                                let head_upper = clean_head.to_ascii_uppercase();
-                                if let Some(pos) = head_upper.find("IFCPROJECT(") {
-                                    let tail = &clean_head[pos..clean_head.len().min(pos + 240)];
-                                    let quotes: Vec<&str> = tail.split('\'').collect();
-                                    if quotes.len() >= 4 && !quotes[3].trim().is_empty() {
-                                        display_name = quotes[3].trim().to_string();
-                                    }
+                    if let Ok(raw_ifcx) = std::fs::read_to_string(&path) {
+                        if let Ok(doc) = crate::core::ifcx::IfcxDocument::parse(&raw_ifcx) {
+                            if let Some(bldg) = doc
+                                .data
+                                .iter()
+                                .find(|n| n.ifc_class() == Some("IfcBuilding"))
+                            {
+                                let dn = bldg.display_name();
+                                if !dn.trim().is_empty() {
+                                    display_name = dn;
                                 }
+                            } else if !doc.header.id.trim().is_empty() {
+                                display_name = doc.header.id.clone();
                             }
-                            // Count STEP entities strictly inside the new slice while preserving boundary overlap
-                            let search_len = window.len();
-                            let tail_keep = 36.min(search_len);
-                            let upper = window.iter().map(|b| b.to_ascii_uppercase()).collect::<Vec<u8>>();
-                            let upper_s = String::from_utf8_lossy(&upper);
-                            let cutoff = if n == chunk.len() { search_len.saturating_sub(tail_keep) } else { search_len };
-                            let scan_slice = &upper_s[..cutoff];
-                            node_count += scan_slice.matches("=IFCBUILDINGSTOREY(").count()
-                                + scan_slice.matches("= IFCBUILDINGSTOREY(").count();
-                            for pat in [
-                                "IFCWALL", "IFCCOLUMN", "IFCBEAM", "IFCSLAB",
-                                "IFCFOOTING", "IFCMEMBER", "IFCROOF", "IFCDOOR", "IFCWINDOW",
-                            ] {
-                                member_count += scan_slice.matches(&format!("={pat}(")).count()
-                                    + scan_slice.matches(&format!("= {pat}(")).count();
-                            }
-                            carry.clear();
-                            if n == chunk.len() && search_len >= tail_keep {
-                                carry.extend_from_slice(&window[search_len - tail_keep..]);
-                            }
+                            node_count = doc
+                                .data
+                                .iter()
+                                .filter(|n| n.ifc_class() == Some("IfcBuildingStorey"))
+                                .count();
+                            member_count = doc
+                                .data
+                                .iter()
+                                .filter(|n| {
+                                    matches!(
+                                        n.ifc_class(),
+                                        Some(
+                                            "IfcWall"
+                                                | "IfcColumn"
+                                                | "IfcBeam"
+                                                | "IfcSlab"
+                                                | "IfcRoof"
+                                                | "IfcFooting"
+                                                | "IfcMember"
+                                        )
+                                    )
+                                })
+                                .count();
                         }
                     }
                     out.push(PersonalVaultProjectEntry {
-                        name: format!("{display_name} [IFC]"),
+                        name: format!("{display_name} [IFCX]"),
                         filename: fname.to_string(),
                         rel_path,
                         abs_path: path.to_string_lossy().to_string(),
                         category: if cat_label == "Vault Root" {
-                            "IFC Model".to_string()
+                            "IFCX Layer".to_string()
                         } else {
                             cat_label
                         },
                         node_count,
                         member_count,
                         size_bytes,
-                        updated_label: "Local Disk (IFC)".to_string(),
+                        updated_label: "Local Disk (IFCX)".to_string(),
                     });
                     continue;
                 }
@@ -820,7 +811,7 @@ impl InternalVault {
                         || lower.ends_with(".txt")
                         || lower.ends_with(".csv")
                         || lower.ends_with(".xyz")
-                        || lower.ends_with(".ifc"))
+                        || lower.ends_with(".ifcx"))
                     {
                         continue;
                     }
@@ -1224,7 +1215,7 @@ impl InternalVault {
             let mut footprint = WorldBuildingProxy::default_footprint_m();
             let mut height_m = (entry.node_count.max(2) as f64 * 3.5).clamp(7.0, 220.0);
 
-            if !lower.ends_with(".ifc") {
+            if !lower.ends_with(".ifcx") {
                 if let Some(snippet) = Self::read_vault_context_snippet(&entry.rel_path, 32768) {
                     if let Some(pos) = snippet.find("\"world_origin_lat_lon\"") {
                         let tail = &snippet[pos..snippet.len().min(pos + 96)];
@@ -1244,74 +1235,22 @@ impl InternalVault {
                     }
                 }
             } else {
-                // Fast O(1) head check for .ifc geo-tags (`IFCSITE`, `IFCPOSTALADDRESS`, or folder/filename city hint)
-                if let Some(head) = Self::read_vault_context_snippet(&entry.rel_path, 65536) {
-                    if let Ok(head_step) = crate::core::ifc::StepParser::parse_step(&head) {
-                        for site in head_step.get_entities_of_type("IFCSITE") {
-                            let dms_to_deg = |idx: usize| -> Option<f64> {
-                                let list = site.parameters.get(idx)?.as_list()?;
-                                if list.len() < 2 {
-                                    return None;
-                                }
-                                let d = list.first()?.as_f64().unwrap_or(0.0);
-                                let m = list.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                let s = list.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                let mil = list.get(3).and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                let sign = if d < 0.0 || m < 0.0 || s < 0.0 { -1.0 } else { 1.0 };
-                                Some(sign * (d.abs() + m.abs() / 60.0 + (s.abs() + mil.abs() * 1e-6) / 3600.0))
-                            };
-                            if let (Some(la), Some(lo)) = (dms_to_deg(9), dms_to_deg(10)) {
-                                if (la.abs() > 1e-4 || lo.abs() > 1e-4)
-                                    && (-90.0..=90.0).contains(&la)
-                                    && (-180.0..=180.0).contains(&lo)
-                                {
-                                    lat = la;
-                                    lon = lo;
-                                    src = GeoPlacementSource::FileNativeGeo;
-                                    break;
-                                }
-                            }
-                        }
-                        if src == GeoPlacementSource::StagingCampusAuto {
-                            for mc in head_step.get_entities_of_type("IFCMAPCONVERSION") {
-                                let east = mc.get_f64(2).unwrap_or(0.0);
-                                let north = mc.get_f64(3).unwrap_or(0.0);
-                                if east.abs() >= 100.0 || north.abs() >= 100.0 {
-                                    if let Some(crs) = mc.get_ref(1).and_then(|cid| head_step.entities.get(&cid)) {
-                                        for p in &crs.parameters {
-                                            if let Some(s) = p.as_str() {
-                                                let up = s.to_ascii_uppercase();
-                                                if let Some(pos) = up.find("EPSG:") {
-                                                    if let Ok(code) = up[pos + 5..].trim().parse::<u32>() {
-                                                        let (z, south) = if (32601..=32660).contains(&code) {
-                                                            ((code - 32600) as u8, false)
-                                                        } else if (32701..=32760).contains(&code) {
-                                                            ((code - 32700) as u8, true)
-                                                        } else {
-                                                            continue;
-                                                        };
-                                                        let eng = crate::core::gis::GeoProjectionEngine::new(z, south);
-                                                        let (em, nm) = if east.abs() > 10_000_000.0 { (east * 0.001, north * 0.001) } else { (east, north) };
-                                                        let (la, lo) = eng.utm_to_wgs84(em, nm);
-                                                        if (-85.0..=85.0).contains(&la) && (-180.0..=180.0).contains(&lo) {
-                                                            lat = la;
-                                                            lon = lo;
-                                                            src = GeoPlacementSource::FileNativeGeo;
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                // Fast O(1) JSON geo check for .ifcx (`eigengraph::geo::wgs84` or city hint)
+                if let Some(raw_ifcx) = Self::read_vault_context_snippet(&entry.rel_path, 262_144) {
+                    if let Some((la, lo, _elev, addr)) =
+                        crate::core::ifcx::IfcxDocument::extract_geo_fast(&raw_ifcx)
+                    {
+                        lat = la;
+                        lon = lo;
+                        src = GeoPlacementSource::FileNativeGeo;
+                        if !addr.is_empty() {
+                            hint = addr;
                         }
                     }
                     if src == GeoPlacementSource::StagingCampusAuto {
                         if let Some((city, cla, clo)) = SlippyMapState::resolve_city_hint_in_text(&format!(
                             "{} | {} | {}",
-                            entry.rel_path, entry.name, &head[..head.len().min(4096)]
+                            entry.rel_path, entry.name, &raw_ifcx[..raw_ifcx.len().min(4096)]
                         )) {
                             lat = cla;
                             lon = clo;
@@ -1879,11 +1818,11 @@ impl InternalVault {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.extension().and_then(|s| s.to_str()) == Some("ifc") {
+                    if path.extension().and_then(|s| s.to_str()) == Some("ifcx") {
                         let name = path
                             .file_name()
                             .and_then(|s| s.to_str())
-                            .unwrap_or("model.ifc")
+                            .unwrap_or("model.ifcx")
                             .to_string();
                         let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
                         files.push((name, size_bytes));

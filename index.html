@@ -105,7 +105,7 @@
       function startFileStream(file, filename, relPath, mode) {
         activeStream = {
           id: nextStreamId++,
-          filename: String(filename || (file && file.name) || "model.ifc"),
+          filename: String(filename || (file && file.name) || "model.ifcx"),
           rel_path: String(relPath || ""),
           mode: String(mode || "vault_open"),
           file,
@@ -215,41 +215,44 @@
         const lower = base.toLowerCase();
         const folderPart = norm.includes("/") ? norm.slice(0, norm.lastIndexOf("/")) : "";
         const isProjFolder = norm.startsWith("Projects/");
-        const isIfc = lower.endsWith(".ifc");
+        const isIfcx = lower.endsWith(".ifcx");
         const isEigenExt = lower.endsWith(".eigen") || lower.endsWith(".eigen.json");
         const isProjJson =
           isProjFolder &&
           lower.endsWith(".json") &&
           base !== "active_live_project.json" &&
           base !== "_eigengraph_world_index.json";
-        if (!isIfc && !isEigenExt && !isProjJson) return null;
+        if (!isIfcx && !isEigenExt && !isProjJson) return null;
 
         let displayName = base
           .replace(/\.eigen\.json$/i, "")
           .replace(/\.eigen$/i, "")
-          .replace(/\.ifc$/i, "")
+          .replace(/\.ifcx$/i, "")
           .replace(/\.json$/i, "");
         let nodeCount = 0;
         let memberCount = 0;
-        if (isIfc) {
+        if (isIfcx) {
           try {
-            const head = content.slice(0, HEAD_SLICE_BYTES);
-            const projMatch = head.match(/IFCPROJECT\s*\([^,]*,[^,]*,\s*'([^']+)'/i);
-            if (projMatch && projMatch[1] && projMatch[1].trim()) {
-              displayName = projMatch[1].trim();
+            const parsed = JSON.parse(content);
+            if (parsed && Array.isArray(parsed.data)) {
+              const bldg = parsed.data.find((n) => n && n.attributes && n.attributes["bsi::ifc::class"] && n.attributes["bsi::ifc::class"].code === "IfcBuilding");
+              if (bldg && bldg.attributes && bldg.attributes["bsi::ifc::prop"] && bldg.attributes["bsi::ifc::prop"].name) {
+                displayName = String(bldg.attributes["bsi::ifc::prop"].name).trim();
+              } else if (parsed.header && parsed.header.id) {
+                displayName = String(parsed.header.id).trim();
+              }
+              nodeCount = parsed.data.filter((n) => n && n.attributes && n.attributes["bsi::ifc::class"] && n.attributes["bsi::ifc::class"].code === "IfcBuildingStorey").length;
+              const elemClasses = new Set(["IfcWall", "IfcColumn", "IfcBeam", "IfcSlab", "IfcRoof", "IfcFooting", "IfcMember"]);
+              memberCount = parsed.data.filter((n) => n && n.attributes && n.attributes["bsi::ifc::class"] && elemClasses.has(n.attributes["bsi::ifc::class"].code)).length;
             }
-            const elemMatches = content.match(/=\s*IFC(?:WALL|WALLSTANDARDCASE|COLUMN|BEAM|SLAB|FOOTING|MEMBER|ROOF|STAIR|DOOR|WINDOW)\s*\(/gi);
-            const storeyMatches = content.match(/=\s*IFCBUILDINGSTOREY\s*\(/gi);
-            nodeCount = storeyMatches ? storeyMatches.length : 0;
-            memberCount = elemMatches ? elemMatches.length : 0;
           } catch (_) {}
           const dt = modifiedMs ? new Date(modifiedMs) : new Date();
           const updatedAt = isNaN(dt.getTime()) ? "Indexed" : dt.toISOString().slice(0, 16).replace("T", " ") + " UTC";
           return {
-            name: `${displayName} [IFC]`,
+            name: `${displayName} [IFCX]`,
             filename: base,
             rel_path: norm,
-            category: folderPart || "IFC Model",
+            category: folderPart || "IFCX Layer",
             node_count: nodeCount,
             member_count: memberCount,
             size_bytes: content.length,
@@ -369,7 +372,7 @@
                 lower.endsWith(".md") ||
                 lower.endsWith(".txt") ||
                 lower.endsWith(".csv") ||
-                lower.endsWith(".ifc") ||
+                lower.endsWith(".ifcx") ||
                 lower.endsWith(".xyz") ||
                 lower.endsWith(".e2k")
               )
@@ -589,7 +592,7 @@
                   lower.endsWith(".txt") ||
                   lower.endsWith(".md") ||
                   lower.endsWith(".csv") ||
-                  lower.endsWith(".ifc") ||
+                  lower.endsWith(".ifcx") ||
                   lower.endsWith(".xyz") ||
                   lower.endsWith(".e2k")
                 ) {
@@ -1072,7 +1075,7 @@
               }
             });
           }
-          activeFileInput.accept = accept || ".ifc,.eigen,.json,.geojson,.csv,.xyz,.e2k";
+          activeFileInput.accept = accept || ".ifcx,.eigen,.json,.geojson,.csv,.xyz,.e2k";
           activeFileInput.click();
         },
         pollPickedFileJson: () => {

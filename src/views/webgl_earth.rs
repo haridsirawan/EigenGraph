@@ -16,10 +16,8 @@ use egui::{Color32, Pos2, Rect};
 use crate::core::gis::earth_globe::{
     lat_lon_to_unit_sphere, GlobeCamera, GlobeScreenTransform, PlanetaryWorldState,
 };
-use crate::core::gis::map_widget::{
-    SlippyMapState, VectorEarthTheme, EARTH_RADIUS_METERS, WORLD_LANDMASSES, WORLD_MAJOR_RIVERS,
-    WORLD_MOUNTAIN_RIDGES,
-};
+use crate::core::gis::map_widget::{SlippyMapState, VectorEarthTheme, EARTH_RADIUS_METERS};
+use crate::core::ifcx::{IfcxDocument, IfcxStage};
 use crate::core::gis::tin_surface::TinSurfaceMesh;
 use crate::core::gis::vector_layers::{UrbanVectorKind, UrbanVectorLayerCache};
 use crate::core::gis::world_index::WorldSpatialIndex;
@@ -341,25 +339,6 @@ fn mix_rgb(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
     ]
 }
 
-#[inline]
-fn norm3_f64(v: [f64; 3]) -> [f64; 3] {
-    let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-    if l > 1e-12 {
-        [v[0] / l, v[1] / l, v[2] / l]
-    } else {
-        [0.0, 1.0, 0.0]
-    }
-}
-
-#[inline]
-fn cross3_f64(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
 /// Simple 2D ear-clipping triangulator returning triangle index triplets into `pts`.
 fn ear_clip_indices_2d(pts: &[[f64; 2]]) -> Vec<[usize; 3]> {
     let n = pts.len();
@@ -423,229 +402,54 @@ fn ear_clip_indices_2d(pts: &[[f64; 2]]) -> Vec<[usize; 3]> {
     tris
 }
 
-/// Recursively subdivides a spherical triangle so chords never dip beneath the curved ocean sphere.
-fn push_subdivided_spherical_tri(
-    out_verts: &mut Vec<GpuEarthVertex>,
-    out_indices: &mut Vec<u32>,
-    a: [f64; 3],
-    b: [f64; 3],
-    c: [f64; 3],
-    radius: f64,
-    color: [f32; 4],
-    depth: u8,
-) {
-    let dist_sq = |u: [f64; 3], v: [f64; 3]| -> f64 {
-        (u[0] - v[0]).powi(2) + (u[1] - v[1]).powi(2) + (u[2] - v[2]).powi(2)
-    };
-    let max_e2 = dist_sq(a, b).max(dist_sq(b, c)).max(dist_sq(c, a));
-    if depth < 3 && max_e2 > 0.022 {
-        let ab = norm3_f64([a[0] + b[0], a[1] + b[1], a[2] + b[2]]);
-        let bc = norm3_f64([b[0] + c[0], b[1] + c[1], b[2] + c[2]]);
-        let ca = norm3_f64([c[0] + a[0], c[1] + a[1], c[2] + a[2]]);
-        push_subdivided_spherical_tri(out_verts, out_indices, a, ab, ca, radius, color, depth + 1);
-        push_subdivided_spherical_tri(out_verts, out_indices, ab, b, bc, radius, color, depth + 1);
-        push_subdivided_spherical_tri(out_verts, out_indices, ca, bc, c, radius, color, depth + 1);
-        push_subdivided_spherical_tri(out_verts, out_indices, ab, bc, ca, radius, color, depth + 1);
-        return;
-    }
-    let base = out_verts.len() as u32;
-    for n in [a, b, c] {
-        out_verts.push(GpuEarthVertex {
-            pos: [(n[0] * radius) as f32, (n[1] * radius) as f32, (n[2] * radius) as f32],
-            normal: [n[0] as f32, n[1] as f32, n[2] as f32],
-            color,
-            meta: [1.0, 0.0, 1.0, 0.0],
-        });
-    }
-    out_indices.extend_from_slice(&[base, base + 1, base + 2]);
-}
-
-/// Builds the complete static GPU mesh for the 3D Pure-Rust Vector Earth Globe (Pass 1):
-/// - High-resolution 64×32 UV-sphere ocean dome (`material_kind = 0.0`)
-/// - Spherical extruded continents & detailed Indonesian archipelago (`material_kind = 1.0`, with coastal bevel skirts)
-/// - 3D vector mountain ridge spines & major hydrological river ribbons (`material_kind = 3.0`)
-pub fn build_planetary_vector_globe_mesh(theme: VectorEarthTheme) -> GpuMeshPayload {
-    let pal = theme.palette();
+/// Converts a pure-vector `earth_globe.ifcx` document (`usd::usdgeom::mesh` nodes) directly 1:1
+/// into a GPU-ready `GpuMeshPayload` VBO/IBO buffer with zero raster pixels.
+pub fn build_gpu_mesh_from_ifcx_earth_layer(doc: &IfcxDocument) -> GpuMeshPayload {
     let mut vertices = Vec::with_capacity(14_000);
     let mut indices = Vec::with_capacity(32_000);
 
-    // 1. Smooth 64×32 Spherical Ocean Dome (radius = 1.0)
-    const LON_SEGS: usize = 64;
-    const LAT_SEGS: usize = 32;
-    let ocean_rgba = color_to_rgba(pal.deep_ocean);
-    let ocean_base_v = vertices.len() as u32;
-    for iy in 0..=LAT_SEGS {
-        let v = iy as f64 / LAT_SEGS as f64;
-        let lat = -std::f64::consts::FRAC_PI_2 + v * std::f64::consts::PI;
-        let (slat, clat) = (lat.sin(), lat.cos());
-        for ix in 0..=LON_SEGS {
-            let u = ix as f64 / LON_SEGS as f64;
-            let lon = -std::f64::consts::PI + u * std::f64::consts::TAU;
-            let nx = clat * lon.sin();
-            let ny = slat;
-            let nz = clat * lon.cos();
-            vertices.push(GpuEarthVertex {
-                pos: [nx as f32, ny as f32, nz as f32],
-                normal: [nx as f32, ny as f32, nz as f32],
-                color: ocean_rgba,
-                meta: [0.0, 0.0, 1.0, (u * 8.0) as f32],
-            });
-        }
-    }
-    let stride = (LON_SEGS + 1) as u32;
-    for iy in 0..LAT_SEGS as u32 {
-        for ix in 0..LON_SEGS as u32 {
-            let i00 = ocean_base_v + iy * stride + ix;
-            let i10 = i00 + 1;
-            let i01 = i00 + stride;
-            let i11 = i01 + 1;
-            indices.extend_from_slice(&[i00, i10, i11, i00, i11, i01]);
-        }
-    }
-
-    // 2. Spherical Extruded Vector Continents & Indonesian Archipelago (`WORLD_LANDMASSES`)
-    let land_base = color_to_rgba(pal.land_base);
-    let land_arid = color_to_rgba(pal.land_arid);
-    let land_polar = color_to_rgba(pal.land_polar);
-    let coast_col = color_to_rgba(pal.coast_stroke);
-    const LAND_R: f64 = 1.0022;
-    const SKIRT_R: f64 = 0.9995;
-
-    for land in WORLD_LANDMASSES {
-        if land.len() < 3 {
+    for node in &doc.data {
+        let Some(mesh) = node.mesh() else {
+            continue;
+        };
+        if mesh.points.is_empty() {
             continue;
         }
-        let unit_pts: Vec<[f64; 3]> = land
-            .iter()
-            .map(|&(la, lo)| lat_lon_to_unit_sphere(la, lo))
-            .collect();
-        let avg_lat = land.iter().map(|&(la, _)| la).sum::<f64>() / land.len() as f64;
-        let is_antarctica = avg_lat < -62.0;
+        let base_v = vertices.len() as u32;
+        let default_col = mesh.display_color.unwrap_or([0.45, 0.60, 0.72, 1.0]);
+        let default_meta = [mesh.material_kind, 0.0, 1.0, 0.0];
 
-        let proj_2d: Vec<[f64; 2]> = if is_antarctica {
-            // South-Pole stereographic projection avoids +/-180 deg seam wrap completely
-            unit_pts
-                .iter()
-                .map(|p| {
-                    let denom = (1.0 - p[1]).max(0.15);
-                    [p[0] / denom, p[2] / denom]
-                })
-                .collect()
-        } else {
-            let mut c = [0.0_f64; 3];
-            for p in &unit_pts {
-                c[0] += p[0];
-                c[1] += p[1];
-                c[2] += p[2];
-            }
-            let c_n = norm3_f64(c);
-            let ref_up = if c_n[1].abs() < 0.92 {
-                [0.0, 1.0, 0.0]
-            } else {
-                [1.0, 0.0, 0.0]
-            };
-            let u_ax = norm3_f64(cross3_f64(ref_up, c_n));
-            let v_ax = norm3_f64(cross3_f64(c_n, u_ax));
-            unit_pts
-                .iter()
-                .map(|p| {
-                    let denom = (1.0 + p[0] * c_n[0] + p[1] * c_n[1] + p[2] * c_n[2]).max(0.25);
-                    let u = (p[0] * u_ax[0] + p[1] * u_ax[1] + p[2] * u_ax[2]) / denom;
-                    let v = (p[0] * v_ax[0] + p[1] * v_ax[1] + p[2] * v_ax[2]) / denom;
-                    [u, v]
-                })
-                .collect()
-        };
-
-        let abs_lat = avg_lat.abs();
-        let fill_col = if abs_lat > 65.0 {
-            mix_rgb(land_base, land_polar, 0.72)
-        } else if (18.0..=31.0).contains(&abs_lat) {
-            mix_rgb(land_base, land_arid, 0.52)
-        } else {
-            land_base
-        };
-
-        for [i0, i1, i2] in ear_clip_indices_2d(&proj_2d) {
-            push_subdivided_spherical_tri(
-                &mut vertices,
-                &mut indices,
-                unit_pts[i0],
-                unit_pts[i1],
-                unit_pts[i2],
-                LAND_R,
-                fill_col,
-                0,
-            );
+        for (i, p) in mesh.points.iter().enumerate() {
+            let n = mesh.normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0]);
+            let c = mesh.vertex_colors.get(i).copied().unwrap_or(default_col);
+            let m = mesh.vertex_meta.get(i).copied().unwrap_or(default_meta);
+            vertices.push(GpuEarthVertex {
+                pos: [p[0] as f32, p[1] as f32, p[2] as f32],
+                normal: [n[0] as f32, n[1] as f32, n[2] as f32],
+                color: c,
+                meta: m,
+            });
         }
-
-        // Tactile 3D coastal cliff / bevel rim around each landmass & island
-        for i in 0..unit_pts.len() {
-            let a = unit_pts[i];
-            let b = unit_pts[(i + 1) % unit_pts.len()];
-            let chord = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-            let mid = norm3_f64([a[0] + b[0], a[1] + b[1], a[2] + b[2]]);
-            let edge_n = norm3_f64(cross3_f64(chord, mid));
-            let base = vertices.len() as u32;
-            for (pt, r, ao) in [
-                (a, LAND_R, 1.0_f32),
-                (b, LAND_R, 1.0),
-                (b, SKIRT_R, 0.70),
-                (a, SKIRT_R, 0.70),
-            ] {
-                vertices.push(GpuEarthVertex {
-                    pos: [(pt[0] * r) as f32, (pt[1] * r) as f32, (pt[2] * r) as f32],
-                    normal: [edge_n[0] as f32, edge_n[1] as f32, edge_n[2] as f32],
-                    color: coast_col,
-                    meta: [1.0, 0.0, ao, 0.0],
-                });
+        for [i0, i1, i2] in mesh.triangulated_indices() {
+            if i0 < mesh.points.len() && i1 < mesh.points.len() && i2 < mesh.points.len() {
+                indices.push(base_v + i0 as u32);
+                indices.push(base_v + i1 as u32);
+                indices.push(base_v + i2 as u32);
             }
-            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
-    }
-
-    // 3. 3D Vector Mountain Ridge Spines & Major Hydrological Rivers (spherical ribbons)
-    let push_spherical_ribbon = |verts: &mut Vec<GpuEarthVertex>,
-                                 idxs: &mut Vec<u32>,
-                                 chain: &[(f64, f64)],
-                                 radius: f64,
-                                 half_w_rad: f64,
-                                 col: [f32; 4]| {
-        for seg in chain.windows(2) {
-            let a = lat_lon_to_unit_sphere(seg[0].0, seg[0].1);
-            let b = lat_lon_to_unit_sphere(seg[1].0, seg[1].1);
-            let dir = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-            let mid = norm3_f64([a[0] + b[0], a[1] + b[1], a[2] + b[2]]);
-            let side = norm3_f64(cross3_f64(dir, mid));
-            let base = verts.len() as u32;
-            let corners = [
-                norm3_f64([a[0] - side[0] * half_w_rad, a[1] - side[1] * half_w_rad, a[2] - side[2] * half_w_rad]),
-                norm3_f64([a[0] + side[0] * half_w_rad, a[1] + side[1] * half_w_rad, a[2] + side[2] * half_w_rad]),
-                norm3_f64([b[0] + side[0] * half_w_rad, b[1] + side[1] * half_w_rad, b[2] + side[2] * half_w_rad]),
-                norm3_f64([b[0] - side[0] * half_w_rad, b[1] - side[1] * half_w_rad, b[2] - side[2] * half_w_rad]),
-            ];
-            for c in corners {
-                verts.push(GpuEarthVertex {
-                    pos: [(c[0] * radius) as f32, (c[1] * radius) as f32, (c[2] * radius) as f32],
-                    normal: [c[0] as f32, c[1] as f32, c[2] as f32],
-                    color: col,
-                    meta: [3.0, 0.0, 1.0, 0.0],
-                });
-            }
-            idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-        }
-    };
-
-    let ridge_rgba = color_to_rgba(pal.ridge_stroke);
-    for ridge in WORLD_MOUNTAIN_RIDGES {
-        push_spherical_ribbon(&mut vertices, &mut indices, ridge, 1.0032, 0.0024, ridge_rgba);
-    }
-    let river_rgba = color_to_rgba(pal.river_stroke);
-    for river in WORLD_MAJOR_RIVERS {
-        push_spherical_ribbon(&mut vertices, &mut indices, river, 1.0028, 0.0018, river_rgba);
     }
 
     GpuMeshPayload { vertices, indices }
+}
+
+/// Builds the complete static GPU mesh for the 3D Pure-Rust Vector Earth Globe (Pass 1)
+/// directly from the live composable `earth_globe.ifcx` IFCX (IFC 5) document:
+/// - High-resolution 64×32 UV-sphere ocean dome (`/earth/globe/ocean`, `material_kind = 0.0`)
+/// - Spherical extruded continents & Indonesian archipelago (`/earth/globe/landmasses/*`, `material_kind = 1.0`)
+/// - 3D vector mountain ridge spines & major hydrological rivers (`/earth/globe/ridges/*`, `/earth/globe/rivers/*`, `material_kind = 3.0`)
+pub fn build_planetary_vector_globe_mesh(theme: VectorEarthTheme) -> GpuMeshPayload {
+    let earth_ifcx = IfcxStage::build_earth_globe_layer(theme);
+    build_gpu_mesh_from_ifcx_earth_layer(&earth_ifcx)
 }
 
 /// Pushes an extruded 3D prism with vertical building-base Ambient Occlusion (`ao: 0.56 -> 1.0`),
@@ -1612,9 +1416,9 @@ mod tests {
         world_idx.upsert_building(
             WorldBuildingProxy {
                 id: 1,
-                rel_path: "Projects/Bandung/Tower_B.ifc".to_string(),
+                rel_path: "Projects/Bandung/Tower_B.ifcx".to_string(),
                 name: "Tower B".to_string(),
-                filename: "Tower_B.ifc".to_string(),
+                filename: "Tower_B.ifcx".to_string(),
                 lat: origin.0,
                 lon: origin.1,
                 elev_m: 710.0,

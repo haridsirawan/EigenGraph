@@ -111,7 +111,7 @@ impl AnalyzeView {
                 if icons::icon_button(
                     ui,
                     AppIcon::Globe,
-                    "OpenBIM (.ifc)",
+                    "OpenBIM (.ifcx)",
                     11.0,
                     Color32::WHITE,
                     theme.bg_canvas,
@@ -124,14 +124,14 @@ impl AnalyzeView {
                     let mut engine = crate::core::ParametricEngine::new();
                     if let Ok(model) = engine.generate_warren_truss() {
                         let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
-                        let ifc =
-                            crate::core::IfcExporter::export_to_ifc(&model, ari.as_ref());
+                        let ifcx =
+                            crate::core::IfcxExporter::export_to_ifcx(&model, ari.as_ref());
                         if let Ok(path) = crate::core::DiskExporter::write_export_file(
-                            "EigenGraph_OpenBIM.ifc",
-                            &ifc,
+                            "EigenGraph_OpenBIM.ifcx",
+                            &ifcx,
                         ) {
                             self.export_status =
-                                Some(format!("OpenBIM IFC 4.3 saved to: {}", path));
+                                Some(format!("OpenBIM IFCX (IFC 5) saved to: {}", path));
                         }
                     }
                 }

@@ -155,7 +155,7 @@ pub fn compute_handover_manifest(
     engineer_name: &str,
 ) -> HandoverManifestSummary {
     let bim_payload = format!(
-        "IFC43:{}:W={}:C={}:R={}",
+        "IFCX:{}:W={}:C={}:R={}",
         project.project_name,
         project.walls.len(),
         project.columns.len(),
@@ -1840,23 +1840,23 @@ impl ResultsView {
                             .size(10.5).color(theme.text_secondary));
                         ui.add_space(10.0);
                         ui.horizontal_wrapped(|ui| {
-                            if crate::icons::icon_button(ui, crate::icons::AppIcon::Globe, "IFC 4.3 (.ifc)", 10.5, theme.accent_blue, theme.bg_card, Stroke::NONE, CornerRadius::same(6), Vec2::ZERO).clicked() {
+                            if crate::icons::icon_button(ui, crate::icons::AppIcon::Globe, "IFCX (IFC 5 .ifcx)", 10.5, theme.accent_blue, theme.bg_card, Stroke::NONE, CornerRadius::same(6), Vec2::ZERO).clicked() {
                                 let mut engine = crate::core::ParametricEngine::new();
                                 if let Ok(model) = engine.generate_warren_truss() {
                                     let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
-                                    let ifc = crate::core::IfcExporter::export_to_ifc(&model, ari.as_ref());
-                                    if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_Model.ifc", &ifc) {
-                                        self.export_status = Some(format!("OpenBIM IFC 4.3 file saved to: {}", path));
+                                    let ifcx = crate::core::IfcxExporter::export_to_ifcx(&model, ari.as_ref());
+                                    if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_Model.ifcx", &ifcx) {
+                                        self.export_status = Some(format!("OpenBIM IFCX file saved to: {}", path));
                                     }
                                 }
                             }
-                            if crate::icons::icon_button(ui, crate::icons::AppIcon::Building, "IFC4 SAM (.ifc)", 10.5, theme.accent_blue, theme.bg_card, Stroke::NONE, CornerRadius::same(6), Vec2::ZERO).clicked() {
+                            if crate::icons::icon_button(ui, crate::icons::AppIcon::Building, "IFCX SAM (.ifcx)", 10.5, theme.accent_blue, theme.bg_card, Stroke::NONE, CornerRadius::same(6), Vec2::ZERO).clicked() {
                                 let mut engine = crate::core::ParametricEngine::new();
                                 if let Ok(model) = engine.generate_warren_truss() {
                                     let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
-                                    let sam = crate::core::IfcSamExporter::export_to_ifc_sam(&model, ari.as_ref());
-                                    if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_StructuralAnalysisModel.ifc", &sam) {
-                                        self.export_status = Some(format!("OpenBIM IFC4 SAM file saved to: {}", path));
+                                    let sam = crate::core::IfcxSamExporter::export_to_ifcx_sam(&model, ari.as_ref());
+                                    if let Ok(path) = crate::core::DiskExporter::write_export_file("EigenGraph_StructuralAnalysisModel.ifcx", &sam) {
+                                        self.export_status = Some(format!("OpenBIM IFCX SAM file saved to: {}", path));
                                     }
                                 }
                             }

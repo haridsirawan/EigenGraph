@@ -2,7 +2,7 @@
 //!
 //! Provides coordinate reference system (CRS) transformations between WGS84 Geodetic
 //! (EPSG:4326) and Universal Transverse Mercator (UTM Zones 1N–60S / EPSG:32601–32760),
-//! meridian convergence (True North rotation), point scale factors, and IFC4 `IfcMapConversion`
+//! meridian convergence (True North rotation), point scale factors, and IFCX `IfcMapConversion`
 //! georeferencing matrix formulations with sub-millimeter precision.
 
 /// WGS84 Ellipsoid semi-major axis in meters (a).
@@ -50,7 +50,7 @@ impl UtmZoneInfo {
     }
 }
 
-/// IFC4 / ISO 16739 `IfcMapConversion` Georeferencing parameters for BIM spatial anchoring.
+/// IFCX (IFC 5) `IfcMapConversion` Georeferencing parameters for Living Earth spatial anchoring.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IfcMapConversionMatrix {
     pub source_crs: String, // "EPSG:4326"
@@ -93,18 +93,17 @@ impl IfcMapConversionMatrix {
         (unscaled_x / self.scale_x, unscaled_y / self.scale_y)
     }
 
-    /// Generates ISO 10303-21 STEP physical file string for `IFCMAPCONVERSION`.
-    pub fn to_step_spf(&self) -> String {
+    /// Generates pure-JSON IFCX georeferencing attribute (`eigengraph::geo::mapConversion`).
+    pub fn to_ifcx_json(&self) -> String {
         format!(
-            "#100=IFCMAPCONVERSION(#90,#95,{:.4},{:.4},{:.4},{:.8},{:.8},{:.6});\n/* SourceCRS='{}', TargetCRS='{}', TrueNorthRotation={:.4}° */",
+            "{{\n  \"eigengraph::geo::mapConversion\": {{\n    \"sourceCrs\": \"{}\",\n    \"targetCrs\": \"{}\",\n    \"eastingM\": {:.4},\n    \"northingM\": {:.4},\n    \"orthogonalHeightM\": {:.4},\n    \"scaleX\": {:.8},\n    \"scaleY\": {:.8},\n    \"trueNorthRotationDeg\": {:.6}\n  }}\n}}",
+            self.source_crs,
+            self.target_crs,
             self.easting_m,
             self.northing_m,
             self.orthogonal_height_m,
             self.scale_x,
             self.scale_y,
-            self.rotation_angle_deg,
-            self.source_crs,
-            self.target_crs,
             self.rotation_angle_deg
         )
     }
@@ -286,7 +285,7 @@ impl GeoProjectionEngine {
         UTM_SCALE_FACTOR_CENTRAL * (1.0 + (1.0 + ep2 * cos_phi * cos_phi) * q * q / 2.0)
     }
 
-    /// Synthesizes an IFC4 `IfcMapConversion` matrix bound to a site geodetic location.
+    /// Synthesizes an IFCX `IfcMapConversion` matrix bound to a site geodetic location.
     pub fn ifc_map_conversion(&self, lat_deg: f64, lon_deg: f64, elevation_m: f64) -> IfcMapConversionMatrix {
         let (easting, northing, convergence) = self.wgs84_to_utm(lat_deg, lon_deg);
         let scale = self.point_scale_factor(lat_deg, lon_deg);
@@ -394,8 +393,8 @@ mod tests {
         assert!((lx - 10.0).abs() < 1e-4);
         assert!((ly - 20.0).abs() < 1e-4);
 
-        let step = map_conv.to_step_spf();
-        assert!(step.contains("IFCMAPCONVERSION"));
-        assert!(step.contains("EPSG:32748"));
+        let ifcx_geo = map_conv.to_ifcx_json();
+        assert!(ifcx_geo.contains("eigengraph::geo::mapConversion"));
+        assert!(ifcx_geo.contains("EPSG:32748"));
     }
 }

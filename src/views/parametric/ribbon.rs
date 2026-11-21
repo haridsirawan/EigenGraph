@@ -352,7 +352,7 @@ impl ParametricView {
                         if icons::icon_button(
                             ui,
                             AppIcon::Printer,
-                            "PDF/IFC4",
+                            "PDF/IFCX",
                             10.5,
                             theme.accent_blue,
                             theme.bg_card,
@@ -360,7 +360,7 @@ impl ParametricView {
                             CornerRadius::same(6),
                             Vec2::new(0.0, 26.0),
                         )
-                        .on_hover_text("Export Vector PDF, SVG & IFC4 Deliverables")
+                        .on_hover_text("Export Vector PDF, SVG & IFCX Deliverables")
                         .clicked()
                         {
                             self.export_bim_deliverables();
@@ -775,7 +775,7 @@ impl ParametricView {
                                 CornerRadius::same(5),
                                 Vec2::new(0.0, 24.0),
                             )
-                            .on_hover_text("Export PDF + DXF + SVG + IFC4 delivery pack")
+                            .on_hover_text("Export PDF + DXF + SVG + IFCX delivery pack")
                             .clicked()
                             {
                                 self.export_bim_deliverables();
@@ -934,7 +934,7 @@ impl ParametricView {
         let dxf_filename = format!("Sheet_{}_{}.dxf", self.sheet_number, safe_title);
         let svg_filename = format!("Sheet_{}_{}.svg", self.sheet_number, safe_title);
         let ifc_filename = format!(
-            "{}.ifc",
+            "{}.ifcx",
             self.bim_bus.project.project_name.replace([' ', '/', '\\'], "_")
         );
 
@@ -966,7 +966,7 @@ impl ParametricView {
             None
         };
         let ifc_str = if fmt == SheetExportFormat::All {
-            Some(self.bim_bus.project.export_ifc4_spatial())
+            Some(self.bim_bus.project.export_ifcx_spatial())
         } else {
             None
         };

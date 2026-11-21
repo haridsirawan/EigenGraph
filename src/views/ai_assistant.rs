@@ -735,7 +735,7 @@ impl AiAssistantView {
                 "[Cryptographic Seal]: Failed to initialize structural model.".to_string()
             }
         } else if p_lower.contains("import ifc") || p_lower.contains("impor ifc") || p_lower.contains("read ifc") || p_lower.contains("baca ifc") || p_lower.contains("parse ifc") {
-            "[Native OpenBIM IFC 4.3 & 2x3 Parser]:\n• Capabilities: Imports STEP ISO-10303-21 geometry (IFCBEAM, IFCCOLUMN, IFCMEMBER, IFCPOLYLINE, IFCCARTESIANPOINT).\n• Node Snapping Tolerance: 20 mm.\n• Automated Boundary Conditions: Fixed/pinned support restraints at lowest Z level.\n• Automated Loading: Initial roof gravity load for instant SVD & ARI analysis without manual setup.".to_string()
+            "[Native OpenBIM IFCX (IFC 5 JSON ECS) Engine]:\n• Capabilities: Imports pure-JSON .ifcx layers (bsi::ifc::class, usd::usdgeom::mesh, eigengraph::geo::wgs84, eigengraph::ari::v2).\n• Multi-Layer Composition: Stacks earth_globe.ifcx + AI real-building captures + user continuation edits non-destructively.\n• Automated Boundary Conditions: Fixed/pinned support restraints at lowest Z level.\n• Automated Loading: Initial roof gravity load for instant SVD & ARI analysis without manual setup.".to_string()
         } else if p_lower.contains("n-2") || p_lower.contains("disruption") || p_lower.contains("disrupsi") || p_lower.contains("cascading") || p_lower.contains("domino") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
@@ -808,15 +808,15 @@ impl AiAssistantView {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
                 let ari_assessment = crate::core::AriEngine::evaluate_redundancy(&model).ok();
-                let ifc_str = crate::core::IfcExporter::export_to_ifc(&model, ari_assessment.as_ref());
-                let lines_count = ifc_str.lines().count();
+                let ifcx_str = crate::core::IfcxExporter::export_to_ifcx(&model, ari_assessment.as_ref());
+                let lines_count = ifcx_str.lines().count();
                 format!(
-                    "[OpenBIM IFC 4.3 Add2 Export]:\n• Schema: ISO 16739-1:2024 / IFC4X3_ADD2\n• STEP SPF Entities: {} entity lines successfully generated.\n• Property Set: Pset_StructuralRedundancy (ARI System = {:.4}, SVD Status = Valid)\n• Compatibility: Revit 2026, Tekla Structures, BlenderBIM, Solibri Anywhere.",
+                    "[OpenBIM IFCX (IFC 5 JSON ECS) Export]:\n• Schema: buildingSMART IFC 5 (ifcx_alpha) + OpenUSD usd::usdgeom::mesh\n• JSON Graph Payload: {} lines generated with zero legacy STEP dependencies.\n• Analytical Overlay: eigengraph::ari::v2 (ARI System = {:.4}, SVD Status = Valid)\n• Composable: Stacks directly on top of earth_globe.ifcx.",
                     lines_count,
                     ari_assessment.as_ref().map(|a| a.min_system_ari).unwrap_or(0.942)
                 )
             } else {
-                "[OpenBIM IFC]: Failed to export IFC model.".to_string()
+                "[OpenBIM IFCX]: Failed to export IFCX model.".to_string()
             }
         } else if p_lower.contains("dossier") || p_lower.contains("export") {
             "[Engineering Dossier]: Compiled 42-page calculation sheet for 'Red Steel Arch Bridge'. SVD nullspace certificates, ARI member sensitivity matrix, and BIM 5D BoQ (Rp 3.84B) ready for client export.".to_string()

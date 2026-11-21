@@ -1167,7 +1167,7 @@ impl EigenGraphApp {
                 workspace_snapshot.clone(),
             );
         }
-        if hud_actions.export_ifc4 {
+        if hud_actions.export_ifcx || hud_actions.export_earth_ifcx {
             let active_proxy = self
                 .universal_canvas
                 .active_world_project_rel_path
@@ -1197,11 +1197,28 @@ impl EigenGraphApp {
                 .as_ref()
                 .map(|p| p.address_hint.as_str())
                 .filter(|s| !s.trim().is_empty());
-            let ifc = self.build_view.bim_bus.project.export_ifc4_spatial_georeferenced(
-                if has_geo { Some((lat, lon, elev_m)) } else { None },
-                heading_deg,
-                city_hint,
-            );
+            let geo_opt = if has_geo { Some((lat, lon, elev_m)) } else { None };
+            let ifcx_doc = if hud_actions.export_earth_ifcx {
+                crate::core::ifcx::IfcxStage::compose_earth_with_site(
+                    self.universal_canvas.world_map.tile_provider,
+                    &self.build_view.bim_bus.project,
+                    geo_opt,
+                    heading_deg,
+                    city_hint,
+                    Some(&self.members),
+                    None,
+                )
+            } else {
+                crate::core::ifcx::IfcxDocument::from_bim_project(
+                    &self.build_view.bim_bus.project,
+                    geo_opt,
+                    heading_deg,
+                    city_hint,
+                    Some(&self.members),
+                    None,
+                )
+            };
+            let ifcx = ifcx_doc.to_json_pretty();
             let raw_name = if self.build_view.bim_bus.project.project_name.trim().is_empty() {
                 "EigenGraph_BIM".to_string()
             } else {
@@ -1214,14 +1231,23 @@ impl EigenGraphApp {
                     .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
                     .collect()
             };
-            let fname = format!("{raw_name}.ifc");
-            match crate::core::web_bridge::save_text_file(&fname, &ifc, "text/plain;charset=utf-8") {
+            let fname = if hud_actions.export_earth_ifcx {
+                format!("{raw_name}_LivingEarth.ifcx")
+            } else {
+                format!("{raw_name}.ifcx")
+            };
+            match crate::core::web_bridge::save_text_file(&fname, &ifcx, "application/json;charset=utf-8") {
                 Ok(_) => {
                     self.spatial_workspace.push_trace(
-                        if has_geo {
-                            format!("Exported Georeferenced IFC4 ({fname} @ {lat:.4}°, {lon:.4}°)")
+                        if hud_actions.export_earth_ifcx {
+                            format!(
+                                "Exported Composed Living Earth + Site IFCX ({fname}, {} nodes)",
+                                ifcx_doc.data.len()
+                            )
+                        } else if has_geo {
+                            format!("Exported Georeferenced IFCX ({fname} @ {lat:.4}°, {lon:.4}°)")
                         } else {
-                            format!("Exported IFC4 ({fname})")
+                            format!("Exported IFCX ({fname})")
                         },
                         true,
                     );
@@ -1485,7 +1511,7 @@ impl EigenGraphApp {
         if hud_actions.pick_local_context_file {
             self.spatial_workspace.pending_context_file_pick = true;
             crate::core::web_bridge::trigger_file_picker(
-                ".eigen,.json,.geojson,.ifc,.csv,.xyz,.pts,.md,.txt,.yaml,.yml",
+                ".eigen,.json,.geojson,.ifcx,.csv,.xyz,.pts,.md,.txt,.yaml,.yml",
             );
         }
         if let Some((lat, lon)) = hud_actions.anchor_and_build_site {
@@ -1668,13 +1694,10 @@ impl EigenGraphApp {
         raw: &str,
     ) {
         let clean_raw = raw.trim_start_matches('\u{FEFF}');
-        let is_ifc = entry.filename.to_ascii_lowercase().ends_with(".ifc")
-            || clean_raw
-                .trim_start()
-                .get(..13)
-                .is_some_and(|h| h.eq_ignore_ascii_case("ISO-10303-21;"));
-        if is_ifc {
-            self.import_ifc_raw_onto_earth(&entry.name, &entry.filename, &entry.rel_path, clean_raw);
+        let is_ifcx = entry.filename.to_ascii_lowercase().ends_with(".ifcx")
+            || crate::core::ifcx::IfcxDocument::looks_like_ifcx(clean_raw);
+        if is_ifcx {
+            self.import_ifcx_raw_onto_earth(&entry.name, &entry.filename, &entry.rel_path, clean_raw);
             return;
         }
         if self.ingest_geojson_or_survey_onto_earth(&entry.filename, clean_raw) {
@@ -1842,15 +1865,16 @@ impl EigenGraphApp {
         false
     }
 
-    fn import_ifc_raw_onto_earth(
+    fn import_ifcx_raw_onto_earth(
         &mut self,
         display_label: &str,
         filename: &str,
         rel_path: &str,
         clean_raw: &str,
     ) {
-        match crate::core::ifc::IfcModel::parse_to_bim_project_with_geo(clean_raw, filename, rel_path)
-        {
+        match crate::core::ifcx::IfcxDocument::parse_to_bim_project_with_geo(
+            clean_raw, filename, rel_path,
+        ) {
             Ok((proj, geo_opt, resolved_src, addr_hint, summary_msg)) => {
                 self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
                 self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
@@ -1886,10 +1910,10 @@ impl EigenGraphApp {
                 self.universal_canvas.ground_origin_lat_lon = target_geo;
                 self.universal_canvas.ground_origin_anchored = true;
                 self.universal_canvas.globe_mode = true;
-                if let Some(ifc_tin) =
-                    crate::core::ifc::IfcModel::extract_site_terrain_tin_from_raw(clean_raw)
+                if let Some(ifcx_tin) =
+                    crate::core::ifcx::IfcxDocument::extract_site_terrain_tin_from_raw(clean_raw)
                 {
-                    self.universal_canvas.active_site_tin = Some(ifc_tin);
+                    self.universal_canvas.active_site_tin = Some(ifcx_tin);
                     self.universal_canvas.site_tin_from_ifc = true;
                     self.universal_canvas.show_terrain_contours = true;
                 }
@@ -3082,35 +3106,23 @@ impl EigenGraphApp {
     fn handle_imported_file(&mut self, payload: crate::core::web_bridge::ImportedFilePayload) {
         let lower = payload.filename.to_lowercase();
         let trimmed = payload.content.trim_start_matches('\u{FEFF}').trim_start();
-        if lower.ends_with(".ifc") || trimmed.get(..13).is_some_and(|h| h.eq_ignore_ascii_case("ISO-10303-21")) {
+        if lower.ends_with(".ifcx") || crate::core::ifcx::IfcxDocument::looks_like_ifcx(trimmed) {
             let clean_raw = payload.content.trim_start_matches('\u{FEFF}');
             if self.spatial_workspace.spatial_mode_enabled {
                 let import_rel = format!("Imports/{}", payload.filename);
-                self.import_ifc_raw_onto_earth(&payload.filename, &payload.filename, &import_rel, clean_raw);
+                self.import_ifcx_raw_onto_earth(&payload.filename, &payload.filename, &import_rel, clean_raw);
                 return;
             }
-            match crate::core::ifc::IfcModel::parse(clean_raw) {
-                Ok(m) => {
-                    self.industrialized_view.export_status = Some(format!(
-                        "Imported IFC '{}' ({} entities, {} elements).",
-                        payload.filename,
-                        m.health_report.total_entities,
-                        m.elements.len()
-                    ));
-                    self.industrialized_view.selected_element_id =
-                        m.elements.first().map(|e| e.step_id);
-                    self.industrialized_view.baseline_model = Some(m.clone());
-                    self.industrialized_view.ifc_model = Some(m);
-                    self.industrialized_view.clash_report = None;
-                    self.industrialized_view.model_diff = None;
-                    self.industrialized_view.ids_report = None;
+            match crate::core::ifcx::IfcxDocument::parse(clean_raw) {
+                Ok(doc) => {
+                    self.industrialized_view.load_ifcx_document(doc, &payload.filename);
                     self.industrialized_view.active_subtab =
-                        crate::views::industrialized::IndustrializedSubTab::OpenBimIfcStudio;
+                        crate::views::industrialized::IndustrializedSubTab::OpenBimIfcxStudio;
                     self.active_pillar = NavigationPillar::IndustrializedAutomation;
                 }
                 Err(e) => {
                     self.industrialized_view.export_status =
-                        Some(format!("IFC parse error for '{}': {}", payload.filename, e));
+                        Some(format!("IFCX parse error for '{}': {}", payload.filename, e));
                 }
             }
             return;
@@ -3204,7 +3216,7 @@ impl EigenGraphApp {
         } else {
             let _ = settings_snap;
             self.my_project_view.export_success_msg = Some(format!(
-                "Unrecognized archive format in '{}'. Supported: .eigen, .json, .ifc, .csv, .xyz.",
+                "Unrecognized archive format in '{}'. Supported: .ifcx, .eigen, .json, .csv, .xyz.",
                 payload.filename
             ));
         }

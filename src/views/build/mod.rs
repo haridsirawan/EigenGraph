@@ -36,14 +36,14 @@ pub enum ModelArchetype {
     FemaP58HospitalArchetype, // 3D 10-Story FEMA P-58 Resilience & Loss Assessment Archetype
     BlastResistantBunker3D,  // 3D Hardened Protective Blast Bunker & Standoff Barrier Archetype (UFC 3-340-02)
     FireCompartmentFrame3D,  // 3D Multi-Bay Steel Frame with Localized Fire Compartment (AISC 360-16 / EN 1993-1-2)
-    OpenBimIfcModel3D,       // 3D OpenBIM Residential Duplex Villa parsed from IFC4 STEP SPF
+    OpenBimIfcModel3D,       // 3D OpenBIM Residential Duplex Villa authored in pure IFCX (IFC 5)
 }
 
 impl ModelArchetype {
     pub fn label(&self) -> &'static str {
         match self {
             Self::BimCraftBuilding3D => "BIMCraft LOD350 (CSG + Rebar)",
-            Self::OpenBimIfcModel3D => "OpenBIM Duplex Villa (IFC4)",
+            Self::OpenBimIfcModel3D => "OpenBIM Duplex Villa (IFCX)",
             Self::FireCompartmentFrame3D => "Fire Compartment Steel Frame (AISC/EC3)",
             Self::BlastResistantBunker3D => "Blast Protective Bunker (UFC 3-340-02)",
             Self::FemaP58HospitalArchetype => "FEMA P-58 Hospital (10-Story)",
