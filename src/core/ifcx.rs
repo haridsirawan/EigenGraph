@@ -1017,6 +1017,34 @@ impl IfcxStage {
     }
 
     /// Composes the Living Earth base layer (`earth_globe.ifcx`) with an active `BimProject` site
+    /// layer, optional `IfcxCityScene` (`IfcRoad`/`IfcBridge`/`IfcSpatialZone`), and ARI overlay.
+    #[allow(clippy::too_many_arguments)]
+    pub fn compose_earth_with_site_and_city(
+        theme: VectorEarthTheme,
+        project: &BimProject,
+        geo_opt: Option<(f64, f64, f64)>,
+        heading_deg: f64,
+        address: Option<&str>,
+        members: Option<&[StructuralMember]>,
+        ari: Option<&RedundancyAssessment>,
+        city: Option<&crate::core::gis::IfcxCityScene>,
+    ) -> IfcxDocument {
+        let earth = Self::build_earth_globe_layer(theme);
+        let mut site = IfcxDocument::from_bim_project(project, geo_opt, heading_deg, address, members, ari);
+        if let Some(c) = city.filter(|c| !c.is_empty()) {
+            let site_path = format!("/earth/sites/{}", sanitize_slug(&project.project_name));
+            for cn in c.to_ifcx_nodes(&site_path) {
+                site.add_node(cn);
+            }
+        }
+        let stage = Self::compose(&[earth, site]);
+        stage.to_composed_document(&format!(
+            "living_earth_{}",
+            sanitize_slug(&project.project_name)
+        ))
+    }
+
+    /// Composes the Living Earth base layer (`earth_globe.ifcx`) with an active `BimProject` site
     /// layer and optional ARI screening overlay into one unified planetary `.ifcx` graph.
     pub fn compose_earth_with_site(
         theme: VectorEarthTheme,
@@ -1027,13 +1055,7 @@ impl IfcxStage {
         members: Option<&[StructuralMember]>,
         ari: Option<&RedundancyAssessment>,
     ) -> IfcxDocument {
-        let earth = Self::build_earth_globe_layer(theme);
-        let site = IfcxDocument::from_bim_project(project, geo_opt, heading_deg, address, members, ari);
-        let stage = Self::compose(&[earth, site]);
-        stage.to_composed_document(&format!(
-            "living_earth_{}",
-            sanitize_slug(&project.project_name)
-        ))
+        Self::compose_earth_with_site_and_city(theme, project, geo_opt, heading_deg, address, members, ari, None)
     }
 }
 

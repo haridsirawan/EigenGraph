@@ -7,6 +7,21 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.6.7] - 2026-11-21 — IFCX City-Builder Authoring, Unified WebGL2 GPU BIM/FEM/Modal/N-1 Fusion & 100% Unified Dynamic Island
+
+### Added & Changed
+- **Pure-Rust IFCX City-Builder Engine (`src/core/gis/city_builder.rs`, `src/core/ifcx.rs`, `src/views/universal_canvas.rs`)**:
+  - Implemented interactive pure-vector urban infrastructure authoring directly on IFCX Earth: 2-click **`IfcRoad`** corridors (asphalt carriageway, sidewalks, dashed centerline), 2-click elevated **`IfcBridge`** decks with concrete piers, 1-click **`IfcSpatialZone`** parcels (Commercial, Residential, Green Park, Transit Plaza, Structural Site) with optional context massing towers and deterministic instanced pure-vector 3D trees, automatic **Road/Parcel Setback Snapping** for BIM placement, and **Auto Cut/Fill Pad Grading (`IfcSite` TIN)** computing balanced cut/fill earthwork volumes (`m³`) with 5 m batter slopes.
+  - Added lossless persistence in `.eigen.json` archives (`UnifiedWorkspaceArchive::city_scene`) and native IFCX (IFC 5) node composition/round-trip via `IfcxStage::compose_earth_with_site_and_city`, `IfcxCityScene::to_ifcx_nodes`, and `IfcxCityScene::from_ifcx_document`.
+  - Added `/road`, `/bridge`, `/zone`, and `/gradepad` slash commands plus the `IFCX City` sub-pill bar inside the Dynamic Island `GIS & Site` studio tab.
+- **Unified WebGL2 GPU BIM/FEM/Modal/N-1 Fusion (`src/views/webgl_earth.rs`, `src/views/universal_canvas.rs`)**:
+  - Upgraded the shared 24-bit hardware Z-buffered WebGL2 RTC Pass 2 with a dedicated `bim_vao` / `bim_vbo` / `bim_ibo` pipeline (`ActiveBimGpuInput`, `build_rtc_active_bim_fem_mesh`) rendering active 3D BIM structures (`IfcColumn`, `IfcBeam`, `IfcWall`, `IfcSlab`, and subsurface 3D `IfcFooting` pile caps + 4 deep pile shafts), DCR%/ARI/Moment heatmaps, 60 FPS GPU-animated Deformed Shape and Modal Eigenmodes (`Mode 1–3`), crimson translucent `N-1` disruption ghost, and authored IFCX City-Builder roads, bridges, zones, and stylized 3D greenery.
+- **100% Unified Dynamically Widening Dynamic Island & Zero Detached Pop-Ups (`src/views/spatial_workspace.rs`, `src/app.rs`, `src/views/settings.rs`)**:
+  - Eliminated all detached `egui::Window` and `egui::Area` pop-ups in Spatial Mode: **Settings & About**, **Smart Element Inspector**, **Vault Startup Connection**, **Unified Workspace Import**, **CAD Shortcuts / Quick-Jump (`Ctrl/Cmd+K`)**, and **all 15 Engineering Module Sheets (`/vault`..`/report`)** now render seamlessly inside the single bottom-center Liquid Glass Dynamic Island (`SpatialIslandHost`), automatically widening up to `1040 px` on desktop with zero horizontal glitch across Desktop (`1280 px`), Tablet (`768 px`), and Mobile (`390 px`).
+  - Renamed `docs/Earth Vector.md` to [`docs/IFCX Earth.md`](IFCX%20Earth.md) and simplified Settings → About EigenGraph to display concise semantic versioning (`v0.6.7`) without internal phase labels.
+
+---
+
 ## [v0.6.6] - 2026-11-21 — Phase 66: 100% Pure-Rust IFCX (IFC 5 JSON ECS) Engine, Living `earth_globe.ifcx` WebGL2 Pipeline, Multi-Layer Non-Destructive Composition & Complete Retirement of Legacy STEP IFC
 
 ### Added & Changed

@@ -13,14 +13,18 @@ use eframe::egui_glow;
 use eframe::glow::{self, HasContext as _};
 use egui::{Color32, Pos2, Rect};
 
+use crate::core::bim::{BimElementKind, BimProject};
+use crate::core::gis::city_builder::{IfcxCityScene, IfcxZoneKind};
 use crate::core::gis::earth_globe::{
     lat_lon_to_unit_sphere, GlobeCamera, GlobeScreenTransform, PlanetaryWorldState,
 };
 use crate::core::gis::map_widget::{SlippyMapState, VectorEarthTheme, EARTH_RADIUS_METERS};
-use crate::core::ifcx::{IfcxDocument, IfcxStage};
 use crate::core::gis::tin_surface::TinSurfaceMesh;
 use crate::core::gis::vector_layers::{UrbanVectorKind, UrbanVectorLayerCache};
 use crate::core::gis::world_index::WorldSpatialIndex;
+use crate::core::ifcx::{IfcxDocument, IfcxStage};
+use crate::models::StructuralMember;
+use crate::views::universal_canvas::EarthBimLens;
 
 /// Compact GPU vertex layout (`56 bytes`, `14 × f32`) shared by both Planetary and RTC Site passes.
 ///
@@ -537,9 +541,610 @@ fn push_extruded_building_prism_enu(
 /// Builds the Floating-Origin RTC 3D local city/site GPU mesh (Pass 2, vertices in local ENU meters
 /// around `origin_lat_lon`):
 /// - Ground terrain apron & buildable city-builder parcel pads (`zoom >= 12.8`)
+/// Pushes a pure-vector stylized low-poly 3D tree (trunk + 2-tier conical foliage, 0% raster pixels).
+fn push_stylized_tree_enu(
+    verts: &mut Vec<GpuEarthVertex>,
+    idxs: &mut Vec<u32>,
+    cx: f32,
+    cy: f32,
+    base_z: f32,
+    total_h: f32,
+    theme: VectorEarthTheme,
+) {
+    let trunk_h = (total_h * 0.34).clamp(1.2, 3.4);
+    let trunk_r = (total_h * 0.045).clamp(0.18, 0.42);
+    let trunk_col = [0.38_f32, 0.27, 0.19, 1.0];
+    let foliage_col = match theme {
+        VectorEarthTheme::CoastalBlueprint => [0.22_f32, 0.56, 0.50, 1.0],
+        VectorEarthTheme::CityDaylight => [0.24_f32, 0.62, 0.36, 1.0],
+        VectorEarthTheme::NightTwin => [0.14_f32, 0.38, 0.36, 1.0],
+        VectorEarthTheme::Topographic => [0.38_f32, 0.56, 0.42, 1.0],
+    };
+
+    const SIDES: usize = 6;
+    // Trunk prism
+    for i in 0..SIDES {
+        let a0 = (i as f32 / SIDES as f32) * std::f32::consts::TAU;
+        let a1 = ((i + 1) as f32 / SIDES as f32) * std::f32::consts::TAU;
+        let (c0, s0) = (a0.cos(), a0.sin());
+        let (c1, s1) = (a1.cos(), a1.sin());
+        let nx = (c0 + c1) * 0.5;
+        let ny = (s0 + s1) * 0.5;
+        let b = verts.len() as u32;
+        for (x, y, z, ao) in [
+            (cx + c0 * trunk_r, cy + s0 * trunk_r, base_z, 0.65_f32),
+            (cx + c1 * trunk_r, cy + s1 * trunk_r, base_z, 0.65),
+            (cx + c1 * trunk_r * 0.8, cy + s1 * trunk_r * 0.8, base_z + trunk_h, 0.92),
+            (cx + c0 * trunk_r * 0.8, cy + s0 * trunk_r * 0.8, base_z + trunk_h, 0.92),
+        ] {
+            verts.push(GpuEarthVertex {
+                pos: [x, y, z],
+                normal: [nx, ny, 0.0],
+                color: trunk_col,
+                meta: [3.0, z, ao, 0.0],
+            });
+        }
+        idxs.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
+    }
+
+    // Two-tier conical foliage crown
+    for (tier, (z_bot, z_top, rad, shade)) in [
+        (base_z + trunk_h * 0.85, base_z + total_h * 0.78, total_h * 0.28, 0.92_f32),
+        (base_z + total_h * 0.48, base_z + total_h, total_h * 0.21, 1.05),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let _ = tier;
+        let col = [
+            (foliage_col[0] * shade).clamp(0.0, 1.0),
+            (foliage_col[1] * shade).clamp(0.0, 1.0),
+            (foliage_col[2] * shade).clamp(0.0, 1.0),
+            1.0,
+        ];
+        for i in 0..SIDES {
+            let a0 = (i as f32 / SIDES as f32) * std::f32::consts::TAU;
+            let a1 = ((i + 1) as f32 / SIDES as f32) * std::f32::consts::TAU;
+            let am = 0.5 * (a0 + a1);
+            let n = [am.cos() * 0.85, am.sin() * 0.85, 0.52];
+            let b = verts.len() as u32;
+            verts.push(GpuEarthVertex {
+                pos: [cx + a0.cos() * rad, cy + a0.sin() * rad, *z_bot],
+                normal: n,
+                color: col,
+                meta: [3.0, *z_bot, 0.80, 0.0],
+            });
+            verts.push(GpuEarthVertex {
+                pos: [cx + a1.cos() * rad, cy + a1.sin() * rad, *z_bot],
+                normal: n,
+                color: col,
+                meta: [3.0, *z_bot, 0.80, 0.0],
+            });
+            verts.push(GpuEarthVertex {
+                pos: [cx, cy, *z_top],
+                normal: [0.0, 0.0, 1.0],
+                color: mix_rgb(col, [0.92, 0.98, 0.94, 1.0], 0.14),
+                meta: [3.0, *z_top, 1.0, 0.0],
+            });
+            idxs.extend_from_slice(&[b, b + 1, b + 2]);
+        }
+    }
+}
+
+/// Pushes an oriented 3D rectangular prism between bottom elevation `z0` and top `z1` (`material_kind = 3.0`).
+#[allow(clippy::too_many_arguments)]
+fn push_box_prism_enu(
+    verts: &mut Vec<GpuEarthVertex>,
+    idxs: &mut Vec<u32>,
+    fp: &[[f64; 2]; 4],
+    z0: f32,
+    z1: f32,
+    col: [f32; 4],
+    meta_kind: f32,
+) {
+    let top_col = mix_rgb(col, [0.96, 0.98, 1.0, 1.0], 0.12);
+    // 4 vertical faces
+    for i in 0..4 {
+        let a = fp[i];
+        let b = fp[(i + 1) % 4];
+        let dx = (b[0] - a[0]) as f32;
+        let dy = (b[1] - a[1]) as f32;
+        let len = dx.hypot(dy).max(1e-4);
+        let nx = dy / len;
+        let ny = -dx / len;
+        let base = verts.len() as u32;
+        for (px, py, pz, ao) in [
+            (a[0] as f32, a[1] as f32, z0, 0.72_f32),
+            (b[0] as f32, b[1] as f32, z0, 0.72),
+            (b[0] as f32, b[1] as f32, z1, 1.0),
+            (a[0] as f32, a[1] as f32, z1, 1.0),
+        ] {
+            verts.push(GpuEarthVertex {
+                pos: [px, py, pz],
+                normal: [nx, ny, 0.0],
+                color: col,
+                meta: [meta_kind, pz.max(0.0), ao, 0.0],
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    // Top cap
+    let tb = verts.len() as u32;
+    for p in fp {
+        verts.push(GpuEarthVertex {
+            pos: [p[0] as f32, p[1] as f32, z1],
+            normal: [0.0, 0.0, 1.0],
+            color: top_col,
+            meta: [meta_kind, z1.max(0.0), 1.0, 0.0],
+        });
+    }
+    idxs.extend_from_slice(&[tb, tb + 1, tb + 2, tb, tb + 2, tb + 3]);
+}
+
+/// Appends authored IFCX City-Builder objects (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`,
+/// context towers, instanced stylized trees, and `IfcGradedPad`) into the RTC site mesh.
+fn push_city_builder_scene_enu(
+    verts: &mut Vec<GpuEarthVertex>,
+    idxs: &mut Vec<u32>,
+    theme: VectorEarthTheme,
+    city: &IfcxCityScene,
+    wall_base: [f32; 4],
+    roof_base: [f32; 4],
+) {
+    let asphalt_col = match theme {
+        VectorEarthTheme::CoastalBlueprint => [0.14_f32, 0.22, 0.30, 1.0],
+        VectorEarthTheme::CityDaylight => [0.24_f32, 0.26, 0.30, 1.0],
+        VectorEarthTheme::NightTwin => [0.09_f32, 0.12, 0.18, 1.0],
+        VectorEarthTheme::Topographic => [0.34_f32, 0.36, 0.38, 1.0],
+    };
+    let curb_col = [0.76_f32, 0.80, 0.82, 1.0];
+    let stripe_col = if theme == VectorEarthTheme::NightTwin {
+        [0.98_f32, 0.86, 0.36, 1.0]
+    } else {
+        [0.94_f32, 0.94, 0.88, 1.0]
+    };
+
+    // 1. Authored `IfcRoad` & `IfcBridge` spans
+    for road in &city.roads {
+        let fp = road.footprint_enu_m();
+        let dx = road.end_enu_m[0] - road.start_enu_m[0];
+        let dy = road.end_enu_m[1] - road.start_enu_m[1];
+        let len = dx.hypot(dy).max(1.0);
+        let ux = dx / len;
+        let uy = dy / len;
+        let nx = -uy;
+        let ny = ux;
+
+        if road.is_bridge {
+            let deck_top = road.deck_elev_m as f32;
+            let deck_bot = (road.deck_elev_m - 0.85) as f32;
+            push_box_prism_enu(verts, idxs, &fp, deck_bot, deck_top, curb_col, 3.0);
+            // Asphalt roadway surface slightly raised inside bridge parapets
+            let inner_hw = (road.width_m * 0.5 - 0.65).max(1.2);
+            let asp_fp = [
+                [road.start_enu_m[0] - nx * inner_hw, road.start_enu_m[1] - ny * inner_hw],
+                [road.end_enu_m[0] - nx * inner_hw, road.end_enu_m[1] - ny * inner_hw],
+                [road.end_enu_m[0] + nx * inner_hw, road.end_enu_m[1] + ny * inner_hw],
+                [road.start_enu_m[0] + nx * inner_hw, road.start_enu_m[1] + ny * inner_hw],
+            ];
+            push_box_prism_enu(verts, idxs, &asp_fp, deck_top, deck_top + 0.08, asphalt_col, 3.0);
+
+            // Bridge piers every `pier_spacing_m` down to subsurface foundations
+            let span_count = ((len / road.pier_spacing_m.max(8.0)).ceil() as usize).clamp(2, 24);
+            for k in 1..span_count {
+                let frac = k as f64 / span_count as f64;
+                let px = road.start_enu_m[0] + dx * frac;
+                let py = road.start_enu_m[1] + dy * frac;
+                let pr = 0.75_f64;
+                for side in [-0.32, 0.32] {
+                    let cx = px + nx * road.width_m * side;
+                    let cy = py + ny * road.width_m * side;
+                    let pier_fp = [
+                        [cx - pr, cy - pr],
+                        [cx + pr, cy - pr],
+                        [cx + pr, cy + pr],
+                        [cx - pr, cy + pr],
+                    ];
+                    push_box_prism_enu(verts, idxs, &pier_fp, -1.5, deck_bot, [0.58, 0.63, 0.68, 1.0], 3.0);
+                }
+            }
+        } else {
+            // Sidewalk base + asphalt carriageway + center lane markings
+            let sw_hw = road.width_m * 0.5 + 1.2;
+            let sw_fp = [
+                [road.start_enu_m[0] - nx * sw_hw, road.start_enu_m[1] - ny * sw_hw],
+                [road.end_enu_m[0] - nx * sw_hw, road.end_enu_m[1] - ny * sw_hw],
+                [road.end_enu_m[0] + nx * sw_hw, road.end_enu_m[1] + ny * sw_hw],
+                [road.start_enu_m[0] + nx * sw_hw, road.start_enu_m[1] + ny * sw_hw],
+            ];
+            push_box_prism_enu(verts, idxs, &sw_fp, 0.0, 0.12, curb_col, 3.0);
+            push_box_prism_enu(verts, idxs, &fp, 0.04, 0.16, asphalt_col, 3.0);
+
+            // Dashed center lane stripe
+            let dash_step = 6.0_f64;
+            let n_dashes = (len / dash_step).floor() as usize;
+            for d in 0..n_dashes.min(120) {
+                let s0 = d as f64 * dash_step + 1.2;
+                let s1 = (s0 + 2.8).min(len - 0.8);
+                if s1 <= s0 {
+                    continue;
+                }
+                let shw = 0.14;
+                let p0x = road.start_enu_m[0] + ux * s0;
+                let p0y = road.start_enu_m[1] + uy * s0;
+                let p1x = road.start_enu_m[0] + ux * s1;
+                let p1y = road.start_enu_m[1] + uy * s1;
+                let dash_fp = [
+                    [p0x - nx * shw, p0y - ny * shw],
+                    [p1x - nx * shw, p1y - ny * shw],
+                    [p1x + nx * shw, p1y + ny * shw],
+                    [p0x + nx * shw, p0y + ny * shw],
+                ];
+                push_box_prism_enu(verts, idxs, &dash_fp, 0.16, 0.19, stripe_col, 3.0);
+            }
+        }
+    }
+
+    // 2. Authored `IfcSpatialZone` parcels, optional context towers & instanced stylized trees
+    for zone in &city.zones {
+        let fp = zone.footprint_enu_m();
+        let zcol = mix_rgb(zone.kind.fill_rgba(), [0.9, 0.94, 0.96, 1.0], 0.12);
+        push_box_prism_enu(verts, idxs, &fp, 0.0, 0.16, zcol, 1.0);
+
+        if zone.synthesize_context_towers && zone.kind != IfcxZoneKind::Park {
+            let rad = zone.rotation_deg.to_radians();
+            let (sr, cr) = (rad.sin(), rad.cos());
+            let bw = (zone.width_m * 0.56).max(8.0);
+            let bd = (zone.depth_m * 0.56).max(8.0);
+            let hw = bw * 0.5;
+            let hd = bd * 0.5;
+            let tfp: Vec<[f64; 2]> = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]]
+                .iter()
+                .map(|[lx, ly]| [zone.center_enu_m[0] + lx * cr - ly * sr, zone.center_enu_m[1] + lx * sr + ly * cr])
+                .collect();
+            let h_m = match zone.kind {
+                IfcxZoneKind::Commercial => 28.0 + ((zone.id * 7) % 18) as f32,
+                IfcxZoneKind::Civic => 18.0,
+                IfcxZoneKind::Residential => 14.0 + ((zone.id * 5) % 10) as f32,
+                IfcxZoneKind::Industrial => 10.5,
+                IfcxZoneKind::Park => 0.0,
+            };
+            let twall = mix_rgb(wall_base, zone.kind.fill_rgba(), 0.22);
+            let troof = mix_rgb(roof_base, zone.kind.fill_rgba(), 0.15);
+            push_extruded_building_prism_enu(verts, idxs, &tfp, 0.16, h_m, twall, troof);
+        }
+
+        for [tx, ty, th] in zone.instanced_trees_enu_m() {
+            push_stylized_tree_enu(verts, idxs, tx as f32, ty as f32, 0.16, th as f32, theme);
+        }
+    }
+
+    // 3. Authored `IfcGradedPad` foundation aprons
+    for pad in &city.graded_pads {
+        let hw = pad.width_m * 0.5;
+        let hd = pad.depth_m * 0.5;
+        let pfp = [
+            [pad.center_enu_m[0] - hw, pad.center_enu_m[1] - hd],
+            [pad.center_enu_m[0] + hw, pad.center_enu_m[1] - hd],
+            [pad.center_enu_m[0] + hw, pad.center_enu_m[1] + hd],
+            [pad.center_enu_m[0] - hw, pad.center_enu_m[1] + hd],
+        ];
+        push_box_prism_enu(verts, idxs, &pfp, -0.06, 0.08, [0.58, 0.56, 0.50, 1.0], 1.0);
+    }
+}
+
+/// Dynamic active 3D BIM + 6-DOF FEM + Modal + N-1 disruption input for unified WebGL2 Pass 2B.
+pub struct ActiveBimGpuInput<'a> {
+    pub project: &'a BimProject,
+    pub members: &'a [StructuralMember],
+    pub lens: EarthBimLens,
+    pub erection_day_limit: usize,
+    pub deform_scale: f64,
+    pub active_modal_mode: usize,
+    pub modal_phase_sin: f32,
+    pub n1_removed_bim: Option<(BimElementKind, usize)>,
+    pub heading_deg: f64,
+}
+
+fn structural_dcr_color(dcr: f64) -> [f32; 4] {
+    if dcr >= 1.0 {
+        [0.94, 0.24, 0.24, 1.0]
+    } else if dcr >= 0.80 {
+        [0.96, 0.62, 0.18, 1.0]
+    } else if dcr >= 0.55 {
+        [0.24, 0.72, 0.88, 1.0]
+    } else {
+        [0.16, 0.78, 0.56, 1.0]
+    }
+}
+
+/// Builds the unified 3D WebGL2 mesh for the active editable `BimProject` inside the shared
+/// 24-bit hardware Z-buffered RTC scene:
+/// - Subsurface 3D pile caps + 4 deep foundation pile shafts beneath every `BimFooting`
+/// - Columns, beams/runs, walls, and floor/roof slabs colored by active structural lens
+///   (`Clean`, `DcrHeatmap`, `AriRedundancy`, `MomentStress`, `Erection4D`)
+/// - 60 FPS animated `DeformedShape` & `ModalVibration` displacements ($\mathbf{p}(t) = \mathbf{p}_0 + s \sin(\omega t)\,\boldsymbol{\phi}_k$)
+/// - Translucent crimson `N-1` disruption ghost on the removed structural member
+pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPayload {
+    let proj = input.project;
+    if proj.is_empty() {
+        return GpuMeshPayload::default();
+    }
+    let mut verts = Vec::with_capacity(2_048);
+    let mut idxs = Vec::with_capacity(4_096);
+
+    let level_elev_m = |lvl_id: usize| -> f64 {
+        proj.levels
+            .iter()
+            .find(|l| l.id == lvl_id)
+            .map(|l| l.elevation_mm * 0.001)
+            .unwrap_or(0.0)
+    };
+    let max_z_m = proj
+        .levels
+        .iter()
+        .map(|l| l.elevation_mm * 0.001)
+        .fold(3.6_f64, f64::max)
+        .max(3.0);
+
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+
+    // Live structural displacement field for DeformedShape / ModalVibration (meters in ENU)
+    let anim_amp_m = match input.lens {
+        EarthBimLens::DeformedShape => (input.deform_scale * 0.012).clamp(0.05, 1.8),
+        EarthBimLens::ModalVibration => {
+            (input.deform_scale * 0.016).clamp(0.08, 2.2) * (input.modal_phase_sin as f64)
+        }
+        _ => 0.0,
+    };
+    let mode_idx = input.active_modal_mode % 3;
+    let deform_offset = |x_m: f64, y_m: f64, z_m: f64| -> [f64; 3] {
+        if anim_amp_m.abs() < 1e-6 || z_m <= 0.05 {
+            return [0.0, 0.0, 0.0];
+        }
+        let xi = (z_m / max_z_m).clamp(0.0, 1.2);
+        match mode_idx {
+            0 => {
+                // Fundamental translational sway along local X
+                let phi = (std::f64::consts::FRAC_PI_2 * xi).sin();
+                [anim_amp_m * phi, 0.0, 0.0]
+            }
+            1 => {
+                // Second mode orthogonal sway along local Y
+                let phi = (std::f64::consts::FRAC_PI_2 * xi).sin();
+                [0.0, anim_amp_m * phi, 0.0]
+            }
+            _ => {
+                // Third mode torsional twist about vertical Z axis
+                let phi = xi * xi;
+                let theta = anim_amp_m * 0.05 * phi;
+                [-y_m * theta, x_m * theta, 0.0]
+            }
+        }
+    };
+
+    let rot_xy = |x_m: f64, y_m: f64, z_m: f64| -> [f64; 2] {
+        let d = deform_offset(x_m, y_m, z_m);
+        let lx = x_m + d[0];
+        let ly = y_m + d[1];
+        [lx * cr - ly * sr, lx * sr + ly * cr]
+    };
+
+    // Average structural health metrics for lens coloring
+    let avg_dcr = if !input.members.is_empty() {
+        input
+            .members
+            .iter()
+            .map(|m| m.utilization.max(m.dcr_interaction))
+            .fold(0.0_f64, f64::max)
+    } else {
+        0.45
+    };
+    let avg_ari = if !input.members.is_empty() {
+        input.members.iter().map(|m| m.ari).fold(1.0_f64, f64::min)
+    } else {
+        0.92
+    };
+
+    let elem_color = |kind: BimElementKind, bim_id: usize, default_col: [f32; 4]| -> [f32; 4] {
+        if input.n1_removed_bim == Some((kind, bim_id)) {
+            return [0.96, 0.16, 0.24, 0.42]; // Crimson translucent N-1 removed ghost
+        }
+        // Match corresponding StructuralMember by id/index if available
+        let member_opt = input.members.get(bim_id % input.members.len().max(1));
+        match input.lens {
+            EarthBimLens::Clean | EarthBimLens::Erection4D => default_col,
+            EarthBimLens::DcrHeatmap | EarthBimLens::DeformedShape | EarthBimLens::ModalVibration => {
+                let dcr = member_opt
+                    .map(|m| m.utilization.max(m.dcr_interaction))
+                    .unwrap_or(avg_dcr);
+                structural_dcr_color(dcr)
+            }
+            EarthBimLens::AriRedundancy => {
+                let ari = member_opt.map(|m| m.ari).unwrap_or(avg_ari);
+                structural_dcr_color(1.0 - ari)
+            }
+            EarthBimLens::MomentStress => {
+                let mom = member_opt
+                    .map(|m| (m.moment_my_knm.hypot(m.moment_mz_knm) / 250.0).clamp(0.0, 1.2))
+                    .unwrap_or(0.45);
+                structural_dcr_color(mom)
+            }
+        }
+    };
+
+    // 1. Subsurface 3D Pile Caps & 4 Deep Pile Shafts (`BimFooting`)
+    for (idx, ftg) in proj.footings.iter().enumerate() {
+        if input.lens == EarthBimLens::Erection4D && idx + 1 > input.erection_day_limit {
+            continue;
+        }
+        let z_top = level_elev_m(ftg.level_id) as f32;
+        let z_bot = z_top - (ftg.thickness_mm * 0.001) as f32;
+        let hw = ftg.width_mm * 0.0005;
+        let hl = ftg.length_mm * 0.0005;
+        let cx = ftg.pos.0 * 0.001;
+        let cy = ftg.pos.1 * 0.001;
+        let fp = [
+            rot_xy(cx - hw, cy - hl, 0.0),
+            rot_xy(cx + hw, cy - hl, 0.0),
+            rot_xy(cx + hw, cy + hl, 0.0),
+            rot_xy(cx - hw, cy + hl, 0.0),
+        ];
+        let col = elem_color(BimElementKind::Footing, ftg.id, [0.48, 0.54, 0.60, 1.0]);
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z_bot, z_top, col, 3.0);
+
+        // 4 subsurface concrete pile shafts extending 4.0m below pile cap
+        let pr = (ftg.width_mm * 0.00012).clamp(0.16, 0.35);
+        for (sx, sy) in [(-0.55, -0.55), (0.55, -0.55), (0.55, 0.55), (-0.55, 0.55)] {
+            let px = cx + sx * hw;
+            let py = cy + sy * hl;
+            let pfp = [
+                rot_xy(px - pr, py - pr, 0.0),
+                rot_xy(px + pr, py - pr, 0.0),
+                rot_xy(px + pr, py + pr, 0.0),
+                rot_xy(px - pr, py + pr, 0.0),
+            ];
+            push_box_prism_enu(
+                &mut verts,
+                &mut idxs,
+                &pfp,
+                z_bot - 4.0,
+                z_bot,
+                [0.36, 0.42, 0.48, 1.0],
+                3.0,
+            );
+        }
+    }
+
+    // 2. Structural Columns (`BimColumn`) with live top/bottom modal shear displacement
+    for (idx, c) in proj.columns.iter().enumerate() {
+        if input.lens == EarthBimLens::Erection4D && idx + 5 > input.erection_day_limit {
+            continue;
+        }
+        let z0 = level_elev_m(c.base_level_id);
+        let z1 = level_elev_m(c.top_level_id).max(z0 + 0.5);
+        let hw = c.width_mm * 0.0005;
+        let hd = c.depth_mm * 0.0005;
+        let cx = c.pos.0 * 0.001;
+        let cy = c.pos.1 * 0.001;
+        let z_mid = 0.5 * (z0 + z1);
+        let fp = [
+            rot_xy(cx - hw, cy - hd, z_mid),
+            rot_xy(cx + hw, cy - hd, z_mid),
+            rot_xy(cx + hw, cy + hd, z_mid),
+            rot_xy(cx - hw, cy + hd, z_mid),
+        ];
+        let col = elem_color(BimElementKind::Column, c.id, [0.35, 0.62, 0.74, 1.0]);
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0 as f32, z1 as f32, col, 3.0);
+    }
+
+    // 3. Structural Beams & Braces (`BimRun`)
+    for (idx, r) in proj.runs.iter().enumerate() {
+        if input.lens == EarthBimLens::Erection4D && idx + 12 > input.erection_day_limit {
+            continue;
+        }
+        let z_top = level_elev_m(r.level_id) + r.start_offset_mm * 0.001;
+        let z_bot = z_top - (r.depth_mm * 0.001).max(0.2);
+        let ax = r.start.0 * 0.001;
+        let ay = r.start.1 * 0.001;
+        let bx = r.end.0 * 0.001;
+        let by = r.end.1 * 0.001;
+        let dx = bx - ax;
+        let dy = by - ay;
+        let len = dx.hypot(dy).max(0.05);
+        let hw = (r.width_mm * 0.0005).max(0.10);
+        let nx = -dy / len * hw;
+        let ny = dx / len * hw;
+        let fp = [
+            rot_xy(ax - nx, ay - ny, z_top),
+            rot_xy(bx - nx, by - ny, z_top),
+            rot_xy(bx + nx, by + ny, z_top),
+            rot_xy(ax + nx, ay + ny, z_top),
+        ];
+        let col = elem_color(BimElementKind::Run, r.id, [0.46, 0.72, 0.80, 1.0]);
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z_bot as f32, z_top as f32, col, 3.0);
+    }
+
+    // 4. Compound & Shear Walls (`BimWall`)
+    for (idx, w) in proj.walls.iter().enumerate() {
+        if input.lens == EarthBimLens::Erection4D && idx + 20 > input.erection_day_limit {
+            continue;
+        }
+        let z0 = level_elev_m(w.base_level_id);
+        let z1 = w
+            .top_level_id
+            .map(level_elev_m)
+            .unwrap_or(z0 + w.unconnected_height_mm * 0.001)
+            .max(z0 + 0.5);
+        let ax = w.start.0 * 0.001;
+        let ay = w.start.1 * 0.001;
+        let bx = w.end.0 * 0.001;
+        let by = w.end.1 * 0.001;
+        let dx = bx - ax;
+        let dy = by - ay;
+        let len = dx.hypot(dy).max(0.05);
+        let ht = (w.thickness_mm * 0.0005).max(0.08);
+        let nx = -dy / len * ht;
+        let ny = dx / len * ht;
+        let z_mid = 0.5 * (z0 + z1);
+        let fp = [
+            rot_xy(ax - nx, ay - ny, z_mid),
+            rot_xy(bx - nx, by - ny, z_mid),
+            rot_xy(bx + nx, by + ny, z_mid),
+            rot_xy(ax + nx, ay + ny, z_mid),
+        ];
+        let default_w = if w.is_structural {
+            [0.64, 0.74, 0.80, 0.92]
+        } else {
+            [0.80, 0.84, 0.88, 0.88]
+        };
+        let col = elem_color(BimElementKind::Wall, w.id, default_w);
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0 as f32, z1 as f32, col, 2.0);
+    }
+
+    // 5. Floor & Roof Slabs (`BimSlab`)
+    for (idx, s) in proj.slabs.iter().enumerate() {
+        if input.lens == EarthBimLens::Erection4D && idx + 16 > input.erection_day_limit {
+            continue;
+        }
+        if s.boundary.len() < 3 {
+            continue;
+        }
+        let z_lvl = level_elev_m(s.level_id);
+        let th = (s.thickness_mm * 0.001).max(0.12) as f32;
+        let base_z = if s.is_roof { z_lvl as f32 } else { z_lvl as f32 - th };
+        let fp: Vec<[f64; 2]> = s
+            .boundary
+            .iter()
+            .map(|p| rot_xy(p.0 * 0.001, p.1 * 0.001, z_lvl))
+            .collect();
+        let col = elem_color(
+            BimElementKind::Slab,
+            s.id,
+            if s.is_roof {
+                [0.54, 0.68, 0.76, 0.88]
+            } else {
+                [0.68, 0.76, 0.82, 0.82]
+            },
+        );
+        push_extruded_building_prism_enu(&mut verts, &mut idxs, &fp, base_z, th, col, col);
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
+/// Builds the local Floating-Origin RTC GPU mesh for Pass 2 (all vertices in ENU meters relative to
+/// `origin_lat_lon`):
+/// - Stylized ground apron & city-builder buildable parcel pads (when zoomed to street/district scale)
 /// - 3D triangulated `TinSurfaceMesh` (`IfcSite` / survey / procedural) with hypsometric colors & SNI 8460 steep slopes
-/// - 3D extruded Vault OpenBIM IFC buildings (`WorldSpatialIndex`, within 15 km of site origin)
+/// - 3D authored IFCX City-Builder objects (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`, stylized trees, graded pads)
+/// - 3D extruded Vault OpenBIM IFCX buildings (`WorldSpatialIndex`, within 15 km of site origin)
 /// - 3D extruded local Vault vector context buildings (`UrbanVectorLayerCache`)
+#[allow(clippy::too_many_arguments)]
 pub fn build_rtc_site_scene_mesh(
     theme: VectorEarthTheme,
     origin_lat_lon: (f64, f64),
@@ -549,6 +1154,7 @@ pub fn build_rtc_site_scene_mesh(
     world_index: &WorldSpatialIndex,
     active_rel_path: Option<&str>,
     urban_vectors: &UrbanVectorLayerCache,
+    city_scene: Option<&IfcxCityScene>,
 ) -> GpuMeshPayload {
     let pal = theme.palette();
     let mut vertices = Vec::with_capacity(4_096);
@@ -720,6 +1326,11 @@ pub fn build_rtc_site_scene_mesh(
         }
     }
 
+    // 5. Phase 67: Authored IFCX City-Builder Infrastructure (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`, Trees, Graded Pads)
+    if let Some(city) = city_scene.filter(|c| !c.is_empty()) {
+        push_city_builder_scene_enu(&mut vertices, &mut indices, theme, city, wall_base, roof_base);
+    }
+
     GpuMeshPayload { vertices, indices }
 }
 
@@ -757,6 +1368,11 @@ struct GpuEarthPipeline {
     site_ibo: glow::Buffer,
     site_index_count: i32,
     site_revision_uploaded: u64,
+    bim_vao: glow::VertexArray,
+    bim_vbo: glow::Buffer,
+    bim_ibo: glow::Buffer,
+    bim_index_count: i32,
+    bim_revision_uploaded: u64,
 }
 
 impl GpuEarthPipeline {
@@ -946,6 +1562,7 @@ impl GpuEarthPipeline {
 
             let (planet_vao, planet_vbo, planet_ibo) = setup_vao_pair()?;
             let (site_vao, site_vbo, site_ibo) = setup_vao_pair()?;
+            let (bim_vao, bim_vbo, bim_ibo) = setup_vao_pair()?;
 
             Ok(Self {
                 program,
@@ -959,6 +1576,11 @@ impl GpuEarthPipeline {
                 site_ibo,
                 site_index_count: 0,
                 site_revision_uploaded: 0,
+                bim_vao,
+                bim_vbo,
+                bim_ibo,
+                bim_index_count: 0,
+                bim_revision_uploaded: 0,
             })
         }
     }
@@ -1005,6 +1627,27 @@ impl GpuEarthPipeline {
         self.site_revision_uploaded = rev;
     }
 
+    fn upload_active_bim(&mut self, gl: &glow::Context, rev: u64, mesh: &GpuMeshPayload) {
+        unsafe {
+            gl.bind_vertex_array(Some(self.bim_vao));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.bim_vbo));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                vertices_as_u8_slice(&mesh.vertices),
+                glow::DYNAMIC_DRAW,
+            );
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.bim_ibo));
+            gl.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                indices_as_u8_slice(&mesh.indices),
+                glow::DYNAMIC_DRAW,
+            );
+            gl.bind_vertex_array(None);
+        }
+        self.bim_index_count = mesh.indices.len() as i32;
+        self.bim_revision_uploaded = rev;
+    }
+
     fn paint(&self, gl: &glow::Context, u: &RtcCameraUniforms) {
         unsafe {
             gl.use_program(Some(self.program));
@@ -1045,16 +1688,22 @@ impl GpuEarthPipeline {
                 gl.draw_elements(glow::TRIANGLES, self.planet_index_count, glow::UNSIGNED_INT, 0);
             }
 
-            // --- Pass 2: Floating-Origin RTC Local Site Scene (3D IfcSite TIN + Extruded IFC Buildings) ---
-            if u.render_site_pass && self.site_index_count > 0 {
+            // --- Pass 2: Floating-Origin RTC Local Site Scene (3D IfcSite TIN + City-Builder + Extruded IFCX + Active BIM/FEM/Modal/N-1) ---
+            if u.render_site_pass && (self.site_index_count > 0 || self.bim_index_count > 0) {
                 gl.clear_depth_f32(1.0);
                 gl.clear(glow::DEPTH_BUFFER_BIT);
                 gl.uniform_matrix_4_f32_slice(loc_mvp.as_ref(), false, &u.site_mvp);
                 gl.uniform_3_f32(loc_sun.as_ref(), u.sun_dir_site[0], u.sun_dir_site[1], u.sun_dir_site[2]);
                 gl.uniform_3_f32(loc_eye.as_ref(), u.cam_eye_site[0], u.cam_eye_site[1], u.cam_eye_site[2]);
                 gl.uniform_1_f32(loc_fog_d.as_ref(), u.fog_density);
-                gl.bind_vertex_array(Some(self.site_vao));
-                gl.draw_elements(glow::TRIANGLES, self.site_index_count, glow::UNSIGNED_INT, 0);
+                if self.site_index_count > 0 {
+                    gl.bind_vertex_array(Some(self.site_vao));
+                    gl.draw_elements(glow::TRIANGLES, self.site_index_count, glow::UNSIGNED_INT, 0);
+                }
+                if self.bim_index_count > 0 {
+                    gl.bind_vertex_array(Some(self.bim_vao));
+                    gl.draw_elements(glow::TRIANGLES, self.bim_index_count, glow::UNSIGNED_INT, 0);
+                }
             }
 
             gl.bind_vertex_array(None);
@@ -1072,6 +1721,9 @@ impl GpuEarthPipeline {
             gl.delete_vertex_array(self.site_vao);
             gl.delete_buffer(self.site_vbo);
             gl.delete_buffer(self.site_ibo);
+            gl.delete_vertex_array(self.bim_vao);
+            gl.delete_buffer(self.bim_vbo);
+            gl.delete_buffer(self.bim_ibo);
         }
     }
 }
@@ -1084,8 +1736,10 @@ pub struct WebGlEarthState {
     pub last_init_error: Option<String>,
     cached_planet_theme: Option<VectorEarthTheme>,
     cached_site_hash: u64,
+    cached_bim_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
+    pub last_bim_tris: usize,
 }
 
 impl std::fmt::Debug for WebGlEarthState {
@@ -1136,6 +1790,7 @@ impl WebGlEarthState {
     }
 
     /// Deterministic hash identifying when the RTC local site VBO needs re-meshing.
+    #[allow(clippy::too_many_arguments)]
     fn compute_site_hash(
         theme: VectorEarthTheme,
         origin: (f64, f64),
@@ -1145,6 +1800,7 @@ impl WebGlEarthState {
         world_index: &WorldSpatialIndex,
         active_rel: Option<&str>,
         urban_vectors: &UrbanVectorLayerCache,
+        city_scene: Option<&IfcxCityScene>,
     ) -> u64 {
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         let mix = |acc: &mut u64, val: u64| {
@@ -1174,11 +1830,37 @@ impl WebGlEarthState {
             }
         }
         mix(&mut h, urban_vectors.feature_count() as u64);
+        if let Some(c) = city_scene {
+            mix(&mut h, c.content_revision_hash());
+        }
+        h
+    }
+
+    fn compute_active_bim_hash(input: &ActiveBimGpuInput<'_>) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mix = |acc: &mut u64, val: u64| {
+            *acc ^= val;
+            *acc = acc.wrapping_mul(0x0000_0100_0000_01b3);
+        };
+        mix(&mut h, input.project.content_revision_hash());
+        mix(&mut h, input.lens as u64 + 1);
+        mix(&mut h, input.erection_day_limit as u64);
+        mix(&mut h, (input.deform_scale * 100.0) as u64);
+        mix(&mut h, input.active_modal_mode as u64);
+        mix(&mut h, (input.heading_deg * 100.0) as i64 as u64);
+        mix(&mut h, input.members.len() as u64);
+        if let Some((k, id)) = input.n1_removed_bim {
+            mix(&mut h, (k as u64 + 1) * 1_000_003 ^ id as u64);
+        }
+        if input.lens == EarthBimLens::ModalVibration {
+            // Quantize animated sine phase at 1000 steps so GPU modal vibration updates smoothly at 60 FPS
+            mix(&mut h, ((input.modal_phase_sin * 1000.0).round() as i32) as u64);
+        }
         h
     }
 
     /// Schedules the hardware WebGL2 3D Vector Earth pass onto `painter`, uploading geometry ONLY
-    /// when theme or site content changes (`O(1)` steady-state draw). Returns `true` if GPU pass ran.
+    /// when theme, site/city, or active BIM/FEM/Modal state changes. Returns `true` if GPU pass ran.
     #[allow(clippy::too_many_arguments)]
     pub fn schedule_paint_pass(
         &mut self,
@@ -1194,6 +1876,8 @@ impl WebGlEarthState {
         world_index: &WorldSpatialIndex,
         active_rel_path: Option<&str>,
         urban_vectors: &UrbanVectorLayerCache,
+        city_scene: Option<&IfcxCityScene>,
+        active_bim: Option<ActiveBimGpuInput<'_>>,
     ) -> bool {
         let Some(pipe_arc) = self.pipeline.clone() else {
             return false;
@@ -1251,7 +1935,7 @@ impl WebGlEarthState {
             None
         };
 
-        // Prepare RTC site mesh upload only when zoomed in and content hash changes
+        // Prepare RTC site + IFCX city-builder mesh upload only when zoomed in and content hash changes
         let zoom_bucket = if world_map.zoom_level >= 16.5 {
             2
         } else if world_map.zoom_level >= 12.5 {
@@ -1269,6 +1953,7 @@ impl WebGlEarthState {
                 world_index,
                 active_rel_path,
                 urban_vectors,
+                city_scene,
             );
             if rev != self.cached_site_hash {
                 let mesh = build_rtc_site_scene_mesh(
@@ -1280,6 +1965,7 @@ impl WebGlEarthState {
                     world_index,
                     active_rel_path,
                     urban_vectors,
+                    city_scene,
                 );
                 self.last_site_tris = mesh.indices.len() / 3;
                 self.cached_site_hash = rev;
@@ -1291,8 +1977,28 @@ impl WebGlEarthState {
             None
         };
 
+        // Prepare unified active 3D BIM + FEM/Modal/N-1 GPU mesh upload
+        let pending_bim = if render_site_pass {
+            if let Some(ref bim_in) = active_bim {
+                let rev = Self::compute_active_bim_hash(bim_in);
+                if rev != self.cached_bim_hash {
+                    let mesh = build_rtc_active_bim_fem_mesh(bim_in);
+                    self.last_bim_tris = mesh.indices.len() / 3;
+                    self.cached_bim_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let planet_payload = Arc::new(Mutex::new(pending_planet));
         let site_payload = Arc::new(Mutex::new(pending_site));
+        let bim_payload = Arc::new(Mutex::new(pending_bim));
 
         let cb = egui_glow::CallbackFn::new(move |_info, glow_painter| {
             let gl = glow_painter.gl();
@@ -1311,6 +2017,13 @@ impl WebGlEarthState {
                         }
                     }
                 }
+                if let Ok(mut slot) = bim_payload.lock() {
+                    if let Some((rev, mesh)) = slot.take() {
+                        if pipe.bim_revision_uploaded != rev {
+                            pipe.upload_active_bim(gl, rev, &mesh);
+                        }
+                    }
+                }
                 pipe.paint(gl, &uniforms);
             }
         });
@@ -1319,8 +2032,17 @@ impl WebGlEarthState {
             rect,
             callback: Arc::new(cb),
         });
-        // Smooth ocean shimmer animation at low overhead
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        // Smooth ocean shimmer & 60 FPS GPU modal oscillation
+        let frame_ms = if active_bim
+            .as_ref()
+            .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)
+        {
+            16
+        } else {
+            33
+        };
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(frame_ms));
         true
     }
 }
@@ -1444,6 +2166,7 @@ mod tests {
             &world_idx,
             None,
             &urban,
+            None,
         );
         assert!(site_mesh.indices.len() / 3 > 400, "Site TIN + extruded IFC tower mesh should be populated");
         assert!(
@@ -1454,5 +2177,71 @@ mod tests {
             site_mesh.vertices.iter().any(|v| (v.meta[0] - 2.0).abs() < 0.01 && v.meta[2] < 0.65),
             "Building ground vertices must encode base Ambient Occlusion"
         );
+    }
+
+    #[test]
+    fn test_phase67_unified_gpu_city_builder_and_active_bim_modal_n1_mesh() {
+        let mut city = IfcxCityScene::default();
+        city.add_road([-40.0, 0.0], [40.0, 0.0], crate::core::gis::IfcxRoadKind::Arterial, false);
+        city.add_road([0.0, -30.0], [0.0, 30.0], crate::core::gis::IfcxRoadKind::Collector, true);
+        city.add_zone([24.0, 20.0], 26.0, 22.0, 0.0, IfcxZoneKind::Commercial);
+        city.add_zone([-24.0, 20.0], 24.0, 24.0, 0.0, IfcxZoneKind::Park);
+
+        let urban = UrbanVectorLayerCache::default();
+        let world_idx = WorldSpatialIndex::default();
+        let site_with_city = build_rtc_site_scene_mesh(
+            VectorEarthTheme::CityDaylight,
+            (-6.9175, 107.6191),
+            17.5,
+            false,
+            None,
+            &world_idx,
+            None,
+            &urban,
+            Some(&city),
+        );
+        assert!(
+            site_with_city.indices.len() / 3 > 500,
+            "City-builder roads, bridge piers, context towers, and stylized trees must generate GPU triangles"
+        );
+        // Bridge deck should sit above 6.0m
+        assert!(site_with_city.vertices.iter().any(|v| v.pos[2] >= 6.4));
+
+        // Active 3D BIM + subsurface pile caps + GPU modal vibration + crimson N-1 ghost
+        let (proj, _) = IfcxDocument::sample_villa_ifcx()
+            .to_bim_project("Villa")
+            .expect("villa project");
+        let first_col_id = proj.columns[0].id;
+        let clean_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
+            project: &proj,
+            members: &[],
+            lens: EarthBimLens::Clean,
+            erection_day_limit: 999,
+            deform_scale: 40.0,
+            active_modal_mode: 0,
+            modal_phase_sin: 0.0,
+            n1_removed_bim: None,
+            heading_deg: 0.0,
+        });
+        let modal_n1_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
+            project: &proj,
+            members: &[],
+            lens: EarthBimLens::ModalVibration,
+            erection_day_limit: 999,
+            deform_scale: 60.0,
+            active_modal_mode: 0,
+            modal_phase_sin: 1.0,
+            n1_removed_bim: Some((BimElementKind::Column, first_col_id)),
+            heading_deg: 0.0,
+        });
+        assert!(clean_mesh.indices.len() / 3 > 400);
+        // Subsurface deep pile shafts extend below z = -3.0m
+        assert!(clean_mesh.vertices.iter().any(|v| v.pos[2] < -3.0));
+        // Modal vibration shifts elevated vertices along X
+        let max_x_clean = clean_mesh.vertices.iter().map(|v| v.pos[0]).fold(f32::NEG_INFINITY, f32::max);
+        let max_x_modal = modal_n1_mesh.vertices.iter().map(|v| v.pos[0]).fold(f32::NEG_INFINITY, f32::max);
+        assert!(max_x_modal > max_x_clean + 0.25);
+        // N-1 removed column renders with translucent crimson ghost alpha
+        assert!(modal_n1_mesh.vertices.iter().any(|v| v.color[0] > 0.90 && v.color[3] < 0.55));
     }
 }

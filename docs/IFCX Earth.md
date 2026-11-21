@@ -1,9 +1,9 @@
-# EigenGraph Earth Vector — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
+# EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Active Roadmap — **Phase 64 (`v0.6.4`), Phase 65 (`v0.6.5`), and Phase 66 (`v0.6.6`) Implemented**; Phases 67–68 Planned  
+> **Status**: Active Roadmap — **`v0.6.4`, `v0.6.5`, `v0.6.6`, and `v0.6.7` Implemented**; `v0.6.8` Planned  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% Raster Pixels**  
-> **Current Platform**: EigenGraph `v0.6.6` (Phase 66 — Native WebGL2 `egui_glow` 3D Vector Earth driven directly by composable `earth_globe.ifcx`)  
-> **UI Contract Alignment**: Strictly preserves the Single Unified Liquid Glass Dynamic Island and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
+> **Current Platform**: EigenGraph `v0.6.7` (IFCX City-Builder Authoring, Unified WebGL2 GPU BIM/FEM/Modal/N-1 Fusion & 100% Unified Dynamic Island)  
+> **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
 
@@ -98,8 +98,8 @@ flowchart TD
     D --> F["Site-Coupled 6-DOF FEM, Modal, SVD & ARI v2 Engine"]
     F -->|"ari_analysis_overlay.ifcx"| D
 
-    E --> G["WebGL2 (egui_glow) 3D Viewport (24-Bit Z-Buffer, Procedural Sun/AO/Ocean/Facades)"]
-    G --> H["egui Overlay Pass (Single Liquid Glass Dynamic Island & Smart Element Pop-Up)"]
+    E --> G["WebGL2 (egui_glow) 3D Viewport (24-Bit Z-Buffer, Procedural Sun/AO/Ocean/Facades, Unified BIM/FEM/Modal/N-1)"]
+    G --> H["egui Overlay Pass (Single Unified Dynamically Widening Liquid Glass Dynamic Island — Zero Detached Pop-Ups)"]
 ```
 
 ---
@@ -136,9 +136,14 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
   - Deleted `src/core/ifc.rs` (~5,650 lines of legacy `IFC2x3`/`IFC4`/`IFC4.3` STEP code) and retired all `ISO-10303-21` STEP exporters/importers across `bim.rs`, `interop.rs`, `vault.rs`, `app.rs`, `index.html`, `spatial_workspace.rs`, and `industrialized/`.
   - Upgraded Vault discovery, Dynamic Island `Export .ifcx` / `/ifcx`, and OpenBIM IFCX Studio to 100% `.ifcx`.
 
-### Phase 67 (`v0.6.7`) — IFCX City-Builder Authoring & Unified GPU BIM/FEM Fusion *(Planned)*
-- Render active 3D BIM structures, subsurface 3D pile caps, DCR%/ARI heatmaps, **GPU-animated Deformed Shape & Modal Eigenmodes**, and **`N-1` Disruption** overlays directly in the shared WebGL2 Z-buffered pass.
-- Interactive **Vector Road & Bridge Authoring (`IfcRoad` / `IfcBridge`)**, **Parcel Zoning (`IfcSpatialZone`)**, **Instanced Stylized Greenery**, **Road/Parcel Snapping**, and **Auto Cut/Fill Pad Grading (`IfcSite` TIN)**—authored natively as composable `.ifcx` delta layers.
+### Phase 67 (`v0.6.7`) — IFCX City-Builder Authoring, Unified GPU BIM/FEM Fusion & 100% Unified Dynamic Island *(Implemented)*
+- **Unified WebGL2 GPU BIM/FEM/Modal/N-1 Pass (`src/views/webgl_earth.rs`, `src/views/universal_canvas.rs`)**:
+  - Active 3D BIM structures (`IfcColumn`, `IfcBeam`, `IfcWall`, `IfcSlab`, and subsurface 3D `IfcFooting` pile caps + deep pile shafts), DCR%/ARI/Moment heatmaps, 60 FPS GPU-animated Deformed Shape & Modal Eigenmodes (`Mode 1–3`), and crimson translucent `N-1` disruption ghost render directly inside the shared 24-bit hardware Z-buffered WebGL2 RTC pass.
+- **IFCX City-Builder Authoring (`src/core/gis/city_builder.rs`, `src/core/ifcx.rs`)**:
+  - Interactive 2-click vector **Road (`IfcRoad`)** and elevated **Bridge (`IfcBridge`)** authoring with sidewalks, lane markings, and structural piers; 1-click **Parcel Zoning (`IfcSpatialZone`)** with optional context towers and deterministic instanced pure-vector 3D greenery; automatic **Road/Parcel Setback Snapping** for BIM placement; and **Auto Cut/Fill Pad Grading (`IfcSite` TIN)** with 5 m batter slopes and earthwork volume calculation—persisted in `.eigen.json` and losslessly composed into `.ifcx` via `IfcxStage::compose_earth_with_site_and_city`.
+- **100% Unified Dynamically Widening Dynamic Island (`src/views/spatial_workspace.rs`, `src/app.rs`, `src/views/settings.rs`)**:
+  - Moved **every** Spatial Mode pop-up—Settings & About, Smart Element Inspector, Vault Startup Setup, Unified Workspace Import, CAD Shortcuts/Quick-Jump, and all 15 Engineering Module Sheets—natively inside the single morphing Liquid Glass Dynamic Island (`SpatialIslandHost`), smoothly expanding up to `1040 px` on desktop with zero detached `egui::Window` or `egui::Area` pop-ups and exact centered positioning across Desktop, Tablet, and Mobile.
+  - Cleaned Settings → About EigenGraph to display concise semantic versioning (`v0.6.7`) without internal phase labels.
 
 ### Phase 68 (`v0.6.8`) — District-Scale Multi-Hazard & AI Real-Building-to-IFCX Streaming *(Planned)*
 - Animated SNI 1726 / ASCE 7 seismic wavefield propagation coupled to inter-building pounding & Venturi wind channeling (`neighborhood_physics.rs`), plus interactive 3D flood/sea-level plane against `IfcSite` contours.

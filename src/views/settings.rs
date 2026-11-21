@@ -687,18 +687,10 @@ impl SettingsView {
 
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
-                let phase_num: u32 = {
-                    let mut parts = env!("CARGO_PKG_VERSION").split('.');
-                    let major: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                    let minor: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                    let patch: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                    major * 100 + minor * 10 + patch
-                };
                 ui.label(
                     RichText::new(format!(
-                        "v{} — Phase {} 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth Globe (WebGL2 24-Bit Z-Buffer, f64 RTC, Multi-Layer Composition, Zero Legacy STEP, 0% Raster), 6-DOF FEM & ARI",
-                        env!("CARGO_PKG_VERSION"),
-                        phase_num
+                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (WebGL2 24-Bit Z-Buffer, f64 RTC, Multi-Layer Composition, City-Builder Authoring, 6-DOF FEM & ARI)",
+                        env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)
                     .color(theme.accent_green)

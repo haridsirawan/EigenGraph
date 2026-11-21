@@ -566,6 +566,12 @@ impl App for EigenGraphApp {
                 if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                     if self.show_settings {
                         self.show_settings = false;
+                    } else if self.show_vault_startup_modal {
+                        self.show_vault_startup_modal = false;
+                    } else if self.universal_canvas.import_json_open {
+                        self.universal_canvas.import_json_open = false;
+                    } else if self.universal_canvas.shortcuts_modal_open {
+                        self.universal_canvas.shortcuts_modal_open = false;
                     } else if self.spatial_workspace.api_key_popover_open {
                         self.spatial_workspace.api_key_popover_open = false;
                     } else if self.spatial_workspace.context_picker_open {
@@ -850,81 +856,87 @@ impl App for EigenGraphApp {
 
         self.maybe_autosave_workspace(&ctx, &workspace_snapshot);
 
-        // 5. CONSOLIDATED SETTINGS (WORKSPACE SETTINGS & FUTURE ROADMAP MODAL)
-        if self.show_settings {
-            let mut open = self.show_settings;
-            let mut close_after_jump = false;
-            egui::Window::new("Settings — Workspace & Future Roadmap")
-                .open(&mut open)
-                .collapsible(false)
-                .resizable(true)
-                .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 0.0))
-                .default_size(MacTheme::clamp_modal_size(&ctx, Vec2::new(820.0, 650.0)))
-                .max_size(MacTheme::modal_max_size(&ctx))
-                .frame(
-                    Frame::new()
-                        .fill(self.theme.bg_card)
-                        .stroke(Stroke::new(1.0, self.theme.border_subtle))
-                        .corner_radius(CornerRadius::same(12))
-                        .inner_margin(Margin::same(if is_mobile { 12 } else { 18 })),
-                )
-                .show(&ctx, |ui| {
-                    let active_bim_project =
-                        if self.active_pillar == NavigationPillar::ParametricDED {
-                            &self.parametric_view.bim_bus.project
-                        } else {
-                            &self.build_view.bim_bus.project
-                        };
-                    if self.settings_view.show(
-                        ui,
-                        &mut self.theme,
-                        &mut self.universal_canvas,
-                        &mut self.ai_assistant_view.is_visible,
-                        active_bim_project,
-                        &self.members,
-                        &self.parametric_view.variables,
-                        &mut self.feature_registry,
-                        &mut self.active_pillar,
-                    ) {
-                        close_after_jump = true;
+        // 5-7. CLASSIC MODE DETACHED MODALS
+        // In Spatial Mode, ALL pop-ups (Settings, Vault Setup, Import Archive, Shortcuts/Quick-Jump,
+        // Smart Element Inspector, and all 15 Engineering Module Sheets) render natively inside the
+        // single dynamically widening Liquid Glass Dynamic Island (ZERO detached pop-ups over Earth 3D).
+        if !self.spatial_workspace.spatial_mode_enabled {
+            // 5. CONSOLIDATED SETTINGS (WORKSPACE SETTINGS & FUTURE ROADMAP MODAL)
+            if self.show_settings {
+                let mut open = self.show_settings;
+                let mut close_after_jump = false;
+                egui::Window::new("Settings — Workspace & Future Roadmap")
+                    .open(&mut open)
+                    .collapsible(false)
+                    .resizable(true)
+                    .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 0.0))
+                    .default_size(MacTheme::clamp_modal_size(&ctx, Vec2::new(820.0, 650.0)))
+                    .max_size(MacTheme::modal_max_size(&ctx))
+                    .frame(
+                        Frame::new()
+                            .fill(self.theme.bg_card)
+                            .stroke(Stroke::new(1.0, self.theme.border_subtle))
+                            .corner_radius(CornerRadius::same(12))
+                            .inner_margin(Margin::same(if is_mobile { 12 } else { 18 })),
+                    )
+                    .show(&ctx, |ui| {
+                        let active_bim_project =
+                            if self.active_pillar == NavigationPillar::ParametricDED {
+                                &self.parametric_view.bim_bus.project
+                            } else {
+                                &self.build_view.bim_bus.project
+                            };
+                        if self.settings_view.show(
+                            ui,
+                            &mut self.theme,
+                            &mut self.universal_canvas,
+                            &mut self.ai_assistant_view.is_visible,
+                            active_bim_project,
+                            &self.members,
+                            &self.parametric_view.variables,
+                            &mut self.feature_registry,
+                            &mut self.active_pillar,
+                        ) {
+                            close_after_jump = true;
+                        }
+                    });
+                self.show_settings = open && !close_after_jump;
+                if std::mem::take(&mut self.settings_view.vault_state_changed) {
+                    self.personal_vault_projects =
+                        crate::core::InternalVault::list_personal_vault_projects();
+                    if crate::core::InternalVault::has_connected_vault() {
+                        self.show_vault_startup_modal = false;
                     }
-                });
-            self.show_settings = open && !close_after_jump;
-            if std::mem::take(&mut self.settings_view.vault_state_changed) {
-                self.personal_vault_projects =
-                    crate::core::InternalVault::list_personal_vault_projects();
-                if crate::core::InternalVault::has_connected_vault() {
-                    self.show_vault_startup_modal = false;
+                }
+                if std::mem::take(&mut self.settings_view.request_open_vault_popup) {
+                    self.show_settings = false;
+                    self.show_vault_startup_modal = true;
                 }
             }
-            if std::mem::take(&mut self.settings_view.request_open_vault_popup) {
-                self.show_settings = false;
-                self.show_vault_startup_modal = true;
+
+            // 5B. VAULT CONNECTION STARTUP POP-UP (shown when no Vault is connected yet)
+            self.render_vault_startup_modal_if_open(&ctx, is_mobile);
+
+            // 6. UNIFIED SINGLE-FILE IMPORT MODAL (works across all 15 modules)
+            {
+                let import_bim_project =
+                    if self.active_pillar == NavigationPillar::ParametricDED {
+                        &mut self.parametric_view.bim_bus.project
+                    } else {
+                        &mut self.build_view.bim_bus.project
+                    };
+                self.universal_canvas.render_import_modal_if_open(
+                    &ctx,
+                    &self.theme,
+                    import_bim_project,
+                    &mut self.members,
+                    &mut self.parametric_view.variables,
+                );
             }
+
+            // 7. CAD SHORTCUTS, CLI SYNTAX & MODULE QUICK-JUMP PALETTE (Ctrl/Cmd+K or ? Shortcuts)
+            self.render_shortcuts_quick_jump_modal_if_open(&ctx);
         }
-
-        // 5B. VAULT CONNECTION STARTUP POP-UP (shown when no Vault is connected yet)
-        self.render_vault_startup_modal_if_open(&ctx, is_mobile);
-
-        // 6. UNIFIED SINGLE-FILE IMPORT MODAL (works across all 15 modules)
-        {
-            let import_bim_project =
-                if self.active_pillar == NavigationPillar::ParametricDED {
-                    &mut self.parametric_view.bim_bus.project
-                } else {
-                    &mut self.build_view.bim_bus.project
-                };
-            self.universal_canvas.render_import_modal_if_open(
-                &ctx,
-                &self.theme,
-                import_bim_project,
-                &mut self.members,
-                &mut self.parametric_view.variables,
-            );
-        }
-
-        // 7. CAD SHORTCUTS, CLI SYNTAX & MODULE QUICK-JUMP PALETTE (Ctrl/Cmd+K or ? Shortcuts)
-        self.render_shortcuts_quick_jump_modal_if_open(&ctx);
 
         // 8. 100% PURE-VECTOR SVG CAPTURE HOOK (AUTOMATED QA — 0% RASTER PIXELS)
         #[cfg(not(target_arch = "wasm32"))]
@@ -945,18 +957,58 @@ impl App for EigenGraphApp {
     }
 }
 
+impl crate::views::spatial_workspace::SpatialIslandHost for EigenGraphApp {
+    fn island_theme(&self) -> MacTheme {
+        self.theme.clone()
+    }
+
+    fn split_island_refs(
+        &mut self,
+    ) -> (
+        &MacTheme,
+        &mut UniversalCanvasState,
+        &mut BuildView,
+        &mut AiAssistantView,
+        &[StructuralMember],
+        &[ProjectItem],
+        &mut Vec<DatabaseComponent>,
+        &[crate::core::vault::PersonalVaultProjectEntry],
+    ) {
+        (
+            &self.theme,
+            &mut self.universal_canvas,
+            &mut self.build_view,
+            &mut self.ai_assistant_view,
+            &self.members,
+            &self.projects,
+            &mut self.db_components,
+            &self.personal_vault_projects,
+        )
+    }
+}
+
 impl EigenGraphApp {
-    /// Phase 48: Renders a true 100% Full-Viewport Spatial Earth & BIM Canvas with zero side panels,
-    /// anchored by the hover-expandable Floating Dynamic Island, Smart Context Element Pop-Up,
-    /// and on-demand engineering module overlay sheets.
+    /// Renders a true 100% Full-Viewport Spatial IFCX Earth & BIM Canvas with ZERO side panels and
+    /// ZERO detached pop-ups: Settings, Vault Setup, Import Archive, Shortcuts/Quick-Jump, Smart
+    /// Element Inspector, and all 15 Engineering Module Sheets morph seamlessly inside the single
+    /// dynamically widening Liquid Glass Dynamic Island.
     fn render_spatial_mode_shell(
         &mut self,
         ui: &mut egui::Ui,
         ctx: &egui::Context,
         workspace_snapshot: &crate::views::universal_canvas::WorkspaceCanvasSettings,
-        is_mobile: bool,
+        _is_mobile: bool,
     ) {
         use crate::views::spatial_workspace::SpatialLens;
+
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum SpatialEmbeddedKind {
+            Settings,
+            VaultSetup,
+            ImportWorkspace,
+            Shortcuts,
+            ModuleSheet(NavigationPillar),
+        }
 
         if !ctx.egui_wants_keyboard_input() {
             if ctx.input(|i| i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z)) {
@@ -1059,17 +1111,153 @@ impl EigenGraphApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
-        let hud_actions = self.spatial_workspace.render_hud_overlays_with_vault(
+        let active_embedded = if self.show_settings {
+            Some((
+                SpatialEmbeddedKind::Settings,
+                "Settings — Workspace & About".to_string(),
+                AppIcon::SettingsGear,
+            ))
+        } else if self.show_vault_startup_modal {
+            Some((
+                SpatialEmbeddedKind::VaultSetup,
+                "Connect Your Engineering Vault".to_string(),
+                AppIcon::Database,
+            ))
+        } else if self.universal_canvas.import_json_open {
+            Some((
+                SpatialEmbeddedKind::ImportWorkspace,
+                "Import Unified Workspace (.eigen / .ifcx)".to_string(),
+                AppIcon::UploadImport,
+            ))
+        } else if self.universal_canvas.shortcuts_modal_open {
+            Some((
+                SpatialEmbeddedKind::Shortcuts,
+                "CAD Shortcuts, Precision CLI & Quick-Jump".to_string(),
+                AppIcon::SlidersPanel,
+            ))
+        } else {
+            self.spatial_workspace.active_overlay_pillar.map(|pillar| {
+                (
+                    SpatialEmbeddedKind::ModuleSheet(pillar),
+                    format!("{} ({})", pillar.clean_name(), pillar.badge()),
+                    pillar.app_icon(),
+                )
+            })
+        };
+
+        let mut close_embedded = false;
+        let mut settings_jump_pillar: Option<NavigationPillar> = None;
+        let mut shortcuts_jump_pillar: Option<NavigationPillar> = None;
+
+        // Move SpatialWorkspaceState out momentarily (O(1)) so the Dynamic Island can host
+        // full EigenGraphApp panels inside its single morphing glass capsule without borrow conflicts.
+        let mut sw = std::mem::take(&mut self.spatial_workspace);
+        let embedded_meta = active_embedded
+            .as_ref()
+            .map(|(_, title, icon)| (title.as_str(), *icon, &mut close_embedded));
+        let embedded_kind = active_embedded.as_ref().map(|(kind, _, _)| *kind);
+
+        let hud_actions = sw.render_hud_overlays_with_host(
             ctx,
-            &self.theme,
-            &mut self.universal_canvas,
-            &mut self.build_view,
-            &mut self.ai_assistant_view,
-            &self.members,
-            &self.projects,
-            &mut self.db_components,
-            &self.personal_vault_projects,
+            self,
+            embedded_meta,
+            |ui, app| match embedded_kind {
+                Some(SpatialEmbeddedKind::Settings) => {
+                    let prev_pillar = app.active_pillar;
+                    let active_bim_project =
+                        if app.active_pillar == NavigationPillar::ParametricDED {
+                            &app.parametric_view.bim_bus.project
+                        } else {
+                            &app.build_view.bim_bus.project
+                        };
+                    if app.settings_view.show(
+                        ui,
+                        &mut app.theme,
+                        &mut app.universal_canvas,
+                        &mut app.ai_assistant_view.is_visible,
+                        active_bim_project,
+                        &app.members,
+                        &app.parametric_view.variables,
+                        &mut app.feature_registry,
+                        &mut app.active_pillar,
+                    ) {
+                        app.show_settings = false;
+                        if app.active_pillar != prev_pillar {
+                            settings_jump_pillar = Some(app.active_pillar);
+                        }
+                    }
+                    if std::mem::take(&mut app.settings_view.vault_state_changed) {
+                        app.personal_vault_projects =
+                            crate::core::InternalVault::list_personal_vault_projects();
+                        if crate::core::InternalVault::has_connected_vault() {
+                            app.show_vault_startup_modal = false;
+                        }
+                    }
+                    if std::mem::take(&mut app.settings_view.request_open_vault_popup) {
+                        app.show_settings = false;
+                        app.show_vault_startup_modal = true;
+                    }
+                }
+                Some(SpatialEmbeddedKind::VaultSetup) => {
+                    if app.render_vault_startup_body(ui) {
+                        app.show_vault_startup_modal = false;
+                    }
+                }
+                Some(SpatialEmbeddedKind::ImportWorkspace) => {
+                    let import_bim_project =
+                        if app.active_pillar == NavigationPillar::ParametricDED {
+                            &mut app.parametric_view.bim_bus.project
+                        } else {
+                            &mut app.build_view.bim_bus.project
+                        };
+                    if app.universal_canvas.render_import_modal_body(
+                        ui,
+                        &app.theme,
+                        import_bim_project,
+                        &mut app.members,
+                        &mut app.parametric_view.variables,
+                    ) {
+                        app.universal_canvas.import_json_open = false;
+                    }
+                }
+                Some(SpatialEmbeddedKind::Shortcuts) => {
+                    if let Some(p) = app.render_shortcuts_quick_jump_body(ui) {
+                        shortcuts_jump_pillar = Some(p);
+                        app.universal_canvas.shortcuts_modal_open = false;
+                    }
+                }
+                Some(SpatialEmbeddedKind::ModuleSheet(overlay_pillar)) => {
+                    app.render_pillar_module_body(ui, overlay_pillar, workspace_snapshot, 0.0);
+                }
+                None => {}
+            },
         );
+
+        self.spatial_workspace = sw;
+
+        if close_embedded {
+            match embedded_kind {
+                Some(SpatialEmbeddedKind::Settings) => self.show_settings = false,
+                Some(SpatialEmbeddedKind::VaultSetup) => self.show_vault_startup_modal = false,
+                Some(SpatialEmbeddedKind::ImportWorkspace) => {
+                    self.universal_canvas.import_json_open = false;
+                }
+                Some(SpatialEmbeddedKind::Shortcuts) => {
+                    self.universal_canvas.shortcuts_modal_open = false;
+                }
+                Some(SpatialEmbeddedKind::ModuleSheet(_)) => {
+                    self.spatial_workspace.active_overlay_pillar = None;
+                }
+                None => {}
+            }
+        }
+        if let Some(p) = settings_jump_pillar.or(shortcuts_jump_pillar) {
+            self.active_pillar = p;
+            self.spatial_workspace.active_overlay_pillar = Some(p);
+        }
+
+        self.apply_pillar_post_render_actions();
+
         if !self.show_settings
             && (self.settings_view.gemini_api_key != self.spatial_workspace.gemini_api_key_draft
                 || self.settings_view.remember_gemini_key
@@ -1079,45 +1267,6 @@ impl EigenGraphApp {
             self.settings_view.remember_gemini_key = self.spatial_workspace.remember_gemini_key;
         }
         self.apply_spatial_hud_actions(hud_actions, workspace_snapshot);
-
-        // On-demand floating engineering module sheet summoned via `/vault`, `/cost`, `/analysis`, etc.
-        if let Some(overlay_pillar) = self.spatial_workspace.active_overlay_pillar {
-            let mut open = true;
-            let title = format!("{} ({})", overlay_pillar.clean_name(), overlay_pillar.badge());
-            egui::Window::new(title)
-                .open(&mut open)
-                .collapsible(false)
-                .resizable(true)
-                .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-                .default_size(MacTheme::clamp_modal_size(ctx, Vec2::new(1020.0, 680.0)))
-                .max_size(MacTheme::modal_max_size(ctx))
-                .frame(
-                    Frame::new()
-                        .fill(self.theme.bg_card)
-                        .stroke(Stroke::new(1.1, self.theme.accent_blue.gamma_multiply(0.45)))
-                        .corner_radius(CornerRadius::same(14))
-                        .inner_margin(Margin::same(if is_mobile { 10 } else { 16 })),
-                )
-                .show(ctx, |ui| {
-                    ScrollArea::vertical()
-                        .id_salt(("spatial_module_overlay_scroll", overlay_pillar as usize))
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            let content_w = ui.available_width().max(160.0);
-                            ui.set_width(content_w);
-                            ui.set_max_width(content_w);
-                            self.render_pillar_module_body(
-                                ui,
-                                overlay_pillar,
-                                workspace_snapshot,
-                                0.0,
-                            );
-                        });
-                });
-            if !open {
-                self.spatial_workspace.active_overlay_pillar = None;
-            }
-        }
     }
 
     fn apply_spatial_hud_actions(
@@ -1198,8 +1347,10 @@ impl EigenGraphApp {
                 .map(|p| p.address_hint.as_str())
                 .filter(|s| !s.trim().is_empty());
             let geo_opt = if has_geo { Some((lat, lon, elev_m)) } else { None };
+            let city_opt = (!self.universal_canvas.city_scene.is_empty())
+                .then_some(&self.universal_canvas.city_scene);
             let ifcx_doc = if hud_actions.export_earth_ifcx {
-                crate::core::ifcx::IfcxStage::compose_earth_with_site(
+                crate::core::ifcx::IfcxStage::compose_earth_with_site_and_city(
                     self.universal_canvas.world_map.tile_provider,
                     &self.build_view.bim_bus.project,
                     geo_opt,
@@ -1207,16 +1358,33 @@ impl EigenGraphApp {
                     city_hint,
                     Some(&self.members),
                     None,
+                    city_opt,
                 )
             } else {
-                crate::core::ifcx::IfcxDocument::from_bim_project(
+                let mut doc = crate::core::ifcx::IfcxDocument::from_bim_project(
                     &self.build_view.bim_bus.project,
                     geo_opt,
                     heading_deg,
                     city_hint,
                     Some(&self.members),
                     None,
-                )
+                );
+                if let Some(c) = city_opt {
+                    let site_path = format!(
+                        "/site/{}",
+                        self.build_view
+                            .bim_bus
+                            .project
+                            .project_name
+                            .chars()
+                            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+                            .collect::<String>()
+                    );
+                    for node in c.to_ifcx_nodes(&site_path) {
+                        doc.data.push(node);
+                    }
+                }
+                doc
             };
             let ifcx = ifcx_doc.to_json_pretty();
             let raw_name = if self.build_view.bim_bus.project.project_name.trim().is_empty() {
@@ -1917,6 +2085,12 @@ impl EigenGraphApp {
                     self.universal_canvas.site_tin_from_ifc = true;
                     self.universal_canvas.show_terrain_contours = true;
                 }
+                if let Ok(doc) = serde_json::from_str::<crate::core::ifcx::IfcxDocument>(clean_raw) {
+                    let restored_city = crate::core::gis::IfcxCityScene::from_ifcx_document(&doc);
+                    if !restored_city.is_empty() {
+                        self.universal_canvas.city_scene = restored_city;
+                    }
+                }
                 self.universal_canvas.active_world_project_rel_path = Some(rel_path.to_string());
                 self.universal_canvas.earth_world.camera.tilt_deg = 42.0;
                 self.universal_canvas.earth_world.start_fly_to(
@@ -2090,6 +2264,7 @@ impl EigenGraphApp {
                                 workspace_snapshot,
                                 sidebar_inset,
                             );
+                            self.apply_pillar_post_render_actions();
                         });
                     });
             });
@@ -2281,15 +2456,6 @@ impl EigenGraphApp {
                         }
                     }
                 }
-                if let Some(kind) = self.my_project_view.request_apply_template.take() {
-                    self.apply_typology_template(kind);
-                    if self.spatial_workspace.spatial_mode_enabled {
-                        self.spatial_workspace.active_canvas_mode =
-                            crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
-                        self.universal_canvas.globe_mode = true;
-                        self.spatial_workspace.active_overlay_pillar = None;
-                    }
-                }
                 if std::mem::take(&mut self.my_project_view.request_export_active_archive) {
                     self.sync_lifecycle_to_canvas();
                     self.universal_canvas.export_unified_file(
@@ -2300,9 +2466,6 @@ impl EigenGraphApp {
                     );
                     self.my_project_view.export_success_msg =
                         self.universal_canvas.status_message.clone();
-                }
-                if let Some(entry) = self.my_project_view.pending_open_vault_project.take() {
-                    self.open_vault_project_entry(entry);
                 }
             }
             NavigationPillar::AiAgent => {
@@ -2449,29 +2612,6 @@ impl EigenGraphApp {
                     &self.build_view.bim_bus.project,
                     &mut self.feature_registry,
                 );
-                if let Some(proj) = self.industrialized_view.request_apply_bim_project.take() {
-                    let el_cnt = proj.element_count();
-                    let pname = proj.project_name.clone();
-                    self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
-                    self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
-                    self.parametric_view.active_level_idx = 0;
-                    self.sync_bim_to_fem();
-                    self.build_view
-                        .fit_view_to_project(&mut self.universal_canvas, &self.members);
-                    self.sync_earth_maps();
-                    self.build_view.modify_status_msg = Some(format!(
-                        "Loaded IFC -> Editable BimProject '{}' ({} elements).",
-                        pname, el_cnt
-                    ));
-                    self.active_pillar = NavigationPillar::GeometryAssembly;
-                    if self.spatial_workspace.spatial_mode_enabled {
-                        self.spatial_workspace.active_canvas_mode =
-                            crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
-                        self.universal_canvas.globe_mode = true;
-                        self.universal_canvas.ground_origin_anchored = true;
-                        self.spatial_workspace.active_overlay_pillar = None;
-                    }
-                }
             }
             NavigationPillar::Prediction => {
                 let shm_feed = crate::views::prediction::ShmPredictionFeed {
@@ -2501,6 +2641,157 @@ impl EigenGraphApp {
         }
     }
 
+    /// Applies deferred module actions that mutate `self.spatial_workspace` (template load,
+    /// vault project open, or IFCX-to-BIM application), ensuring full access to `spatial_workspace`
+    /// both in Classic Mode and after the Dynamic Island embedded panel completes.
+    fn apply_pillar_post_render_actions(&mut self) {
+        if let Some(kind) = self.my_project_view.request_apply_template.take() {
+            self.apply_typology_template(kind);
+            if self.spatial_workspace.spatial_mode_enabled {
+                self.spatial_workspace.active_canvas_mode =
+                    crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
+                self.universal_canvas.globe_mode = true;
+                self.spatial_workspace.active_overlay_pillar = None;
+            }
+        }
+        if let Some(entry) = self.my_project_view.pending_open_vault_project.take() {
+            self.open_vault_project_entry(entry);
+        }
+        if let Some(proj) = self.industrialized_view.request_apply_bim_project.take() {
+            let el_cnt = proj.element_count();
+            let pname = proj.project_name.clone();
+            self.build_view.bim_bus = crate::core::BimCommandBus::from_project(proj.clone());
+            self.parametric_view.bim_bus = crate::core::BimCommandBus::from_project(proj);
+            self.parametric_view.active_level_idx = 0;
+            self.sync_bim_to_fem();
+            self.build_view
+                .fit_view_to_project(&mut self.universal_canvas, &self.members);
+            self.sync_earth_maps();
+            self.build_view.modify_status_msg = Some(format!(
+                "Loaded IFCX -> Editable BimProject '{}' ({} elements).",
+                pname, el_cnt
+            ));
+            self.active_pillar = NavigationPillar::GeometryAssembly;
+            if self.spatial_workspace.spatial_mode_enabled {
+                self.spatial_workspace.active_canvas_mode =
+                    crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
+                self.universal_canvas.globe_mode = true;
+                self.universal_canvas.ground_origin_anchored = true;
+                self.spatial_workspace.active_overlay_pillar = None;
+            }
+        }
+    }
+
+    fn render_shortcuts_quick_jump_body(&mut self, ui: &mut egui::Ui) -> Option<NavigationPillar> {
+        let mut jump_to: Option<NavigationPillar> = None;
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Quick-Jump Module:")
+                    .size(12.0)
+                    .strong()
+                    .color(self.theme.accent_blue),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.universal_canvas.quick_jump_query)
+                    .desired_width((ui.available_width() - 160.0).max(120.0))
+                    .hint_text("Filter any of 15 engineering modules..."),
+            );
+        });
+        ui.add_space(6.0);
+        let q = self.universal_canvas.quick_jump_query.trim().to_lowercase();
+        ui.horizontal_wrapped(|ui| {
+            for pillar in ALL_PILLARS {
+                let label = format!("{} ({})", pillar.clean_name(), pillar.badge());
+                if !q.is_empty() && !label.to_lowercase().contains(&q) {
+                    continue;
+                }
+                let is_active = self.active_pillar == pillar;
+                if icons::icon_button(
+                    ui,
+                    pillar.app_icon(),
+                    label,
+                    10.5,
+                    if is_active {
+                        Color32::WHITE
+                    } else {
+                        self.theme.text_primary
+                    },
+                    if is_active {
+                        self.theme.accent_blue
+                    } else {
+                        self.theme.bg_sidebar
+                    },
+                    Stroke::new(1.0, self.theme.border_subtle),
+                    CornerRadius::same(6),
+                    Vec2::new(0.0, 24.0),
+                )
+                .clicked()
+                {
+                    jump_to = Some(pillar);
+                }
+            }
+        });
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new("Keyboard Shortcuts (Outside Text Focus)")
+                .size(12.0)
+                .strong()
+                .color(self.theme.text_primary),
+        );
+        ui.add_space(4.0);
+        egui::Grid::new("cad_shortcuts_grid")
+            .num_columns(2)
+            .spacing([18.0, 5.0])
+            .show(ui, |ui| {
+                for (keys, desc) in [
+                    ("Space", "Freeze / Unfreeze Canvas scroll lock"),
+                    ("G / [ ] / 1-9", "Toggle 3D IFCX Earth vs 2D Map (G), Tilt ([/]), Earth Brushes (1-9)"),
+                    ("L / R / C / D / T / E / V", "2D Line, Rect, Circle, Dim, Callout, Eraser, Box Marquee"),
+                    ("W / B / C / F", "3D Author Wall, Beam, Column, Footing"),
+                    ("M / O / X / Del", "Move (+Step), Offset (+500mm), Mirror X, Delete"),
+                    ("F8 / F3 / F4 / Z / Esc", "Ortho, Grid Snap, OSNAP, Fit Model, Cancel / Select"),
+                    ("Ctrl+Z / Ctrl+Y", "Undo / Redo CAD or BIM command"),
+                    ("Ctrl+K or F1", "Open or close Shortcuts & Quick-Jump"),
+                ] {
+                    ui.label(
+                        RichText::new(keys)
+                            .size(11.0)
+                            .monospace()
+                            .strong()
+                            .color(self.theme.accent_blue),
+                    );
+                    ui.label(
+                        RichText::new(desc)
+                            .size(11.0)
+                            .color(self.theme.text_secondary),
+                    );
+                    ui.end_row();
+                }
+            });
+
+        ui.add_space(10.0);
+        ui.label(
+            RichText::new("Precision CAD & IFCX Command Line Syntax")
+                .size(12.0)
+                .strong()
+                .color(self.theme.text_primary),
+        );
+        ui.label(
+            RichText::new(
+                "• Relative Cartesian: @6000,0  |  Polar Vector: @4500<45  |  Move: move @0,1200\n\
+                 • Rotate: ro 90  |  Copy: cp @1500,0  |  Offset: o 250  |  3D Wall: wall 0,0->6000,0\n\
+                 • IFCX City: /road  |  /bridge  |  /zone  |  /gradepad",
+            )
+            .size(10.5)
+            .monospace()
+            .color(self.theme.text_muted),
+        );
+        jump_to
+    }
+
     fn render_shortcuts_quick_jump_modal_if_open(&mut self, ctx: &egui::Context) {
         if !self.universal_canvas.shortcuts_modal_open {
             return;
@@ -2515,110 +2806,7 @@ impl EigenGraphApp {
             .default_size(MacTheme::clamp_modal_size(ctx, Vec2::new(640.0, 500.0)))
             .max_size(MacTheme::modal_max_size(ctx))
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Quick-Jump Module:")
-                            .size(12.0)
-                            .strong()
-                            .color(self.theme.accent_blue),
-                    );
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.universal_canvas.quick_jump_query)
-                            .desired_width((ui.available_width() - 160.0).max(120.0))
-                            .hint_text("Filter any of 15 engineering modules..."),
-                    );
-                });
-                ui.add_space(6.0);
-                let q = self.universal_canvas.quick_jump_query.trim().to_lowercase();
-                ui.horizontal_wrapped(|ui| {
-                    for pillar in ALL_PILLARS {
-                        let label = format!("{} ({})", pillar.clean_name(), pillar.badge());
-                        if !q.is_empty() && !label.to_lowercase().contains(&q) {
-                            continue;
-                        }
-                        let is_active = self.active_pillar == pillar;
-                        if icons::icon_button(
-                            ui,
-                            pillar.app_icon(),
-                            label,
-                            10.5,
-                            if is_active {
-                                Color32::WHITE
-                            } else {
-                                self.theme.text_primary
-                            },
-                            if is_active {
-                                self.theme.accent_blue
-                            } else {
-                                self.theme.bg_sidebar
-                            },
-                            Stroke::new(1.0, self.theme.border_subtle),
-                            CornerRadius::same(6),
-                            Vec2::new(0.0, 24.0),
-                        )
-                        .clicked()
-                        {
-                            jump_to = Some(pillar);
-                        }
-                    }
-                });
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new("Keyboard Shortcuts (Outside Text Focus)")
-                        .size(12.0)
-                        .strong()
-                        .color(self.theme.text_primary),
-                );
-                ui.add_space(4.0);
-                egui::Grid::new("cad_shortcuts_grid")
-                    .num_columns(2)
-                    .spacing([18.0, 5.0])
-                    .show(ui, |ui| {
-                        for (keys, desc) in [
-                            ("Space", "Freeze / Unfreeze Canvas scroll lock"),
-                            ("G / [ ] / 1-9", "Toggle 3D Google Earth vs 2D Map (G), Tilt ([/]), Earth Brushes (1-9)"),
-                            ("L / R / C / D / T / E / V", "2D Line, Rect, Circle, Dim, Callout, Eraser, Box Marquee"),
-                            ("W / B / C / F", "3D Author Wall, Beam, Column, Footing"),
-                            ("M / O / X / Del", "Move (+Step), Offset (+500mm), Mirror X, Delete"),
-                            ("F8 / F3 / F4 / Z / Esc", "Ortho, Grid Snap, OSNAP, Fit Model, Cancel / Select"),
-                            ("Ctrl+Z / Ctrl+Y", "Undo / Redo CAD or BIM command"),
-                            ("Ctrl+K or F1", "Open or close this Shortcuts & Quick-Jump modal"),
-                        ] {
-                            ui.label(
-                                RichText::new(keys)
-                                    .size(11.0)
-                                    .monospace()
-                                    .strong()
-                                    .color(self.theme.accent_blue),
-                            );
-                            ui.label(
-                                RichText::new(desc)
-                                    .size(11.0)
-                                    .color(self.theme.text_secondary),
-                            );
-                            ui.end_row();
-                        }
-                    });
-
-                ui.add_space(10.0);
-                ui.label(
-                    RichText::new("Precision CAD Command Line Syntax")
-                        .size(12.0)
-                        .strong()
-                        .color(self.theme.text_primary),
-                );
-                ui.label(
-                    RichText::new(
-                        "• Relative Cartesian: @6000,0  |  Polar Vector: @4500<45  |  Move: move @0,1200\n\
-                         • Rotate: ro 90  |  Copy: cp @1500,0  |  Offset: o 250  |  3D Wall: wall 0,0->6000,0",
-                    )
-                    .size(10.5)
-                    .monospace()
-                    .color(self.theme.text_muted),
-                );
+                jump_to = self.render_shortcuts_quick_jump_body(ui);
             });
         if let Some(p) = jump_to {
             self.active_pillar = p;
@@ -2628,13 +2816,76 @@ impl EigenGraphApp {
         self.universal_canvas.shortcuts_modal_open = open;
     }
 
+    /// Renders the Vault connection setup body (shared between Classic Mode modal and Spatial Dynamic Island).
+    /// Returns `true` when the setup panel should close (connected or guest mode selected).
+    fn render_vault_startup_body(&mut self, ui: &mut egui::Ui) -> bool {
+        let status = crate::core::InternalVault::connection_status();
+        let mut close_now = false;
+        ui.horizontal_wrapped(|ui| {
+            icons::icon_label(
+                ui,
+                AppIcon::Database,
+                18.0,
+                self.theme.accent_blue,
+                "Select How to Store Your Personal Projects",
+                15.0,
+                self.theme.text_primary,
+                true,
+            );
+        });
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Connect an existing local Engineering Vault folder, create a brand new Vault, or explore the 15-module workspace first.")
+                .size(12.0)
+                .color(self.theme.text_secondary),
+        );
+        ui.add_space(8.0);
+
+        if !status.status_msg.is_empty() {
+            ui.label(RichText::new(&status.status_msg).size(11.0).color(self.theme.accent_blue));
+        }
+        if !status.error_msg.is_empty() {
+            ui.label(RichText::new(&status.error_msg).size(11.0).color(self.theme.accent_red));
+        }
+        if let Some(ref fb) = self.vault_modal_feedback {
+            ui.label(RichText::new(fb).size(11.0).color(self.theme.accent_orange));
+        }
+
+        ui.add_space(10.0);
+
+        let outcome = crate::ui_kit::render_obsidian_vault_panel(
+            ui,
+            &self.theme,
+            &mut self.vault_path_input,
+            &mut self.vault_new_name_input,
+            false,
+            true,
+            false,
+        );
+        if outcome.state_changed {
+            self.personal_vault_projects =
+                crate::core::InternalVault::list_personal_vault_projects();
+            self.settings_view.vault_path_input = self.vault_path_input.clone();
+        }
+        if let Some(fb) = outcome.feedback {
+            self.vault_modal_feedback = Some(fb);
+        }
+        if outcome.connected_now {
+            self.vault_modal_feedback = None;
+            close_now = true;
+        }
+        if outcome.enter_guest_mode {
+            close_now = true;
+        }
+        close_now
+    }
+
     fn render_vault_startup_modal_if_open(&mut self, ctx: &egui::Context, is_mobile: bool) {
         if !self.show_vault_startup_modal {
             return;
         }
-        let status = crate::core::InternalVault::connection_status();
         let modal_size = MacTheme::clamp_modal_size(ctx, Vec2::new(760.0, 490.0));
-        let mut close_guest = false;
+        let mut close_panel = false;
 
         egui::Window::new("Welcome to EigenGraph — Connect Your Engineering Vault")
             .collapsible(false)
@@ -2651,66 +2902,13 @@ impl EigenGraphApp {
             )
             .show(ctx, |ui| {
                 ScrollArea::vertical().show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        icons::icon_label(
-                            ui,
-                            AppIcon::Database,
-                            18.0,
-                            self.theme.accent_blue,
-                            "Select How to Store Your Personal Projects",
-                            15.0,
-                            self.theme.text_primary,
-                            true,
-                        );
-                    });
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new("Connect an existing local Engineering Vault folder, create a brand new Vault, or explore the 15-module workspace first.")
-                            .size(12.0)
-                            .color(self.theme.text_secondary),
-                    );
-                    ui.add_space(8.0);
-
-                    if !status.status_msg.is_empty() {
-                        ui.label(RichText::new(&status.status_msg).size(11.0).color(self.theme.accent_blue));
-                    }
-                    if !status.error_msg.is_empty() {
-                        ui.label(RichText::new(&status.error_msg).size(11.0).color(self.theme.accent_red));
-                    }
-                    if let Some(ref fb) = self.vault_modal_feedback {
-                        ui.label(RichText::new(fb).size(11.0).color(self.theme.accent_orange));
-                    }
-
-                    ui.add_space(10.0);
-
-                    let outcome = crate::ui_kit::render_obsidian_vault_panel(
-                        ui,
-                        &self.theme,
-                        &mut self.vault_path_input,
-                        &mut self.vault_new_name_input,
-                        false,
-                        true,
-                        false,
-                    );
-                    if outcome.state_changed {
-                        self.personal_vault_projects =
-                            crate::core::InternalVault::list_personal_vault_projects();
-                        self.settings_view.vault_path_input = self.vault_path_input.clone();
-                    }
-                    if let Some(fb) = outcome.feedback {
-                        self.vault_modal_feedback = Some(fb);
-                    }
-                    if outcome.connected_now {
-                        self.vault_modal_feedback = None;
-                        self.show_vault_startup_modal = false;
-                    }
-                    if outcome.enter_guest_mode {
-                        close_guest = true;
+                    if self.render_vault_startup_body(ui) {
+                        close_panel = true;
                     }
                 });
             });
 
-        if close_guest {
+        if close_panel {
             self.show_vault_startup_modal = false;
         }
     }

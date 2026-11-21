@@ -1018,6 +1018,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export composed Living Earth Globe (earth_globe.ifcx) + active site layer",
         icon: AppIcon::Globe,
     },
+    SlashCommandSpec {
+        cmd: "/road",
+        category: "City",
+        description: "Author pure-vector IFCX IfcRoad multi-lane corridor on Earth 3D (2 clicks)",
+        icon: AppIcon::MapPin,
+    },
+    SlashCommandSpec {
+        cmd: "/bridge",
+        category: "City",
+        description: "Author elevated IFCX IfcBridge deck & piers on Earth 3D (2 clicks)",
+        icon: AppIcon::BridgeSpan,
+    },
+    SlashCommandSpec {
+        cmd: "/zone",
+        category: "City",
+        description: "Stamp IFCX IfcSpatialZone urban parcel with context towers & trees (1 click)",
+        icon: AppIcon::Building,
+    },
+    SlashCommandSpec {
+        cmd: "/gradepad",
+        category: "City",
+        description: "Auto-grade flat foundation pad onto IfcSite TIN terrain & compute Cut/Fill m3",
+        icon: AppIcon::Layers,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1542,7 +1566,7 @@ impl SpatialWorkspaceState {
             || self.api_key_popover_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
-            || matches!(self.selected_target, Some(SmartSelectionTarget::EarthSite { .. }))
+            || self.selected_target.is_some()
             || self.command_bar_expanded;
         hovered_island || engaged
     }
@@ -1558,9 +1582,8 @@ impl SpatialWorkspaceState {
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
-        if matches!(self.selected_target, Some(SmartSelectionTarget::EarthSite { .. })) {
-            self.selected_target = None;
-        }
+        self.selected_target = None;
+        self.popup_pinned = false;
     }
 
     /// Toggles `"vault"`, `"context"`, `"history"`, or `"api_key"` exclusively so
@@ -3518,6 +3541,73 @@ impl SpatialWorkspaceState {
                 "/earth-ifcx" | "/earth_ifcx" => {
                     actions.export_earth_ifcx = true;
                 }
+                "/road" => {
+                    build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                    universal_canvas.earth_bim_author.active_tool =
+                        crate::views::universal_canvas::EarthBimTool::Road;
+                    universal_canvas.earth_bim_author.pending_start_mm = None;
+                    universal_canvas.is_frozen = false;
+                    self.push_trace(
+                        format!(
+                            "City-Builder IfcRoad active ({}) — click start & end on Earth 3D",
+                            universal_canvas.city_scene.active_road_kind.label()
+                        ),
+                        true,
+                    );
+                }
+                "/bridge" => {
+                    build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                    universal_canvas.earth_bim_author.active_tool =
+                        crate::views::universal_canvas::EarthBimTool::Bridge;
+                    universal_canvas.earth_bim_author.pending_start_mm = None;
+                    universal_canvas.is_frozen = false;
+                    self.push_trace(
+                        "City-Builder IfcBridge active (6.5m pier/deck) — click start & end on Earth 3D",
+                        true,
+                    );
+                }
+                "/zone" => {
+                    build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                    universal_canvas.earth_bim_author.active_tool =
+                        crate::views::universal_canvas::EarthBimTool::Zone;
+                    universal_canvas.earth_bim_author.pending_start_mm = None;
+                    universal_canvas.is_frozen = false;
+                    self.push_trace(
+                        format!(
+                            "City-Builder IfcSpatialZone active ({}) — click on Earth 3D to zone parcel",
+                            universal_canvas.city_scene.active_zone_kind.label()
+                        ),
+                        true,
+                    );
+                }
+                "/gradepad" | "/grade" => {
+                    let tin = universal_canvas.active_site_tin.get_or_insert_with(|| {
+                        crate::core::gis::TinSurfaceMesh::generate_from_dem_preset(
+                            universal_canvas.site_tin_preset,
+                            400.0,
+                            400.0,
+                            36,
+                            36,
+                            1.0,
+                        )
+                    });
+                    let pad = universal_canvas
+                        .city_scene
+                        .auto_grade_building_pad(&build_view.bim_bus.project, tin);
+                    universal_canvas.show_terrain_contours = true;
+                    self.push_trace(
+                        format!(
+                            "Graded {} ({:.0}x{:.0}m @ {:.1}m): Cut {:.0} m3 | Fill {:.0} m3",
+                            pad.name,
+                            pad.width_m,
+                            pad.depth_m,
+                            pad.target_elev_m,
+                            pad.cut_volume_m3,
+                            pad.fill_volume_m3
+                        ),
+                        true,
+                    );
+                }
                 "/section" | "/cut" => {
                     let elev_opt = arg
                         .trim_end_matches('m')
@@ -4393,7 +4483,8 @@ impl SpatialWorkspaceState {
                             || self.command_bar_expanded
                             || self.context_picker_open
                             || self.vault_drawer_open
-                            || self.mobile_deck_pinned)
+                            || self.mobile_deck_pinned
+                            || self.selected_target.is_some())
                         && icons::icon_only_button(
                             ui,
                             AppIcon::Close,
@@ -4438,11 +4529,72 @@ impl SpatialWorkspaceState {
             &[],
         )
     }
+}
 
-    /// Renders all Floating HUD layers over the 100% Full-Canvas workspace (ZERO side panels or corner chrome):
-    /// 1. Conditional Top-Center Active Lens / Tool Pill (only when non-Orbit/Clean)
-    /// 2. Smart Element Pop-Up Inspector (only when an element or Earth location is clicked)
-    /// 3. Dynamic Island Bottom-Center Studio (3-row resting dock expanding upward on cursor hover)
+/// Host abstraction allowing `EigenGraphApp` to render full Settings, Engineering Module Sheets,
+/// Vault Setup, Import Archive, and Shortcuts/Quick-Jump natively inside the single Dynamic Island
+/// without detached pop-up windows or overlapping mutable borrows.
+pub trait SpatialIslandHost {
+    fn island_theme(&self) -> MacTheme;
+    #[allow(clippy::type_complexity)]
+    fn split_island_refs(
+        &mut self,
+    ) -> (
+        &MacTheme,
+        &mut UniversalCanvasState,
+        &mut BuildView,
+        &mut AiAssistantView,
+        &[StructuralMember],
+        &[ProjectItem],
+        &mut Vec<DatabaseComponent>,
+        &[crate::core::vault::PersonalVaultProjectEntry],
+    );
+}
+
+struct BorrowedIslandHost<'a> {
+    theme: &'a MacTheme,
+    universal_canvas: &'a mut UniversalCanvasState,
+    build_view: &'a mut BuildView,
+    ai_assistant: &'a mut AiAssistantView,
+    members: &'a [StructuralMember],
+    projects: &'a [ProjectItem],
+    db_components: &'a mut Vec<DatabaseComponent>,
+    vault_projects: &'a [crate::core::vault::PersonalVaultProjectEntry],
+}
+
+impl<'a> SpatialIslandHost for BorrowedIslandHost<'a> {
+    fn island_theme(&self) -> MacTheme {
+        self.theme.clone()
+    }
+
+    fn split_island_refs(
+        &mut self,
+    ) -> (
+        &MacTheme,
+        &mut UniversalCanvasState,
+        &mut BuildView,
+        &mut AiAssistantView,
+        &[StructuralMember],
+        &[ProjectItem],
+        &mut Vec<DatabaseComponent>,
+        &[crate::core::vault::PersonalVaultProjectEntry],
+    ) {
+        (
+            self.theme,
+            self.universal_canvas,
+            self.build_view,
+            self.ai_assistant,
+            self.members,
+            self.projects,
+            self.db_components,
+            self.vault_projects,
+        )
+    }
+}
+
+impl SpatialWorkspaceState {
+    /// Renders the Single Unified Floating Dynamic Island HUD over the 100% Full-Canvas workspace
+    /// (ZERO side panels, ZERO detached pop-ups, ZERO corner chrome).
     #[allow(clippy::too_many_arguments)]
     pub fn render_hud_overlays_with_vault(
         &mut self,
@@ -4456,46 +4608,80 @@ impl SpatialWorkspaceState {
         db_components: &mut Vec<DatabaseComponent>,
         vault_projects: &[crate::core::vault::PersonalVaultProjectEntry],
     ) -> SpatialHudActions {
+        let mut host = BorrowedIslandHost {
+            theme,
+            universal_canvas,
+            build_view,
+            ai_assistant,
+            members,
+            projects,
+            db_components,
+            vault_projects,
+        };
+        self.render_hud_overlays_with_host(ctx, &mut host, None, |_, _| {})
+    }
+
+    /// Renders the Single Unified Dynamic Island HUD with an optional embedded wide panel
+    /// (Settings, Engineering Module Sheet, Vault Setup, Import Archive, or Shortcuts/Quick-Jump)
+    /// hosted seamlessly inside the exact same morphing Liquid Glass Dynamic Island frame.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_hud_overlays_with_host<H, F>(
+        &mut self,
+        ctx: &egui::Context,
+        host: &mut H,
+        embedded_panel: Option<(&str, AppIcon, &mut bool)>,
+        render_embedded_panel: F,
+    ) -> SpatialHudActions
+    where
+        H: SpatialIslandHost,
+        F: FnOnce(&mut Ui, &mut H),
+    {
         let mut actions = SpatialHudActions::default();
         self.hud_rects.clear();
         self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
-        universal_canvas.globe_mode = true;
+        {
+            let (_, universal_canvas, build_view, _, _, _, _, _) = host.split_island_refs();
+            universal_canvas.globe_mode = true;
 
-        // Keep Earth 3D BIM Authoring Config synchronized with active Story & Element Dimensions
-        let (sync_base_id, sync_top_id, _, _) =
-            self.active_base_and_top_levels(&build_view.bim_bus.project);
-        universal_canvas.earth_bim_author.base_level_id = sync_base_id;
-        universal_canvas.earth_bim_author.top_level_id = sync_top_id;
-        universal_canvas.earth_bim_author.col_width_mm = build_view.author_col_width_mm;
-        universal_canvas.earth_bim_author.col_depth_mm = build_view.author_col_depth_mm;
-        universal_canvas.earth_bim_author.beam_width_mm = build_view.author_beam_width_mm;
-        universal_canvas.earth_bim_author.beam_depth_mm = build_view.author_beam_depth_mm;
-        universal_canvas.earth_bim_author.wall_thickness_mm = build_view.author_wall_thickness_mm;
-        universal_canvas.earth_bim_author.footing_size_mm = build_view.author_footing_size_mm;
-        universal_canvas.earth_bim_author.erection_day_limit = self.active_4d_day as usize;
-        universal_canvas.earth_bim_author.active_tool = match build_view.ground_author_tool {
-            Ground3DAuthorTool::Orbit => {
-                if matches!(
-                    universal_canvas.earth_bim_author.active_tool,
-                    crate::views::universal_canvas::EarthBimTool::Slab
-                        | crate::views::universal_canvas::EarthBimTool::Door
-                        | crate::views::universal_canvas::EarthBimTool::Window
-                ) {
-                    universal_canvas.earth_bim_author.active_tool
-                } else {
-                    crate::views::universal_canvas::EarthBimTool::None
+            // Keep Earth 3D BIM Authoring Config synchronized with active Story & Element Dimensions
+            let (sync_base_id, sync_top_id, _, _) =
+                self.active_base_and_top_levels(&build_view.bim_bus.project);
+            universal_canvas.earth_bim_author.base_level_id = sync_base_id;
+            universal_canvas.earth_bim_author.top_level_id = sync_top_id;
+            universal_canvas.earth_bim_author.col_width_mm = build_view.author_col_width_mm;
+            universal_canvas.earth_bim_author.col_depth_mm = build_view.author_col_depth_mm;
+            universal_canvas.earth_bim_author.beam_width_mm = build_view.author_beam_width_mm;
+            universal_canvas.earth_bim_author.beam_depth_mm = build_view.author_beam_depth_mm;
+            universal_canvas.earth_bim_author.wall_thickness_mm = build_view.author_wall_thickness_mm;
+            universal_canvas.earth_bim_author.footing_size_mm = build_view.author_footing_size_mm;
+            universal_canvas.earth_bim_author.erection_day_limit = self.active_4d_day as usize;
+            universal_canvas.earth_bim_author.active_tool = match build_view.ground_author_tool {
+                Ground3DAuthorTool::Orbit => {
+                    if matches!(
+                        universal_canvas.earth_bim_author.active_tool,
+                        crate::views::universal_canvas::EarthBimTool::Slab
+                            | crate::views::universal_canvas::EarthBimTool::Door
+                            | crate::views::universal_canvas::EarthBimTool::Window
+                            | crate::views::universal_canvas::EarthBimTool::Road
+                            | crate::views::universal_canvas::EarthBimTool::Bridge
+                            | crate::views::universal_canvas::EarthBimTool::Zone
+                    ) {
+                        universal_canvas.earth_bim_author.active_tool
+                    } else {
+                        crate::views::universal_canvas::EarthBimTool::None
+                    }
                 }
+                Ground3DAuthorTool::Column => crate::views::universal_canvas::EarthBimTool::Column,
+                Ground3DAuthorTool::Beam => crate::views::universal_canvas::EarthBimTool::Beam,
+                Ground3DAuthorTool::Wall => crate::views::universal_canvas::EarthBimTool::Wall,
+                Ground3DAuthorTool::Footing => crate::views::universal_canvas::EarthBimTool::Footing,
+            };
+            if let Some(earth_snap) = universal_canvas.earth_bim_author.hover_snap_mm {
+                build_view.hover_3d_ground_snap_mm = Some(earth_snap);
             }
-            Ground3DAuthorTool::Column => crate::views::universal_canvas::EarthBimTool::Column,
-            Ground3DAuthorTool::Beam => crate::views::universal_canvas::EarthBimTool::Beam,
-            Ground3DAuthorTool::Wall => crate::views::universal_canvas::EarthBimTool::Wall,
-            Ground3DAuthorTool::Footing => crate::views::universal_canvas::EarthBimTool::Footing,
-        };
-        if let Some(earth_snap) = universal_canvas.earth_bim_author.hover_snap_mm {
-            build_view.hover_3d_ground_snap_mm = Some(earth_snap);
-        }
-        if let Some(earth_start) = universal_canvas.earth_bim_author.pending_start_mm {
-            build_view.pending_3d_start_mm = Some(earth_start);
+            if let Some(earth_start) = universal_canvas.earth_bim_author.pending_start_mm {
+                build_view.pending_3d_start_mm = Some(earth_start);
+            }
         }
 
         let vp = MacTheme::viewport_size(ctx);
@@ -4521,39 +4707,15 @@ impl SpatialWorkspaceState {
             }
         });
 
-        // 3. Smart Element Pop-Up Inspector (Active Lens & Manual Tool Strip now lives inside Dynamic Island)
-        if let Some(target) = self.selected_target {
-            if !matches!(target, SmartSelectionTarget::EarthSite { .. }) {
-                let popup_actions = self.render_smart_element_popup(
-                    ctx,
-                    theme,
-                    target,
-                    universal_canvas,
-                    build_view,
-                    ai_assistant,
-                    members,
-                    projects,
-                    db_components,
-                    vp,
-                    is_mobile,
-                );
-                actions.merge(popup_actions);
-            }
-        }
-
-        // 4. Unified Hover-Expandable Floating Dynamic Island
-        let island_actions = self.render_dynamic_island(
+        // Unified Morphing Floating Dynamic Island (hosts ALL tools, drawers, Smart Inspector,
+        // Settings, Vault Setup, Import, Shortcuts & Engineering Sheets in ONE single glass frame!)
+        let island_actions = self.render_dynamic_island_with_host(
             ctx,
-            theme,
-            universal_canvas,
-            build_view,
-            ai_assistant,
-            members,
-            projects,
-            db_components,
-            vault_projects,
+            host,
             vp,
             is_mobile,
+            embedded_panel,
+            render_embedded_panel,
         );
         actions.merge(island_actions);
 
@@ -5091,6 +5253,9 @@ impl SpatialWorkspaceState {
                 crate::views::universal_canvas::EarthBimTool::Slab
                     | crate::views::universal_canvas::EarthBimTool::Door
                     | crate::views::universal_canvas::EarthBimTool::Window
+                    | crate::views::universal_canvas::EarthBimTool::Road
+                    | crate::views::universal_canvas::EarthBimTool::Bridge
+                    | crate::views::universal_canvas::EarthBimTool::Zone
             ) {
                 let (_, _, story_lbl, _) =
                     self.active_base_and_top_levels(&build_view.bim_bus.project);
@@ -5100,6 +5265,21 @@ impl SpatialWorkspaceState {
                     }
                     crate::views::universal_canvas::EarthBimTool::Door => {
                         "Tool: Door (900x2100mm) — click 3D Wall".to_string()
+                    }
+                    crate::views::universal_canvas::EarthBimTool::Road => {
+                        format!(
+                            "Tool: IfcRoad ({}) — click start & end on Earth 3D",
+                            universal_canvas.city_scene.active_road_kind.label()
+                        )
+                    }
+                    crate::views::universal_canvas::EarthBimTool::Bridge => {
+                        "Tool: IfcBridge (6.5m pier/deck) — click start & end on Earth 3D".to_string()
+                    }
+                    crate::views::universal_canvas::EarthBimTool::Zone => {
+                        format!(
+                            "Tool: IfcSpatialZone ({}) — click on Earth 3D",
+                            universal_canvas.city_scene.active_zone_kind.label()
+                        )
                     }
                     _ => "Tool: Window (1800x1400mm) — click 3D Wall".to_string(),
                 };
@@ -5313,19 +5493,20 @@ impl SpatialWorkspaceState {
         });
     }
 
-    fn render_smart_element_popup(
+    /// Renders the Smart Element Inspector directly INSIDE the unified Dynamic Island (zero detached pop-up windows).
+    #[allow(clippy::too_many_arguments)]
+    fn render_embedded_smart_inspector_in_island(
         &mut self,
-        ctx: &egui::Context,
+        ui: &mut Ui,
         theme: &MacTheme,
         target: SmartSelectionTarget,
+        cap_w: f32,
         universal_canvas: &mut UniversalCanvasState,
         build_view: &mut BuildView,
         ai_assistant: &mut AiAssistantView,
         members: &[StructuralMember],
         projects: &[ProjectItem],
         db_components: &mut Vec<DatabaseComponent>,
-        vp: Vec2,
-        is_mobile: bool,
     ) -> SpatialHudActions {
         let mut actions = SpatialHudActions::default();
 
@@ -5341,154 +5522,132 @@ impl SpatialWorkspaceState {
             self.last_loaded_target = Some(target);
         }
 
-        let card_w = if is_mobile {
-            (vp.x - 16.0).clamp(200.0, 380.0)
-        } else {
-            (vp.x * 0.34).clamp(310.0, 385.0)
-        };
-        let inner_w = (card_w - 28.0).max(170.0);
-        let max_h = if is_mobile {
-            (vp.y * 0.44).clamp(190.0, 340.0)
-        } else {
-            (vp.y - 125.0).clamp(260.0, 520.0)
-        };
-        let (anchor, offset) = if is_mobile {
-            (Align2::CENTER_TOP, Vec2::new(0.0, 12.0))
-        } else {
-            (Align2::RIGHT_TOP, Vec2::new(-14.0, 14.0))
-        };
-
         let mut close_popup = false;
-        let area_resp = Area::new(Id::new("antigravity_smart_element_popup"))
-            .order(Order::Foreground)
-            .anchor(anchor, offset)
-            .constrain(true)
-            .show(ctx, |ui| {
-                let glass = Self::antigravity_glass_frame(theme, 14, Margin::same(12)).show(ui, |ui| {
-                    ui.set_width(inner_w);
-                    ui.set_max_width(inner_w);
-                    ui.set_max_height(max_h);
-                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+        let iw = (cap_w - 32.0).max(160.0);
+        Frame::new()
+            .fill(theme.bg_card.gamma_multiply(0.45))
+            .corner_radius(CornerRadius::same(12))
+            .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.35)))
+            .inner_margin(Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(iw);
+                ui.set_max_width(iw);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
 
-                    // Header bar with element identity, Pin toggle, and Close button
-                    let (title, subtitle, elem_icon) =
-                        Self::describe_target(target, &build_view.bim_bus.project);
-                    ui.horizontal(|ui| {
-                        icons::icon_label(
+                // Header bar with element identity, Pin toggle, and Close button
+                let (title, subtitle, elem_icon) =
+                    Self::describe_target(target, &build_view.bim_bus.project);
+                ui.horizontal(|ui| {
+                    icons::icon_label(
+                        ui,
+                        elem_icon,
+                        15.0,
+                        theme.accent_blue,
+                        &title,
+                        12.5,
+                        theme.text_primary,
+                        true,
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if icons::icon_only_button(
                             ui,
-                            elem_icon,
-                            15.0,
-                            theme.accent_blue,
-                            &title,
-                            13.0,
-                            theme.text_primary,
-                            true,
-                        );
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if icons::icon_only_button(
-                                ui,
-                                AppIcon::Close,
-                                theme.text_secondary,
-                                Color32::TRANSPARENT,
-                                Stroke::NONE,
-                                CornerRadius::same(6),
-                                Vec2::splat(22.0),
-                                "Close pop-up (Esc)",
-                            )
-                            .clicked()
-                            {
-                                close_popup = true;
-                            }
-                            let pin_bg = if self.popup_pinned {
-                                theme.accent_blue.gamma_multiply(0.22)
+                            AppIcon::Close,
+                            theme.text_secondary,
+                            Color32::TRANSPARENT,
+                            Stroke::NONE,
+                            CornerRadius::same(6),
+                            Vec2::splat(22.0),
+                            "Close inspector (Esc)",
+                        )
+                        .clicked()
+                        {
+                            close_popup = true;
+                        }
+                        let pin_bg = if self.popup_pinned {
+                            theme.accent_blue.gamma_multiply(0.22)
+                        } else {
+                            Color32::TRANSPARENT
+                        };
+                        if icons::icon_button(
+                            ui,
+                            AppIcon::MapPin,
+                            if self.popup_pinned { "Pinned" } else { "Pin" },
+                            10.0,
+                            if self.popup_pinned {
+                                theme.accent_blue
                             } else {
-                                Color32::TRANSPARENT
-                            };
-                            if icons::icon_button(
-                                ui,
-                                AppIcon::MapPin,
-                                if self.popup_pinned { "Pinned" } else { "Pin" },
-                                10.0,
-                                if self.popup_pinned {
-                                    theme.accent_blue
-                                } else {
-                                    theme.text_muted
-                                },
-                                pin_bg,
-                                Stroke::NONE,
-                                CornerRadius::same(6),
-                                Vec2::new(0.0, 22.0),
-                            )
-                            .on_hover_text("Pin inspector open across canvas clicks")
-                            .clicked()
-                            {
-                                self.popup_pinned = !self.popup_pinned;
-                            }
-                        });
+                                theme.text_muted
+                            },
+                            pin_bg,
+                            Stroke::NONE,
+                            CornerRadius::same(6),
+                            Vec2::new(0.0, 22.0),
+                        )
+                        .on_hover_text("Pin inspector open inside Dynamic Island across canvas clicks")
+                        .clicked()
+                        {
+                            self.popup_pinned = !self.popup_pinned;
+                        }
                     });
-                    ui.label(RichText::new(subtitle).size(10.5).color(theme.text_secondary));
-                    ui.add_space(6.0);
-
-                    // Context Tab Switcher (Properties | Calc | 5D/6D | Ask AI)
-                    if !matches!(target, SmartSelectionTarget::EarthSite { .. } | SmartSelectionTarget::SketchEntity(_)) {
-                        ui.horizontal_wrapped(|ui| {
-                            for tab in [
-                                SmartPopupTab::Properties,
-                                SmartPopupTab::Calculations,
-                                SmartPopupTab::Lifecycle5D6D,
-                                SmartPopupTab::AskAi,
-                            ] {
-                                let active = self.popup_tab == tab;
-                                if ui
-                                    .add(
-                                        egui::Button::new(
-                                            RichText::new(tab.label()).size(10.5).color(if active {
-                                                Color32::WHITE
-                                            } else {
-                                                theme.text_secondary
-                                            }),
-                                        )
-                                        .fill(if active {
-                                            theme.accent_blue
-                                        } else {
-                                            theme.bg_card
-                                        })
-                                        .corner_radius(CornerRadius::same(8))
-                                        .min_size(Vec2::new(56.0, 22.0)),
-                                    )
-                                    .clicked()
-                                {
-                                    self.popup_tab = tab;
-                                }
-                            }
-                        });
-                        ui.add_space(6.0);
-                    }
-
-                    ui.separator();
-                    ui.add_space(4.0);
-
-                    ScrollArea::vertical()
-                        .id_salt("smart_popup_scroll")
-                        .auto_shrink([false, true])
-                        .show(ui, |ui| {
-                            let body_actions = self.render_smart_popup_body(
-                                ui,
-                                theme,
-                                target,
-                                universal_canvas,
-                                build_view,
-                                ai_assistant,
-                                members,
-                                projects,
-                                db_components,
-                            );
-                            actions.merge(body_actions);
-                        });
                 });
-                theme.paint_glass_specular_sheen(ui.painter(), glass.response.rect, 14.0);
+                ui.label(RichText::new(subtitle).size(10.5).color(theme.text_secondary));
+                ui.add_space(5.0);
+
+                // Context Tab Switcher (Properties | Calc | 5D/6D | Ask AI)
+                if !matches!(
+                    target,
+                    SmartSelectionTarget::EarthSite { .. } | SmartSelectionTarget::SketchEntity(_)
+                ) {
+                    ui.horizontal_wrapped(|ui| {
+                        for tab in [
+                            SmartPopupTab::Properties,
+                            SmartPopupTab::Calculations,
+                            SmartPopupTab::Lifecycle5D6D,
+                            SmartPopupTab::AskAi,
+                        ] {
+                            let active = self.popup_tab == tab;
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new(tab.label()).size(10.5).color(if active {
+                                            Color32::WHITE
+                                        } else {
+                                            theme.text_secondary
+                                        }),
+                                    )
+                                    .fill(if active {
+                                        theme.accent_blue
+                                    } else {
+                                        theme.bg_card
+                                    })
+                                    .corner_radius(CornerRadius::same(8))
+                                    .min_size(Vec2::new(56.0, 22.0)),
+                                )
+                                .clicked()
+                            {
+                                self.popup_tab = tab;
+                            }
+                        }
+                    });
+                    ui.add_space(5.0);
+                }
+
+                ui.separator();
+                ui.add_space(4.0);
+
+                let body_actions = self.render_smart_popup_body(
+                    ui,
+                    theme,
+                    target,
+                    universal_canvas,
+                    build_view,
+                    ai_assistant,
+                    members,
+                    projects,
+                    db_components,
+                );
+                actions.merge(body_actions);
             });
-        self.hud_rects.push(area_resp.response.rect);
 
         if close_popup {
             self.selected_target = None;
@@ -9057,34 +9216,40 @@ impl SpatialWorkspaceState {
         actions
     }
 
-    /// Renders the interactive Hover-Expandable Floating Dynamic Island at bottom-center:
-    /// - Compact Idle Pill when pointer is away on the Earth/BIM canvas (0 side panels)
-    /// - Smooth Hover-Expanded Dynamic Island exposing Vault `+ Add Folder`, `+ Add Context (@)`,
-    ///   AI Model & Mode Switcher, Manual Drawing Commands, `/` Palette, Chat Drawer & Composer.
+    /// Renders the single unified Morphing Liquid Glass Dynamic Island at bottom-center:
+    /// - Compact Idle Pill when pointer is away on the Earth/BIM canvas (0 side panels, 0 detached pop-ups)
+    /// - Smooth Hover-Expanded Studio Deck exposing Vault, Context, AI, Manual Drawing & IFCX City-Builder
+    /// - Automatic Wide Expansion when hosting Settings, Engineering Module Sheets, Vault Setup,
+    ///   Import Archive, Shortcuts/Quick-Jump, or the Smart Element Inspector inside ONE single capsule.
     #[allow(clippy::too_many_arguments)]
-    fn render_dynamic_island(
+    fn render_dynamic_island_with_host<H, F>(
         &mut self,
         ctx: &egui::Context,
-        theme: &MacTheme,
-        universal_canvas: &mut UniversalCanvasState,
-        build_view: &mut BuildView,
-        ai_assistant: &mut AiAssistantView,
-        members: &[StructuralMember],
-        projects: &[ProjectItem],
-        db_components: &mut Vec<DatabaseComponent>,
-        vault_projects: &[crate::core::vault::PersonalVaultProjectEntry],
+        host: &mut H,
         vp: Vec2,
         is_mobile: bool,
-    ) -> SpatialHudActions {
+        mut embedded_panel: Option<(&str, AppIcon, &mut bool)>,
+        render_embedded_panel: F,
+    ) -> SpatialHudActions
+    where
+        H: SpatialIslandHost,
+        F: FnOnce(&mut Ui, &mut H),
+    {
         let mut actions = SpatialHudActions::default();
         let slash_mode = self.command_input.trim_start().starts_with('/');
         let vault_status = crate::core::InternalVault::connection_status();
+        let has_embedded_panel = embedded_panel.is_some();
+        let has_smart_inspector = self.selected_target.is_some();
 
-        let should_expand = self.is_dynamic_island_expanded(ctx);
+        let should_expand = has_embedded_panel || self.is_dynamic_island_expanded(ctx);
         self.island_expanded_prev = should_expand;
         let expand_t = ctx.animate_bool(
             Id::new("eigengraph_dynamic_island_expand"),
             should_expand,
+        );
+        let wide_t = ctx.animate_bool(
+            Id::new("eigengraph_dynamic_island_wide"),
+            has_embedded_panel || has_smart_inspector,
         );
 
         let compact_w = if is_mobile {
@@ -9093,15 +9258,25 @@ impl SpatialWorkspaceState {
             (vp.x * 0.62).clamp(520.0, 740.0)
         };
         let expanded_w = if is_mobile {
-            (vp.x - 12.0).clamp(220.0, 440.0)
+            (vp.x - 14.0).clamp(220.0, 440.0)
         } else {
             (vp.x * 0.72).clamp(580.0, 840.0)
         };
-        let dock_w = egui::lerp(compact_w..=expanded_w, expand_t);
+        let wide_w = if is_mobile {
+            (vp.x - 14.0).clamp(220.0, 440.0)
+        } else {
+            (vp.x * 0.88).clamp(680.0, 1040.0).min((vp.x - 24.0).max(260.0))
+        };
+        let base_w = egui::lerp(compact_w..=expanded_w, expand_t);
+        let dock_w = egui::lerp(base_w..=wide_w, wide_t).min((vp.x - 14.0).max(220.0));
 
+        let frame_theme = host.island_theme();
+        let mut render_embedded_opt = Some(render_embedded_panel);
+        let island_left_x = ((vp.x - dock_w) * 0.5).max(6.0);
         let dock_resp = Area::new(Id::new("antigravity_ai_command_dock"))
             .order(Order::Foreground)
-            .anchor(Align2::CENTER_BOTTOM, Vec2::new(0.0, -14.0))
+            .anchor(Align2::LEFT_BOTTOM, Vec2::new(island_left_x, -14.0))
+            .default_width(dock_w)
             .constrain(true)
             .show(ctx, |ui| {
                 ui.set_width(dock_w);
@@ -9119,11 +9294,11 @@ impl SpatialWorkspaceState {
                                 .take(if is_mobile { 1 } else { 2 })
                             {
                                 let col = if chip.ok {
-                                    theme.accent_green
+                                    frame_theme.accent_green
                                 } else {
-                                    theme.accent_orange
+                                    frame_theme.accent_orange
                                 };
-                                theme
+                                frame_theme
                                     .glass_capsule_frame(12, Margin::symmetric(10, 3))
                                     .stroke(Stroke::new(1.0, col.gamma_multiply(0.55)))
                                     .show(ui, |ui| {
@@ -9138,7 +9313,7 @@ impl SpatialWorkspaceState {
                                             col,
                                             &chip.label,
                                             10.0,
-                                            theme.text_secondary,
+                                            frame_theme.text_secondary,
                                             false,
                                         );
                                     });
@@ -9147,19 +9322,100 @@ impl SpatialWorkspaceState {
                         ui.add_space(5.0);
                     }
 
-                    // B. ONE UNIFIED GROWING LIQUID GLASS DYNAMIC ISLAND (morphs seamlessly upward when hovered or expanded)
-                    let island_glass = Self::antigravity_glass_frame(theme, 20, Margin::symmetric(12, 9)).show(
+                    // B. ONE UNIFIED GROWING LIQUID GLASS DYNAMIC ISLAND (morphs seamlessly upward & wider when needed)
+                    let island_glass = Self::antigravity_glass_frame(&frame_theme, 20, Margin::symmetric(12, 9)).show(
                         ui,
                         |ui| {
-                            let cap_w = (dock_w - 28.0).max(200.0);
+                            let cap_w = (dock_w - 30.0).max(180.0);
                             ui.set_width(cap_w);
                             ui.set_max_width(cap_w);
 
-                    if should_expand {
+                    // 0. Embedded Full Panel inside Dynamic Island (rendered BEFORE splitting host refs so host has full mutable access!)
+                    if let Some((panel_title, panel_icon, ref mut close_panel)) = embedded_panel {
+                        let panel_max_h = if is_mobile {
+                            (vp.y * 0.46).clamp(160.0, 420.0)
+                        } else {
+                            (vp.y * 0.64).clamp(210.0, 560.0)
+                        };
+                        Frame::new()
+                            .fill(frame_theme.bg_card.gamma_multiply(0.45))
+                            .corner_radius(CornerRadius::same(12))
+                            .stroke(Stroke::new(1.0, frame_theme.accent_blue.gamma_multiply(0.38)))
+                            .inner_margin(Margin::symmetric(12, 10))
+                            .show(ui, |ui| {
+                                let pw = (cap_w - 34.0).max(160.0);
+                                ui.set_width(pw);
+                                ui.set_max_width(pw);
+                                ui.horizontal(|ui| {
+                                    icons::icon_label(
+                                        ui,
+                                        panel_icon,
+                                        15.0,
+                                        frame_theme.accent_blue,
+                                        panel_title,
+                                        13.0,
+                                        frame_theme.text_primary,
+                                        true,
+                                    );
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        if icons::icon_only_button(
+                                            ui,
+                                            AppIcon::Close,
+                                            frame_theme.text_secondary,
+                                            Color32::TRANSPARENT,
+                                            Stroke::NONE,
+                                            CornerRadius::same(6),
+                                            Vec2::splat(22.0),
+                                            "Close panel (Esc)",
+                                        )
+                                        .clicked()
+                                        {
+                                            **close_panel = true;
+                                        }
+                                    });
+                                });
+                                ui.separator();
+                                ui.add_space(6.0);
+                                ScrollArea::vertical()
+                                    .id_salt(("dynamic_island_embedded_panel_scroll", panel_title))
+                                    .max_width(pw)
+                                    .max_height(panel_max_h)
+                                    .auto_shrink([false, true])
+                                    .show(ui, |ui| {
+                                        ui.set_width(pw);
+                                        ui.set_max_width(pw);
+                                        if let Some(render_fn) = render_embedded_opt.take() {
+                                            render_fn(ui, host);
+                                        }
+                                    });
+                            });
+                        ui.add_space(6.0);
+                        ui.separator();
+                    }
+
+                    let (
+                        theme,
+                        universal_canvas,
+                        build_view,
+                        ai_assistant,
+                        members,
+                        projects,
+                        db_components,
+                        vault_projects,
+                    ) = host.split_island_refs();
+
+                    if should_expand && !has_embedded_panel {
+                    let expand_max_h = if is_mobile {
+                        (vp.y * 0.42).clamp(150.0, 360.0)
+                    } else if has_smart_inspector {
+                        (vp.y * 0.56).clamp(190.0, 480.0)
+                    } else {
+                        (vp.y * 0.52).clamp(170.0, 440.0)
+                    };
                     ScrollArea::vertical()
                         .id_salt("dynamic_island_expand_scroll")
                         .max_width(cap_w)
-                        .max_height((vp.y * 0.54).clamp(170.0, 440.0))
+                        .max_height(expand_max_h)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
                     ui.set_max_width(cap_w);
@@ -9174,6 +9430,22 @@ impl SpatialWorkspaceState {
                             build_view,
                         );
                         actions.merge(site_actions);
+                        ui.separator();
+                    } else if let Some(target) = self.selected_target {
+                        let smart_actions = self.render_embedded_smart_inspector_in_island(
+                            ui,
+                            theme,
+                            target,
+                            cap_w,
+                            universal_canvas,
+                            build_view,
+                            ai_assistant,
+                            members,
+                            projects,
+                            db_components,
+                        );
+                        actions.merge(smart_actions);
+                        ui.add_space(4.0);
                         ui.separator();
                     }
                     if self.history_popover_open {
@@ -10564,6 +10836,144 @@ impl SpatialWorkspaceState {
                                             }
                                         },
                                     );
+                                    ui.add_space(4.0);
+                                    // Phase 67: IFCX City-Builder Authoring (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`, Auto Cut/Fill Pad)
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new("IFCX City:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            let road_on = universal_canvas.earth_bim_author.active_tool
+                                                == crate::views::universal_canvas::EarthBimTool::Road;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::MapPin),
+                                                format!("Road ({})", universal_canvas.city_scene.roads.iter().filter(|r| !r.is_bridge).count()),
+                                                road_on,
+                                                theme.accent_blue,
+                                                "Draw IFCX IfcRoad multi-lane corridor on Earth 3D (2 clicks)",
+                                            )
+                                            .clicked()
+                                            {
+                                                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                                                universal_canvas.earth_bim_author.active_tool = if road_on {
+                                                    crate::views::universal_canvas::EarthBimTool::None
+                                                } else {
+                                                    crate::views::universal_canvas::EarthBimTool::Road
+                                                };
+                                                universal_canvas.earth_bim_author.pending_start_mm = None;
+                                                universal_canvas.is_frozen = false;
+                                            }
+                                            let bridge_on = universal_canvas.earth_bim_author.active_tool
+                                                == crate::views::universal_canvas::EarthBimTool::Bridge;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::BridgeSpan),
+                                                format!("Bridge ({})", universal_canvas.city_scene.roads.iter().filter(|r| r.is_bridge).count()),
+                                                bridge_on,
+                                                theme.accent_blue,
+                                                "Draw elevated IFCX IfcBridge deck & piers on Earth 3D (2 clicks)",
+                                            )
+                                            .clicked()
+                                            {
+                                                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                                                universal_canvas.earth_bim_author.active_tool = if bridge_on {
+                                                    crate::views::universal_canvas::EarthBimTool::None
+                                                } else {
+                                                    crate::views::universal_canvas::EarthBimTool::Bridge
+                                                };
+                                                universal_canvas.earth_bim_author.pending_start_mm = None;
+                                                universal_canvas.is_frozen = false;
+                                            }
+                                            let zone_on = universal_canvas.earth_bim_author.active_tool
+                                                == crate::views::universal_canvas::EarthBimTool::Zone;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Building),
+                                                format!(
+                                                    "Zone: {}",
+                                                    universal_canvas.city_scene.active_zone_kind.short_label()
+                                                ),
+                                                zone_on,
+                                                theme.accent_green,
+                                                "Click on Earth 3D to stamp IFCX IfcSpatialZone parcel with context massing & trees",
+                                            )
+                                            .clicked()
+                                            {
+                                                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                                                if zone_on {
+                                                    universal_canvas.city_scene.active_zone_kind =
+                                                        universal_canvas.city_scene.active_zone_kind.cycle_next();
+                                                } else {
+                                                    universal_canvas.earth_bim_author.active_tool =
+                                                        crate::views::universal_canvas::EarthBimTool::Zone;
+                                                    universal_canvas.is_frozen = false;
+                                                }
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Layers),
+                                                "Grade Pad",
+                                                !universal_canvas.city_scene.graded_pads.is_empty(),
+                                                theme.accent_orange,
+                                                "Auto-grade flat foundation pad onto IfcSite TIN & compute Cut/Fill m3",
+                                            )
+                                            .clicked()
+                                            {
+                                                let tin = universal_canvas.active_site_tin.get_or_insert_with(|| {
+                                                    crate::core::gis::TinSurfaceMesh::generate_from_dem_preset(
+                                                        universal_canvas.site_tin_preset,
+                                                        400.0,
+                                                        400.0,
+                                                        36,
+                                                        36,
+                                                        1.0,
+                                                    )
+                                                });
+                                                let pad = universal_canvas
+                                                    .city_scene
+                                                    .auto_grade_building_pad(&build_view.bim_bus.project, tin);
+                                                universal_canvas.show_terrain_contours = true;
+                                                self.push_trace(
+                                                    format!(
+                                                        "Graded {} ({:.0}x{:.0}m): Cut {:.0}m3 | Fill {:.0}m3",
+                                                        pad.name,
+                                                        pad.width_m,
+                                                        pad.depth_m,
+                                                        pad.cut_volume_m3,
+                                                        pad.fill_volume_m3
+                                                    ),
+                                                    true,
+                                                );
+                                            }
+                                            let snap_on = universal_canvas.city_scene.road_snap_enabled;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                if snap_on { "Road Snap" } else { "Snap Off" },
+                                                snap_on,
+                                                theme.accent_blue,
+                                                "Snap BIM columns/walls/footings to road setbacks & parcel alignments",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.city_scene.road_snap_enabled = !snap_on;
+                                            }
+                                        },
+                                    );
                                 }
                                 DynamicIslandStudioTab::CadAndExport => {
                                     Self::glass_subpill_group(
@@ -11015,7 +11425,11 @@ impl SpatialWorkspaceState {
                                 });
                         },
                     );
-                    theme.paint_glass_specular_sheen(ui.painter(), island_glass.response.rect, 20.0);
+                    frame_theme.paint_glass_specular_sheen(
+                        ui.painter(),
+                        island_glass.response.rect,
+                        20.0,
+                    );
                 });
             });
 
@@ -13701,6 +14115,194 @@ mod tests {
                 r.right() <= win_w + 1.0 && r.left() >= -1.0,
                 "Phase 65 GIS & Site Dynamic Island overflowed viewport {win_w}: {r:?}"
             );
+        }
+    }
+
+    #[test]
+    fn test_phase67_unified_dynamic_island_all_popups_wide_expansion_and_city_slash_commands() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus = crate::core::BimCommandBus::from_project(
+            crate::core::BimProject::sample_bimcraft_building(),
+        );
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = crate::theme::MacTheme::default();
+
+        // 1. Slash commands activate IFCX City-Builder tools & auto pad grading
+        for cmd in ["/road", "/bridge", "/zone", "/gradepad"] {
+            assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == cmd));
+        }
+        let _ = spatial.execute_spatial_input(
+            "/road",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(
+            canvas.earth_bim_author.active_tool,
+            crate::views::universal_canvas::EarthBimTool::Road
+        );
+
+        let _ = spatial.execute_spatial_input(
+            "/bridge",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(
+            canvas.earth_bim_author.active_tool,
+            crate::views::universal_canvas::EarthBimTool::Bridge
+        );
+
+        let _ = spatial.execute_spatial_input(
+            "/zone",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(
+            canvas.earth_bim_author.active_tool,
+            crate::views::universal_canvas::EarthBimTool::Zone
+        );
+
+        let _ = spatial.execute_spatial_input(
+            "/gradepad",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(canvas.active_site_tin.is_some());
+        assert!(!canvas.city_scene.graded_pads.is_empty());
+
+        // 2. Smart Element Inspector renders INSIDE the single Dynamic Island (ZERO detached pop-up windows!)
+        let col_id = build.bim_bus.project.columns[0].id;
+        spatial.selected_target = Some(SmartSelectionTarget::Column(col_id));
+        for win_w in [1200.0_f32, 768.0, 390.0] {
+            let ctx = egui::Context::default();
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 844.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                },
+            );
+            out.textures_delta.clear();
+            assert_eq!(
+                spatial.hud_rects.len(),
+                1,
+                "Smart Inspector must live strictly inside the single Dynamic Island (0 detached popups)"
+            );
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 67 Smart Inspector Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
+        }
+
+        // 3. Embedded Settings / Module Sheet panel inside Dynamic Island expands wider on desktop & fits mobile cleanly
+        spatial.selected_target = None;
+        let compact_w_desktop = {
+            let ctx = egui::Context::default();
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, 840.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                },
+            );
+            out.textures_delta.clear();
+            spatial.hud_rects[0].width()
+        };
+
+        for win_w in [1280.0_f32, 768.0, 390.0] {
+            let ctx = egui::Context::default();
+            let mut close_flag = false;
+            let mut rendered_panel = false;
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 844.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut host = BorrowedIslandHost {
+                        theme: &theme,
+                        universal_canvas: &mut canvas,
+                        build_view: &mut build,
+                        ai_assistant: &mut ai,
+                        members: &members,
+                        projects: &projects,
+                        db_components: &mut db_components,
+                        vault_projects: &[],
+                    };
+                    let _ = spatial.render_hud_overlays_with_host(
+                        ui.ctx(),
+                        &mut host,
+                        Some((
+                            "Settings — Workspace & About",
+                            AppIcon::SettingsGear,
+                            &mut close_flag,
+                        )),
+                        |ui, _| {
+                            rendered_panel = true;
+                            ui.label("Embedded Settings panel inside Dynamic Island");
+                        },
+                    );
+                },
+            );
+            out.textures_delta.clear();
+            assert!(rendered_panel);
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 67 Embedded Settings Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
+            if win_w >= 1200.0 {
+                assert!(
+                    r.width() > compact_w_desktop + 100.0,
+                    "Desktop Dynamic Island should smoothly expand wider when hosting Settings ({} vs compact {})",
+                    r.width(),
+                    compact_w_desktop
+                );
+            }
         }
     }
 }

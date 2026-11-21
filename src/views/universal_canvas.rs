@@ -264,6 +264,8 @@ pub struct UnifiedWorkspaceArchive {
     pub planetary_world: PlanetaryWorldState,
     #[serde(default)]
     pub lifecycle_ops: LifecycleOpsState,
+    #[serde(default)]
+    pub city_scene: crate::core::gis::IfcxCityScene,
     pub sha256_seal: String,
 }
 
@@ -367,6 +369,9 @@ pub enum EarthBimTool {
     Slab,
     Door,
     Window,
+    Road,
+    Bridge,
+    Zone,
 }
 
 /// Phase 55–63: Structural visualization overlay rendered directly over 3D BIM buildings on Earth 3D.
@@ -701,6 +706,8 @@ pub struct UniversalCanvasState {
     pub earth_fem_cache: EarthStructuralRenderCache,
     // Phase 65: Native WebGL2 / OpenGL (`egui_glow`) 3D Pure-Vector Earth Renderer (0% Raster Pixels)
     pub webgl_earth: crate::views::webgl_earth::WebGlEarthState,
+    // Phase 67: IFCX City-Builder Authoring (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`, Auto Cut/Fill Pads)
+    pub city_scene: crate::core::gis::IfcxCityScene,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -793,6 +800,7 @@ impl Default for UniversalCanvasState {
             active_vector_snap_az_deg: None,
             earth_fem_cache: EarthStructuralRenderCache::default(),
             webgl_earth: crate::views::webgl_earth::WebGlEarthState::default(),
+            city_scene: crate::core::gis::IfcxCityScene::default(),
         }
     }
 }
@@ -2399,6 +2407,7 @@ impl UniversalCanvasState {
                 ops.site_coupling = self.active_site_coupling();
                 ops
             },
+            city_scene: self.city_scene.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -2483,6 +2492,7 @@ impl UniversalCanvasState {
         self.earth_world.recompute_vitals();
         self.lifecycle_ops = archive.lifecycle_ops;
         self.lifecycle_ops.site_coupling = self.active_site_coupling();
+        self.city_scene = archive.city_scene;
         self.status_message = Some(format!(
             "Imported verified 1-file workspace '{}' ({} canvas objects)",
             archive.project_name,
@@ -2780,8 +2790,39 @@ impl UniversalCanvasState {
             pointer_in_freeze_pill || pointer_blocked_by_hud,
         );
 
-        // 1a. Phase 64–65: Native WebGL2 (`egui_glow`) 3D Pure-Vector Earth Globe + CPU Overlay Fallback
+        // 1a. Phase 64–67: Native WebGL2 (`egui_glow`) 3D Pure-Vector IFCX Earth + City-Builder + Unified BIM/FEM/Modal/N-1
         let active_globe_xform = if self.globe_mode {
+            let active_heading_deg = self
+                .active_world_project_rel_path
+                .as_deref()
+                .and_then(|r| self.world_index.get(r))
+                .map(|b| b.heading_deg)
+                .unwrap_or(0.0);
+            let modal_phase_sin = if self.earth_bim_author.modal_anim_playing {
+                ((ui.ctx().input(|i| i.time) * 3.8).sin()) as f32
+            } else {
+                1.0_f32
+            };
+            let n1_removed_bim = self
+                .earth_fem_cache
+                .n1_simulation
+                .as_ref()
+                .map(|ov| (ov.removed_kind, ov.removed_bim_id));
+            let active_bim_gpu = if !bim_project.is_empty() {
+                Some(crate::views::webgl_earth::ActiveBimGpuInput {
+                    project: bim_project,
+                    members,
+                    lens: self.earth_bim_author.active_lens,
+                    erection_day_limit: self.earth_bim_author.erection_day_limit,
+                    deform_scale: self.earth_bim_author.deform_scale,
+                    active_modal_mode: self.earth_bim_author.active_modal_mode,
+                    modal_phase_sin,
+                    n1_removed_bim,
+                    heading_deg: active_heading_deg,
+                })
+            } else {
+                None
+            };
             let gpu_globe_active = self.webgl_earth.schedule_paint_pass(
                 ui,
                 &painter,
@@ -2795,6 +2836,8 @@ impl UniversalCanvasState {
                 &self.world_index,
                 self.active_world_project_rel_path.as_deref(),
                 &self.urban_vectors,
+                Some(&self.city_scene),
+                active_bim_gpu,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
                 ui,
@@ -5002,7 +5045,20 @@ impl UniversalCanvasState {
                     } else {
                         to_world(pos)
                     };
-                    let pt = bim_snap(self, raw, self.earth_bim_author.pending_start_mm);
+                    let mut pt = bim_snap(self, raw, self.earth_bim_author.pending_start_mm);
+                    // Phase 67: Road & Parcel Setback Snapping for BIM columns/walls/footings
+                    if matches!(
+                        self.earth_bim_author.active_tool,
+                        EarthBimTool::Column | EarthBimTool::Wall | EarthBimTool::Footing
+                    ) {
+                        if let Some(hit) = self
+                            .city_scene
+                            .snap_point_to_road_or_parcel([pt[0] * 0.001, pt[1] * 0.001], 3.5)
+                        {
+                            pt = [hit.snapped_enu_m[0] * 1000.0, hit.snapped_enu_m[1] * 1000.0];
+                            self.active_vector_snap_az_deg = Some(hit.bearing_deg);
+                        }
+                    }
                     let base_level_id = self.earth_bim_author.base_level_id.max(1);
                     let top_level_id = self.earth_bim_author.top_level_id.max(base_level_id);
                     let p2 = crate::core::P2(pt[0], pt[1]);
@@ -5176,6 +5232,41 @@ impl UniversalCanvasState {
                                     if is_door { "Door" } else { "Window" }
                                 ));
                             }
+                        }
+                        EarthBimTool::Road | EarthBimTool::Bridge => {
+                            let is_bridge = self.earth_bim_author.active_tool == EarthBimTool::Bridge;
+                            if let Some(s) = self.earth_bim_author.pending_start_mm.take() {
+                                let start_m = [s[0] * 0.001, s[1] * 0.001];
+                                let end_m = [pt[0] * 0.001, pt[1] * 0.001];
+                                let kind = self.city_scene.active_road_kind;
+                                if let Some(seg) = self.city_scene.add_road(start_m, end_m, kind, is_bridge) {
+                                    self.status_message = Some(format!(
+                                        "Authored {} '{}' ({:.1} m, {:.1} m wide) as IFCX {}",
+                                        if is_bridge { "Bridge" } else { "Road" },
+                                        seg.name,
+                                        seg.length_m(),
+                                        seg.width_m,
+                                        if is_bridge { "IfcBridge" } else { "IfcRoad" }
+                                    ));
+                                }
+                            } else {
+                                self.earth_bim_author.pending_start_mm = Some(pt);
+                            }
+                        }
+                        EarthBimTool::Zone => {
+                            let center_m = [pt[0] * 0.001, pt[1] * 0.001];
+                            let kind = self.city_scene.active_zone_kind;
+                            let bearing = self
+                                .city_scene
+                                .snap_point_to_road_or_parcel(center_m, 14.0)
+                                .map(|h| h.bearing_deg)
+                                .unwrap_or(0.0);
+                            let z = self.city_scene.add_zone(center_m, 30.0, 24.0, bearing, kind);
+                            self.status_message = Some(format!(
+                                "Zoned '{}' ({}, 30x24 m) as IFCX IfcSpatialZone",
+                                z.name,
+                                z.kind.label()
+                            ));
                         }
                         EarthBimTool::None => {}
                     }
@@ -6888,6 +6979,50 @@ impl UniversalCanvasState {
                                             ghost_stroke,
                                         ));
                                     }
+                                }
+                            }
+                            EarthBimTool::Road | EarthBimTool::Bridge => {
+                                let is_bridge = self.earth_bim_author.active_tool == EarthBimTool::Bridge;
+                                let z_draw = if is_bridge { 6.5 } else { 0.16 };
+                                if let Some(s) = self.earth_bim_author.pending_start_mm {
+                                    if let (Some(p0), Some(p1)) = (
+                                        proj_mm(s[0], s[1], z_draw),
+                                        proj_mm(snap_pt[0], snap_pt[1], z_draw),
+                                    ) {
+                                        let len_m = ((snap_pt[0] - s[0]).hypot(snap_pt[1] - s[1])) * 0.001;
+                                        clip_painter.line_segment([p0, p1], Stroke::new(3.2, ghost_col));
+                                        let mid = Pos2::new((p0.x + p1.x) * 0.5, (p0.y + p1.y) * 0.5 - 10.0);
+                                        clip_painter.text(
+                                            mid,
+                                            Align2::CENTER_BOTTOM,
+                                            format!(
+                                                "{} {:.1} m",
+                                                if is_bridge { "IfcBridge" } else { "IfcRoad" },
+                                                len_m
+                                            ),
+                                            egui::FontId::monospace(10.5),
+                                            ghost_col,
+                                        );
+                                    }
+                                }
+                            }
+                            EarthBimTool::Zone => {
+                                let hw = 15_000.0;
+                                let hd = 12_000.0;
+                                let corners = [
+                                    (snap_pt[0] - hw, snap_pt[1] - hd),
+                                    (snap_pt[0] + hw, snap_pt[1] - hd),
+                                    (snap_pt[0] + hw, snap_pt[1] + hd),
+                                    (snap_pt[0] - hw, snap_pt[1] + hd),
+                                ];
+                                let pts: Vec<Pos2> =
+                                    corners.iter().filter_map(|(x, y)| proj_mm(*x, *y, 0.18)).collect();
+                                if pts.len() == 4 {
+                                    clip_painter.add(egui::Shape::convex_polygon(
+                                        pts,
+                                        Color32::from_rgba_unmultiplied(64, 210, 150, 48),
+                                        ghost_stroke,
+                                    ));
                                 }
                             }
                             EarthBimTool::None => {}
@@ -8770,6 +8905,72 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Renders the single-file archive import body inside either the Dynamic Island (Spatial Mode)
+    /// or a classic window. Returns `true` when the user completes or cancels import.
+    pub fn render_import_modal_body(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        bim_project: &mut BimProject,
+        members: &mut Vec<StructuralMember>,
+        variables: &mut Vec<ParametricVariable>,
+    ) -> bool {
+        let mut close_now = false;
+        ui.label(
+            RichText::new(
+                "Paste the contents of a single-file EigenGraph_Unified_Workspace.eigen.json archive to verify its SHA-256 seal and restore all synchronized modules.",
+            )
+            .size(11.5)
+            .color(theme.text_secondary),
+        );
+        ui.add_space(8.0);
+        egui::ScrollArea::vertical()
+            .id_salt("import_unified_workspace_scroll")
+            .max_height(220.0)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.import_json_buffer)
+                        .desired_width(ui.available_width())
+                        .desired_rows(10),
+                );
+            });
+        ui.add_space(10.0);
+        ui.horizontal_wrapped(|ui| {
+            if icons::icon_button(
+                ui,
+                AppIcon::CheckCircle,
+                "Verify & Restore Workspace",
+                11.5,
+                Color32::WHITE,
+                theme.accent_green,
+                Stroke::NONE,
+                CornerRadius::same(7),
+                Vec2::new(0.0, 28.0),
+            )
+            .clicked()
+            {
+                match self.apply_unified_archive(
+                    &self.import_json_buffer.clone(),
+                    bim_project,
+                    members,
+                    variables,
+                ) {
+                    Ok(settings) => {
+                        self.pending_imported_settings = Some(settings);
+                        close_now = true;
+                    }
+                    Err(err) => {
+                        self.status_message = Some(format!("Import error: {err}"));
+                    }
+                }
+            }
+            if ui.button("Cancel").clicked() {
+                close_now = true;
+            }
+        });
+        close_now
+    }
+
     fn render_import_modal(
         &mut self,
         ctx: &egui::Context,
@@ -8795,57 +8996,7 @@ impl UniversalCanvasState {
                     .inner_margin(Margin::same(14)),
             )
             .show(ctx, |ui| {
-                ui.label(
-                    RichText::new(
-                        "Paste the contents of a single-file EigenGraph_Unified_Workspace.eigen.json archive to verify its SHA-256 seal and restore all synchronized modules.",
-                    )
-                    .size(11.5)
-                    .color(theme.text_secondary),
-                );
-                ui.add_space(8.0);
-                egui::ScrollArea::vertical()
-                    .max_height(240.0)
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.import_json_buffer)
-                                .desired_width(ui.available_width())
-                                .desired_rows(12),
-                        );
-                    });
-                ui.add_space(10.0);
-                ui.horizontal_wrapped(|ui| {
-                    if icons::icon_button(
-                        ui,
-                        AppIcon::CheckCircle,
-                        "Verify & Restore Workspace",
-                        11.5,
-                        Color32::WHITE,
-                        theme.accent_green,
-                        Stroke::NONE,
-                        CornerRadius::same(7),
-                        Vec2::new(0.0, 28.0),
-                    )
-                    .clicked()
-                    {
-                        match self.apply_unified_archive(
-                            &self.import_json_buffer.clone(),
-                            bim_project,
-                            members,
-                            variables,
-                        ) {
-                            Ok(settings) => {
-                                self.pending_imported_settings = Some(settings);
-                                close_now = true;
-                            }
-                            Err(err) => {
-                                self.status_message = Some(format!("Import error: {err}"));
-                            }
-                        }
-                    }
-                    if ui.button("Cancel").clicked() {
-                        close_now = true;
-                    }
-                });
+                close_now = self.render_import_modal_body(ui, theme, bim_project, members, variables);
             });
         self.import_json_open = open && !close_now;
     }

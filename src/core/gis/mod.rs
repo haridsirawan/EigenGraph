@@ -12,6 +12,12 @@ pub mod vector_layers;
 pub mod dem_stream;
 pub mod neighborhood_physics;
 pub mod world_vectors;
+pub mod city_builder;
+
+pub use city_builder::{
+    IfcxCityScene, IfcxGradedPad, IfcxRoadKind, IfcxRoadSegment, IfcxSpatialZone, IfcxZoneKind,
+    RoadParcelSnapHit,
+};
 
 pub use world_vectors::{
     TileSource, VectorEarthPalette, VectorEarthTheme, WORLD_LANDMASSES, WORLD_MAJOR_RIVERS,
