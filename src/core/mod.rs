@@ -42,6 +42,7 @@ pub mod retrofit;
 pub mod gis;
 pub mod lifecycle_ops;
 pub mod web_bridge;
+pub mod vector_dossier;
 
 pub use linalg::{CsrMatrix, Matrix};
 pub use model::{
@@ -174,11 +175,12 @@ pub use fire::{
 };
 pub use ifcx::{
     AiBuildingFrameInferenceReport, IfcxAriOverlay, IfcxAuditItem, IfcxAuditStatus,
-    IfcxClashItem, IfcxClashReport, IfcxClashSeverity, IfcxDiffKind, IfcxDiffReport,
-    IfcxDocument, IfcxEditSession, IfcxGeoWgs84, IfcxHeader, IfcxHealthReport, IfcxImport,
-    IfcxNode, IfcxNodeDiff, IfcxStage, IfcxUnits, UsdGeomMesh, IFCX_DATA_VERSION,
-    IFCX_SCHEMA_VERSION,
+    IfcxClashItem, IfcxClashReport, IfcxClashSeverity, IfcxDiffKind, IfcxDiffLayerFilter,
+    IfcxDiffReport, IfcxDocument, IfcxEditSession, IfcxGeoWgs84, IfcxHeader, IfcxHealthReport,
+    IfcxImport, IfcxNode, IfcxNodeDiff, IfcxStage, IfcxUnits, IfcxVisualDiffEntry,
+    IfcxVisualDiffReport, UsdGeomMesh, IFCX_DATA_VERSION, IFCX_SCHEMA_VERSION,
 };
+pub use ifcx::ns::EG_IFCX_DIFF as NS_EG_IFCX_DIFF;
 pub use retrofit::{
     synthesize_structural_retrofit, RetrofitActionKind, RetrofitElementAction, RetrofitStrategy,
     StructuralRetrofitReport, NS_EG_RETROFIT,
@@ -201,6 +203,9 @@ pub use lifecycle_ops::{
     MepSizingResult, MepTestingItem, NcrPunchItem, ProcurementContractLedger, ProcurementStatus,
     PurchaseOrderRow, QualityScorecardSummary, SiteDailyDiaryLedger, SiteEnvironmentalCoupling,
     VariationOrderRow,
+};
+pub use vector_dossier::{
+    build_pure_vector_engineering_dossier_svg, VectorDossierExport, VectorDossierInput,
 };
 
 

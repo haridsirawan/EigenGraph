@@ -3227,3 +3227,110 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_phase72_ifcx_diff_and_dossier_slash_commands_and_zero_hud_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus = crate::core::BimCommandBus::from_project(
+            crate::core::BimProject::sample_bimcraft_building(),
+        );
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = MacTheme::default();
+
+        for cmd in ["/snapshot", "/diff", "/diff-ifcx", "/dossier"] {
+            assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == cmd));
+        }
+
+        let act_snap = spatial.execute_spatial_input(
+            "/snapshot",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_snap.capture_ifcx_baseline);
+
+        let act_diff = spatial.execute_spatial_input(
+            "/diff added",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_diff.run_ifcx_visual_diff);
+        assert!(spatial.ifcx_diff_drawer_open);
+        assert!(canvas.ifcx_diff_overlay_active);
+        assert_eq!(
+            canvas.ifcx_diff_filter,
+            crate::core::ifcx::IfcxDiffLayerFilter::AddedOnly
+        );
+
+        let act_dexp = spatial.execute_spatial_input(
+            "/diff-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_dexp.export_ifcx_diff_manifest);
+
+        let act_dos = spatial.execute_spatial_input(
+            "/dossier",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_dos.export_vector_dossier_svg);
+
+        // Populate layered diff report with an added SSI overlay to exercise full widened UI
+        canvas.capture_ifcx_baseline(&build.bim_bus.project, &members, "Initial");
+        canvas.subsurface_ssi.ssi_coupling_enabled = true;
+        canvas.refresh_subsurface_ssi(&build.bim_bus.project);
+        canvas.refresh_ifcx_visual_diff(&build.bim_bus.project, &members);
+        assert!(canvas.last_ifcx_visual_diff.is_some());
+
+        spatial.mobile_deck_pinned = true;
+        spatial.studio_tab = DynamicIslandStudioTab::CadAndExport;
+        for win_w in [1280.0_f32, 768.0, 390.0] {
+            let ctx = egui::Context::default();
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 844.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                },
+            );
+            out.textures_delta.clear();
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 72 IFCX Diff & Dossier Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
+        }
+    }

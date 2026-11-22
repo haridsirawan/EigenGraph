@@ -132,6 +132,13 @@ pub struct UniversalCanvasState {
     // Phase 71: 3D Subsurface Geotechnical Stratigraphy, Liquefaction & Coupled 6-DOF Winkler SSI
     pub subsurface_ssi: crate::core::geotech::SubsurfaceSsiConfig,
     pub last_subsurface_ssi_report: Option<crate::core::geotech::SubsurfaceSsiAnalysisReport>,
+    // Phase 72: Multi-Layer IFCX Visual Diffing & Pure-Vector Engineering Dossier Exporter
+    pub ifcx_baseline_snapshot: Option<crate::core::ifcx::IfcxDocument>,
+    pub ifcx_baseline_label: String,
+    pub last_ifcx_visual_diff: Option<crate::core::ifcx::IfcxVisualDiffReport>,
+    pub ifcx_diff_overlay_active: bool,
+    pub ifcx_diff_filter: crate::core::ifcx::IfcxDiffLayerFilter,
+    pub last_vector_dossier_seal: Option<String>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -237,6 +244,12 @@ impl Default for UniversalCanvasState {
             cascade_daf: 1.50,
             subsurface_ssi: crate::core::geotech::SubsurfaceSsiConfig::default(),
             last_subsurface_ssi_report: None,
+            ifcx_baseline_snapshot: None,
+            ifcx_baseline_label: "Baseline Snapshot".to_string(),
+            last_ifcx_visual_diff: None,
+            ifcx_diff_overlay_active: false,
+            ifcx_diff_filter: crate::core::ifcx::IfcxDiffLayerFilter::default(),
+            last_vector_dossier_seal: None,
         }
     }
 }
@@ -353,6 +366,95 @@ impl UniversalCanvasState {
         ) {
             Ok(rep) => self.last_subsurface_ssi_report = Some(rep),
             Err(_) => self.last_subsurface_ssi_report = None,
+        }
+    }
+
+    /// Builds a composed multi-layer `.ifcx` snapshot containing base BIM geometry and active overlays.
+    pub fn build_active_layered_ifcx(
+        &self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+    ) -> crate::core::ifcx::IfcxDocument {
+        let site = self.active_site_coupling();
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let hazard_opt = self
+            .district_hazard
+            .any_active()
+            .then_some(&self.district_hazard_report);
+        crate::core::ifcx::IfcxDocument::build_layered_snapshot_for_workspace(
+            bim_project,
+            Some((
+                self.ground_origin_lat_lon.0,
+                self.ground_origin_lat_lon.1,
+                site.elevation_m as f64,
+            )),
+            heading_deg,
+            (!members.is_empty()).then_some(members),
+            self.last_retrofit_report.as_ref(),
+            self.last_crc_cascade_report.as_ref(),
+            self.last_subsurface_ssi_report.as_ref(),
+            hazard_opt,
+        )
+    }
+
+    /// Captures the current layered `.ifcx` workspace graph as the baseline for visual diffing.
+    pub fn capture_ifcx_baseline(
+        &mut self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+        label: &str,
+    ) {
+        self.ifcx_baseline_snapshot = Some(self.build_active_layered_ifcx(bim_project, members));
+        self.ifcx_baseline_label = label.to_string();
+        self.refresh_ifcx_visual_diff(bim_project, members);
+    }
+
+    /// Evaluates the multi-layer semantic & geometric diff against the captured baseline snapshot.
+    pub fn refresh_ifcx_visual_diff(
+        &mut self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+    ) {
+        if bim_project.is_empty() {
+            self.last_ifcx_visual_diff = None;
+            return;
+        }
+        if self.ifcx_baseline_snapshot.is_none() {
+            if let Some(ref pre) = self.pre_retrofit_baseline {
+                self.ifcx_baseline_snapshot = Some(crate::core::ifcx::IfcxDocument::from_bim_project(
+                    pre, None, 0.0, None, None, None,
+                ));
+                self.ifcx_baseline_label = "Pre-Retrofit Baseline".to_string();
+            } else {
+                let site = self.active_site_coupling();
+                self.ifcx_baseline_snapshot = Some(crate::core::ifcx::IfcxDocument::from_bim_project(
+                    bim_project,
+                    Some((
+                        self.ground_origin_lat_lon.0,
+                        self.ground_origin_lat_lon.1,
+                        site.elevation_m as f64,
+                    )),
+                    0.0,
+                    None,
+                    None,
+                    None,
+                ));
+                self.ifcx_baseline_label = "Base BIM Layer".to_string();
+            }
+        }
+        let target_doc = self.build_active_layered_ifcx(bim_project, members);
+        if let Some(ref base_doc) = self.ifcx_baseline_snapshot {
+            self.last_ifcx_visual_diff = Some(crate::core::ifcx::IfcxStage::compute_visual_diff(
+                base_doc,
+                &self.ifcx_baseline_label,
+                &target_doc,
+                "Active Layered Stage",
+            ));
         }
     }
 
@@ -936,6 +1038,23 @@ impl UniversalCanvasState {
                     crate::core::geotech::BoreholePreset::StiffVolcanicAlluvium => 10.0,
                     crate::core::geotech::BoreholePreset::DenseGravelBedrock => 4.5,
                 });
+            let (diff_added, diff_modified, diff_deleted_ghosts): (
+                Vec<(crate::core::BimElementKind, usize)>,
+                Vec<(crate::core::BimElementKind, usize)>,
+                Vec<([f64; 3], [f64; 3], String)>,
+            ) = if self.ifcx_diff_overlay_active {
+                if let Some(ref d) = self.last_ifcx_visual_diff {
+                    (
+                        d.added_bim_elements.clone(),
+                        d.modified_bim_elements.clone(),
+                        d.deleted_ghost_boxes_m.clone(),
+                    )
+                } else {
+                    (Vec::new(), Vec::new(), Vec::new())
+                }
+            } else {
+                (Vec::new(), Vec::new(), Vec::new())
+            };
             let active_bim_gpu = if !bim_project.is_empty() {
                 Some(crate::views::webgl_earth::ActiveBimGpuInput {
                     project: bim_project,
@@ -950,6 +1069,10 @@ impl UniversalCanvasState {
                     cascade_step_progress,
                     heading_deg: active_heading_deg,
                     subsurface_pile_depth_m,
+                    diff_overlay_active: self.ifcx_diff_overlay_active,
+                    diff_added_bim: &diff_added,
+                    diff_modified_bim: &diff_modified,
+                    diff_deleted_ghosts: &diff_deleted_ghosts,
                 })
             } else {
                 None
@@ -1001,6 +1124,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.subsurface_ssi.xray_subsurface_visible {
                 self.paint_cpu_subsurface_ssi_fallback(&painter, rect, theme, &xform, bim_project);
+            }
+            if !gpu_globe_active && self.ifcx_diff_overlay_active {
+                self.paint_cpu_ifcx_diff_ghosts_fallback(&painter, rect, theme, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

@@ -1131,6 +1131,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export non-destructive eigengraph::geotech::stratigraphy & ssi_springs .ifcx overlay",
         icon: AppIcon::Cube3D,
     },
+    SlashCommandSpec {
+        cmd: "/snapshot",
+        category: "IFCX",
+        description: "Capture baseline .ifcx snapshot for multi-layer visual diffing",
+        icon: AppIcon::Camera,
+    },
+    SlashCommandSpec {
+        cmd: "/diff",
+        category: "IFCX",
+        description: "Open Multi-Layer IFCX visual diff inspector & 3D color overlay",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/diff-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::ifcx::diff_manifest .ifcx layer",
+        icon: AppIcon::Cube3D,
+    },
+    SlashCommandSpec {
+        cmd: "/dossier",
+        category: "Export",
+        description: "Export publication-grade 100% Pure-Vector SVG engineering calculation dossier",
+        icon: AppIcon::Printer,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1172,6 +1196,10 @@ pub struct SpatialHudActions {
     pub export_crc_cascade_ifcx: bool,
     pub run_subsurface_ssi_sync: bool,
     pub export_subsurface_ssi_ifcx: bool,
+    pub capture_ifcx_baseline: bool,
+    pub run_ifcx_visual_diff: bool,
+    pub export_ifcx_diff_manifest: bool,
+    pub export_vector_dossier_svg: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -1517,5 +1545,9 @@ impl SpatialHudActions {
         self.export_crc_cascade_ifcx |= other.export_crc_cascade_ifcx;
         self.run_subsurface_ssi_sync |= other.run_subsurface_ssi_sync;
         self.export_subsurface_ssi_ifcx |= other.export_subsurface_ssi_ifcx;
+        self.capture_ifcx_baseline |= other.capture_ifcx_baseline;
+        self.run_ifcx_visual_diff |= other.run_ifcx_visual_diff;
+        self.export_ifcx_diff_manifest |= other.export_ifcx_diff_manifest;
+        self.export_vector_dossier_svg |= other.export_vector_dossier_svg;
     }
 }

@@ -1266,6 +1266,35 @@ impl SpatialWorkspaceState {
                 "/ssi-ifcx" | "/geotech-ifcx" => {
                     actions.export_subsurface_ssi_ifcx = true;
                 }
+                "/snapshot" | "/ifcx-baseline" => {
+                    actions.capture_ifcx_baseline = true;
+                }
+                "/diff" | "/ifcx-diff" => {
+                    let sub = arg.trim().to_ascii_lowercase();
+                    if sub == "off" || sub == "close" {
+                        self.ifcx_diff_drawer_open = false;
+                        universal_canvas.ifcx_diff_overlay_active = false;
+                    } else {
+                        if !sub.is_empty() {
+                            universal_canvas.ifcx_diff_filter =
+                                crate::core::ifcx::IfcxDiffLayerFilter::from_arg(arg);
+                        }
+                        self.vault_drawer_open = false;
+                        self.vault_path_popover_open = false;
+                        self.context_picker_open = false;
+                        self.history_popover_open = false;
+                        self.api_key_popover_open = false;
+                        self.ifcx_diff_drawer_open = true;
+                        universal_canvas.ifcx_diff_overlay_active = true;
+                    }
+                    actions.run_ifcx_visual_diff = true;
+                }
+                "/diff-ifcx" => {
+                    actions.export_ifcx_diff_manifest = true;
+                }
+                "/dossier" | "/dossier-svg" | "/vector-dossier" => {
+                    actions.export_vector_dossier_svg = true;
+                }
                 "/section" | "/cut" => {
                     let elev_opt = arg
                         .trim_end_matches('m')

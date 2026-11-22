@@ -2207,6 +2207,152 @@ impl EigenGraphApp {
                     .push_trace("No Subsurface SSI overlay available to export.", false);
             }
         }
+        if hud_actions.capture_ifcx_baseline {
+            if self.build_view.bim_bus.project.is_empty() {
+                if let Ok(msg) = self
+                    .build_view
+                    .bim_bus
+                    .execute_natural_language("portal 3x2 @6m 2floors")
+                {
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.spatial_workspace.push_trace(msg, true);
+                    self.sync_bim_to_fem();
+                }
+            }
+            self.universal_canvas.capture_ifcx_baseline(
+                &self.build_view.bim_bus.project,
+                &self.members,
+                "Captured Snapshot",
+            );
+            let node_cnt = self
+                .universal_canvas
+                .ifcx_baseline_snapshot
+                .as_ref()
+                .map(|d| d.data.len())
+                .unwrap_or(0);
+            self.spatial_workspace.push_trace(
+                format!("Captured IFCX Baseline Snapshot ({node_cnt} nodes)"),
+                true,
+            );
+        }
+        if hud_actions.run_ifcx_visual_diff {
+            if self.build_view.bim_bus.project.is_empty() {
+                if let Ok(msg) = self
+                    .build_view
+                    .bim_bus
+                    .execute_natural_language("portal 3x2 @6m 2floors")
+                {
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.spatial_workspace.push_trace(msg, true);
+                    self.sync_bim_to_fem();
+                }
+            }
+            self.universal_canvas
+                .refresh_ifcx_visual_diff(&self.build_view.bim_bus.project, &self.members);
+            if let Some(ref diff) = self.universal_canvas.last_ifcx_visual_diff {
+                self.spatial_workspace.push_trace(diff.summary.clone(), true);
+            }
+        }
+        if hud_actions.export_ifcx_diff_manifest {
+            if self.universal_canvas.last_ifcx_visual_diff.is_none()
+                && !self.build_view.bim_bus.project.is_empty()
+            {
+                self.universal_canvas
+                    .refresh_ifcx_visual_diff(&self.build_view.bim_bus.project, &self.members);
+            }
+            if let Some(ref diff) = self.universal_canvas.last_ifcx_visual_diff {
+                let raw_name =
+                    Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+                let fname = format!("{raw_name}_ifcx_diff.ifcx");
+                let layered = self
+                    .universal_canvas
+                    .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+                let composed = crate::core::IfcxStage::compose_with_diff_manifest(&layered, diff);
+                let json = composed.to_json_pretty();
+                match crate::core::web_bridge::save_text_file(
+                    &fname,
+                    &json,
+                    "application/json;charset=utf-8",
+                ) {
+                    Ok(_) => {
+                        self.spatial_workspace.push_trace(
+                            format!(
+                                "Exported IFCX Diff Manifest ({fname}, {} nodes)",
+                                composed.data.len()
+                            ),
+                            true,
+                        );
+                    }
+                    Err(err) => self.spatial_workspace.push_trace(err, false),
+                }
+            } else {
+                self.spatial_workspace
+                    .push_trace("No IFCX Visual Diff manifest available to export.", false);
+            }
+        }
+        if hud_actions.export_vector_dossier_svg {
+            if self.build_view.bim_bus.project.is_empty() {
+                if let Ok(msg) = self
+                    .build_view
+                    .bim_bus
+                    .execute_natural_language("portal 3x2 @6m 2floors")
+                {
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.spatial_workspace.push_trace(msg, true);
+                    self.sync_bim_to_fem();
+                }
+            }
+            let site = self.universal_canvas.active_site_coupling();
+            let lat_lon = if self.universal_canvas.ground_origin_anchored {
+                self.universal_canvas.ground_origin_lat_lon
+            } else {
+                self.universal_canvas.world_map.center_lat_lon
+            };
+            let haz_opt = self
+                .universal_canvas
+                .district_hazard
+                .any_active()
+                .then_some(&self.universal_canvas.district_hazard_report);
+            let dossier = crate::core::build_pure_vector_engineering_dossier_svg(
+                &crate::core::VectorDossierInput {
+                    project: &self.build_view.bim_bus.project,
+                    members: &self.members,
+                    site: &site,
+                    lat_lon,
+                    retrofit_report: self.universal_canvas.last_retrofit_report.as_ref(),
+                    crc_report: self.universal_canvas.last_crc_cascade_report.as_ref(),
+                    ssi_report: self.universal_canvas.last_subsurface_ssi_report.as_ref(),
+                    hazard_report: haz_opt,
+                    diff_report: self.universal_canvas.last_ifcx_visual_diff.as_ref(),
+                    sheet_code: "S-101",
+                    revision: "REV 01",
+                },
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_engineering_dossier.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &dossier.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(dossier.sha256_seal);
+                    self.spatial_workspace.push_trace(dossier.summary.clone(), true);
+                    self.ai_assistant_view
+                        .chat_history
+                        .push(crate::models::ChatMessage {
+                            is_user: false,
+                            message: format!(
+                                "[EigenAI Pure-Vector Engineering Dossier]: {} ({fname})",
+                                dossier.summary
+                            ),
+                            time: crate::core::web_bridge::unix_timestamp_label(),
+                        });
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {
@@ -3620,6 +3766,14 @@ impl EigenGraphApp {
                 .refresh_subsurface_ssi(&self.build_view.bim_bus.project);
         } else {
             self.universal_canvas.last_subsurface_ssi_report = None;
+        }
+
+        if self.universal_canvas.ifcx_baseline_snapshot.is_some()
+            && (self.universal_canvas.ifcx_diff_overlay_active
+                || self.spatial_workspace.ifcx_diff_drawer_open)
+        {
+            self.universal_canvas
+                .refresh_ifcx_visual_diff(&self.build_view.bim_bus.project, &self.members);
         }
 
         self.planning_view

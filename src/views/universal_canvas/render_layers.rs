@@ -1932,6 +1932,62 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Pure-CPU translucent crimson wireframe ghost fallback for deleted `.ifcx` nodes when
+    /// WebGL2 is inactive and Multi-Layer IFCX Visual Diff overlay is active.
+    pub(super) fn paint_cpu_ifcx_diff_ghosts_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        theme: &MacTheme,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.ifcx_diff_overlay_active || self.world_map.zoom_level < 12.5 {
+            return;
+        }
+        let Some(ref diff) = self.last_ifcx_visual_diff else {
+            return;
+        };
+        if diff.deleted_ghost_boxes_m.is_empty() {
+            return;
+        }
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let proj_pt = |ex: f64, ny: f64, elev_m: f64| -> Option<Pos2> {
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, elev_m)
+                .and_then(|(sp, _, front)| front.then_some(sp))
+        };
+        for (bmin, bmax, _) in &diff.deleted_ghost_boxes_m {
+            let corners = [
+                [bmin[0], bmin[1]],
+                [bmax[0], bmin[1]],
+                [bmax[0], bmax[1]],
+                [bmin[0], bmax[1]],
+            ];
+            let mut poly = Vec::with_capacity(4);
+            for [ex, ny] in corners {
+                if let Some(sp) = proj_pt(ex, ny, bmax[2]) {
+                    poly.push(sp);
+                }
+            }
+            if poly.len() == 4 {
+                clip.add(egui::Shape::convex_polygon(
+                    poly,
+                    Color32::from_rgba_unmultiplied(245, 56, 72, 68),
+                    Stroke::new(1.5, theme.accent_red),
+                ));
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

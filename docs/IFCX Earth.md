@@ -167,6 +167,11 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 - **WebGL2 3D Subsurface X-Ray Cutaway & Non-Destructive `.ifcx` Overlay (`src/core/ifcx.rs`, `src/views/webgl_earth/`, `src/views/universal_canvas/`)**:
   - Dynamically extends `BimFooting` foundation pile shafts (`subsurface_pile_depth_m`) into the governing bearing stratum, renders translucent multi-horizon soil strata + borehole BH-01 casing + procedural GLSL sedimentary bedding (`kind >= 3.5`) + animated phreatic groundwater ripples (`kind >= 4.5`) in hardware-Z WebGL2 (with CPU fallback), composes `eigengraph::geotech::stratigraphy` + `eigengraph::geotech::ssi_springs` non-destructively via `IfcxStage::compose_with_subsurface_ssi_overlay`, and refactors view modules into `src/views/{webgl_earth,universal_canvas,spatial_workspace}/`.
 
-### Planned Next Phases (`v0.7.2 – v0.7.3`)
-- **Phase 72 (`v0.7.2`) — Multi-Layer IFCX Visual Diffing & Pure-Vector Engineering Dossier Exporter**: Layer-by-layer `.ifcx` visual diffing inside the Dynamic Island and publication-grade 100% vector SVG structural calculation dossiers.
+### Phase 72 (`v0.7.2`) — Multi-Layer IFCX Visual Diffing & Pure-Vector Engineering Dossier Exporter *(Implemented)*
+- **Multi-Layer IFCX Diff Manifest & 3D Ghost Highlighting (`src/core/ifcx.rs`, `src/views/webgl_earth/`, `src/views/universal_canvas/`)**:
+  - Evaluates path-by-path, attribute-level semantic diffs across stacked `.ifcx` stages (`BIM Core`, `Subsurface SSI`, `Retrofit Delta`, `CRC Cascade`, `District Hazard`, `City-Builder`), emits non-destructive `eigengraph::ifcx::diff_manifest` nodes (`IfcxStage::compose_with_diff_manifest`), and renders Added (emerald), Modified (amber), and Deleted node AABB ghost volumes (translucent crimson) directly in WebGL2 Pass 2 and CPU fallback.
+- **A3 Pure-Vector Engineering Dossier SVG Exporter (`src/core/vector_dossier.rs`, `src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Synthesizes 6-panel A3 landscape (`1600 × 1131`, 0% raster pixels) engineering calculation dossiers uniting structural framing plan, storey elevation + subsurface stratigraphy cut, ARI v2 / LRFD DCR% governing chart, multi-physics scorecard, IFCX diff manifest, and SHA-256 integrity seal, driven via `/snapshot`, `/diff`, `/diff-ifcx`, `/dossier` and the widened Dynamic Island Diff Inspector.
+
+### Planned Next Phases (`v0.7.3`)
 - **Phase 73 (`v0.7.3`) — Autonomous Portfolio-Scale `ARI v2` Retrofit Optimization Across Multi-Building Districts**: District-wide coupled retrofit synthesis across multiple `.ifcx` buildings with joint budget/carbon Pareto frontiers.

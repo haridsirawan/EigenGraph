@@ -651,6 +651,10 @@ pub struct ActiveBimGpuInput<'a> {
     pub cascade_step_progress: f32,
     pub subsurface_pile_depth_m: f32,
     pub heading_deg: f64,
+    pub diff_overlay_active: bool,
+    pub diff_added_bim: &'a [(BimElementKind, usize)],
+    pub diff_modified_bim: &'a [(BimElementKind, usize)],
+    pub diff_deleted_ghosts: &'a [([f64; 3], [f64; 3], String)],
 }
 
 pub(super) fn structural_dcr_color(dcr: f64) -> [f32; 4] {
@@ -760,6 +764,15 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         }
         if input.n1_removed_bim == Some((kind, bim_id)) {
             return [0.96, 0.16, 0.24, 0.42]; // Crimson translucent N-1 removed ghost
+        }
+        if input.diff_overlay_active {
+            if input.diff_added_bim.contains(&(kind, bim_id)) {
+                return [0.16, 0.90, 0.54, 0.96];
+            }
+            if input.diff_modified_bim.contains(&(kind, bim_id)) {
+                return [0.98, 0.72, 0.16, 0.96];
+            }
+            return [0.42, 0.50, 0.58, 0.36];
         }
         // Match corresponding StructuralMember by id/index if available
         let member_opt = input.members.get(bim_id % input.members.len().max(1));
@@ -1007,6 +1020,29 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             },
         );
         push_extruded_building_prism_enu(&mut verts, &mut idxs, &fp, base_z, th, col, col);
+    }
+
+    // 6. Deleted IFCX Diff AABB Ghost Volumes (Translucent Crimson)
+    if input.diff_overlay_active {
+        for (bmin, bmax, _) in input.diff_deleted_ghosts {
+            let fp = [
+                rot_xy(bmin[0], bmin[1], bmax[2]),
+                rot_xy(bmax[0], bmin[1], bmax[2]),
+                rot_xy(bmax[0], bmax[1], bmax[2]),
+                rot_xy(bmin[0], bmax[1], bmax[2]),
+            ];
+            let z0 = bmin[2] as f32;
+            let z1 = bmax[2].max(bmin[2] + 0.15) as f32;
+            push_box_prism_enu(
+                &mut verts,
+                &mut idxs,
+                &fp,
+                z0,
+                z1,
+                [0.96, 0.22, 0.28, 0.34],
+                3.0,
+            );
+        }
     }
 
     GpuMeshPayload {

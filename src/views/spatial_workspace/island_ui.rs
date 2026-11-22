@@ -486,6 +486,7 @@ impl SpatialWorkspaceState {
             || universal_canvas.district_hazard.any_active()
             || universal_canvas.subsurface_ssi.ssi_coupling_enabled
             || universal_canvas.subsurface_ssi.xray_subsurface_visible
+            || universal_canvas.ifcx_diff_overlay_active
             || universal_canvas.last_retrofit_report.is_some()
             || universal_canvas.last_crc_cascade_report.is_some()
             || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
@@ -1445,6 +1446,28 @@ impl SpatialWorkspaceState {
                     }
                 }
             }
+            if universal_canvas.ifcx_diff_overlay_active {
+                let diff_badge = if let Some(ref d) = universal_canvas.last_ifcx_visual_diff {
+                    format!("IFCX Diff +{} ~{} -{}", d.added, d.modified, d.deleted)
+                } else {
+                    "IFCX Diff Ready".to_string()
+                };
+                icons::pill_badge(ui, AppIcon::Layers, diff_badge, theme.accent_blue);
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "Inspect",
+                    self.ifcx_diff_drawer_open,
+                    theme.accent_blue,
+                    "Open Multi-Layer IFCX Visual Diff Inspector inside Dynamic Island",
+                )
+                .clicked()
+                {
+                    self.toggle_exclusive_drawer("ifcx_diff");
+                    actions.run_ifcx_visual_diff = true;
+                }
+            }
             let (rst_fg, rst_bg, rst_st) = theme.glass_chip_style(false, theme.accent_red);
             if icons::icon_only_button(
                 ui,
@@ -1472,6 +1495,8 @@ impl SpatialWorkspaceState {
                 universal_canvas.subsurface_ssi.xray_subsurface_visible = false;
                 universal_canvas.subsurface_ssi.liquefaction_trigger_active = false;
                 universal_canvas.last_subsurface_ssi_report = None;
+                universal_canvas.ifcx_diff_overlay_active = false;
+                self.ifcx_diff_drawer_open = false;
                 actions.sync_fem_and_earth = true;
             }
         });
@@ -1510,7 +1535,7 @@ impl SpatialWorkspaceState {
         );
         let wide_t = ctx.animate_bool(
             Id::new("eigengraph_dynamic_island_wide"),
-            has_embedded_panel || has_smart_inspector,
+            has_embedded_panel || has_smart_inspector || self.ifcx_diff_drawer_open,
         );
 
         let compact_w = if is_mobile {
@@ -1889,6 +1914,224 @@ impl SpatialWorkspaceState {
                                         .size(9.5)
                                         .color(theme.text_muted),
                                 );
+                            });
+                        ui.separator();
+                    }
+
+                    if self.ifcx_diff_drawer_open {
+                        let diff_opt = universal_canvas.last_ifcx_visual_diff.clone();
+                        Frame::new()
+                            .fill(Color32::TRANSPARENT)
+                            .inner_margin(Margin::symmetric(2, 4))
+                            .show(ui, |ui| {
+                                let dw = (cap_w - 10.0).max(160.0);
+                                ui.set_width(dw);
+                                ui.set_max_width(dw);
+                                ui.horizontal(|ui| {
+                                    icons::icon_label(
+                                        ui,
+                                        AppIcon::Layers,
+                                        12.5,
+                                        theme.accent_blue,
+                                        "Multi-Layer IFCX Visual Diff Inspector",
+                                        11.0,
+                                        theme.text_primary,
+                                        true,
+                                    );
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        if icons::icon_only_button(
+                                            ui,
+                                            AppIcon::Close,
+                                            theme.text_secondary,
+                                            Color32::TRANSPARENT,
+                                            Stroke::NONE,
+                                            CornerRadius::same(6),
+                                            Vec2::splat(18.0),
+                                            "Close IFCX Visual Diff drawer",
+                                        )
+                                        .clicked()
+                                        {
+                                            self.ifcx_diff_drawer_open = false;
+                                        }
+                                    });
+                                });
+                                ui.add_space(4.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Camera),
+                                        "Snapshot Base",
+                                        false,
+                                        theme.accent_blue,
+                                        "Capture current layered .ifcx graph as baseline",
+                                    )
+                                    .clicked()
+                                    {
+                                        actions.capture_ifcx_baseline = true;
+                                    }
+                                    let ov_on = universal_canvas.ifcx_diff_overlay_active;
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Layers),
+                                        "3D Overlay",
+                                        ov_on,
+                                        theme.accent_green,
+                                        "Highlight Added/Modified/Deleted nodes in WebGL2 3D view",
+                                    )
+                                    .clicked()
+                                    {
+                                        universal_canvas.ifcx_diff_overlay_active = !ov_on;
+                                        actions.run_ifcx_visual_diff = true;
+                                    }
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        None,
+                                        format!("Filter: {}", universal_canvas.ifcx_diff_filter.short_label()),
+                                        false,
+                                        theme.accent_orange,
+                                        "Cycle delta filter (Changes / +Added / ~Modified / -Deleted / All)",
+                                    )
+                                    .clicked()
+                                    {
+                                        universal_canvas.ifcx_diff_filter =
+                                            universal_canvas.ifcx_diff_filter.cycle_next();
+                                    }
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Cube3D),
+                                        "Diff .ifcx",
+                                        false,
+                                        theme.accent_green,
+                                        "Export eigengraph::ifcx::diff_manifest .ifcx layer",
+                                    )
+                                    .clicked()
+                                    {
+                                        actions.export_ifcx_diff_manifest = true;
+                                    }
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Printer),
+                                        "Dossier .svg",
+                                        false,
+                                        theme.accent_green,
+                                        "Export A3 Pure-Vector SVG engineering dossier",
+                                    )
+                                    .clicked()
+                                    {
+                                        actions.export_vector_dossier_svg = true;
+                                    }
+                                });
+                                ui.add_space(4.0);
+                                if let Some(ref diff) = diff_opt {
+                                    ui.horizontal_wrapped(|ui| {
+                                        icons::pill_badge(
+                                            ui,
+                                            AppIcon::Plus,
+                                            format!("+{} Added", diff.added),
+                                            theme.accent_green,
+                                        );
+                                        icons::pill_badge(
+                                            ui,
+                                            AppIcon::Wrench,
+                                            format!("~{} Modified", diff.modified),
+                                            theme.accent_orange,
+                                        );
+                                        icons::pill_badge(
+                                            ui,
+                                            AppIcon::Trash,
+                                            format!("-{} Deleted", diff.deleted),
+                                            theme.accent_red,
+                                        );
+                                        icons::pill_badge(
+                                            ui,
+                                            AppIcon::CheckCircle,
+                                            format!("={} Same", diff.unchanged),
+                                            theme.text_muted,
+                                        );
+                                        for (layer, cnt) in &diff.layer_counts {
+                                            icons::pill_badge(
+                                                ui,
+                                                AppIcon::Layers,
+                                                format!("{layer}: {cnt}"),
+                                                theme.accent_blue,
+                                            );
+                                        }
+                                    });
+                                    ui.add_space(4.0);
+                                    let filtered = diff.filtered_entries(universal_canvas.ifcx_diff_filter);
+                                    if filtered.is_empty() {
+                                        ui.label(
+                                            RichText::new("No .ifcx deltas match the selected filter (edit BIM or toggle SSI/Retrofit/CRC to see diffs).")
+                                                .size(9.5)
+                                                .color(theme.text_muted),
+                                        );
+                                    } else {
+                                        ScrollArea::vertical()
+                                            .id_salt("ifcx_diff_entries_scroll")
+                                            .max_width(dw)
+                                            .max_height(155.0)
+                                            .auto_shrink([false, true])
+                                            .show(ui, |ui| {
+                                                for entry in filtered.into_iter().take(40) {
+                                                    let (badge, col) = match entry.kind {
+                                                        crate::core::ifcx::IfcxDiffKind::Added => {
+                                                            ("+", theme.accent_green)
+                                                        }
+                                                        crate::core::ifcx::IfcxDiffKind::Modified => {
+                                                            ("~", theme.accent_orange)
+                                                        }
+                                                        crate::core::ifcx::IfcxDiffKind::Deleted => {
+                                                            ("-", theme.accent_red)
+                                                        }
+                                                        crate::core::ifcx::IfcxDiffKind::Unchanged => {
+                                                            ("=", theme.text_muted)
+                                                        }
+                                                    };
+                                                    let resp = ui.horizontal_wrapped(|ui| {
+                                                        ui.label(
+                                                            RichText::new(format!(
+                                                                "[{badge} {} | {}]",
+                                                                entry.class_code,
+                                                                entry.layer_namespace
+                                                            ))
+                                                            .size(9.2)
+                                                            .strong()
+                                                            .color(col),
+                                                        );
+                                                        ui.label(
+                                                            RichText::new(format!(
+                                                                "{} ({})",
+                                                                entry.path, entry.detail
+                                                            ))
+                                                            .size(9.0)
+                                                            .monospace()
+                                                            .color(theme.text_secondary),
+                                                        );
+                                                    });
+                                                    if let Some((kind, id)) = entry.bim_element {
+                                                        if resp.response.interact(egui::Sense::click()).clicked() {
+                                                            universal_canvas.highlighted_bim_element = Some((kind, id));
+                                                            self.push_trace(
+                                                                format!("Focused {} #{}", entry.class_code, id),
+                                                                true,
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            });
+                                    }
+                                } else {
+                                    ui.label(
+                                        RichText::new("No diff report yet — click 'Snapshot Base' or toggle overlays to compare IFCX layers.")
+                                            .size(9.5)
+                                            .color(theme.text_muted),
+                                    );
+                                }
                             });
                         ui.separator();
                     }
@@ -3834,6 +4077,79 @@ impl SpatialWorkspaceState {
                                             .clicked()
                                             {
                                                 actions.save_audit_note = true;
+                                            }
+                                        },
+                                    );
+                                    ui.add_space(4.0);
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new("IFCX Diff & Dossier:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Camera),
+                                                "Snapshot Base",
+                                                false,
+                                                theme.accent_blue,
+                                                "Capture baseline .ifcx snapshot for layer visual diffing",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.capture_ifcx_baseline = true;
+                                            }
+                                            let diff_active = universal_canvas.ifcx_diff_overlay_active
+                                                || self.ifcx_diff_drawer_open;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Layers),
+                                                "Visual Diff",
+                                                diff_active,
+                                                theme.accent_orange,
+                                                "Open Multi-Layer IFCX visual diff inspector & 3D delta highlighting",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.ifcx_diff_overlay_active =
+                                                    !universal_canvas.ifcx_diff_overlay_active;
+                                                self.toggle_exclusive_drawer("ifcx_diff");
+                                                actions.run_ifcx_visual_diff = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Cube3D),
+                                                "Diff .ifcx",
+                                                false,
+                                                theme.accent_green,
+                                                "Export non-destructive eigengraph::ifcx::diff_manifest .ifcx layer",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.export_ifcx_diff_manifest = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Printer),
+                                                "Vector Dossier .svg",
+                                                false,
+                                                theme.accent_green,
+                                                "Export publication-grade 100% Pure-Vector SVG engineering dossier",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.export_vector_dossier_svg = true;
                                             }
                                         },
                                     );

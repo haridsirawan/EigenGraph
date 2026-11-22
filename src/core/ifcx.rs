@@ -22,7 +22,8 @@ use serde_json::{json, Value};
 
 use crate::core::ari::{AriEngine, RedundancyAssessment};
 use crate::core::bim::{
-    BimColumn, BimFooting, BimLevel, BimProject, BimRun, BimSlab, BimWall, RunCategory, RunJustify,
+    BimColumn, BimElementKind, BimFooting, BimLevel, BimProject, BimRun, BimSlab, BimWall,
+    RunCategory, RunJustify,
 };
 use crate::core::geom::P2;
 use crate::core::gis::dem_stream::build_tin_from_3d_triangles;
@@ -65,6 +66,7 @@ pub mod ns {
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
     pub const EG_GEOTECH_SSI: &str = "eigengraph::geotech::ssi_springs";
+    pub const EG_IFCX_DIFF: &str = "eigengraph::ifcx::diff_manifest";
 }
 
 fn default_ifcx_version() -> String {
@@ -1149,6 +1151,205 @@ impl IfcxStage {
         ]);
         stage.to_composed_document(&format!("{}_subsurface_ssi", base_doc.header.id))
     }
+
+    /// Computes a multi-layer semantic & geometric diff between a `baseline` `.ifcx` snapshot
+    /// and a `target` `.ifcx` snapshot, preserving changed attribute keys, layer classification,
+    /// BIM element highlights (`Added` / `Modified` / `Deleted`), and deleted mesh AABB ghosts.
+    pub fn compute_visual_diff(
+        baseline: &IfcxDocument,
+        baseline_label: &str,
+        target: &IfcxDocument,
+        target_label: &str,
+    ) -> IfcxVisualDiffReport {
+        let base_map: BTreeMap<&str, &IfcxNode> =
+            baseline.data.iter().map(|n| (n.path.as_str(), n)).collect();
+        let curr_map: BTreeMap<&str, &IfcxNode> =
+            target.data.iter().map(|n| (n.path.as_str(), n)).collect();
+
+        let mut entries = Vec::new();
+        let mut layer_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut added_bim_elements = Vec::new();
+        let mut modified_bim_elements = Vec::new();
+        let mut deleted_bim_elements = Vec::new();
+        let mut deleted_ghost_boxes_m = Vec::new();
+        let (mut added, mut modified, mut deleted, mut unchanged) = (0usize, 0usize, 0usize, 0usize);
+
+        let record_layer = |counts: &mut BTreeMap<String, usize>, layer: &str| {
+            *counts.entry(layer.to_string()).or_insert(0) += 1;
+        };
+
+        for (p, cn) in &curr_map {
+            let layer_ns = classify_ifcx_node_layer(cn);
+            let bim_el = extract_bim_element_ref(cn);
+            match base_map.get(p) {
+                None => {
+                    added += 1;
+                    record_layer(&mut layer_counts, &layer_ns);
+                    if let Some(el) = bim_el {
+                        added_bim_elements.push(el);
+                    }
+                    let changed_attributes: Vec<String> = cn.attributes.keys().cloned().collect();
+                    entries.push(IfcxVisualDiffEntry {
+                        path: (*p).to_string(),
+                        class_code: cn.ifc_class().unwrap_or("Node").to_string(),
+                        layer_namespace: layer_ns,
+                        kind: IfcxDiffKind::Added,
+                        bim_element: bim_el,
+                        detail: format!("Added (+{} attrs)", changed_attributes.len()),
+                        changed_attributes,
+                    });
+                }
+                Some(bn) => {
+                    let mut changed_attributes = Vec::new();
+                    let mut keys: Vec<&str> = cn.attributes.keys().map(|s| s.as_str()).collect();
+                    for k in bn.attributes.keys() {
+                        if !cn.attributes.contains_key(k) {
+                            keys.push(k.as_str());
+                        }
+                    }
+                    keys.sort_unstable();
+                    keys.dedup();
+                    for k in keys {
+                        if bn.attributes.get(k) != cn.attributes.get(k) {
+                            changed_attributes.push(k.to_string());
+                        }
+                    }
+                    let structural_changed = !changed_attributes.is_empty()
+                        || bn.children != cn.children
+                        || bn.inherits != cn.inherits;
+                    if !structural_changed {
+                        unchanged += 1;
+                        entries.push(IfcxVisualDiffEntry {
+                            path: (*p).to_string(),
+                            class_code: cn.ifc_class().unwrap_or("Node").to_string(),
+                            layer_namespace: layer_ns,
+                            kind: IfcxDiffKind::Unchanged,
+                            bim_element: bim_el,
+                            changed_attributes,
+                            detail: "Unchanged".to_string(),
+                        });
+                    } else {
+                        modified += 1;
+                        record_layer(&mut layer_counts, &layer_ns);
+                        if let Some(el) = bim_el {
+                            modified_bim_elements.push(el);
+                        }
+                        entries.push(IfcxVisualDiffEntry {
+                            path: (*p).to_string(),
+                            class_code: cn.ifc_class().unwrap_or("Node").to_string(),
+                            layer_namespace: layer_ns,
+                            kind: IfcxDiffKind::Modified,
+                            bim_element: bim_el,
+                            detail: if changed_attributes.is_empty() {
+                                "Hierarchy/inherits updated".to_string()
+                            } else {
+                                format!("Updated {}", changed_attributes.join(", "))
+                            },
+                            changed_attributes,
+                        });
+                    }
+                }
+            }
+        }
+
+        for (p, bn) in &base_map {
+            if !curr_map.contains_key(p) {
+                deleted += 1;
+                let layer_ns = classify_ifcx_node_layer(bn);
+                let bim_el = extract_bim_element_ref(bn);
+                record_layer(&mut layer_counts, &layer_ns);
+                if let Some(el) = bim_el {
+                    deleted_bim_elements.push(el);
+                }
+                if let Some((bmin, bmax)) = bn.mesh().and_then(|m| m.bbox()) {
+                    deleted_ghost_boxes_m.push((bmin, bmax, (*p).to_string()));
+                }
+                let changed_attributes: Vec<String> = bn.attributes.keys().cloned().collect();
+                entries.push(IfcxVisualDiffEntry {
+                    path: (*p).to_string(),
+                    class_code: bn.ifc_class().unwrap_or("Node").to_string(),
+                    layer_namespace: layer_ns,
+                    kind: IfcxDiffKind::Deleted,
+                    bim_element: bim_el,
+                    changed_attributes,
+                    detail: "Removed relative to baseline".to_string(),
+                });
+            }
+        }
+
+        let summary = format!(
+            "IFCX Diff [{baseline_label} -> {target_label}]: +{added} Added • ~{modified} Modified • -{deleted} Deleted • {unchanged} Unchanged"
+        );
+        IfcxVisualDiffReport {
+            baseline_label: baseline_label.to_string(),
+            target_label: target_label.to_string(),
+            baseline_node_count: baseline.data.len(),
+            target_node_count: target.data.len(),
+            added,
+            modified,
+            deleted,
+            unchanged,
+            layer_counts,
+            entries,
+            added_bim_elements,
+            modified_bim_elements,
+            deleted_bim_elements,
+            deleted_ghost_boxes_m,
+            summary,
+        }
+    }
+
+    /// Composes a base `.ifcx` document with a non-destructive `eigengraph::ifcx::diff_manifest` overlay.
+    pub fn compose_with_diff_manifest(
+        base_doc: &IfcxDocument,
+        diff: &IfcxVisualDiffReport,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[base_doc.clone(), diff.to_diff_manifest_ifcx()]);
+        stage.to_composed_document(&format!("{}_diff", base_doc.header.id))
+    }
+}
+
+fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
+    if node.attributes.contains_key(ns::EG_RETROFIT) {
+        "Retrofit Delta".to_string()
+    } else if node.attributes.contains_key(ns::EG_CASCADE_CRC) {
+        "CRC Cascade".to_string()
+    } else if node.attributes.contains_key(ns::EG_GEOTECH_STRATIGRAPHY)
+        || node.attributes.contains_key(ns::EG_GEOTECH_SSI)
+    {
+        "Subsurface SSI".to_string()
+    } else if node.attributes.contains_key("eigengraph::hazard::district") {
+        "District Hazard".to_string()
+    } else if node.attributes.contains_key(ns::EG_IFCX_DIFF) {
+        "IFCX Diff".to_string()
+    } else if matches!(
+        node.ifc_class(),
+        Some("IfcRoad" | "IfcBridge" | "IfcSpatialZone")
+    ) || node.path.contains("/city/")
+    {
+        "City-Builder".to_string()
+    } else if node.attributes.contains_key(ns::EG_ARI)
+        && !node.attributes.contains_key(ns::EG_BIM_ELEMENT)
+    {
+        "ARI v2".to_string()
+    } else {
+        "BIM Core".to_string()
+    }
+}
+
+fn extract_bim_element_ref(node: &IfcxNode) -> Option<(BimElementKind, usize)> {
+    let val = node.attributes.get(ns::EG_BIM_ELEMENT)?;
+    let kind_str = val.get("kind").and_then(|v| v.as_str())?;
+    let id = val.get("id").and_then(|v| v.as_u64())? as usize;
+    let kind = match kind_str {
+        "column" => BimElementKind::Column,
+        "run" | "beam" => BimElementKind::Run,
+        "wall" => BimElementKind::Wall,
+        "slab" => BimElementKind::Slab,
+        "footing" => BimElementKind::Footing,
+        _ => return None,
+    };
+    Some((kind, id))
 }
 
 // =============================================================================
@@ -2925,12 +3126,167 @@ pub struct IfcxClashReport {
     pub clashes: Vec<IfcxClashItem>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IfcxDiffKind {
     Added,
     Deleted,
     Modified,
     Unchanged,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum IfcxDiffLayerFilter {
+    All,
+    #[default]
+    ChangedOnly,
+    AddedOnly,
+    ModifiedOnly,
+    DeletedOnly,
+}
+
+impl IfcxDiffLayerFilter {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All Nodes",
+            Self::ChangedOnly => "Changed Only",
+            Self::AddedOnly => "Added Only",
+            Self::ModifiedOnly => "Modified Only",
+            Self::DeletedOnly => "Deleted Only",
+        }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::ChangedOnly => "Changes",
+            Self::AddedOnly => "+Added",
+            Self::ModifiedOnly => "~Modified",
+            Self::DeletedOnly => "-Deleted",
+        }
+    }
+
+    pub fn cycle_next(self) -> Self {
+        match self {
+            Self::ChangedOnly => Self::AddedOnly,
+            Self::AddedOnly => Self::ModifiedOnly,
+            Self::ModifiedOnly => Self::DeletedOnly,
+            Self::DeletedOnly => Self::All,
+            Self::All => Self::ChangedOnly,
+        }
+    }
+
+    pub fn from_arg(arg: &str) -> Self {
+        let lower = arg.trim().to_ascii_lowercase();
+        if lower.contains("all") {
+            Self::All
+        } else if lower.contains("add") || lower == "+" {
+            Self::AddedOnly
+        } else if lower.contains("mod") || lower.contains("edit") || lower == "~" {
+            Self::ModifiedOnly
+        } else if lower.contains("del") || lower.contains("rem") || lower == "-" {
+            Self::DeletedOnly
+        } else {
+            Self::ChangedOnly
+        }
+    }
+
+    pub fn matches(self, kind: IfcxDiffKind) -> bool {
+        match self {
+            Self::All => true,
+            Self::ChangedOnly => kind != IfcxDiffKind::Unchanged,
+            Self::AddedOnly => kind == IfcxDiffKind::Added,
+            Self::ModifiedOnly => kind == IfcxDiffKind::Modified,
+            Self::DeletedOnly => kind == IfcxDiffKind::Deleted,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IfcxVisualDiffEntry {
+    pub path: String,
+    pub class_code: String,
+    pub layer_namespace: String,
+    pub kind: IfcxDiffKind,
+    pub bim_element: Option<(BimElementKind, usize)>,
+    pub changed_attributes: Vec<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IfcxVisualDiffReport {
+    pub baseline_label: String,
+    pub target_label: String,
+    pub baseline_node_count: usize,
+    pub target_node_count: usize,
+    pub added: usize,
+    pub modified: usize,
+    pub deleted: usize,
+    pub unchanged: usize,
+    pub layer_counts: BTreeMap<String, usize>,
+    pub entries: Vec<IfcxVisualDiffEntry>,
+    pub added_bim_elements: Vec<(BimElementKind, usize)>,
+    pub modified_bim_elements: Vec<(BimElementKind, usize)>,
+    pub deleted_bim_elements: Vec<(BimElementKind, usize)>,
+    pub deleted_ghost_boxes_m: Vec<([f64; 3], [f64; 3], String)>,
+    pub summary: String,
+}
+
+impl IfcxVisualDiffReport {
+    pub fn filtered_entries(&self, filter: IfcxDiffLayerFilter) -> Vec<&IfcxVisualDiffEntry> {
+        self.entries
+            .iter()
+            .filter(|e| filter.matches(e.kind))
+            .collect()
+    }
+
+    pub fn total_changes(&self) -> usize {
+        self.added + self.modified + self.deleted
+    }
+
+    pub fn to_diff_manifest_ifcx(&self) -> IfcxDocument {
+        let mut doc = IfcxDocument::new("ifcx_visual_diff_manifest");
+        let delta_items: Vec<Value> = self
+            .entries
+            .iter()
+            .filter(|e| e.kind != IfcxDiffKind::Unchanged)
+            .take(64)
+            .map(|e| {
+                json!({
+                    "path": e.path,
+                    "class": e.class_code,
+                    "layer": e.layer_namespace,
+                    "kind": e.kind,
+                    "changedAttributes": e.changed_attributes,
+                    "detail": e.detail,
+                })
+            })
+            .collect();
+        doc.add_node(
+            IfcxNode::new("/earth/diff/visual_manifest")
+                .with_class("IfcAnnotation")
+                .with_prop(
+                    "Multi-Layer IFCX Visual Diff Manifest",
+                    "EigenGraph IFC 5 ECS Diff",
+                    &self.summary,
+                )
+                .with_attr(
+                    ns::EG_IFCX_DIFF,
+                    json!({
+                        "baselineLabel": self.baseline_label,
+                        "targetLabel": self.target_label,
+                        "baselineNodes": self.baseline_node_count,
+                        "targetNodes": self.target_node_count,
+                        "added": self.added,
+                        "modified": self.modified,
+                        "deleted": self.deleted,
+                        "unchanged": self.unchanged,
+                        "layerCounts": self.layer_counts,
+                        "deltas": delta_items,
+                    }),
+                ),
+        );
+        doc
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -3167,6 +3523,37 @@ impl IfcxDocument {
             unchanged,
             items,
         }
+    }
+
+    /// Builds a unified, non-destructively composed `.ifcx` snapshot merging the active `BimProject`
+    /// with any active Retrofit Delta, Two-Stage CRC Cascade, 3D Subsurface SSI, or District
+    /// Multi-Hazard overlay layers currently enabled in the workspace.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_layered_snapshot_for_workspace(
+        project: &BimProject,
+        geo_opt: Option<(f64, f64, f64)>,
+        heading_deg: f64,
+        members: Option<&[StructuralMember]>,
+        retrofit: Option<&crate::core::retrofit::StructuralRetrofitReport>,
+        crc: Option<&crate::core::cascade::TwoStageCrcCascadeReport>,
+        ssi: Option<&crate::core::geotech::SubsurfaceSsiAnalysisReport>,
+        hazard: Option<&DistrictMultiHazardReport>,
+    ) -> Self {
+        let mut doc = Self::from_bim_project(project, geo_opt, heading_deg, None, members, None);
+        if let Some(hz) = hazard {
+            let site_path = format!("/earth/sites/{}", sanitize_slug(&project.project_name));
+            doc.add_node(to_ifcx_hazard_node(&site_path, hz));
+        }
+        if let Some(ret) = retrofit {
+            doc = IfcxStage::compose_with_retrofit_delta(&doc, ret);
+        }
+        if let Some(c) = crc {
+            doc = IfcxStage::compose_with_crc_cascade_overlay(&doc, c);
+        }
+        if let Some(s) = ssi {
+            doc = IfcxStage::compose_with_subsurface_ssi_overlay(&doc, s);
+        }
+        doc
     }
 }
 
@@ -3625,5 +4012,87 @@ mod tests {
             .data
             .iter()
             .any(|n| n.attributes.get(ns::BSI_CLASS).and_then(|v| v.get("code")).and_then(|s| s.as_str()) == Some("IfcColumn")));
+    }
+
+    #[test]
+    fn test_phase72_multi_layer_ifcx_visual_diff_and_deleted_ghosts() {
+        let mut proj = BimProject::sample_bimcraft_building();
+        let baseline = IfcxDocument::build_layered_snapshot_for_workspace(
+            &proj,
+            Some((-6.2088, 106.8456, 8.0)),
+            0.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let mut next_proj = proj.clone();
+        // Delete one existing wall or column to generate a deleted AABB ghost
+        if !next_proj.walls.is_empty() {
+            next_proj.walls.remove(0);
+        }
+        // Modify an existing beam width
+        if let Some(r0) = next_proj.runs.first_mut() {
+            r0.width_mm += 75.0;
+        }
+        // Add a brand-new column
+        let next_col_id = next_proj.columns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+        if let Some(mut new_col) = next_proj.columns.first().cloned() {
+            new_col.id = next_col_id;
+            new_col.name = "C-Diff-New".to_string();
+            new_col.pos = P2(9000.0, 9000.0);
+            new_col.width_mm = 450.0;
+            new_col.depth_mm = 450.0;
+            new_col.profile_name = "RC 450x450".to_string();
+            next_proj.columns.push(new_col);
+        }
+
+        let site = crate::core::lifecycle_ops::SiteEnvironmentalCoupling::default();
+        let ssi_cfg = crate::core::geotech::SubsurfaceSsiConfig {
+            ssi_coupling_enabled: true,
+            xray_subsurface_visible: true,
+            ..Default::default()
+        };
+        let ssi_rep = crate::core::geotech::evaluate_coupled_subsurface_ssi_for_bim(
+            &next_proj,
+            &site,
+            &ssi_cfg,
+        )
+        .expect("SSI overlay");
+
+        let target = IfcxDocument::build_layered_snapshot_for_workspace(
+            &next_proj,
+            Some((-6.2088, 106.8456, 8.0)),
+            0.0,
+            None,
+            None,
+            None,
+            Some(&ssi_rep),
+            None,
+        );
+        let diff = IfcxStage::compute_visual_diff(&baseline, "Baseline", &target, "SSI + Edited");
+        assert!(diff.added >= 1);
+        assert!(diff.modified >= 1);
+        assert!(!diff.added_bim_elements.is_empty());
+        assert!(!diff.modified_bim_elements.is_empty());
+        assert!(
+            diff.layer_counts.contains_key("Subsurface SSI"),
+            "Diff report must bucket subsurface stratigraphy/SSI nodes by semantic layer"
+        );
+        if !proj.walls.is_empty() {
+            assert!(diff.deleted >= 1);
+            assert!(!diff.deleted_ghost_boxes_m.is_empty());
+        } else {
+            // Ensure deleted AABB helper always compiles cleanly
+            proj.walls.clear();
+        }
+
+        let composed = IfcxStage::compose_with_diff_manifest(&target, &diff);
+        assert!(composed
+            .data
+            .iter()
+            .any(|n| n.attributes.contains_key(ns::EG_IFCX_DIFF)));
     }
 }

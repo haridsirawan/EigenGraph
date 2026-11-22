@@ -964,6 +964,16 @@ impl WebGlEarthState {
             &mut h,
             ((input.subsurface_pile_depth_m * 10.0).round() as u32) as u64,
         );
+        mix(&mut h, u64::from(input.diff_overlay_active));
+        mix(&mut h, input.diff_added_bim.len() as u64);
+        mix(&mut h, input.diff_modified_bim.len() as u64);
+        mix(&mut h, input.diff_deleted_ghosts.len() as u64);
+        for &(k, id) in input.diff_added_bim {
+            mix(&mut h, (k as u64 + 13) * 1_000_033 ^ id as u64);
+        }
+        for &(k, id) in input.diff_modified_bim {
+            mix(&mut h, (k as u64 + 29) * 1_000_037 ^ id as u64);
+        }
         if input.lens == EarthBimLens::ModalVibration {
             // Quantize animated sine phase at 1000 steps so GPU modal vibration updates smoothly at 60 FPS
             mix(&mut h, ((input.modal_phase_sin * 1000.0).round() as i32) as u64);

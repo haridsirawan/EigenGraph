@@ -179,6 +179,10 @@ use crate::core::ifcx::IfcxDocument;
             cascade_step_progress: 0.0,
             heading_deg: 0.0,
             subsurface_pile_depth_m: 4.0,
+            diff_overlay_active: false,
+            diff_added_bim: &[],
+            diff_modified_bim: &[],
+            diff_deleted_ghosts: &[],
         });
         let modal_n1_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
             project: &proj,
@@ -193,6 +197,10 @@ use crate::core::ifcx::IfcxDocument;
             cascade_step_progress: 0.0,
             heading_deg: 0.0,
             subsurface_pile_depth_m: 4.0,
+            diff_overlay_active: false,
+            diff_added_bim: &[],
+            diff_modified_bim: &[],
+            diff_deleted_ghosts: &[],
         });
         assert!(clean_mesh.indices.len() / 3 > 400);
         // Subsurface deep pile shafts extend below z = -3.0m
@@ -313,6 +321,10 @@ use crate::core::ifcx::IfcxDocument;
             cascade_step_progress: 0.8,
             heading_deg: 0.0,
             subsurface_pile_depth_m: 4.0,
+            diff_overlay_active: false,
+            diff_added_bim: &[],
+            diff_modified_bim: &[],
+            diff_deleted_ghosts: &[],
         });
         assert!(mesh.indices.len() / 3 > 200);
         assert!(
@@ -380,9 +392,53 @@ use crate::core::ifcx::IfcxDocument;
             cascade_step_progress: 0.0,
             heading_deg: 0.0,
             subsurface_pile_depth_m: 22.0,
+            diff_overlay_active: false,
+            diff_added_bim: &[],
+            diff_modified_bim: &[],
+            diff_deleted_ghosts: &[],
         });
         assert!(
             deep_piles.vertices.iter().any(|v| v.pos[2] < -20.0),
             "Dynamic subsurface pile embedment must reach bearing stratum depth"
+        );
+    }
+
+    #[test]
+    fn test_phase72_gpu_ifcx_visual_diff_highlight_and_deleted_ghosts() {
+        let proj = BimProject::sample_bimcraft_building();
+        let added = vec![(BimElementKind::Column, proj.columns[0].id)];
+        let modified = vec![(BimElementKind::Run, proj.runs[0].id)];
+        let ghosts = vec![([1.0, 1.0, 0.0], [3.0, 4.0, 3.6], "/deleted/wall_99".to_string())];
+
+        let mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
+            project: &proj,
+            members: &[],
+            lens: EarthBimLens::Clean,
+            erection_day_limit: 999,
+            deform_scale: 35.0,
+            active_modal_mode: 0,
+            modal_phase_sin: 0.0,
+            n1_removed_bim: None,
+            cascade_failed_bim: &[],
+            cascade_step_progress: 0.0,
+            heading_deg: 0.0,
+            subsurface_pile_depth_m: 4.0,
+            diff_overlay_active: true,
+            diff_added_bim: &added,
+            diff_modified_bim: &modified,
+            diff_deleted_ghosts: &ghosts,
+        });
+
+        assert!(
+            mesh.vertices.iter().any(|v| v.color[1] > 0.85 && v.color[0] < 0.25),
+            "Added BIM elements must render emerald green during IFCX Visual Diff"
+        );
+        assert!(
+            mesh.vertices.iter().any(|v| v.color[0] > 0.92 && v.color[1] > 0.65 && v.color[2] < 0.25),
+            "Modified BIM elements must render amber gold during IFCX Visual Diff"
+        );
+        assert!(
+            mesh.vertices.iter().any(|v| v.color[0] > 0.92 && v.color[3] < 0.40),
+            "Deleted IFCX nodes must emit translucent crimson AABB ghost prisms"
         );
     }

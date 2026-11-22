@@ -115,6 +115,8 @@ pub struct SpatialWorkspaceState {
     // Phase 59: Batch City Geo-Assign UI state inside Vault drawer
     pub batch_pin_query: String,
     pub batch_pin_city_idx: usize,
+    // Phase 72: Multi-Layer IFCX Visual Diff Drawer inside Single Dynamic Island
+    pub ifcx_diff_drawer_open: bool,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -206,6 +208,7 @@ impl Default for SpatialWorkspaceState {
             world_portfolio_filter: crate::core::gis::WorldPortfolioFilter::All,
             batch_pin_query: String::new(),
             batch_pin_city_idx: 0,
+            ifcx_diff_drawer_open: false,
         }
     }
 }
@@ -227,6 +230,7 @@ impl SpatialWorkspaceState {
             || self.vault_path_popover_open
             || self.history_popover_open
             || self.api_key_popover_open
+            || self.ifcx_diff_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -242,6 +246,7 @@ impl SpatialWorkspaceState {
         self.vault_path_popover_open = false;
         self.history_popover_open = false;
         self.api_key_popover_open = false;
+        self.ifcx_diff_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -260,6 +265,7 @@ impl SpatialWorkspaceState {
                     self.context_picker_open = false;
                     self.history_popover_open = false;
                     self.api_key_popover_open = false;
+                    self.ifcx_diff_drawer_open = false;
                 } else {
                     self.vault_path_popover_open = false;
                 }
@@ -272,6 +278,7 @@ impl SpatialWorkspaceState {
                     self.vault_path_popover_open = false;
                     self.history_popover_open = false;
                     self.api_key_popover_open = false;
+                    self.ifcx_diff_drawer_open = false;
                 }
             }
             "history" => {
@@ -282,6 +289,7 @@ impl SpatialWorkspaceState {
                     self.vault_path_popover_open = false;
                     self.context_picker_open = false;
                     self.api_key_popover_open = false;
+                    self.ifcx_diff_drawer_open = false;
                 }
             }
             "api_key" => {
@@ -292,6 +300,18 @@ impl SpatialWorkspaceState {
                     self.vault_path_popover_open = false;
                     self.context_picker_open = false;
                     self.history_popover_open = false;
+                    self.ifcx_diff_drawer_open = false;
+                }
+            }
+            "ifcx_diff" => {
+                let next = !self.ifcx_diff_drawer_open;
+                self.ifcx_diff_drawer_open = next;
+                if next {
+                    self.vault_drawer_open = false;
+                    self.vault_path_popover_open = false;
+                    self.context_picker_open = false;
+                    self.history_popover_open = false;
+                    self.api_key_popover_open = false;
                 }
             }
             _ => {}

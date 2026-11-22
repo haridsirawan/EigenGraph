@@ -7,6 +7,21 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.7.2] - 2026-11-22 — Multi-Layer IFCX Visual Diffing & Pure-Vector Engineering Dossier Exporter
+
+### Added & Changed
+- **Multi-Layer Semantic & Geometric IFCX Visual Diff Engine (`src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added `IfcxStage::compute_visual_diff`, `IfcxStage::compose_with_diff_manifest` (`eigengraph::ifcx::diff_manifest`), `IfcxDocument::build_layered_snapshot_for_workspace`, `IfcxDiffLayerFilter` (`All`, `ChangedOnly`, `AddedOnly`, `ModifiedOnly`, `DeletedOnly`), `IfcxVisualDiffEntry`, and `IfcxVisualDiffReport`.
+  - Classifies node deltas across semantic layers (`BIM Core`, `Subsurface SSI`, `Retrofit Delta`, `CRC Cascade`, `District Hazard`, `City-Builder`, `ARI v2`, `IFCX Diff`), identifies exact changed attribute keys, extracts BIM element IDs for 3D highlighting, and preserves deleted node 3D AABB bounding boxes from `usd::usdgeom::mesh` for ghost rendering.
+- **Publication-Grade 100% Pure-Vector Engineering Dossier Exporter (`src/core/vector_dossier.rs`, `src/core/mod.rs`)**:
+  - Implemented `build_pure_vector_engineering_dossier_svg` (`VectorDossierInput`, `VectorDossierExport`) producing archival A3 landscape (`1600 × 1131`) pure-vector SVG dossiers with strict XML escaping, zero `<image>` or raster tags, and embedded 64-character SHA-256 verification seals (`Sha256Hasher`).
+  - Synthesizes six synchronized panels: (1) Orthographic Structural Framing Plan with grid bubbles, foundations, North arrow & scale bar; (2) Storey Elevation & Subsurface Borehole Stratigraphy with phreatic GWT line and pile embedment; (3) ARI v2 & LRFD DCR% governing horizontal bar chart; (4) Coupled Multi-Physics Telemetry Scorecard; (5) Multi-Layer IFCX Visual Diff Manifest or OpenBIM Element Schedule; and (6) ISO Title Block & Cryptographic Seal.
+- **WebGL2 & CPU 3D Visual Diff Overlay, Dynamic Island Inspector & Slash Commands (`src/views/webgl_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Extended `ActiveBimGpuInput` and `build_rtc_active_bim_fem_mesh` to color Added members emerald green, Modified members amber gold, mute unchanged baseline geometry, and emit translucent crimson AABB ghost prisms for deleted `.ifcx` nodes inside Pass 2 WebGL2 rendering (backed by `paint_cpu_ifcx_diff_ghosts_fallback` when GPU is inactive).
+  - Integrated the `IFCX Diff & Dossier:` sub-pill group inside `CAD & Export`, the widening interactive Multi-Layer IFCX Visual Diff Inspector drawer (with click-to-highlight BIM focus), inline active-strip status badge, and `/snapshot`, `/diff`, `/diff-ifcx`, and `/dossier` slash commands—preserving `hud_rects.len() == 1` across `1280px`, `768px`, and `390px` viewports.
+
+---
+
 ## [v0.7.1] - 2026-11-22 — 3D Subsurface Geotechnical Stratigraphy, Coupled 6-DOF Winkler SSI & Modular View Architecture
 
 ### Added & Changed
