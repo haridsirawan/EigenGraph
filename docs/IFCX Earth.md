@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.6.9` Delivered** (`v0.7.0 – v0.7.2` Planned)  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.0` Delivered** (`v0.7.1 – v0.7.3` Planned)  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% Raster Pixels**  
-> **Current Platform**: EigenGraph `v0.6.9` (Automated Structural Retrofit & Non-Destructive `.ifcx` Strengthening Engine)  
+> **Current Platform**: EigenGraph `v0.7.0` (Two-Stage `ARI v2 + StructGNN-CRC` Conformal Screening & 3D Progressive Collapse Cascade)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -156,7 +156,12 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
   - Synthesizes code-informed strengthening options (`AutoBalanced`, `BrbBracingOnly`, `RcJacketingOnly`, `ShearWallCore`) targeting low-ARI / high-DCR bottlenecks via RC column/beam jacketing, pad footing enlargement, 3D Buckling-Restrained Brace (`BRB`) bay injection, and RC Structural Shear Wall infill—verified by site-coupled 6-DOF FEM + `ARI v2` re-analysis with 5D cost (`USD`) & 6D embodied carbon (`kgCO2e`) Pareto scoring.
   - Emits non-destructive `eigengraph::bim::retrofit_delta` `.ifcx` delta layers composable via `IfcxStage::compose_with_retrofit_delta`, with 3D WebGL2 inclined BRB strut rendering (`push_inclined_3d_strut_enu`), interactive Before vs. After comparison, and Dynamic Island `/retrofit`, `/brb`, `/jacket`, `/retrofit-ifcx`, and `/before-after` workflows.
 
-### Planned Next Phases (`v0.7.0 – v0.7.2`)
-- **Phase 70 (`v0.7.0`) — Two-Stage `ARI v2 + StructGNN-CRC` District Portfolio Screening & Progressive Collapse Cascade**: Live district-scale conformal screening filter and animated DAF-driven progressive overload cascade on WebGL2.
+### Phase 70 (`v0.7.0`) — Two-Stage `ARI v2 + StructGNN-CRC` Conformal Screening & Progressive Collapse Cascade *(Implemented)*
+- **Dissertation Conformal Screening & Domino Cascade (`src/core/cascade.rs`, `src/core/ifcx.rs`)**:
+  - Deploys Stage 1 analytical three-channel `ARI v2` ($w_k=0.25, w_c=0.45, w_d=0.30$) with SVD spectral kinematic guarding ahead of Stage 2 `StructGNN-CRC` ($\alpha=0.05$) conformal risk bounds and Green AI $\text{CO}_2\text{e}$ compute savings telemetry, coupled to UFC 4-023-03 DAF-driven Alternate Path progressive collapse simulation (`PVI`, `Rsys`, residual ARI).
+  - Emits non-destructive `eigengraph::analysis::crc_cascade` `.ifcx` overlays composable via `IfcxStage::compose_with_crc_cascade_overlay`, drives WebGL2 step-by-step crimson-orange domino ghosting with gravity sag (`build_rtc_active_bim_fem_mesh`), and integrates interactive `◀ Step` / `Step ▶` chronology controls and `/cascade`, `/crc`, and `/cascade-ifcx` commands directly inside the Single Unified Dynamic Island.
+
+### Planned Next Phases (`v0.7.1 – v0.7.3`)
 - **Phase 71 (`v0.7.1`) — 3D Subsurface Geotechnical Stratigraphy & Winkler SSI Coupling**: Subsurface $N$-SPT / liquefaction soil layers beneath `IfcSite` TIN coupled with 6-DOF foundation springs (`IfcFooting` pile caps & deep piles).
 - **Phase 72 (`v0.7.2`) — Multi-Layer IFCX Visual Diffing & Pure-Vector Engineering Dossier Exporter**: Layer-by-layer `.ifcx` visual diffing inside the Dynamic Island and publication-grade 100% vector SVG structural calculation dossiers.
+- **Phase 73 (`v0.7.3`) — Autonomous Portfolio-Scale `ARI v2` Retrofit Optimization Across Multi-Building Districts**: District-wide coupled retrofit synthesis across multiple `.ifcx` buildings with joint budget/carbon Pareto frontiers.

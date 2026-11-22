@@ -952,6 +952,8 @@ pub struct ActiveBimGpuInput<'a> {
     pub active_modal_mode: usize,
     pub modal_phase_sin: f32,
     pub n1_removed_bim: Option<(BimElementKind, usize)>,
+    pub cascade_failed_bim: &'a [(BimElementKind, usize)],
+    pub cascade_step_progress: f32,
     pub heading_deg: f64,
 }
 
@@ -1057,6 +1059,9 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
     };
 
     let elem_color = |kind: BimElementKind, bim_id: usize, default_col: [f32; 4]| -> [f32; 4] {
+        if input.cascade_failed_bim.contains(&(kind, bim_id)) {
+            return [0.98, 0.22, 0.18, 0.36]; // Translucent crimson-orange progressive collapse ghost
+        }
         if input.n1_removed_bim == Some((kind, bim_id)) {
             return [0.96, 0.16, 0.24, 0.42]; // Crimson translucent N-1 removed ghost
         }
@@ -1127,12 +1132,18 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
     }
 
     // 2. Structural Columns (`BimColumn`) with live top/bottom modal shear displacement
+    let domino_sag_m = (input.cascade_step_progress.clamp(0.15, 1.0) as f64) * 0.45;
     for (idx, c) in proj.columns.iter().enumerate() {
         if input.lens == EarthBimLens::Erection4D && idx + 5 > input.erection_day_limit {
             continue;
         }
         let z0 = level_elev_m(c.base_level_id);
-        let z1 = level_elev_m(c.top_level_id).max(z0 + 0.5);
+        let sag = if input.cascade_failed_bim.contains(&(BimElementKind::Column, c.id)) {
+            domino_sag_m * 0.65
+        } else {
+            0.0
+        };
+        let z1 = (level_elev_m(c.top_level_id) - sag).max(z0 + 0.4);
         let hw = c.width_mm * 0.0005;
         let hd = c.depth_mm * 0.0005;
         let cx = c.pos.0 * 0.001;
@@ -1160,6 +1171,11 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         }
         let is_inclined_brace = r.category == crate::core::bim::RunCategory::StructuralBrace
             || (r.end_offset_mm - r.start_offset_mm).abs() > 10.0;
+        let sag = if input.cascade_failed_bim.contains(&(BimElementKind::Run, r.id)) {
+            domino_sag_m
+        } else {
+            0.0
+        };
         let default_col = if r.category == crate::core::bim::RunCategory::StructuralBrace {
             [0.96, 0.68, 0.16, 1.0]
         } else if r.profile_name.contains("Jacket") {
@@ -1173,8 +1189,8 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         let bx = r.end.0 * 0.001;
         let by = r.end.1 * 0.001;
         if is_inclined_brace {
-            let z0 = level_elev_m(r.level_id) + r.start_offset_mm * 0.001;
-            let z1 = level_elev_m(r.level_id) + r.end_offset_mm * 0.001;
+            let z0 = level_elev_m(r.level_id) + r.start_offset_mm * 0.001 - sag * 0.5;
+            let z1 = level_elev_m(r.level_id) + r.end_offset_mm * 0.001 - sag;
             let p0_xy = rot_xy(ax, ay, z0);
             let p1_xy = rot_xy(bx, by, z1);
             push_inclined_3d_strut_enu(
@@ -1188,7 +1204,7 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             );
             continue;
         }
-        let z_top = level_elev_m(r.level_id) + r.start_offset_mm * 0.001;
+        let z_top = (level_elev_m(r.level_id) + r.start_offset_mm * 0.001 - sag).max(0.15);
         let z_bot = z_top - (r.depth_mm * 0.001).max(0.2);
         let dx = bx - ax;
         let dy = by - ay;
@@ -1211,11 +1227,17 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             continue;
         }
         let z0 = level_elev_m(w.base_level_id);
-        let z1 = w
+        let sag = if input.cascade_failed_bim.contains(&(BimElementKind::Wall, w.id)) {
+            domino_sag_m * 0.65
+        } else {
+            0.0
+        };
+        let z1 = (w
             .top_level_id
             .map(level_elev_m)
             .unwrap_or(z0 + w.unconnected_height_mm * 0.001)
-            .max(z0 + 0.5);
+            - sag)
+            .max(z0 + 0.45);
         let ax = w.start.0 * 0.001;
         let ay = w.start.1 * 0.001;
         let bx = w.end.0 * 0.001;
@@ -2359,6 +2381,14 @@ impl WebGlEarthState {
         if let Some((k, id)) = input.n1_removed_bim {
             mix(&mut h, (k as u64 + 1) * 1_000_003 ^ id as u64);
         }
+        mix(&mut h, input.cascade_failed_bim.len() as u64);
+        for &(k, id) in input.cascade_failed_bim {
+            mix(&mut h, (k as u64 + 7) * 2_000_003 ^ id as u64);
+        }
+        mix(
+            &mut h,
+            ((input.cascade_step_progress * 100.0).round() as u32) as u64,
+        );
         if input.lens == EarthBimLens::ModalVibration {
             // Quantize animated sine phase at 1000 steps so GPU modal vibration updates smoothly at 60 FPS
             mix(&mut h, ((input.modal_phase_sin * 1000.0).round() as i32) as u64);
@@ -2766,6 +2796,8 @@ mod tests {
             active_modal_mode: 0,
             modal_phase_sin: 0.0,
             n1_removed_bim: None,
+            cascade_failed_bim: &[],
+            cascade_step_progress: 0.0,
             heading_deg: 0.0,
         });
         let modal_n1_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
@@ -2777,6 +2809,8 @@ mod tests {
             active_modal_mode: 0,
             modal_phase_sin: 1.0,
             n1_removed_bim: Some((BimElementKind::Column, first_col_id)),
+            cascade_failed_bim: &[],
+            cascade_step_progress: 0.0,
             heading_deg: 0.0,
         });
         assert!(clean_mesh.indices.len() / 3 > 400);
@@ -2876,5 +2910,34 @@ mod tests {
             .vertices
             .iter()
             .all(|v| v.pos.iter().all(|f| f.is_finite()) && v.normal.iter().all(|f| f.is_finite())));
+    }
+
+    #[test]
+    fn test_phase70_gpu_progressive_collapse_cascade_domino_mesh() {
+        let proj = BimProject::sample_bimcraft_building();
+        let failed = vec![
+            (BimElementKind::Column, proj.columns[0].id),
+            (BimElementKind::Run, proj.runs[0].id),
+        ];
+        let mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
+            project: &proj,
+            members: &[],
+            lens: EarthBimLens::Clean,
+            erection_day_limit: 999,
+            deform_scale: 35.0,
+            active_modal_mode: 0,
+            modal_phase_sin: 0.0,
+            n1_removed_bim: None,
+            cascade_failed_bim: &failed,
+            cascade_step_progress: 0.8,
+            heading_deg: 0.0,
+        });
+        assert!(mesh.indices.len() / 3 > 200);
+        assert!(
+            mesh.vertices
+                .iter()
+                .any(|v| v.color[0] > 0.94 && v.color[1] < 0.28 && v.color[3] < 0.42),
+            "Cascading domino-failed members must render as translucent crimson-orange ghosts"
+        );
     }
 }

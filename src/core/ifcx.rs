@@ -62,6 +62,7 @@ pub mod ns {
     pub const EG_FEM_MEMBER: &str = "eigengraph::fem::member";
     pub const EG_ARI: &str = "eigengraph::ari::v2";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
+    pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
 }
 
 fn default_ifcx_version() -> String {
@@ -1117,6 +1118,20 @@ impl IfcxStage {
             retrofit_report.retrofit_delta_ifcx.clone(),
         ]);
         stage.to_composed_document(&format!("{}_retrofitted", base_doc.header.id))
+    }
+
+    /// Composes an existing base `.ifcx` document with a non-destructive Two-Stage
+    /// `ARI v2 + StructGNN-CRC` Conformal Screening & Progressive Collapse Cascade overlay
+    /// (`eigengraph::analysis::crc_cascade`) without mutating base geometry nodes.
+    pub fn compose_with_crc_cascade_overlay(
+        base_doc: &IfcxDocument,
+        crc_report: &crate::core::cascade::TwoStageCrcCascadeReport,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[
+            base_doc.clone(),
+            crc_report.crc_overlay_ifcx.clone(),
+        ]);
+        stage.to_composed_document(&format!("{}_crc_cascade", base_doc.header.id))
     }
 }
 
@@ -3557,5 +3572,42 @@ mod tests {
                 .any(|n| n.attributes.contains_key(ns::EG_ARI)),
             "Composed IFCX output should embed eigengraph::ari::v2 triage overlay"
         );
+    }
+
+    #[test]
+    fn phase70_ifcx_stage_composes_crc_cascade_overlay_nondestructively() {
+        let proj = BimProject::sample_bimcraft_building();
+        let site = crate::core::lifecycle_ops::SiteEnvironmentalCoupling::default();
+        let base_ifcx = IfcxDocument::from_bim_project(
+            &proj,
+            Some((-6.2088, 106.8456, 8.0)),
+            0.0,
+            Some("Jakarta"),
+            None,
+            None,
+        );
+        let crc_rep = crate::core::cascade::run_two_stage_crc_and_cascade_for_bim(
+            &proj,
+            &site,
+            None,
+            1.50,
+        )
+        .expect("CRC cascade screening");
+
+        let composed = IfcxStage::compose_with_crc_cascade_overlay(&base_ifcx, &crc_rep);
+        assert!(composed.data.len() >= base_ifcx.data.len());
+        assert!(composed
+            .data
+            .iter()
+            .any(|n| n.attributes.contains_key(ns::EG_CASCADE_CRC)));
+        assert!(composed
+            .data
+            .iter()
+            .any(|n| n.path.ends_with("/analysis/crc_cascade_v1")));
+        // Base columns/walls geometry remains intact after stage composition
+        assert!(composed
+            .data
+            .iter()
+            .any(|n| n.attributes.get(ns::BSI_CLASS).and_then(|v| v.get("code")).and_then(|s| s.as_str()) == Some("IfcColumn")));
     }
 }

@@ -719,6 +719,10 @@ pub struct UniversalCanvasState {
     pub last_retrofit_report: Option<crate::core::retrofit::StructuralRetrofitReport>,
     pub pre_retrofit_baseline: Option<BimProject>,
     pub viewing_pre_retrofit_baseline: bool,
+    // Phase 70: Two-Stage `ARI v2 + StructGNN-CRC` Screening & Animated Progressive Collapse Cascade
+    pub last_crc_cascade_report: Option<crate::core::cascade::TwoStageCrcCascadeReport>,
+    pub active_cascade_step: usize,
+    pub cascade_daf: f64,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -819,6 +823,9 @@ impl Default for UniversalCanvasState {
             last_retrofit_report: None,
             pre_retrofit_baseline: None,
             viewing_pre_retrofit_baseline: false,
+            last_crc_cascade_report: None,
+            active_cascade_step: 1,
+            cascade_daf: 1.50,
         }
     }
 }
@@ -2878,6 +2885,18 @@ impl UniversalCanvasState {
                 .n1_simulation
                 .as_ref()
                 .map(|ov| (ov.removed_kind, ov.removed_bim_id));
+            let (cascade_failed_bim, cascade_step_progress) =
+                if let Some(ref crc) = self.last_crc_cascade_report {
+                    let step = self.active_cascade_step.clamp(1, crc.total_steps.max(1));
+                    let progress = if crc.total_steps > 0 {
+                        (step as f32 / crc.total_steps as f32).clamp(0.15, 1.0)
+                    } else {
+                        1.0
+                    };
+                    (crc.cumulative_failed_bim_up_to_step(step), progress)
+                } else {
+                    (Vec::new(), 0.0_f32)
+                };
             let active_bim_gpu = if !bim_project.is_empty() {
                 Some(crate::views::webgl_earth::ActiveBimGpuInput {
                     project: bim_project,
@@ -2888,6 +2907,8 @@ impl UniversalCanvasState {
                     active_modal_mode: self.earth_bim_author.active_modal_mode,
                     modal_phase_sin,
                     n1_removed_bim,
+                    cascade_failed_bim: &cascade_failed_bim,
+                    cascade_step_progress,
                     heading_deg: active_heading_deg,
                 })
             } else {

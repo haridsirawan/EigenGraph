@@ -1096,6 +1096,24 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export non-destructive eigengraph::bim::retrofit_delta .ifcx strengthening layer",
         icon: AppIcon::Cube3D,
     },
+    SlashCommandSpec {
+        cmd: "/cascade",
+        category: "Analysis",
+        description: "Run Two-Stage ARI v2 + StructGNN-CRC conformal screening & 3D progressive collapse cascade",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/crc",
+        category: "AI",
+        description: "Evaluate Two-Stage ARI v2 + StructGNN-CRC conformal scenario reduction & safety recall",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/cascade-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::crc_cascade .ifcx conformal overlay",
+        icon: AppIcon::Cube3D,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1133,6 +1151,8 @@ pub struct SpatialHudActions {
     pub run_structural_retrofit: Option<crate::core::retrofit::RetrofitStrategy>,
     pub toggle_retrofit_before_after: bool,
     pub export_retrofit_delta_ifcx: bool,
+    pub run_crc_cascade_screening: Option<f64>,
+    pub export_crc_cascade_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3774,6 +3794,25 @@ impl SpatialWorkspaceState {
                 "/before-after" | "/compare-retrofit" => {
                     actions.toggle_retrofit_before_after = true;
                 }
+                "/cascade" | "/collapse" => {
+                    let daf = arg
+                        .trim()
+                        .trim_end_matches('x')
+                        .trim()
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|v| v.is_finite())
+                        .unwrap_or(universal_canvas.cascade_daf)
+                        .clamp(1.0, 2.5);
+                    universal_canvas.cascade_daf = daf;
+                    actions.run_crc_cascade_screening = Some(daf);
+                }
+                "/crc" | "/structgnn" => {
+                    actions.run_crc_cascade_screening = Some(universal_canvas.cascade_daf);
+                }
+                "/cascade-ifcx" | "/crc-ifcx" => {
+                    actions.export_crc_cascade_ifcx = true;
+                }
                 "/section" | "/cut" => {
                     let elev_opt = arg
                         .trim_end_matches('m')
@@ -3997,6 +4036,20 @@ impl SpatialWorkspaceState {
             );
             actions.merge(sub);
             self.command_bar_expanded = true;
+            return actions;
+        } else if lower.contains("progressive collapse")
+            || lower.contains("structgnn")
+            || lower.contains("crc screening")
+            || lower.contains("cascade")
+        {
+            actions.run_crc_cascade_screening = Some(universal_canvas.cascade_daf);
+            self.push_trace(
+                format!(
+                    "Queued Two-Stage ARI v2 + StructGNN-CRC Cascade (DAF {:.2}x)",
+                    universal_canvas.cascade_daf
+                ),
+                true,
+            );
             return actions;
         } else if lower == "pure vector" || lower == "vector earth" {
             let sub = self.apply_proposal_actions(
@@ -4904,6 +4957,7 @@ impl SpatialWorkspaceState {
             || universal_canvas.earth_fem_cache.n1_simulation.is_some()
             || universal_canvas.district_hazard.any_active()
             || universal_canvas.last_retrofit_report.is_some()
+            || universal_canvas.last_crc_cascade_report.is_some()
             || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
             || universal_canvas.earth_bim_author.active_tool
                 != crate::views::universal_canvas::EarthBimTool::None
@@ -5716,6 +5770,71 @@ impl SpatialWorkspaceState {
                     actions.export_retrofit_delta_ifcx = true;
                 }
             }
+            if let Some(crc_rep) = universal_canvas.last_crc_cascade_report.clone() {
+                let total_steps = crc_rep.total_steps.max(1);
+                let cur_step = universal_canvas.active_cascade_step.clamp(1, total_steps);
+                let status_col = match crc_rep.cascade_status {
+                    crate::core::cascade::CollapseStatus::ArrestedSafe => theme.accent_green,
+                    crate::core::cascade::CollapseStatus::ArrestedPartialCollapse => theme.accent_orange,
+                    crate::core::cascade::CollapseStatus::CatastrophicCollapse => theme.accent_red,
+                };
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Bolt,
+                    format!(
+                        "CRC -{:.0}% • Recall {:.0}% • PVI {:.2}",
+                        crc_rep.scenario_reduction_pct,
+                        crc_rep.safety_recall_pct,
+                        crc_rep.pvi
+                    ),
+                    status_col,
+                );
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "◀ Step",
+                    false,
+                    theme.accent_blue,
+                    "Rewind 3D progressive collapse domino animation step",
+                )
+                .clicked()
+                {
+                    universal_canvas.active_cascade_step = cur_step.saturating_sub(1).max(1);
+                }
+                ui.label(
+                    RichText::new(format!("Step {cur_step}/{total_steps}"))
+                        .size(9.3)
+                        .monospace()
+                        .color(theme.text_primary),
+                );
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "Step ▶",
+                    false,
+                    theme.accent_orange,
+                    "Advance 3D progressive collapse domino propagation step",
+                )
+                .clicked()
+                {
+                    universal_canvas.active_cascade_step = (cur_step + 1).min(total_steps);
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    "CRC .ifcx",
+                    false,
+                    theme.accent_green,
+                    "Export non-destructive eigengraph::analysis::crc_cascade .ifcx overlay",
+                )
+                .clicked()
+                {
+                    actions.export_crc_cascade_ifcx = true;
+                }
+            }
             let (rst_fg, rst_bg, rst_st) = theme.glass_chip_style(false, theme.accent_red);
             if icons::icon_only_button(
                 ui,
@@ -5737,6 +5856,8 @@ impl SpatialWorkspaceState {
                 universal_canvas.district_hazard.flood_plane_active = false;
                 universal_canvas.last_retrofit_report = None;
                 universal_canvas.viewing_pre_retrofit_baseline = false;
+                universal_canvas.last_crc_cascade_report = None;
+                universal_canvas.active_cascade_step = 1;
             }
         });
     }
@@ -10625,6 +10746,90 @@ impl SpatialWorkspaceState {
                                             deck_w,
                                         );
                                     }
+                                    ui.add_space(4.0);
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new("CRC & Cascade:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Bolt),
+                                                "CRC + Cascade",
+                                                universal_canvas.last_crc_cascade_report.is_some(),
+                                                theme.accent_orange,
+                                                "Run Two-Stage ARI v2 + StructGNN-CRC Conformal Screening & 3D Progressive Collapse Cascade",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.run_crc_cascade_screening =
+                                                    Some(universal_canvas.cascade_daf);
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                format!("DAF {:.2}x", universal_canvas.cascade_daf),
+                                                false,
+                                                theme.accent_blue,
+                                                "Cycle UFC 4-023-03 Dynamic Amplification Factor: 1.20x / 1.50x / 2.00x",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.cascade_daf =
+                                                    if universal_canvas.cascade_daf < 1.35 {
+                                                        1.50
+                                                    } else if universal_canvas.cascade_daf < 1.75 {
+                                                        2.00
+                                                    } else {
+                                                        1.20
+                                                    };
+                                            }
+                                            if let Some(ref crc_rep) =
+                                                universal_canvas.last_crc_cascade_report
+                                            {
+                                                let max_steps = crc_rep.total_steps.clamp(1, 4);
+                                                for s in 1..=max_steps {
+                                                    let act = universal_canvas.active_cascade_step == s;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        None,
+                                                        format!("S{s}"),
+                                                        act,
+                                                        theme.accent_red,
+                                                        "Inspect domino collapse chronology at step",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.active_cascade_step = s;
+                                                    }
+                                                }
+                                                if Self::glass_pill_button(
+                                                    ui,
+                                                    theme,
+                                                    Some(AppIcon::Cube3D),
+                                                    "CRC .ifcx",
+                                                    false,
+                                                    theme.accent_green,
+                                                    "Export eigengraph::analysis::crc_cascade .ifcx overlay",
+                                                )
+                                                .clicked()
+                                                {
+                                                    actions.export_crc_cascade_ifcx = true;
+                                                }
+                                            }
+                                        },
+                                    );
                                 }
                                 DynamicIslandStudioTab::BimAndStory => {
                                     let (_, _, story_lbl, lvl_cnt) =
@@ -11997,6 +12202,10 @@ impl SpatialHudActions {
         }
         self.toggle_retrofit_before_after |= other.toggle_retrofit_before_after;
         self.export_retrofit_delta_ifcx |= other.export_retrofit_delta_ifcx;
+        if other.run_crc_cascade_screening.is_some() {
+            self.run_crc_cascade_screening = other.run_crc_cascade_screening;
+        }
+        self.export_crc_cascade_ifcx |= other.export_crc_cascade_ifcx;
     }
 }
 
@@ -15003,6 +15212,100 @@ mod tests {
             assert!(
                 r.right() <= win_w + 1.0 && r.left() >= -1.0,
                 "Phase 69 Retrofit Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_phase70_crc_cascade_slash_commands_and_zero_hud_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus = crate::core::BimCommandBus::from_project(
+            crate::core::BimProject::sample_bimcraft_building(),
+        );
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = crate::theme::MacTheme::default();
+
+        for cmd in ["/cascade", "/crc", "/cascade-ifcx"] {
+            assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == cmd));
+        }
+
+        let act_cas = spatial.execute_spatial_input(
+            "/cascade 1.75",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(act_cas.run_crc_cascade_screening, Some(1.75));
+
+        let act_crc = spatial.execute_spatial_input(
+            "/crc",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_crc.run_crc_cascade_screening.is_some());
+
+        let act_exp = spatial.execute_spatial_input(
+            "/cascade-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_exp.export_crc_cascade_ifcx);
+
+        let site = canvas.active_site_coupling();
+        let crc_rep = crate::core::cascade::run_two_stage_crc_and_cascade_for_bim(
+            &build.bim_bus.project,
+            &site,
+            None,
+            1.50,
+        )
+        .expect("Phase 70 CRC cascade report");
+        canvas.last_crc_cascade_report = Some(crc_rep);
+        canvas.active_cascade_step = 1;
+
+        spatial.mobile_deck_pinned = true;
+        spatial.studio_tab = DynamicIslandStudioTab::ViewAndLens;
+        for win_w in [1280.0_f32, 768.0, 390.0] {
+            let ctx = egui::Context::default();
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 844.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                },
+            );
+            out.textures_delta.clear();
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 70 CRC Cascade Dynamic Island overflowed viewport {win_w}: {r:?}"
             );
         }
     }

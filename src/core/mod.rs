@@ -65,7 +65,11 @@ pub use interop::{
 };
 pub use optimizer::{AriTopologyOptimizer, BracingCandidate, BracingOptimizationReport};
 pub use cost::{AhspUnitRates, BoqLineItem, CostEngine, CostEstimationReport, ProfileQuantity};
-pub use cascade::{CascadingCollapseReport, CascadingSimulator, CollapseStatus, CollapseStep};
+pub use cascade::{
+    run_two_stage_crc_and_cascade_for_bim, CascadingCollapseReport, CascadingSimulator,
+    CollapseStatus, CollapseStep, CrcRiskTier, StructGnnCrcScenario, TwoStageCrcCascadeReport,
+    NS_EG_CASCADE_CRC,
+};
 pub use schedule::{
     ConstructionActivity, SCurvePoint, Schedule4DReport, ScheduleEngine, StageStabilityResult,
 };

@@ -7,6 +7,19 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.7.0] - 2026-11-22 — Two-Stage `ARI v2 + StructGNN-CRC` Conformal Screening & 3D Progressive Collapse Cascade
+
+### Added & Changed
+- **Two-Stage Pairwise `ARI v2 + StructGNN-CRC` Conformal Screening & Cascade Kernel (`src/core/cascade.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:
+  - Implemented `run_two_stage_crc_and_cascade_for_bim`, evaluating Stage 1 analytical three-channel `ARI v2` ($w_k=0.25, w_c=0.45, w_d=0.30$) with SVD spectral kinematic guarding to prune provably safe disruption scenarios while forwarding 100.0% of critical scenarios to Stage 2 physics-informed `StructGNN-CRC` conformal risk calibration ($\alpha = 0.05$, finite-sample conformal upper bounds, and Green AI compute/$\text{CO}_2$ savings telemetry).
+  - Coupled `CascadingSimulator::simulate_disruption` (UFC 4-023-03 / ASCE 7-22 Alternate Path DAF) to BIM element chronology (`step_failed_bim_elements`, `all_collapsed_bim_elements`, PVI, Robustness Index $R_{\text{sys}}$, residual ARI), emitting non-destructive OpenBIM `.ifcx` overlays (`eigengraph::analysis::crc_cascade` + `eigengraph::ari::v2`) composable via `IfcxStage::compose_with_crc_cascade_overlay`.
+- **WebGL2 3D Animated Progressive Collapse Domino Visualization (`src/views/webgl_earth.rs`, `src/views/universal_canvas.rs`)**:
+  - Extended `ActiveBimGpuInput` and `build_rtc_active_bim_fem_mesh` to highlight cumulatively failed members up to the active cascade step as translucent crimson-orange domino-collapse ghosts `[0.98, 0.22, 0.18, 0.36]` with progressive gravity sag inside the 24-bit Z-buffered WebGL2 RTC pass.
+- **Dynamic Island CRC Screening Studio, Step Stepper & Slash Commands (`src/views/spatial_workspace.rs`, `src/app.rs`)**:
+  - Added the `CRC & Cascade:` pill bar inside the Dynamic Island `View & Lens` tab (`CRC + Cascade`, `DAF 1.20x/1.50x/2.00x`, step `S1..S4` buttons, `CRC .ifcx`), an inline `CRC` telemetry strip with interactive `◀ Step` / `Step ▶` chronology controls in the active strip, and `/cascade`, `/crc`, and `/cascade-ifcx` slash commands—strictly preserving a single unified Dynamic Island capsule (`hud_rects.len() == 1`) across `1280px`, `768px`, and `390px` viewports.
+
+---
+
 ## [v0.6.9] - 2026-11-21 — Automated Structural Retrofit & Non-Destructive `.ifcx` Strengthening Engine
 
 ### Added & Changed

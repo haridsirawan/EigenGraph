@@ -2024,24 +2024,7 @@ impl EigenGraphApp {
                 }
             }
             if let Some(ref rep) = self.universal_canvas.last_retrofit_report {
-                let raw_name = if self.build_view.bim_bus.project.project_name.trim().is_empty() {
-                    "EigenGraph_BIM".to_string()
-                } else {
-                    self.build_view
-                        .bim_bus
-                        .project
-                        .project_name
-                        .trim()
-                        .chars()
-                        .map(|c| {
-                            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                                c
-                            } else {
-                                '_'
-                            }
-                        })
-                        .collect()
-                };
+                let raw_name = Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
                 let fname = format!("{raw_name}_retrofit_delta.ifcx");
                 let json = rep.retrofit_delta_ifcx.to_json_pretty();
                 match crate::core::web_bridge::save_text_file(
@@ -2065,6 +2048,105 @@ impl EigenGraphApp {
                     .push_trace("No retrofit delta available to export.", false);
             }
         }
+        if let Some(daf) = hud_actions.run_crc_cascade_screening {
+            if self.build_view.bim_bus.project.is_empty() {
+                if let Ok(msg) = self
+                    .build_view
+                    .bim_bus
+                    .execute_natural_language("portal 3x2 @6m 2floors")
+                {
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.spatial_workspace.push_trace(msg, true);
+                }
+            }
+            let coupling = self.universal_canvas.active_site_coupling();
+            let trigger_opt = self.universal_canvas.highlighted_bim_element;
+            match crate::core::cascade::run_two_stage_crc_and_cascade_for_bim(
+                &self.build_view.bim_bus.project,
+                &coupling,
+                trigger_opt,
+                daf,
+            ) {
+                Ok(rep) => {
+                    self.universal_canvas.cascade_daf = rep.daf;
+                    self.universal_canvas.active_cascade_step = 1;
+                    self.universal_canvas.last_crc_cascade_report = Some(rep.clone());
+                    let is_safe = rep.cascade_status
+                        != crate::core::cascade::CollapseStatus::CatastrophicCollapse;
+                    self.spatial_workspace.push_trace(rep.summary.clone(), is_safe);
+                    self.ai_assistant_view
+                        .chat_history
+                        .push(crate::models::ChatMessage {
+                            is_user: false,
+                            message: format!(
+                                "[EigenAI Two-Stage ARI v2 + StructGNN-CRC]: {}",
+                                rep.summary
+                            ),
+                            time: crate::core::web_bridge::unix_timestamp_label(),
+                        });
+                }
+                Err(err) => {
+                    self.spatial_workspace.push_trace(err, false);
+                }
+            }
+        }
+        if hud_actions.export_crc_cascade_ifcx {
+            if self.universal_canvas.last_crc_cascade_report.is_none()
+                && !self.build_view.bim_bus.project.is_empty()
+            {
+                let coupling = self.universal_canvas.active_site_coupling();
+                if let Ok(rep) = crate::core::cascade::run_two_stage_crc_and_cascade_for_bim(
+                    &self.build_view.bim_bus.project,
+                    &coupling,
+                    self.universal_canvas.highlighted_bim_element,
+                    self.universal_canvas.cascade_daf,
+                ) {
+                    self.universal_canvas.active_cascade_step = 1;
+                    self.universal_canvas.last_crc_cascade_report = Some(rep);
+                }
+            }
+            if let Some(ref rep) = self.universal_canvas.last_crc_cascade_report {
+                let raw_name = Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+                let fname = format!("{raw_name}_crc_cascade.ifcx");
+                let json = rep.crc_overlay_ifcx.to_json_pretty();
+                match crate::core::web_bridge::save_text_file(
+                    &fname,
+                    &json,
+                    "application/json;charset=utf-8",
+                ) {
+                    Ok(_) => {
+                        self.spatial_workspace.push_trace(
+                            format!(
+                                "Exported Non-Destructive CRC Cascade IFCX ({fname}, {} nodes)",
+                                rep.crc_overlay_ifcx.data.len()
+                            ),
+                            true,
+                        );
+                    }
+                    Err(err) => self.spatial_workspace.push_trace(err, false),
+                }
+            } else {
+                self.spatial_workspace
+                    .push_trace("No CRC cascade overlay available to export.", false);
+            }
+        }
+    }
+
+    fn safe_ifcx_project_stem(project_name: &str) -> String {
+        let trimmed = project_name.trim();
+        if trimmed.is_empty() {
+            return "EigenGraph_BIM".to_string();
+        }
+        trimmed
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
     }
 
     fn open_vault_project_entry(&mut self, entry: crate::core::vault::PersonalVaultProjectEntry) {
