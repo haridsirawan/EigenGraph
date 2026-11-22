@@ -166,6 +166,67 @@ mod js_vault {
         #[wasm_bindgen(js_namespace = EigenGraphVaultBridge, js_name = loadGeminiKeyOptInJson)]
         pub fn load_gemini_key_opt_in_json() -> String;
     }
+
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(js_namespace = EigenGraphWorkerBridge, js_name = isSupported)]
+        pub fn worker_is_supported() -> bool;
+
+        #[wasm_bindgen(js_namespace = EigenGraphWorkerBridge, js_name = startReplayJob)]
+        pub fn worker_start_replay_job(job_id: u32, payload_json: &str) -> bool;
+
+        #[wasm_bindgen(js_namespace = EigenGraphWorkerBridge, js_name = pollJobStateJson)]
+        pub fn worker_poll_job_state_json(job_id: u32) -> String;
+
+        #[wasm_bindgen(js_namespace = EigenGraphWorkerBridge, js_name = cancelJob)]
+        pub fn worker_cancel_job(job_id: u32);
+    }
+}
+
+/// Returns true when the browser environment supports inline Blob WebWorker background execution.
+pub fn worker_bridge_supported() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_vault::worker_is_supported()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
+}
+
+/// Dispatches an asynchronous NL-THA + `StructGNN-CRC` job to the browser Blob WebWorker.
+pub fn worker_bridge_start_replay(job_id: u32, payload_json: &str) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_vault::worker_start_replay_job(job_id, payload_json)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (job_id, payload_json);
+        false
+    }
+}
+
+/// Polls non-blocking JSON progress / completion payload from the browser Blob WebWorker.
+pub fn worker_bridge_poll_replay(job_id: u32) -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_vault::worker_poll_job_state_json(job_id)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = job_id;
+        String::new()
+    }
+}
+
+/// Cancels an active or superseded browser Blob WebWorker job.
+pub fn worker_bridge_cancel_replay(job_id: u32) {
+    #[cfg(target_arch = "wasm32")]
+    js_vault::worker_cancel_job(job_id);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = job_id;
 }
 
 pub fn vault_bridge_version() -> u64 {

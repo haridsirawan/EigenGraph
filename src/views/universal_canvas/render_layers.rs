@@ -269,9 +269,32 @@ impl UniversalCanvasState {
                 let modal_idx = self.earth_bim_author.active_modal_mode;
                 let modal_playing = self.earth_bim_author.modal_anim_playing;
                 let n1_active = self.earth_fem_cache.n1_simulation.is_some();
+                let replay_frame_opt = if active_lens == EarthBimLens::TimeHistoryReplay {
+                    self.current_replay_frame()
+                } else {
+                    None
+                };
+                let replay_hinges_map: std::collections::HashMap<
+                    (crate::core::BimElementKind, usize),
+                    crate::core::nonlinear::PlasticHingeState,
+                > = if active_lens == EarthBimLens::TimeHistoryReplay {
+                    self.last_ground_motion_replay_report
+                        .as_ref()
+                        .map(|rep| {
+                            rep.worst_hinge_states_at(self.replay_cursor_time_s)
+                                .into_iter()
+                                .map(|(k, id, st)| ((k, id), st))
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    std::collections::HashMap::new()
+                };
                 let deform_visual_active = matches!(
                     active_lens,
-                    EarthBimLens::DeformedShape | EarthBimLens::ModalVibration
+                    EarthBimLens::DeformedShape
+                        | EarthBimLens::ModalVibration
+                        | EarthBimLens::TimeHistoryReplay
                 ) || n1_active;
 
                 let anim_time_s = if active_lens == EarthBimLens::ModalVibration {
@@ -280,6 +303,9 @@ impl UniversalCanvasState {
                     }
                     clip_painter.ctx().input(|i| i.time)
                 } else {
+                    if active_lens == EarthBimLens::TimeHistoryReplay && self.replay_anim_playing {
+                        clip_painter.ctx().request_repaint();
+                    }
                     0.0
                 };
 
@@ -289,6 +315,46 @@ impl UniversalCanvasState {
                 let proj_def_mm = |x_mm: f64, y_mm: f64, elev_m: f64| -> Option<Pos2> {
                     if !deform_visual_active {
                         return self.project_active_bim_mm(xf, x_mm, y_mm, elev_m, lift_scale);
+                    }
+                    if let Some(ref rf) = replay_frame_opt {
+                        let vis = (deform_scale * 0.25).clamp(1.0, 28.0);
+                        let shake_x_mm = rf.ground_disp_m * vis * 0.35 * 1000.0;
+                        let shake_y_mm = rf.ground_disp_m * 0.25 * vis * 0.35 * 1000.0;
+                        let n = rf
+                            .story_elevations_m
+                            .len()
+                            .min(rf.story_disp_x_m.len())
+                            .min(rf.story_disp_y_m.len());
+                        let (mut dx_m, mut dy_m) = (0.0, 0.0);
+                        if n > 0 {
+                            dx_m = rf.story_disp_x_m[n - 1];
+                            dy_m = rf.story_disp_y_m[n - 1];
+                            if elev_m <= rf.story_elevations_m[0] {
+                                dx_m = rf.story_disp_x_m[0];
+                                dy_m = rf.story_disp_y_m[0];
+                            } else {
+                                for k in 1..n {
+                                    if elev_m <= rf.story_elevations_m[k] {
+                                        let t = ((elev_m - rf.story_elevations_m[k - 1])
+                                            / (rf.story_elevations_m[k] - rf.story_elevations_m[k - 1])
+                                                .max(1e-4))
+                                        .clamp(0.0, 1.0);
+                                        dx_m = rf.story_disp_x_m[k - 1]
+                                            + (rf.story_disp_x_m[k] - rf.story_disp_x_m[k - 1]) * t;
+                                        dy_m = rf.story_disp_y_m[k - 1]
+                                            + (rf.story_disp_y_m[k] - rf.story_disp_y_m[k - 1]) * t;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        return self.project_active_bim_mm(
+                            xf,
+                            x_mm + (dx_m * vis * 1000.0 + shake_x_mm).clamp(-2800.0, 2800.0),
+                            y_mm + (dy_m * vis * 1000.0 + shake_y_mm).clamp(-2800.0, 2800.0),
+                            elev_m,
+                            lift_scale,
+                        );
                     }
                     let ([dx_mm, dy_mm, dz_m], _) = self.earth_fem_cache.sample_displacement_at_mm(
                         x_mm,
@@ -387,6 +453,24 @@ impl UniversalCanvasState {
                         }
                         EarthBimLens::DeformedShape | EarthBimLens::ModalVibration => {
                             disp_gradient_color(disp_norm)
+                        }
+                        EarthBimLens::TimeHistoryReplay => {
+                            use crate::core::nonlinear::PlasticHingeState;
+                            match replay_hinges_map.get(&(kind, id)).copied() {
+                                Some(PlasticHingeState::ImmediateOccupancy) => {
+                                    Color32::from_rgb(10, 132, 255)
+                                }
+                                Some(PlasticHingeState::LifeSafety) => {
+                                    Color32::from_rgb(255, 159, 10)
+                                }
+                                Some(PlasticHingeState::CollapsePrevention) => {
+                                    Color32::from_rgb(255, 69, 58)
+                                }
+                                Some(PlasticHingeState::Mechanism) => {
+                                    Color32::from_rgb(191, 90, 242)
+                                }
+                                _ => Color32::from_rgb(91, 146, 165),
+                            }
                         }
                         EarthBimLens::Erection4D => {
                             if level_idx == 0 {
@@ -1058,6 +1142,24 @@ impl UniversalCanvasState {
                                     Color32::from_rgb(208, 235, 225),
                                 );
                             }
+                        } else if active_lens == EarthBimLens::TimeHistoryReplay {
+                            if let Some(ref rf) = replay_frame_opt {
+                                let rec_lbl = crate::core::ground_motion_replay::GroundMotionReplayConfig::record_short_label(
+                                    self.ground_motion_replay_config.record,
+                                );
+                                clip_painter.text(
+                                    apex_pt + Vec2::new(0.0, -14.0),
+                                    Align2::CENTER_BOTTOM,
+                                    format!(
+                                        "{rec_lbl} • t={:.1}s • Drift={:.2}% • Hinges={}",
+                                        rf.time_s,
+                                        rf.roof_drift_ratio * 100.0,
+                                        rf.active_hinges.len()
+                                    ),
+                                    egui::FontId::monospace(10.0),
+                                    Color32::from_rgb(208, 235, 225),
+                                );
+                            }
                         } else if active_lens == EarthBimLens::DeformedShape && self.earth_fem_cache.max_disp_mm > 0.01 {
                             let disp_mm = self
                                 .earth_fem_cache
@@ -1481,6 +1583,7 @@ impl UniversalCanvasState {
                         EarthBimLens::MomentStress => Color32::from_rgb(129, 140, 248),
                         EarthBimLens::DeformedShape => Color32::from_rgb(245, 158, 11),
                         EarthBimLens::ModalVibration => Color32::from_rgb(91, 146, 165),
+                        EarthBimLens::TimeHistoryReplay => Color32::from_rgb(245, 158, 11),
                         EarthBimLens::Erection4D => Color32::from_rgb(56, 189, 248),
                     }
                 };
@@ -2052,6 +2155,106 @@ impl UniversalCanvasState {
                     fill,
                     Stroke::new(1.5, stroke_col),
                 ));
+            }
+        }
+    }
+
+    /// Pure-vector CPU projection fallback for 3D ASCE 41-17 plastic hinge beacons and ground
+    /// seismic pulse ring when WebGL2 is inactive.
+    pub(super) fn paint_cpu_plastic_hinges_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        _theme: &MacTheme,
+        xform: &crate::core::gis::GlobeScreenTransform,
+        bim_project: &BimProject,
+    ) {
+        use crate::core::nonlinear::PlasticHingeState;
+
+        if self.earth_bim_author.active_lens != EarthBimLens::TimeHistoryReplay
+            || self.world_map.zoom_level < 14.0
+        {
+            return;
+        }
+        let Some(frame) = self.current_replay_frame() else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let lift_scale = if self.world_map.zoom_level < 14.5 { 8.0 } else { 1.0 };
+        let vis = (self.earth_bim_author.deform_scale * 0.25).clamp(1.0, 28.0);
+        let shake_x_mm = frame.ground_disp_m * vis * 0.35 * 1000.0;
+        let shake_y_mm = frame.ground_disp_m * 0.25 * vis * 0.35 * 1000.0;
+
+        // Ground pulse ring around building centroid
+        if let Some((bmin, bmax)) = bim_project.plan_extents_mm() {
+            let cx = (bmin[0] + bmax[0]) * 0.5;
+            let cy = (bmin[1] + bmax[1]) * 0.5;
+            let r_m = ((bmax[0] - bmin[0]).hypot(bmax[1] - bmin[1]) * 0.00055).max(5.0)
+                + (frame.ground_accel_g.abs() * 1.5);
+            let mut ring_pts = Vec::with_capacity(24);
+            for i in 0..24 {
+                let th = (i as f64 / 24.0) * std::f64::consts::TAU;
+                let px_mm = cx + r_m * 1000.0 * th.cos();
+                let py_mm = cy + r_m * 1000.0 * th.sin();
+                if let Some(sp) = self.project_active_bim_mm(xform, px_mm, py_mm, 0.14, lift_scale) {
+                    ring_pts.push(sp);
+                }
+            }
+            if ring_pts.len() >= 12 {
+                let col = if frame.ground_accel_g.abs() > 0.35 {
+                    Color32::from_rgba_unmultiplied(255, 110, 64, 170)
+                } else {
+                    Color32::from_rgba_unmultiplied(91, 196, 225, 130)
+                };
+                clip.add(egui::Shape::closed_line(ring_pts, Stroke::new(2.0, col)));
+            }
+        }
+
+        if !self.ground_motion_replay_config.show_plastic_hinges {
+            return;
+        }
+        let n = frame
+            .story_elevations_m
+            .len()
+            .min(frame.story_disp_x_m.len())
+            .min(frame.story_disp_y_m.len());
+        for h in &frame.active_hinges {
+            let (col, rad) = match h.state {
+                PlasticHingeState::Elastic => continue,
+                PlasticHingeState::ImmediateOccupancy => (Color32::from_rgb(10, 132, 255), 5.0_f32),
+                PlasticHingeState::LifeSafety => (Color32::from_rgb(255, 159, 10), 6.2_f32),
+                PlasticHingeState::CollapsePrevention => (Color32::from_rgb(255, 69, 58), 7.5_f32),
+                PlasticHingeState::Mechanism => (Color32::from_rgb(191, 90, 242), 8.8_f32),
+            };
+            let z_m = h.local_pos_m[2];
+            let (mut dx_m, mut dy_m) = (0.0, 0.0);
+            if n > 0 {
+                dx_m = frame.story_disp_x_m[n - 1];
+                dy_m = frame.story_disp_y_m[n - 1];
+                if z_m <= frame.story_elevations_m[0] {
+                    dx_m = frame.story_disp_x_m[0];
+                    dy_m = frame.story_disp_y_m[0];
+                } else {
+                    for k in 1..n {
+                        if z_m <= frame.story_elevations_m[k] {
+                            let t = ((z_m - frame.story_elevations_m[k - 1])
+                                / (frame.story_elevations_m[k] - frame.story_elevations_m[k - 1])
+                                    .max(1e-4))
+                            .clamp(0.0, 1.0);
+                            dx_m = frame.story_disp_x_m[k - 1]
+                                + (frame.story_disp_x_m[k] - frame.story_disp_x_m[k - 1]) * t;
+                            dy_m = frame.story_disp_y_m[k - 1]
+                                + (frame.story_disp_y_m[k] - frame.story_disp_y_m[k - 1]) * t;
+                            break;
+                        }
+                    }
+                }
+            }
+            let x_mm = h.local_pos_m[0] * 1000.0 + (dx_m * vis * 1000.0 + shake_x_mm).clamp(-2800.0, 2800.0);
+            let y_mm = h.local_pos_m[1] * 1000.0 + (dy_m * vis * 1000.0 + shake_y_mm).clamp(-2800.0, 2800.0);
+            if let Some(sp) = self.project_active_bim_mm(xform, x_mm, y_mm, z_m, lift_scale) {
+                clip.circle_filled(sp, rad, col.gamma_multiply(0.85));
+                clip.circle_stroke(sp, rad + 1.5, Stroke::new(1.2, Color32::WHITE.gamma_multiply(0.7)));
             }
         }
     }

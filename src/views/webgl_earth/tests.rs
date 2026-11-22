@@ -183,6 +183,10 @@ use crate::core::ifcx::IfcxDocument;
             diff_added_bim: &[],
             diff_modified_bim: &[],
             diff_deleted_ghosts: &[],
+            replay_story_elevs_m: &[],
+            replay_story_disp_xy_m: &[],
+            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_hinge_states: &[],
         });
         let modal_n1_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
             project: &proj,
@@ -201,6 +205,10 @@ use crate::core::ifcx::IfcxDocument;
             diff_added_bim: &[],
             diff_modified_bim: &[],
             diff_deleted_ghosts: &[],
+            replay_story_elevs_m: &[],
+            replay_story_disp_xy_m: &[],
+            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_hinge_states: &[],
         });
         assert!(clean_mesh.indices.len() / 3 > 400);
         // Subsurface deep pile shafts extend below z = -3.0m
@@ -325,6 +333,10 @@ use crate::core::ifcx::IfcxDocument;
             diff_added_bim: &[],
             diff_modified_bim: &[],
             diff_deleted_ghosts: &[],
+            replay_story_elevs_m: &[],
+            replay_story_disp_xy_m: &[],
+            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_hinge_states: &[],
         });
         assert!(mesh.indices.len() / 3 > 200);
         assert!(
@@ -396,6 +408,10 @@ use crate::core::ifcx::IfcxDocument;
             diff_added_bim: &[],
             diff_modified_bim: &[],
             diff_deleted_ghosts: &[],
+            replay_story_elevs_m: &[],
+            replay_story_disp_xy_m: &[],
+            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_hinge_states: &[],
         });
         assert!(
             deep_piles.vertices.iter().any(|v| v.pos[2] < -20.0),
@@ -427,6 +443,10 @@ use crate::core::ifcx::IfcxDocument;
             diff_added_bim: &added,
             diff_modified_bim: &modified,
             diff_deleted_ghosts: &ghosts,
+            replay_story_elevs_m: &[],
+            replay_story_disp_xy_m: &[],
+            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_hinge_states: &[],
         });
 
         assert!(
@@ -482,4 +502,117 @@ use crate::core::ifcx::IfcxDocument;
             .vertices
             .iter()
             .all(|v| v.pos.iter().all(|f| f.is_finite()) && v.normal.iter().all(|f| f.is_finite())));
+    }
+
+    #[test]
+    fn test_phase74_gpu_time_history_replay_sway_and_plastic_hinge_beacons() {
+        use crate::core::ground_motion_replay::{
+            run_ground_motion_replay_for_bim, GroundMotionReplayConfig,
+        };
+        use crate::core::time_history::GroundMotionRecord;
+
+        let proj = BimProject::sample_bimcraft_building();
+        let site = crate::core::compute_site_environmental_coupling(
+            -6.2088,
+            106.8456,
+            &crate::core::gis::earth_globe::PlanetaryWorldState::default(),
+        );
+        let rep = run_ground_motion_replay_for_bim(
+            &proj,
+            &site,
+            None,
+            &GroundMotionReplayConfig {
+                record: GroundMotionRecord::NorthridgeSylmar1994,
+                scale_factor: 1.85,
+                ..Default::default()
+            },
+            "GpuUnitTest",
+            None,
+        )
+        .expect("Replay report");
+
+        let frame = rep.sample_interpolated(rep.peak_time_s);
+        let disp_pairs: Vec<[f64; 2]> = frame
+            .story_disp_x_m
+            .iter()
+            .zip(frame.story_disp_y_m.iter())
+            .map(|(&x, &y)| [x, y])
+            .collect();
+        let hinge_states = rep.worst_hinge_states_at(rep.peak_time_s);
+
+        let base_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
+            project: &proj,
+            members: &[],
+            lens: EarthBimLens::Clean,
+            erection_day_limit: 999,
+            deform_scale: 40.0,
+            active_modal_mode: 0,
+            modal_phase_sin: 0.0,
+            n1_removed_bim: None,
+            cascade_failed_bim: &[],
+            cascade_step_progress: 0.0,
+            heading_deg: 0.0,
+            subsurface_pile_depth_m: 4.0,
+            diff_overlay_active: false,
+            diff_added_bim: &[],
+            diff_modified_bim: &[],
+            diff_deleted_ghosts: &[],
+            replay_story_elevs_m: &[],
+            replay_story_disp_xy_m: &[],
+            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_hinge_states: &[],
+        });
+
+        let sway_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
+            project: &proj,
+            members: &[],
+            lens: EarthBimLens::TimeHistoryReplay,
+            erection_day_limit: 999,
+            deform_scale: 40.0,
+            active_modal_mode: 0,
+            modal_phase_sin: 0.0,
+            n1_removed_bim: None,
+            cascade_failed_bim: &[],
+            cascade_step_progress: 0.0,
+            heading_deg: 0.0,
+            subsurface_pile_depth_m: 4.0,
+            diff_overlay_active: false,
+            diff_added_bim: &[],
+            diff_modified_bim: &[],
+            diff_deleted_ghosts: &[],
+            replay_story_elevs_m: &frame.story_elevations_m,
+            replay_story_disp_xy_m: &disp_pairs,
+            replay_ground_shake_xy_m: [frame.ground_disp_m, frame.ground_disp_m * 0.25],
+            replay_hinge_states: &hinge_states,
+        });
+
+        assert!(sway_mesh.vertices.iter().all(|v| v.pos.iter().all(|f| f.is_finite())));
+        let max_dx = base_mesh
+            .vertices
+            .iter()
+            .zip(sway_mesh.vertices.iter())
+            .filter(|(a, _)| a.pos[2] > 2.0)
+            .map(|(a, b)| (b.pos[0] - a.pos[0]).hypot(b.pos[1] - a.pos[1]))
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_dx > 0.05,
+            "TimeHistoryReplay lens must displace upper-story BIM vertices (got max_dx={max_dx})"
+        );
+
+        let hinge_mesh = build_rtc_plastic_hinge_mesh(&PlasticHingeGpuInput {
+            project: &proj,
+            frame: &frame,
+            show_hinges: true,
+            deform_scale: 40.0,
+            heading_deg: 0.0,
+        });
+        assert!(hinge_mesh.indices.len() / 3 >= 24);
+        assert!(hinge_mesh
+            .indices
+            .iter()
+            .all(|&ix| (ix as usize) < hinge_mesh.vertices.len()));
+        assert!(hinge_mesh
+            .vertices
+            .iter()
+            .all(|v| v.pos.iter().all(|f| f.is_finite()) && v.meta[0] >= 5.5));
     }

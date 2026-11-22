@@ -490,6 +490,8 @@ impl SpatialWorkspaceState {
             || universal_canvas.portfolio_retrofit_config.overlay_visible
             || universal_canvas.last_retrofit_report.is_some()
             || universal_canvas.last_crc_cascade_report.is_some()
+            || universal_canvas.replay_async_manager.is_running()
+            || universal_canvas.last_ground_motion_replay_report.is_some()
             || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
             || universal_canvas.earth_bim_author.active_tool
                 != crate::views::universal_canvas::EarthBimTool::None
@@ -690,7 +692,81 @@ impl SpatialWorkspaceState {
                             .color(theme.text_primary),
                         );
                     }
+                } else if self.active_lens == SpatialLens::TimeHistoryReplay {
+                    let playing = universal_canvas.replay_anim_playing;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        if playing { "Pause" } else { "Play" },
+                        playing,
+                        theme.accent_green,
+                        "Toggle live 60 FPS earthquake ground-motion replay",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.replay_anim_playing = !playing;
+                    }
+                    if let Some(ref rep) = universal_canvas.last_ground_motion_replay_report {
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            "Peak t*",
+                            false,
+                            theme.accent_orange,
+                            "Jump to peak seismic inter-story drift instant",
+                        )
+                        .clicked()
+                        {
+                            universal_canvas.replay_cursor_time_s = rep.peak_time_s;
+                            universal_canvas.replay_anim_playing = false;
+                        }
+                        let fr = rep.sample_interpolated(universal_canvas.replay_cursor_time_s);
+                        ui.label(
+                            RichText::new(format!(
+                                "t={:.1}/{:.0}s • Drift {:.2}% • Hinges IO:{} LS:{} CP:{} M:{}",
+                                fr.time_s,
+                                rep.total_duration_s,
+                                fr.roof_drift_ratio * 100.0,
+                                fr.count_io,
+                                fr.count_ls,
+                                fr.count_cp,
+                                fr.count_mechanism
+                            ))
+                            .size(9.2)
+                            .monospace()
+                            .color(theme.text_primary),
+                        );
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "Replay UI",
+                        self.ground_motion_drawer_open,
+                        theme.accent_blue,
+                        "Open Live Earthquake Replay & Async StructGNN-CRC drawer",
+                    )
+                    .clicked()
+                    {
+                        self.toggle_exclusive_drawer("ground_motion");
+                    }
                 }
+            }
+            if let crate::core::ground_motion_replay::AsyncReplayJobPhase::Running {
+                progress,
+                stage_label,
+                ..
+            } = &universal_canvas.replay_async_manager.phase
+            {
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Bolt,
+                    format!("Async CRC {:.0}% • {}", progress * 100.0, stage_label),
+                    theme.accent_orange,
+                );
+                ui.ctx().request_repaint();
             }
             if build_view.ground_author_tool != Ground3DAuthorTool::Orbit {
                 icons::pill_badge(
@@ -1534,6 +1610,9 @@ impl SpatialWorkspaceState {
                 self.ifcx_diff_drawer_open = false;
                 universal_canvas.portfolio_retrofit_config.overlay_visible = false;
                 self.portfolio_drawer_open = false;
+                universal_canvas.last_ground_motion_replay_report = None;
+                universal_canvas.replay_cursor_time_s = 0.0;
+                self.ground_motion_drawer_open = false;
                 actions.sync_fem_and_earth = true;
             }
         });
@@ -1575,7 +1654,8 @@ impl SpatialWorkspaceState {
             has_embedded_panel
                 || has_smart_inspector
                 || self.ifcx_diff_drawer_open
-                || self.portfolio_drawer_open,
+                || self.portfolio_drawer_open
+                || self.ground_motion_drawer_open,
         );
 
         let compact_w = if is_mobile {
@@ -2526,6 +2606,19 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.ground_motion_drawer_open {
+                        self.render_ground_motion_replay_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            build_view,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -3237,6 +3330,7 @@ impl SpatialWorkspaceState {
                                                 (SpatialLens::BendingMoment, "Moment"),
                                                 (SpatialLens::DeformedShape, "Deform"),
                                                 (SpatialLens::ModalVibration, "Modal"),
+                                                (SpatialLens::TimeHistoryReplay, "EQ Replay"),
                                                 (SpatialLens::Erection4D, "4D"),
                                             ] {
                                                 if Self::glass_pill_button(
@@ -3352,6 +3446,128 @@ impl SpatialWorkspaceState {
                                                 {
                                                     actions.export_crc_cascade_ifcx = true;
                                                 }
+                                            }
+                                        },
+                                    );
+                                    ui.add_space(4.0);
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            use crate::core::ground_motion_replay::GroundMotionReplayConfig;
+                                            ui.label(
+                                                RichText::new("Ground Motion & Async CRC:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            let worker_busy = universal_canvas.replay_async_manager.is_running();
+                                            let has_rep = universal_canvas.last_ground_motion_replay_report.is_some();
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Bolt),
+                                                if worker_busy { "Running..." } else { "Async EQ" },
+                                                has_rep || worker_busy,
+                                                theme.accent_orange,
+                                                "Run non-blocking background StructGNN-CRC & live 60 FPS Earthquake Replay",
+                                            )
+                                            .clicked()
+                                            {
+                                                self.apply_lens_to_views(
+                                                    SpatialLens::TimeHistoryReplay,
+                                                    build_view,
+                                                    universal_canvas,
+                                                );
+                                                actions.run_async_ground_motion_replay = true;
+                                            }
+                                            let rec_lbl = format!(
+                                                "Rec: {}",
+                                                GroundMotionReplayConfig::record_short_label(
+                                                    universal_canvas.ground_motion_replay_config.record
+                                                )
+                                            );
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                rec_lbl,
+                                                false,
+                                                theme.accent_blue,
+                                                "Cycle earthquake record (Northridge / Kobe / El Centro / Chi-Chi / Sumatra)",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.ground_motion_replay_config.record =
+                                                    GroundMotionReplayConfig::next_record(
+                                                        universal_canvas.ground_motion_replay_config.record,
+                                                    );
+                                                self.apply_lens_to_views(
+                                                    SpatialLens::TimeHistoryReplay,
+                                                    build_view,
+                                                    universal_canvas,
+                                                );
+                                                actions.run_async_ground_motion_replay = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                format!(
+                                                    "SF {:.2}x",
+                                                    universal_canvas.ground_motion_replay_config.scale_factor
+                                                ),
+                                                false,
+                                                theme.text_secondary,
+                                                "Cycle MCE ground motion scale factor (0.75x..2.00x)",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.ground_motion_replay_config.cycle_scale_factor();
+                                                actions.run_async_ground_motion_replay = true;
+                                            }
+                                            let hinges_on = universal_canvas.ground_motion_replay_config.show_plastic_hinges;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Target),
+                                                "Hinges",
+                                                hinges_on,
+                                                theme.accent_red,
+                                                "Toggle 3D ASCE 41-17 plastic hinge beacons",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.ground_motion_replay_config.show_plastic_hinges = !hinges_on;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::ChartLine),
+                                                "Replay UI",
+                                                self.ground_motion_drawer_open,
+                                                theme.accent_blue,
+                                                "Open Live Earthquake Replay & Async StructGNN-CRC drawer",
+                                            )
+                                            .clicked()
+                                            {
+                                                self.toggle_exclusive_drawer("ground_motion");
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Cube3D),
+                                                "Replay .ifcx",
+                                                false,
+                                                theme.accent_green,
+                                                "Export non-destructive eigengraph::analysis::time_history_replay .ifcx overlay",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.export_ground_motion_replay_ifcx = true;
                                             }
                                         },
                                     );
@@ -4964,5 +5180,583 @@ impl SpatialWorkspaceState {
         self.hud_rects.push(dock_resp.response.rect);
 
         actions
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_ground_motion_replay_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::ground_motion_replay::{
+            AsyncReplayJobPhase, GroundMotionReplayConfig, GroundMotionReplayReport,
+        };
+        use crate::core::nonlinear::PlasticHingeState;
+
+        let rep_opt: Option<GroundMotionReplayReport> =
+            universal_canvas.last_ground_motion_replay_report.clone();
+
+        Frame::new()
+            .fill(Color32::TRANSPARENT)
+            .inner_margin(Margin::symmetric(2, 4))
+            .show(ui, |ui| {
+                let dw = (cap_w - 10.0).max(160.0);
+                ui.set_width(dw);
+                ui.set_max_width(dw);
+
+                ui.horizontal(|ui| {
+                    icons::icon_label(
+                        ui,
+                        AppIcon::Bolt,
+                        12.5,
+                        theme.accent_orange,
+                        "Live Earthquake Replay & Async StructGNN-CRC",
+                        11.0,
+                        theme.text_primary,
+                        true,
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if icons::icon_only_button(
+                            ui,
+                            AppIcon::Close,
+                            theme.text_secondary,
+                            Color32::TRANSPARENT,
+                            Stroke::NONE,
+                            CornerRadius::same(6),
+                            Vec2::splat(18.0),
+                            "Close Ground-Motion Replay drawer",
+                        )
+                        .clicked()
+                        {
+                            self.ground_motion_drawer_open = false;
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+
+                ui.horizontal_wrapped(|ui| {
+                    for rec in GroundMotionReplayConfig::ALL_RECORDS {
+                        let active = universal_canvas.ground_motion_replay_config.record == rec;
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            GroundMotionReplayConfig::record_short_label(rec),
+                            active,
+                            theme.accent_blue,
+                            rec.label(),
+                        )
+                        .clicked()
+                        {
+                            universal_canvas.ground_motion_replay_config.record = rec;
+                            self.apply_lens_to_views(
+                                SpatialLens::TimeHistoryReplay,
+                                build_view,
+                                universal_canvas,
+                            );
+                            actions.run_async_ground_motion_replay = true;
+                        }
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "-0.25x",
+                        false,
+                        theme.text_secondary,
+                        "Decrease ground-motion scale factor by 0.25",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.ground_motion_replay_config.scale_factor =
+                            (universal_canvas.ground_motion_replay_config.scale_factor - 0.25)
+                                .clamp(0.50, 2.50);
+                        actions.run_async_ground_motion_replay = true;
+                    }
+                    ui.label(
+                        RichText::new(format!(
+                            "SF {:.2}x",
+                            universal_canvas.ground_motion_replay_config.scale_factor
+                        ))
+                        .size(9.4)
+                        .strong()
+                        .color(theme.text_primary),
+                    );
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "+0.25x",
+                        false,
+                        theme.text_secondary,
+                        "Increase ground-motion scale factor by 0.25",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.ground_motion_replay_config.scale_factor =
+                            (universal_canvas.ground_motion_replay_config.scale_factor + 0.25)
+                                .clamp(0.50, 2.50);
+                        actions.run_async_ground_motion_replay = true;
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        format!(
+                            "Hyst: {}",
+                            GroundMotionReplayConfig::hysteresis_short_label(
+                                universal_canvas
+                                    .ground_motion_replay_config
+                                    .hysteresis_model
+                            )
+                        ),
+                        false,
+                        theme.accent_blue,
+                        "Cycle hysteretic constitutive rule (Bouc-Wen / Takeda Pinch / Bilinear)",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas
+                            .ground_motion_replay_config
+                            .hysteresis_model = GroundMotionReplayConfig::next_hysteresis(
+                            universal_canvas
+                                .ground_motion_replay_config
+                                .hysteresis_model,
+                        );
+                        actions.run_async_ground_motion_replay = true;
+                    }
+                    let ssi_on = universal_canvas
+                        .ground_motion_replay_config
+                        .use_ssi_period_coupling;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "SSI",
+                        ssi_on,
+                        theme.accent_green,
+                        "Couple Subsurface SSI lengthened period T1 into NL-THA",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas
+                            .ground_motion_replay_config
+                            .use_ssi_period_coupling = !ssi_on;
+                        actions.run_async_ground_motion_replay = true;
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Bolt),
+                        "Run Async",
+                        universal_canvas.replay_async_manager.is_running(),
+                        theme.accent_orange,
+                        "Execute background WebWorker / Multi-Thread StructGNN-CRC + NL-THA",
+                    )
+                    .clicked()
+                    {
+                        self.apply_lens_to_views(
+                            SpatialLens::TimeHistoryReplay,
+                            build_view,
+                            universal_canvas,
+                        );
+                        actions.run_async_ground_motion_replay = true;
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Cube3D),
+                        "Replay .ifcx",
+                        false,
+                        theme.accent_green,
+                        "Export non-destructive eigengraph::analysis::time_history_replay .ifcx",
+                    )
+                    .clicked()
+                    {
+                        actions.export_ground_motion_replay_ifcx = true;
+                    }
+                });
+
+                if let AsyncReplayJobPhase::Running {
+                    progress,
+                    stage_label,
+                    backend,
+                    ..
+                } = &universal_canvas.replay_async_manager.phase
+                {
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        icons::pill_badge(
+                            ui,
+                            AppIcon::Bolt,
+                            format!("{} • {:.0}%", backend, progress * 100.0),
+                            theme.accent_orange,
+                        );
+                        ui.label(
+                            RichText::new(stage_label)
+                                .size(9.3)
+                                .color(theme.text_secondary),
+                        );
+                    });
+                }
+
+                ui.add_space(4.0);
+                if let Some(ref rep) = rep_opt {
+                    ui.horizontal_wrapped(|ui| {
+                        let playing = universal_canvas.replay_anim_playing;
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            if playing { "Pause" } else { "Play" },
+                            playing,
+                            theme.accent_green,
+                            "Play or pause 60 FPS replay",
+                        )
+                        .clicked()
+                        {
+                            universal_canvas.replay_anim_playing = !playing;
+                        }
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            format!("Peak {:.1}s", rep.peak_time_s),
+                            false,
+                            theme.accent_orange,
+                            "Jump cursor to peak drift instant",
+                        )
+                        .clicked()
+                        {
+                            universal_canvas.replay_cursor_time_s = rep.peak_time_s;
+                            universal_canvas.replay_anim_playing = false;
+                        }
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            format!(
+                                "{:.2}x",
+                                universal_canvas.ground_motion_replay_config.playback_speed
+                            ),
+                            false,
+                            theme.text_secondary,
+                            "Cycle playback speed (0.25x / 0.5x / 1x / 2x)",
+                        )
+                        .clicked()
+                        {
+                            universal_canvas
+                                .ground_motion_replay_config
+                                .cycle_playback_speed();
+                        }
+                        ui.spacing_mut().slider_width = (dw - 220.0).clamp(80.0, 260.0);
+                        ui.add(
+                            egui::Slider::new(
+                                &mut universal_canvas.replay_cursor_time_s,
+                                0.0..=rep.total_duration_s.max(0.1),
+                            )
+                            .suffix("s")
+                            .fixed_decimals(1),
+                        );
+                    });
+
+                    ui.add_space(4.0);
+                    let max_scroll_h = if is_mobile { 220.0 } else { 290.0 };
+                    ScrollArea::vertical()
+                        .id_salt("ground_motion_replay_scroll")
+                        .max_height(max_scroll_h)
+                        .show(ui, |ui| {
+                            ui.set_width((dw - 4.0).max(150.0));
+                            self.paint_ground_motion_vector_charts(
+                                ui,
+                                theme,
+                                rep,
+                                universal_canvas.replay_cursor_time_s,
+                                (dw - 6.0).max(150.0),
+                            );
+                            ui.add_space(5.0);
+                            ui.horizontal_wrapped(|ui| {
+                                icons::pill_badge(
+                                    ui,
+                                    AppIcon::Shield,
+                                    format!(
+                                        "Async CRC: {}/{} pruned ({:.0}%, 100% recall, -{:.1}g CO2)",
+                                        rep.async_crc.stage1_pruned,
+                                        rep.async_crc.total_scenarios,
+                                        rep.async_crc.scenario_reduction_pct,
+                                        rep.async_crc.green_ai_co2_saved_g
+                                    ),
+                                    theme.accent_green,
+                                );
+                                icons::pill_badge(
+                                    ui,
+                                    AppIcon::Building,
+                                    format!(
+                                        "T1={:.2}s{} • Max Drift {:.2}% ({})",
+                                        rep.fundamental_period_t1_s,
+                                        if rep.ssi_coupled { " SSI" } else { "" },
+                                        rep.peak_interstory_drift_ratio * 100.0,
+                                        if rep.is_drift_compliant { "PASS" } else { ">2%" }
+                                    ),
+                                    if rep.is_drift_compliant {
+                                        theme.accent_blue
+                                    } else {
+                                        theme.accent_red
+                                    },
+                                );
+                                ui.label(
+                                    RichText::new(format!("Backend: {}", rep.async_crc.execution_backend))
+                                        .size(9.0)
+                                        .monospace()
+                                        .color(theme.text_muted),
+                                );
+                            });
+                            if !rep.peak_hinges.is_empty() {
+                                ui.add_space(3.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(
+                                        RichText::new("Critical Hinges:")
+                                            .size(9.2)
+                                            .strong()
+                                            .color(theme.text_secondary),
+                                    );
+                                    for h in rep.peak_hinges.iter().take(6) {
+                                        let col = match h.state {
+                                            PlasticHingeState::Elastic => theme.accent_green,
+                                            PlasticHingeState::ImmediateOccupancy => {
+                                                Color32::from_rgb(10, 132, 255)
+                                            }
+                                            PlasticHingeState::LifeSafety => {
+                                                Color32::from_rgb(255, 159, 10)
+                                            }
+                                            PlasticHingeState::CollapsePrevention => {
+                                                Color32::from_rgb(255, 69, 58)
+                                            }
+                                            PlasticHingeState::Mechanism => {
+                                                Color32::from_rgb(191, 90, 242)
+                                            }
+                                        };
+                                        let tag = match h.state {
+                                            PlasticHingeState::Elastic => "EL",
+                                            PlasticHingeState::ImmediateOccupancy => "IO",
+                                            PlasticHingeState::LifeSafety => "LS",
+                                            PlasticHingeState::CollapsePrevention => "CP",
+                                            PlasticHingeState::Mechanism => "MECH",
+                                        };
+                                        icons::pill_badge(
+                                            ui,
+                                            AppIcon::Target,
+                                            format!(
+                                                "{}.{} {} ({:.2})",
+                                                h.element_name,
+                                                if h.joint_end == 0 { "I" } else { "J" },
+                                                tag,
+                                                h.dcr_dynamic
+                                            ),
+                                            col,
+                                        );
+                                    }
+                                });
+                            }
+                        });
+                } else {
+                    ui.label(
+                        RichText::new("Click 'Async EQ' or run /replay to stream background StructGNN-CRC & 60 FPS earthquake ground-motion replay.")
+                            .size(9.5)
+                            .color(theme.text_muted),
+                    );
+                }
+            });
+    }
+
+    fn paint_ground_motion_vector_charts(
+        &self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        rep: &crate::core::ground_motion_replay::GroundMotionReplayReport,
+        cursor_time_s: f64,
+        avail_w: f32,
+    ) {
+        let two_col = avail_w >= 540.0;
+        let cw = if two_col {
+            ((avail_w - 8.0) * 0.5).max(180.0)
+        } else {
+            avail_w.max(150.0)
+        };
+        let ch = if two_col { 76.0_f32 } else { 66.0_f32 };
+
+        let draw_accel = |ui: &mut Ui| {
+            let (resp, p) = ui.allocate_painter(Vec2::new(cw, ch), egui::Sense::hover());
+            let r = resp.rect;
+            p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+            p.text(
+                egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                Align2::LEFT_TOP,
+                format!("Accelerogram ag(t) • PGA {:.2}g", rep.scaled_pga_g),
+                egui::FontId::proportional(8.8),
+                theme.text_muted,
+            );
+            let max_a = rep
+                .frames
+                .iter()
+                .map(|f| f.ground_accel_g.abs())
+                .fold(0.10_f64, f64::max);
+            let t_max = rep.total_duration_s.max(1.0);
+            let pad_t = 16.0_f32;
+            let pad_b = 6.0_f32;
+            let mid_y = r.top() + pad_t + (r.height() - pad_t - pad_b) * 0.5;
+            let half_h = ((r.height() - pad_t - pad_b) * 0.46).max(8.0);
+            p.line_segment(
+                [egui::Pos2::new(r.left() + 6.0, mid_y), egui::Pos2::new(r.right() - 6.0, mid_y)],
+                Stroke::new(0.8, theme.border_card),
+            );
+            let step = (rep.frames.len() / 160).max(1);
+            let pts: Vec<egui::Pos2> = rep
+                .frames
+                .iter()
+                .step_by(step)
+                .map(|f| {
+                    let nx = (f.time_s / t_max).clamp(0.0, 1.0) as f32;
+                    let ny = (f.ground_accel_g / max_a).clamp(-1.0, 1.0) as f32;
+                    egui::Pos2::new(
+                        r.left() + 6.0 + nx * (r.width() - 12.0),
+                        mid_y - ny * half_h,
+                    )
+                })
+                .collect();
+            for win in pts.windows(2) {
+                p.line_segment([win[0], win[1]], Stroke::new(1.2, theme.accent_blue));
+            }
+            let cx = r.left() + 6.0 + ((cursor_time_s / t_max).clamp(0.0, 1.0) as f32) * (r.width() - 12.0);
+            p.line_segment(
+                [egui::Pos2::new(cx, r.top() + pad_t), egui::Pos2::new(cx, r.bottom() - pad_b)],
+                Stroke::new(1.4, theme.accent_orange),
+            );
+        };
+
+        let draw_drift = |ui: &mut Ui| {
+            let (resp, p) = ui.allocate_painter(Vec2::new(cw, ch), egui::Sense::hover());
+            let r = resp.rect;
+            p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+            p.text(
+                egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                Align2::LEFT_TOP,
+                format!("Roof Drift % (Peak {:.2}% vs 2.0% Limit)", rep.peak_interstory_drift_ratio * 100.0),
+                egui::FontId::proportional(8.8),
+                theme.text_muted,
+            );
+            let max_d = (rep.peak_roof_drift_ratio * 100.0).max(2.2);
+            let t_max = rep.total_duration_s.max(1.0);
+            let pad_t = 16.0_f32;
+            let pad_b = 6.0_f32;
+            let mid_y = r.top() + pad_t + (r.height() - pad_t - pad_b) * 0.5;
+            let half_h = ((r.height() - pad_t - pad_b) * 0.45).max(8.0);
+            let lim_y_off = ((2.0 / max_d).clamp(0.0, 1.0) as f32) * half_h;
+            for sy in [mid_y - lim_y_off, mid_y + lim_y_off] {
+                p.line_segment(
+                    [egui::Pos2::new(r.left() + 6.0, sy), egui::Pos2::new(r.right() - 6.0, sy)],
+                    Stroke::new(0.8, theme.accent_red.gamma_multiply(0.65)),
+                );
+            }
+            let step = (rep.frames.len() / 160).max(1);
+            let pts: Vec<egui::Pos2> = rep
+                .frames
+                .iter()
+                .step_by(step)
+                .map(|f| {
+                    let nx = (f.time_s / t_max).clamp(0.0, 1.0) as f32;
+                    let ny = ((f.roof_drift_ratio * 100.0) / max_d).clamp(-1.0, 1.0) as f32;
+                    egui::Pos2::new(
+                        r.left() + 6.0 + nx * (r.width() - 12.0),
+                        mid_y - ny * half_h,
+                    )
+                })
+                .collect();
+            for win in pts.windows(2) {
+                p.line_segment([win[0], win[1]], Stroke::new(1.3, theme.accent_green));
+            }
+            let cx = r.left() + 6.0 + ((cursor_time_s / t_max).clamp(0.0, 1.0) as f32) * (r.width() - 12.0);
+            p.line_segment(
+                [egui::Pos2::new(cx, r.top() + pad_t), egui::Pos2::new(cx, r.bottom() - pad_b)],
+                Stroke::new(1.4, theme.accent_orange),
+            );
+        };
+
+        let draw_hysteresis = |ui: &mut Ui, hw: f32| {
+            let (resp, p) = ui.allocate_painter(Vec2::new(hw, ch), egui::Sense::hover());
+            let r = resp.rect;
+            p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+            p.text(
+                egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                Align2::LEFT_TOP,
+                format!(
+                    "Hysteresis Vb ({:.0} kN) vs Roof Disp ({:.0} mm)",
+                    rep.peak_base_shear_kn, rep.peak_roof_disp_mm
+                ),
+                egui::FontId::proportional(8.8),
+                theme.text_muted,
+            );
+            let max_u = rep.peak_roof_disp_mm.max(5.0);
+            let max_v = rep.peak_base_shear_kn.max(50.0);
+            let pad_t = 16.0_f32;
+            let pad_b = 6.0_f32;
+            let mid_x = r.center().x;
+            let mid_y = r.top() + pad_t + (r.height() - pad_t - pad_b) * 0.5;
+            let half_w = ((r.width() - 16.0) * 0.48).max(20.0);
+            let half_h = ((r.height() - pad_t - pad_b) * 0.45).max(8.0);
+            p.line_segment(
+                [egui::Pos2::new(r.left() + 8.0, mid_y), egui::Pos2::new(r.right() - 8.0, mid_y)],
+                Stroke::new(0.7, theme.border_card),
+            );
+            p.line_segment(
+                [egui::Pos2::new(mid_x, r.top() + pad_t), egui::Pos2::new(mid_x, r.bottom() - pad_b)],
+                Stroke::new(0.7, theme.border_card),
+            );
+            let step = (rep.frames.len() / 220).max(1);
+            let pts: Vec<egui::Pos2> = rep
+                .frames
+                .iter()
+                .step_by(step)
+                .map(|f| {
+                    let nx = (f.roof_disp_mm / max_u).clamp(-1.0, 1.0) as f32;
+                    let ny = (f.base_shear_kn / max_v).clamp(-1.0, 1.0) as f32;
+                    egui::Pos2::new(mid_x + nx * half_w, mid_y - ny * half_h)
+                })
+                .collect();
+            for win in pts.windows(2) {
+                p.line_segment(
+                    [win[0], win[1]],
+                    Stroke::new(1.1, Color32::from_rgb(91, 146, 165)),
+                );
+            }
+            let cur = rep.sample_interpolated(cursor_time_s);
+            let cur_pt = egui::Pos2::new(
+                mid_x + (cur.roof_disp_mm / max_u).clamp(-1.0, 1.0) as f32 * half_w,
+                mid_y - (cur.base_shear_kn / max_v).clamp(-1.0, 1.0) as f32 * half_h,
+            );
+            p.circle_filled(cur_pt, 3.8, theme.accent_orange);
+        };
+
+        if two_col {
+            ui.horizontal(|ui| {
+                draw_accel(ui);
+                draw_drift(ui);
+            });
+            ui.add_space(4.0);
+            draw_hysteresis(ui, avail_w.max(180.0));
+        } else {
+            ui.vertical(|ui| {
+                draw_accel(ui);
+                ui.add_space(3.0);
+                draw_drift(ui);
+                ui.add_space(3.0);
+                draw_hysteresis(ui, cw);
+            });
+        }
     }
 }

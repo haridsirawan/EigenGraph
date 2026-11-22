@@ -31,6 +31,7 @@ pub struct VectorDossierInput<'a> {
     pub hazard_report: Option<&'a DistrictMultiHazardReport>,
     pub diff_report: Option<&'a IfcxVisualDiffReport>,
     pub portfolio_report: Option<&'a crate::core::portfolio_retrofit::DistrictPortfolioRetrofitReport>,
+    pub replay_report: Option<&'a crate::core::ground_motion_replay::GroundMotionReplayReport>,
     pub sheet_code: &'a str,
     pub revision: &'a str,
 }
@@ -611,7 +612,19 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
         "Baseline Intact (No retrofit delta active)".to_string()
     };
 
-    let haz_line = if let Some(h) = input.hazard_report {
+    let haz_line = if let Some(rep) = input.replay_report {
+        format!(
+            "NL-THA {} ({:.2}g) | Drift {:.2}% | Hinges {} IO/{} LS/{} CP/{} M | CRC -{:.0}%",
+            crate::core::ground_motion_replay::GroundMotionReplayConfig::record_short_label(rep.config.record),
+            rep.scaled_pga_g,
+            rep.peak_interstory_drift_ratio * 100.0,
+            rep.peak_count_io,
+            rep.peak_count_ls,
+            rep.peak_count_cp,
+            rep.peak_count_mechanism,
+            rep.async_crc.scenario_reduction_pct
+        )
+    } else if let Some(h) = input.hazard_report {
         format!(
             "Resilience {:.0}/100 | Pounding {} | Venturi x{:.2} | Flood {:.1}%",
             h.resilience_score, h.pounding_risk_count, h.venturi_speedup_factor, h.flood.inundated_area_pct
@@ -620,13 +633,19 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
         "Nominal Ambient Site Conditions".to_string()
     };
 
+    let sixth_label = if input.replay_report.is_some() {
+        "NL-THA Ground-Motion & Hinges"
+    } else {
+        "District Multi-Hazard"
+    };
+
     let rows = [
         ("WGS84 Geodetic Anchor", format!("{:.5} deg, {:.5} deg | Elev {:.1} m", input.lat_lon.0, input.lat_lon.1, input.site.elevation_m)),
         ("SNI 1726 Seismic & Wind", format!("Ss={:.2}g | S1={:.2}g | Wind={:.1} m/s | {}", input.site.seismic_pga_ss_g, input.site.seismic_pga_s1_g, input.site.design_wind_ms, input.site.site_label)),
         ("6-DOF Winkler SSI & Soil", ssi_line),
         ("ARI v2 + StructGNN-CRC", crc_line),
         ("Automated Retrofit Delta", ret_line),
-        ("District Multi-Hazard", haz_line),
+        (sixth_label, haz_line),
     ];
 
     for (idx, (k, v)) in rows.iter().enumerate() {
@@ -931,6 +950,16 @@ mod tests {
             rr: 0.88,
         }];
 
+        let replay_rep = crate::core::ground_motion_replay::run_ground_motion_replay_for_bim(
+            &proj,
+            &site,
+            Some(&ssi_rep),
+            &crate::core::ground_motion_replay::GroundMotionReplayConfig::default(),
+            "DossierTest",
+            None,
+        )
+        .expect("Replay report");
+
         let export = build_pure_vector_engineering_dossier_svg(&VectorDossierInput {
             project: &proj,
             members: &members,
@@ -942,6 +971,7 @@ mod tests {
             hazard_report: None,
             diff_report: Some(&diff),
             portfolio_report: None,
+            replay_report: Some(&replay_rep),
             sheet_code: "S-101",
             revision: "REV 01",
         });
@@ -952,6 +982,7 @@ mod tests {
         assert!(export.svg_content.trim_end().ends_with("</svg>"));
         assert!(!export.svg_content.contains("<image"));
         assert!(!export.svg_content.contains("data:image"));
+        assert!(export.svg_content.contains("NL-THA Ground-Motion &amp; Hinges"));
         assert!(export.svg_content.contains("Tower &lt;A &amp; B&gt;"));
         assert!(export.svg_content.contains("Col-C1 &lt;Crit&gt;"));
         assert!(export.svg_content.contains("Vs30="));

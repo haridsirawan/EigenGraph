@@ -42,6 +42,7 @@ pub mod retrofit;
 pub mod gis;
 pub mod lifecycle_ops;
 pub mod portfolio_retrofit;
+pub mod ground_motion_replay;
 pub mod web_bridge;
 pub mod vector_dossier;
 
@@ -212,6 +213,11 @@ pub use portfolio_retrofit::{
     optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,
     PortfolioBuildingDecision, PortfolioOptimizationObjective, PortfolioParetoPoint,
     PortfolioRetrofitConfig, NS_EG_PORTFOLIO_RETROFIT,
+};
+pub use ground_motion_replay::{
+    run_ground_motion_replay_for_bim, AsyncCrcReplayTelemetry, AsyncReplayJobManager,
+    AsyncReplayJobPhase, GroundMotionReplayConfig, GroundMotionReplayFrame,
+    GroundMotionReplayReport, PlasticHingeJointSnapshot, NS_EG_TIME_HISTORY_REPLAY,
 };
 
 

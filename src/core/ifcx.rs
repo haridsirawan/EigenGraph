@@ -68,6 +68,7 @@ pub mod ns {
     pub const EG_GEOTECH_SSI: &str = "eigengraph::geotech::ssi_springs";
     pub const EG_IFCX_DIFF: &str = "eigengraph::ifcx::diff_manifest";
     pub const EG_PORTFOLIO_RETROFIT: &str = "eigengraph::portfolio::retrofit_plan";
+    pub const EG_TIME_HISTORY_REPLAY: &str = "eigengraph::analysis::time_history_replay";
 }
 
 fn default_ifcx_version() -> String {
@@ -1318,10 +1319,22 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), portfolio.portfolio_overlay_ifcx.clone()]);
         stage.to_composed_document(&format!("{}_portfolio_retrofit", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Nonlinear Earthquake Ground-Motion
+    /// Replay & Async `StructGNN-CRC` overlay (`eigengraph::analysis::time_history_replay`).
+    pub fn compose_with_time_history_replay_overlay(
+        base_doc: &IfcxDocument,
+        replay: &crate::core::ground_motion_replay::GroundMotionReplayReport,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[base_doc.clone(), replay.replay_overlay_ifcx.clone()]);
+        stage.to_composed_document(&format!("{}_time_history_replay", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_PORTFOLIO_RETROFIT) {
+    if node.attributes.contains_key(ns::EG_TIME_HISTORY_REPLAY) {
+        "Time-History Replay".to_string()
+    } else if node.attributes.contains_key(ns::EG_PORTFOLIO_RETROFIT) {
         "Portfolio Retrofit".to_string()
     } else if node.attributes.contains_key(ns::EG_RETROFIT) {
         "Retrofit Delta".to_string()

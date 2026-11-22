@@ -258,6 +258,8 @@ pub struct UnifiedWorkspaceArchive {
     pub subsurface_ssi: crate::core::geotech::SubsurfaceSsiConfig,
     #[serde(default)]
     pub portfolio_retrofit: crate::core::portfolio_retrofit::PortfolioRetrofitConfig,
+    #[serde(default)]
+    pub ground_motion_replay: crate::core::ground_motion_replay::GroundMotionReplayConfig,
     pub sha256_seal: String,
 }
 
@@ -366,7 +368,7 @@ pub enum EarthBimTool {
     Zone,
 }
 
-/// Phase 55–63: Structural visualization overlay rendered directly over 3D BIM buildings on Earth 3D.
+/// Phase 55–74: Structural visualization overlay rendered directly over 3D BIM buildings on Earth 3D.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EarthBimLens {
     #[default]
@@ -376,6 +378,7 @@ pub enum EarthBimLens {
     MomentStress,
     DeformedShape,
     ModalVibration,
+    TimeHistoryReplay,
     Erection4D,
 }
 

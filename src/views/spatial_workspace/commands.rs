@@ -301,6 +301,46 @@ impl SpatialWorkspaceState {
                     out.restore_n1_simulation = true;
                     self.push_trace("Restored intact structure (N-1 cleared)", true);
                 }
+                PlannedProposalAction::RunEqReplay(rec_opt) => {
+                    if let Some(rec) = rec_opt {
+                        universal_canvas.ground_motion_replay_config.record = *rec;
+                    }
+                    self.apply_lens_to_views(
+                        SpatialLens::TimeHistoryReplay,
+                        build_view,
+                        universal_canvas,
+                    );
+                    self.vault_drawer_open = false;
+                    self.vault_path_popover_open = false;
+                    self.context_picker_open = false;
+                    self.history_popover_open = false;
+                    self.api_key_popover_open = false;
+                    self.ifcx_diff_drawer_open = false;
+                    self.portfolio_drawer_open = false;
+                    self.ground_motion_drawer_open = true;
+                    out.run_async_ground_motion_replay = true;
+                    self.push_trace("Dispatched Async StructGNN-CRC & EQ Replay", true);
+                }
+                PlannedProposalAction::TogglePlasticHinges => {
+                    universal_canvas.ground_motion_replay_config.show_plastic_hinges =
+                        !universal_canvas.ground_motion_replay_config.show_plastic_hinges;
+                    self.apply_lens_to_views(
+                        SpatialLens::TimeHistoryReplay,
+                        build_view,
+                        universal_canvas,
+                    );
+                    self.push_trace(
+                        format!(
+                            "3D ASCE 41-17 Plastic Hinges: {}",
+                            if universal_canvas.ground_motion_replay_config.show_plastic_hinges {
+                                "ON"
+                            } else {
+                                "OFF"
+                            }
+                        ),
+                        true,
+                    );
+                }
             }
         }
         self.sessions_dirty = true;
@@ -443,6 +483,10 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ApplyModalLens(m) => PlannedProposalAction::ApplyModalLens(*m),
                             GeminiDirective::SimulateN1(fid) => PlannedProposalAction::SimulateN1(*fid),
                             GeminiDirective::RestoreN1 => PlannedProposalAction::RestoreN1,
+                            GeminiDirective::RunEqReplay(r) => PlannedProposalAction::RunEqReplay(*r),
+                            GeminiDirective::TogglePlasticHinges => {
+                                PlannedProposalAction::TogglePlasticHinges
+                            }
                         })
                         .collect();
                     let preview: String = directives
@@ -480,6 +524,8 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ApplyModalLens(m) => format!("LensModal(M{})", m + 1),
                             GeminiDirective::SimulateN1(fid) => format!("SimulateN1(#{fid})"),
                             GeminiDirective::RestoreN1 => "RestoreN1".to_string(),
+                            GeminiDirective::RunEqReplay(_) => "AsyncEqReplay".to_string(),
+                            GeminiDirective::TogglePlasticHinges => "ToggleHinges".to_string(),
                         })
                         .collect::<Vec<_>>()
                         .join(" + ");
@@ -766,6 +812,12 @@ impl SpatialWorkspaceState {
                 universal_canvas.earth_bim_author.active_lens = EarthBimLens::ModalVibration;
                 universal_canvas.earth_bim_author.modal_anim_playing = true;
             }
+            SpatialLens::TimeHistoryReplay => {
+                build_view.render_mode = Render3DMode::SolidShaded;
+                build_view.highlight_4d_erection = false;
+                universal_canvas.show_domain_overlay = true;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::TimeHistoryReplay;
+            }
             SpatialLens::Erection4D => {
                 build_view.render_mode = Render3DMode::CsgSolidBrep;
                 build_view.highlight_4d_erection = true;
@@ -901,6 +953,8 @@ impl SpatialWorkspaceState {
                         SpatialLens::DeformedShape
                     } else if arg_l.contains("mod") || arg_l.contains("eig") || arg_l.contains("vib") {
                         SpatialLens::ModalVibration
+                    } else if arg_l.contains("eq") || arg_l.contains("rep") || arg_l.contains("tha") {
+                        SpatialLens::TimeHistoryReplay
                     } else if arg_l.contains("4d") || arg_l.contains("time") {
                         SpatialLens::Erection4D
                     } else {
@@ -1284,6 +1338,8 @@ impl SpatialWorkspaceState {
                         self.context_picker_open = false;
                         self.history_popover_open = false;
                         self.api_key_popover_open = false;
+                        self.portfolio_drawer_open = false;
+                        self.ground_motion_drawer_open = false;
                         self.ifcx_diff_drawer_open = true;
                         universal_canvas.ifcx_diff_overlay_active = true;
                     }
@@ -1330,6 +1386,7 @@ impl SpatialWorkspaceState {
                         self.history_popover_open = false;
                         self.api_key_popover_open = false;
                         self.ifcx_diff_drawer_open = false;
+                        self.ground_motion_drawer_open = false;
                         self.portfolio_drawer_open = true;
                         universal_canvas.portfolio_retrofit_config.overlay_visible = true;
                         actions.run_portfolio_retrofit = true;
@@ -1383,6 +1440,95 @@ impl SpatialWorkspaceState {
                 }
                 "/portfolio-ifcx" => {
                     actions.export_portfolio_retrofit_ifcx = true;
+                }
+                "/replay" | "/eq" | "/tha" | "/time-history" => {
+                    let sub = arg.trim().to_ascii_lowercase();
+                    if sub == "off" || sub == "close" {
+                        self.ground_motion_drawer_open = false;
+                        self.apply_lens_to_views(SpatialLens::Clean, build_view, universal_canvas);
+                    } else {
+                        if let Some(rec) = crate::core::ground_motion_replay::GroundMotionReplayConfig::record_from_arg(&sub) {
+                            universal_canvas.ground_motion_replay_config.record = rec;
+                        }
+                        self.vault_drawer_open = false;
+                        self.vault_path_popover_open = false;
+                        self.context_picker_open = false;
+                        self.history_popover_open = false;
+                        self.api_key_popover_open = false;
+                        self.ifcx_diff_drawer_open = false;
+                        self.portfolio_drawer_open = false;
+                        self.ground_motion_drawer_open = true;
+                        universal_canvas.replay_anim_playing = true;
+                        self.apply_lens_to_views(
+                            SpatialLens::TimeHistoryReplay,
+                            build_view,
+                            universal_canvas,
+                        );
+                        actions.run_async_ground_motion_replay = true;
+                    }
+                }
+                "/record" => {
+                    let next_rec = if let Some(rec) =
+                        crate::core::ground_motion_replay::GroundMotionReplayConfig::record_from_arg(arg)
+                    {
+                        rec
+                    } else {
+                        crate::core::ground_motion_replay::GroundMotionReplayConfig::next_record(
+                            universal_canvas.ground_motion_replay_config.record,
+                        )
+                    };
+                    universal_canvas.ground_motion_replay_config.record = next_rec;
+                    self.vault_drawer_open = false;
+                    self.vault_path_popover_open = false;
+                    self.context_picker_open = false;
+                    self.history_popover_open = false;
+                    self.api_key_popover_open = false;
+                    self.ifcx_diff_drawer_open = false;
+                    self.portfolio_drawer_open = false;
+                    self.ground_motion_drawer_open = true;
+                    self.apply_lens_to_views(
+                        SpatialLens::TimeHistoryReplay,
+                        build_view,
+                        universal_canvas,
+                    );
+                    actions.run_async_ground_motion_replay = true;
+                    self.push_trace(
+                        format!(
+                            "Ground motion set to {} ({:.2}g) — running async...",
+                            crate::core::ground_motion_replay::GroundMotionReplayConfig::record_short_label(next_rec),
+                            next_rec.pga_g() * universal_canvas.ground_motion_replay_config.scale_factor
+                        ),
+                        true,
+                    );
+                }
+                "/hinges" | "/plastic-hinges" => {
+                    universal_canvas.ground_motion_replay_config.show_plastic_hinges =
+                        !universal_canvas.ground_motion_replay_config.show_plastic_hinges;
+                    self.apply_lens_to_views(
+                        SpatialLens::TimeHistoryReplay,
+                        build_view,
+                        universal_canvas,
+                    );
+                    if let Some(ref rep) = universal_canvas.last_ground_motion_replay_report {
+                        universal_canvas.replay_cursor_time_s = rep.peak_time_s;
+                        universal_canvas.replay_anim_playing = false;
+                    } else {
+                        actions.run_async_ground_motion_replay = true;
+                    }
+                    self.push_trace(
+                        format!(
+                            "ASCE 41-17 3D Plastic Hinges {}",
+                            if universal_canvas.ground_motion_replay_config.show_plastic_hinges {
+                                "ON (jumped to peak drift)"
+                            } else {
+                                "OFF"
+                            }
+                        ),
+                        true,
+                    );
+                }
+                "/replay-ifcx" => {
+                    actions.export_ground_motion_replay_ifcx = true;
                 }
                 "/section" | "/cut" => {
                     let elev_opt = arg

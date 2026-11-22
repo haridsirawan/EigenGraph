@@ -819,6 +819,38 @@ impl App for EigenGraphApp {
             }
         }
         self.sync_earth_maps();
+        if let Some(res) = self.universal_canvas.poll_async_ground_motion_replay() {
+            match res {
+                Ok(summary) => {
+                    self.spatial_workspace.push_trace(summary.clone(), true);
+                    self.ai_assistant_view
+                        .chat_history
+                        .push(crate::models::ChatMessage {
+                            is_user: false,
+                            message: format!(
+                                "[EigenAI Async StructGNN-CRC & Ground-Motion Replay]: {summary}"
+                            ),
+                            time: crate::core::web_bridge::unix_timestamp_label(),
+                        });
+                    ctx.request_repaint();
+                }
+                Err(err) => {
+                    self.spatial_workspace.push_trace(err, false);
+                }
+            }
+        } else if self.universal_canvas.replay_async_manager.is_running() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
+        if self.universal_canvas.earth_bim_author.active_lens
+            == crate::views::universal_canvas::EarthBimLens::TimeHistoryReplay
+            && self.universal_canvas.replay_anim_playing
+            && self.universal_canvas.last_ground_motion_replay_report.is_some()
+        {
+            let dt_s = ctx.input(|i| i.stable_dt) as f64;
+            self.universal_canvas
+                .advance_ground_motion_replay_clock(dt_s);
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
         if self.planning_view.simulation_day != self.last_planning_sim_day {
             self.last_planning_sim_day = self.planning_view.simulation_day;
             if self.planning_view.simulation_day > 0 {
@@ -1053,7 +1085,8 @@ impl EigenGraphApp {
             | SpatialLens::ShearForce
             | SpatialLens::BendingMoment
             | SpatialLens::DeformedShape
-            | SpatialLens::ModalVibration => NavigationPillar::AnalysisSimulation,
+            | SpatialLens::ModalVibration
+            | SpatialLens::TimeHistoryReplay => NavigationPillar::AnalysisSimulation,
             SpatialLens::Erection4D => NavigationPillar::TimeScheduling,
         };
 
@@ -2325,6 +2358,7 @@ impl EigenGraphApp {
                     hazard_report: haz_opt,
                     diff_report: self.universal_canvas.last_ifcx_visual_diff.as_ref(),
                     portfolio_report: self.universal_canvas.last_portfolio_retrofit_report.as_ref(),
+                    replay_report: self.universal_canvas.last_ground_motion_replay_report.as_ref(),
                     sheet_code: "S-101",
                     revision: "REV 01",
                 },
@@ -2416,6 +2450,81 @@ impl EigenGraphApp {
             } else {
                 self.spatial_workspace
                     .push_trace("No District Portfolio Retrofit overlay available.", false);
+            }
+        }
+        if hud_actions.run_async_ground_motion_replay {
+            if self.build_view.bim_bus.project.is_empty() {
+                if let Ok(msg) = self
+                    .build_view
+                    .bim_bus
+                    .execute_natural_language("portal 3x2 @6m 2floors")
+                {
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.spatial_workspace.push_trace(msg, true);
+                    self.sync_bim_to_fem();
+                }
+            }
+            self.universal_canvas
+                .start_async_ground_motion_replay(&self.build_view.bim_bus.project);
+            self.spatial_workspace.push_trace(
+                format!(
+                    "Streaming async StructGNN-CRC & {} ({:.2}x) NL-THA...",
+                    crate::core::ground_motion_replay::GroundMotionReplayConfig::record_short_label(
+                        self.universal_canvas.ground_motion_replay_config.record
+                    ),
+                    self.universal_canvas.ground_motion_replay_config.scale_factor
+                ),
+                true,
+            );
+        }
+        if hud_actions.export_ground_motion_replay_ifcx {
+            if self
+                .universal_canvas
+                .last_ground_motion_replay_report
+                .is_none()
+                && !self.build_view.bim_bus.project.is_empty()
+            {
+                let site = self.universal_canvas.active_site_coupling();
+                if let Ok(rep) = crate::core::ground_motion_replay::run_ground_motion_replay_for_bim(
+                    &self.build_view.bim_bus.project,
+                    &site,
+                    self.universal_canvas.last_subsurface_ssi_report.as_ref(),
+                    &self.universal_canvas.ground_motion_replay_config,
+                    "Direct IFCX Export",
+                    None,
+                ) {
+                    self.universal_canvas.last_ground_motion_replay_report = Some(rep);
+                }
+            }
+            if let Some(ref rep) = self.universal_canvas.last_ground_motion_replay_report {
+                let raw_name =
+                    Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+                let fname = format!("{raw_name}_time_history_replay.ifcx");
+                let layered = self
+                    .universal_canvas
+                    .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+                let composed =
+                    crate::core::IfcxStage::compose_with_time_history_replay_overlay(&layered, rep);
+                let json = composed.to_json_pretty();
+                match crate::core::web_bridge::save_text_file(
+                    &fname,
+                    &json,
+                    "application/json;charset=utf-8",
+                ) {
+                    Ok(_) => {
+                        self.spatial_workspace.push_trace(
+                            format!(
+                                "Exported Ground-Motion Replay IFCX ({fname}, {} nodes)",
+                                composed.data.len()
+                            ),
+                            true,
+                        );
+                    }
+                    Err(err) => self.spatial_workspace.push_trace(err, false),
+                }
+            } else {
+                self.spatial_workspace
+                    .push_trace("No Ground-Motion Replay overlay available.", false);
             }
         }
     }

@@ -3427,3 +3427,136 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_phase74_ground_motion_replay_slash_commands_drawer_and_zero_hud_overflow() {
+        use crate::core::ground_motion_replay::{
+            run_ground_motion_replay_for_bim, GroundMotionReplayConfig,
+        };
+        use crate::core::time_history::GroundMotionRecord;
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus = crate::core::BimCommandBus::from_project(
+            crate::core::BimProject::sample_bimcraft_building(),
+        );
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = MacTheme::default();
+
+        for cmd in ["/replay", "/record", "/hinges", "/replay-ifcx"] {
+            assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == cmd));
+        }
+
+        let act_rec = spatial.execute_spatial_input(
+            "/record sumatra",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_rec.run_async_ground_motion_replay);
+        assert_eq!(
+            canvas.ground_motion_replay_config.record,
+            GroundMotionRecord::SumatraSubduction2004
+        );
+        assert_eq!(spatial.active_lens, SpatialLens::TimeHistoryReplay);
+        assert!(spatial.ground_motion_drawer_open);
+
+        // Exclusive drawer switching must close ground_motion_drawer_open when opening portfolio
+        spatial.toggle_exclusive_drawer("portfolio");
+        assert!(spatial.portfolio_drawer_open);
+        assert!(!spatial.ground_motion_drawer_open);
+        spatial.toggle_exclusive_drawer("ground_motion");
+        assert!(spatial.ground_motion_drawer_open);
+        assert!(!spatial.portfolio_drawer_open);
+
+        let act_rep = spatial.execute_spatial_input(
+            "/replay",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_rep.run_async_ground_motion_replay);
+
+        let act_exp = spatial.execute_spatial_input(
+            "/replay-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_exp.export_ground_motion_replay_ifcx);
+
+        let site = canvas.active_site_coupling();
+        let rep = run_ground_motion_replay_for_bim(
+            &build.bim_bus.project,
+            &site,
+            None,
+            &GroundMotionReplayConfig {
+                record: GroundMotionRecord::NorthridgeSylmar1994,
+                scale_factor: 1.50,
+                ..Default::default()
+            },
+            "UiResponsiveTest",
+            None,
+        )
+        .expect("Ground-motion replay report");
+        canvas.last_ground_motion_replay_report = Some(rep);
+
+        let initial_hinges = canvas.ground_motion_replay_config.show_plastic_hinges;
+        let _ = spatial.execute_spatial_input(
+            "/hinges",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_ne!(
+            canvas.ground_motion_replay_config.show_plastic_hinges,
+            initial_hinges
+        );
+
+        spatial.mobile_deck_pinned = true;
+        spatial.studio_tab = DynamicIslandStudioTab::ViewAndLens;
+        for win_w in [1280.0_f32, 768.0, 390.0] {
+            let ctx = egui::Context::default();
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 844.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                },
+            );
+            out.textures_delta.clear();
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 74 Ground-Motion Replay Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
+        }
+    }

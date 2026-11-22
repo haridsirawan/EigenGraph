@@ -2564,6 +2564,23 @@ impl SpatialWorkspaceState {
                                 );
                             }
                         }
+                        SpatialLens::TimeHistoryReplay => {
+                            ui.label(
+                                RichText::new("EQ Plastic Hinges:")
+                                    .size(9.3)
+                                    .strong()
+                                    .color(theme.text_secondary),
+                            );
+                            for (lbl, col) in [
+                                ("Elastic", Color32::from_rgb(91, 146, 165)),
+                                ("IO", Color32::from_rgb(10, 132, 255)),
+                                ("LS", Color32::from_rgb(255, 159, 10)),
+                                ("CP", Color32::from_rgb(255, 69, 58)),
+                                ("Mech", Color32::from_rgb(191, 90, 242)),
+                            ] {
+                                ui.colored_label(col, RichText::new(format!("■ {lbl}")).size(9.2));
+                            }
+                        }
                         SpatialLens::Erection4D => {
                             ui.label(
                                 RichText::new("4D Erection:")

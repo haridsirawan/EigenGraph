@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.0` Delivered** (`v0.7.1 – v0.7.3` Planned)  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.4` Delivered** (`v0.7.5` Planned)  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% Raster Pixels**  
-> **Current Platform**: EigenGraph `v0.7.0` (Two-Stage `ARI v2 + StructGNN-CRC` Conformal Screening & 3D Progressive Collapse Cascade)  
+> **Current Platform**: EigenGraph `v0.7.4` (Real-Time WebWorker / Async Multi-Thread `StructGNN-CRC` & Live 60 FPS Earthquake Ground-Motion Replay)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -114,7 +114,7 @@ Because 100% of Earth and buildings live in analytical vector `.ifcx` nodes, cri
 
 ---
 
-## 6. Phased Implementation Roadmap (`v0.6.4 – v0.7.2`)
+## 6. Phased Implementation Roadmap (`v0.6.4 – v0.7.4`)
 
 Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.md` — advancing one patch digit per phase):
 
@@ -179,5 +179,11 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 - **3D District Retrofit Crowns & Dynamic Island Pareto Frontier Drawer (`src/views/webgl_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/core/vector_dossier.rs`)**:
   - Projects per-building district retrofit status directly in 3D via WebGL2 Pass 2 (`build_rtc_portfolio_retrofit_mesh`) and CPU fallback (glowing emerald/cyan/amber retrofit crowns and deferred crimson alerts), renders a pure-vector Pareto scatter chart (`egui::Painter`) with selectable `F1..Fk` frontier solutions and ranked building cards with `Fly` camera targets inside the widening Dynamic Island `District Portfolio:` drawer, exposes `/portfolio`, `/pareto`, `/budget`, and `/portfolio-ifcx`, and embeds active portfolio KPIs inside exported A3 Pure-Vector Engineering Dossiers.
 
-### Planned Next Phases (`v0.7.4`)
-- **Phase 74 (`v0.7.4`) — Real-Time WebWorker / Async Multi-Thread `StructGNN-CRC` & Live Earthquake Ground-Motion Replay**: Background browser/native surrogate inference pipeline streaming time-history drift envelopes and nonlinear plastic hinge animations cleanly at 60 FPS inside the 3D IFCX Earth viewport.
+### Phase 74 (`v0.7.4`) — Real-Time WebWorker / Async Multi-Thread `StructGNN-CRC` & Live Earthquake Ground-Motion Replay *(Implemented)*
+- **BIM + SSI-Coupled NL-THA & Cross-Platform Async Background Worker (`src/core/ground_motion_replay.rs`, `src/core/web_bridge.rs`, `index.html`, `src/core/ifcx.rs`)**:
+  - Couples active `BimProject`, 6-DOF FEM, `ModalEngine`, and `SubsurfaceSsiAnalysisReport` ($\tilde{T}_1$ period lengthening) to HHT-$\alpha$ nonlinear dynamic time-history integration (`Northridge 1994`, `Kobe 1995`, `El Centro 1940`, `Chi-Chi 1999`, `Sumatra 2004`; Bouc-Wen, Takeda Pinching, Bilinear), dynamic ASCE 41-17 plastic hinge state evaluation, and Two-Stage `ARI v2 + StructGNN-CRC` conformal screening—offloaded cleanly via `AsyncReplayJobManager` (`std::thread::spawn` on Native; inline Blob WebWorker `EigenGraphWorkerBridge` + cooperative time-sliced Rust fallback on `wasm32`) and emitted as non-destructive `eigengraph::analysis::time_history_replay` overlays.
+- **60 FPS WebGL2 Story Sway, Pulsing 3D Plastic Hinge Beacons & Dynamic Island Vector Charts (`src/views/webgl_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/core/vector_dossier.rs`, `src/app.rs`)**:
+  - Drives interpolated 60 FPS structural sway (`EarthBimLens::TimeHistoryReplay`), pulsing octahedral 3D plastic hinge beacons (`hinge_vao/vbo/ibo`, GLSL `kind >= 5.5` with CPU projection fallback), interactive accelerogram/drift/hysteresis pure-vector charts inside the widening Dynamic Island drawer, `/replay`, `/record`, `/hinges`, `/replay-ifcx` commands, and pure-vector A3 dossier telemetry.
+
+### Planned Next Phases (`v0.7.5`)
+- **Phase 75 (`v0.7.5`) — Custom PEER `.at2` / `.csv` Accelerogram Ingestion, Tri-Directional Ground-Motion Coupling & Real-Time Fragility Curve Synthesis**: Streaming user-uploaded earthquake accelerograms and probabilistic FEMA P-58 repair cost/downtime fragility envelopes directly onto IFCX Earth.

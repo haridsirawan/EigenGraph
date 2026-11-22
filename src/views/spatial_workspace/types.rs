@@ -41,6 +41,7 @@ pub enum SpatialLens {
     BendingMoment,
     DeformedShape,
     ModalVibration,
+    TimeHistoryReplay,
     Erection4D,
 }
 
@@ -55,6 +56,7 @@ impl SpatialLens {
             Self::BendingMoment => "Moment BMD",
             Self::DeformedShape => "Deformed 6-DOF",
             Self::ModalVibration => "Modal Eigenmode",
+            Self::TimeHistoryReplay => "EQ Time-History",
             Self::Erection4D => "4D Erection",
         }
     }
@@ -407,6 +409,9 @@ pub enum PlannedProposalAction {
     ApplyModalLens(usize),
     SimulateN1(usize),
     RestoreN1,
+    // Phase 74: Async Multi-Thread / WebWorker StructGNN-CRC & Ground-Motion Replay
+    RunEqReplay(Option<crate::core::time_history::GroundMotionRecord>),
+    TogglePlasticHinges,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -460,6 +465,9 @@ pub enum GeminiDirective {
     ApplyModalLens(usize),
     SimulateN1(usize),
     RestoreN1,
+    // Phase 74: Async Multi-Thread / WebWorker StructGNN-CRC & Ground-Motion Replay
+    RunEqReplay(Option<crate::core::time_history::GroundMotionRecord>),
+    TogglePlasticHinges,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -622,6 +630,13 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 }
             } else if upper == "RESTORE_N1" {
                 directives.push(GeminiDirective::RestoreN1);
+            } else if upper == "RUN_EQ_REPLAY" || upper.starts_with("RUN_EQ_REPLAY:") {
+                let rec = upper
+                    .strip_prefix("RUN_EQ_REPLAY:")
+                    .and_then(crate::core::ground_motion_replay::GroundMotionReplayConfig::record_from_arg);
+                directives.push(GeminiDirective::RunEqReplay(rec));
+            } else if upper == "TOGGLE_HINGES" {
+                directives.push(GeminiDirective::TogglePlasticHinges);
             }
             cursor = &after_start[end + 2..];
         } else {
@@ -1179,6 +1194,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export non-destructive eigengraph::portfolio::retrofit_plan .ifcx district overlay",
         icon: AppIcon::Cube3D,
     },
+    SlashCommandSpec {
+        cmd: "/replay",
+        category: "AI",
+        description: "Run background async StructGNN-CRC & live 60 FPS earthquake ground-motion replay",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/record",
+        category: "AI",
+        description: "Switch benchmark earthquake record (northridge, kobe, elcentro, chichi, sumatra)",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/hinges",
+        category: "View",
+        description: "Toggle 3D ASCE 41-17 plastic hinge beacons and jump to peak seismic drift",
+        icon: AppIcon::Target,
+    },
+    SlashCommandSpec {
+        cmd: "/replay-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::time_history_replay .ifcx overlay",
+        icon: AppIcon::Cube3D,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1226,6 +1265,8 @@ pub struct SpatialHudActions {
     pub export_vector_dossier_svg: bool,
     pub run_portfolio_retrofit: bool,
     pub export_portfolio_retrofit_ifcx: bool,
+    pub run_async_ground_motion_replay: bool,
+    pub export_ground_motion_replay_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -1577,5 +1618,7 @@ impl SpatialHudActions {
         self.export_vector_dossier_svg |= other.export_vector_dossier_svg;
         self.run_portfolio_retrofit |= other.run_portfolio_retrofit;
         self.export_portfolio_retrofit_ifcx |= other.export_portfolio_retrofit_ifcx;
+        self.run_async_ground_motion_replay |= other.run_async_ground_motion_replay;
+        self.export_ground_motion_replay_ifcx |= other.export_ground_motion_replay_ifcx;
     }
 }

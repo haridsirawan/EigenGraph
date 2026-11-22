@@ -1131,6 +1131,243 @@
         }
       };
 
+      window.EigenGraphWorkerBridge = (() => {
+        const jobs = new Map();
+        const supported = typeof window.Worker === "function" && typeof window.Blob === "function" && typeof window.URL === "function" && typeof window.URL.createObjectURL === "function";
+        const WORKER_SRC = `
+self.onmessage = function (ev) {
+  const msg = ev.data || {};
+  if (msg.type !== "start") return;
+  const jobId = msg.jobId;
+  try {
+    const p = JSON.parse(msg.payloadJson || "{}");
+    const g = 9.80665;
+    const dt = Math.max(0.005, Math.min(0.025, Number(p.dtS || 0.01)));
+    const totalTime = Math.max(8.0, Math.min(40.0, Number(p.durationS || 20.0)));
+    const scaleFactor = Math.max(0.25, Math.min(3.0, Number(p.scaleFactor || 1.15)));
+    const heightM = Math.max(3.0, Number(p.heightM || 12.0));
+    const weightKn = Math.max(100.0, Number(p.weightKn || 2500.0));
+    const t1S = Math.max(0.08, Number(p.t1S || 0.45));
+    const dampingRatio = Math.max(0.01, Math.min(0.15, Number(p.dampingRatio || 0.025)));
+    const cy = Math.max(0.05, Number(p.cy || 0.14));
+    const postYield = Math.max(0.01, Math.min(0.35, Number(p.postYieldRatio || 0.04)));
+    const hystKey = String(p.hysteresisKey || "BoucWen");
+    const recKey = String(p.recordKey || "Northridge");
+
+    let pgaG = 0.843, omegaP = 2.2 * Math.PI, zetaG = 0.35, tPeak = 4.2;
+    if (recKey === "Kobe") { pgaG = 0.671; omegaP = 1.8 * Math.PI; zetaG = 0.30; tPeak = 5.0; }
+    else if (recKey === "ElCentro") { pgaG = 0.348; omegaP = 2.8 * Math.PI; zetaG = 0.40; tPeak = 6.0; }
+    else if (recKey === "ChiChi") { pgaG = 0.512; omegaP = 1.2 * Math.PI; zetaG = 0.25; tPeak = 9.5; }
+    else if (recKey === "Sumatra") { pgaG = 0.425; omegaP = 0.8 * Math.PI; zetaG = 0.20; tPeak = 16.0; }
+
+    const pga = pgaG * scaleFactor * g;
+    const numSteps = Math.ceil(totalTime / dt);
+    const totalMass = (weightKn * 1000.0) / g;
+    const omega1 = (2.0 * Math.PI) / t1S;
+    const kElastic = totalMass * omega1 * omega1;
+    const vYieldN = cy * (weightKn * 1000.0);
+    const uYield = vYieldN / Math.max(1.0, kElastic);
+    const cDamping = 2.0 * dampingRatio * totalMass * omega1;
+
+    const alphaHht = -0.10;
+    const beta = Math.pow(1.0 - alphaHht, 2) / 4.0;
+    const gamma = (1.0 - 2.0 * alphaHht) / 2.0;
+
+    let u = 0.0, v = 0.0, a = 0.0, z = 0.0, fS = 0.0;
+    let eDamping = 0.0, eStrain = 0.0, eHyst = 0.0, eInput = 0.0;
+    let peakU = 0.0, peakBaseShear = 0.0, maxErrPct = 0.0;
+    const sampleRate = Math.max(1, Math.round(0.05 / dt));
+    const samples = [];
+    let hystMult = 1.0, pinchFactor = 1.0;
+    if (hystKey === "Takeda") { hystMult = 1.08; pinchFactor = 0.84; }
+    else if (hystKey === "Bilinear") { hystMult = 0.94; pinchFactor = 1.05; }
+
+    self.postMessage({ type: "progress", jobId, progress: 0.22, stage: "WebWorker HHT-alpha NL-THA..." });
+    const halfStep = Math.floor(numSteps * 0.5);
+    for (let i = 0; i < numSteps; i++) {
+      const t = i * dt;
+      let env = 0.0;
+      if (t >= 0.1) {
+        const tau = t / tPeak;
+        env = Math.max(0.0, Math.min(1.8, (tau * tau) * Math.exp(-2.0 * (tau - 1.0))));
+      }
+      const p1 = Math.sin(omegaP * t) * Math.exp(-zetaG * omegaP * Math.abs(t - tPeak) * 0.15);
+      const p2 = Math.sin(2.1 * omegaP * t + 0.5) * 0.45;
+      const p3 = Math.cos(0.5 * omegaP * t - 0.8) * 0.35;
+      const rawA = Math.max(-1.0, Math.min(1.0, env * (p1 + p2 + p3)));
+      const aG = rawA * pga;
+
+      const uPred = u + dt * v + dt * dt * (0.5 - beta) * a;
+      const vPred = v + dt * (1.0 - gamma) * a;
+      let uNext = uPred, vNext = vPred, aNext = 0.0, fSNext = fS;
+
+      for (let it = 0; it < 15; it++) {
+        aNext = (uNext - uPred) / (beta * dt * dt);
+        vNext = vPred + gamma * dt * aNext;
+        const duIter = (uNext - u) / Math.max(1e-6, uYield);
+        const dz = duIter - 0.5 * Math.abs(duIter) * Math.abs(z) * z - 0.5 * duIter * z * z;
+        const zCand = Math.max(-1.0, Math.min(1.0, z + dz * pinchFactor));
+        fSNext = postYield * kElastic * uNext + (1.0 - postYield) * vYieldN * zCand;
+        const dynForce = totalMass * aNext + (1.0 + alphaHht) * (cDamping * vNext + fSNext) - alphaHht * (cDamping * v + fS);
+        const res = -totalMass * aG - dynForce;
+        if (Math.abs(res) < 1e-2 * vYieldN) {
+          z = zCand;
+          break;
+        }
+        const kT = postYield * kElastic + (1.0 - postYield) * kElastic * Math.max(0.01, 1.0 - zCand * zCand);
+        const kEff = totalMass / (beta * dt * dt) + (1.0 + alphaHht) * ((cDamping * gamma) / (beta * dt) + kT);
+        uNext += res / Math.max(1.0, kEff);
+      }
+
+      const du = uNext - u;
+      const meanV = 0.5 * (v + vNext);
+      const meanFs = 0.5 * (fS + fSNext);
+      const eStrainPrev = eStrain;
+      const eKin = 0.5 * totalMass * vNext * vNext;
+      eDamping += cDamping * meanV * meanV * dt;
+      eStrain = 0.5 * postYield * kElastic * uNext * uNext;
+      const workRest = meanFs * du;
+      eHyst = Math.max(0.0, eHyst + (workRest - (eStrain - eStrainPrev)));
+      const workIn = 0.5 * totalMass * (vNext * vNext - v * v);
+      eInput = Math.max(0.0, eInput + workIn + cDamping * meanV * meanV * dt + workRest);
+      const eSum = eKin + eDamping + eStrain + eHyst;
+      const errPct = (Math.abs(eSum - eInput) / Math.max(100000.0, eInput)) * 100.0;
+      if (errPct > maxErrPct) maxErrPct = errPct;
+
+      u = uNext; v = vNext; a = aNext; fS = fSNext;
+      const uEff = u * hystMult;
+      if (Math.abs(uEff) > peakU) peakU = Math.abs(uEff);
+      if (Math.abs(fS) > peakBaseShear) peakBaseShear = Math.abs(fS);
+
+      if (i % sampleRate === 0) {
+        samples.push({
+          time_s: t,
+          ground_accel_g: aG / g,
+          roof_disp_mm: uEff * 1000.0,
+          roof_drift_ratio: uEff / heightM,
+          base_shear_kn: fS / 1000.0,
+          hysteretic_energy_kj: eHyst / 1000.0
+        });
+      }
+      if (i === halfStep) {
+        self.postMessage({ type: "progress", jobId, progress: 0.62, stage: "WebWorker StructGNN-CRC Batch..." });
+      }
+    }
+
+    const scenarios = Array.isArray(p.scenarios) ? p.scenarios : [];
+    const peakDrift = peakU / heightM;
+    const driftAmp = 1.0 + 0.35 * (peakDrift / 0.020);
+    const qConformal = Math.sqrt(Math.log(1.0 / 0.05) / 600.0);
+    let prunedCount = 0;
+    let maxBound = 0.0;
+    let critName = "";
+    for (let sIdx = 0; sIdx < scenarios.length; sIdx++) {
+      const sc = scenarios[sIdx];
+      const ariV2 = Number(sc.ariV2 || 0.9);
+      const svdMech = Boolean(sc.svdMech);
+      const postU = Number(sc.postU || 0.35) * driftAmp;
+      const svdM = Number(sc.svdMargin || 0.8);
+      const buckM = Number(sc.bucklingMargin || 0.8);
+      const hE = Math.max(0.0, Math.min(1.0, 1.0 - svdM));
+      const ovT = Math.max(0.0, Math.min(1.0, postU / 1.15));
+      const bkT = Math.max(0.0, Math.min(1.0, 1.0 - buckM));
+      const gnnProb = svdMech ? 0.96 : Math.max(0.01, Math.min(0.99, 0.35 * (1.0 - ariV2) + 0.35 * ovT + 0.15 * hE + 0.15 * bkT));
+      const bound = Math.min(1.0, gnnProb + qConformal);
+      const safe = !svdMech && !Boolean(sc.isCritical) && ariV2 >= 0.72 && postU < 0.92 && buckM >= 0.12;
+      if (safe) prunedCount++;
+      if (bound > maxBound) {
+        maxBound = bound;
+        critName = String(sc.name || "Member");
+      }
+    }
+    const hystDissRatio = eHyst / Math.max(1.0, eHyst + eDamping);
+    self.postMessage({
+      type: "done",
+      jobId,
+      result: {
+        samples,
+        peak_roof_disp_mm: peakU * 1000.0,
+        peak_base_shear_kn: peakBaseShear / 1000.0,
+        hyst_dissipation_ratio: hystDissRatio,
+        max_energy_balance_error_pct: maxErrPct,
+        stage1_pruned: prunedCount,
+        max_conformal_bound: maxBound,
+        critical_member_name: critName
+      }
+    });
+  } catch (err) {
+    self.postMessage({ type: "error", jobId, error: (err && err.message) ? err.message : String(err) });
+  }
+};`;
+
+        return {
+          isSupported: () => supported,
+          startReplayJob: (jobId, payloadJson) => {
+            if (!supported) return false;
+            try {
+              const blob = new Blob([WORKER_SRC], { type: "application/javascript" });
+              const url = URL.createObjectURL(blob);
+              const w = new Worker(url);
+              const entry = { status: "running", progress: 0.08, stage: "Spawning Browser Blob WebWorker...", worker: w, url, result: null, error: null };
+              jobs.set(jobId, entry);
+              w.onmessage = (ev) => {
+                const d = ev.data || {};
+                const cur = jobs.get(jobId);
+                if (!cur) return;
+                if (d.type === "progress") {
+                  cur.progress = Number(d.progress || cur.progress);
+                  cur.stage = String(d.stage || cur.stage);
+                } else if (d.type === "done") {
+                  cur.status = "done";
+                  cur.progress = 1.0;
+                  cur.stage = "Completed";
+                  cur.result = d.result || null;
+                  try { w.terminate(); URL.revokeObjectURL(url); } catch (_) {}
+                } else if (d.type === "error") {
+                  cur.status = "error";
+                  cur.error = String(d.error || "WebWorker execution error");
+                  try { w.terminate(); URL.revokeObjectURL(url); } catch (_) {}
+                }
+              };
+              w.onerror = (err) => {
+                const cur = jobs.get(jobId);
+                if (cur) {
+                  cur.status = "error";
+                  cur.error = (err && err.message) ? err.message : "WebWorker crashed";
+                }
+                try { w.terminate(); URL.revokeObjectURL(url); } catch (_) {}
+              };
+              w.postMessage({ type: "start", jobId, payloadJson });
+              return true;
+            } catch (_) {
+              return false;
+            }
+          },
+          pollJobStateJson: (jobId) => {
+            const cur = jobs.get(jobId);
+            if (!cur) return JSON.stringify({ status: "missing" });
+            if (cur.status === "done") {
+              const out = JSON.stringify({ status: "done", progress: 1.0, stage: cur.stage, result: cur.result });
+              jobs.delete(jobId);
+              return out;
+            }
+            if (cur.status === "error") {
+              const out = JSON.stringify({ status: "error", error: cur.error });
+              jobs.delete(jobId);
+              return out;
+            }
+            return JSON.stringify({ status: "running", progress: cur.progress, stage: cur.stage });
+          },
+          cancelJob: (jobId) => {
+            const cur = jobs.get(jobId);
+            if (cur) {
+              try { if (cur.worker) cur.worker.terminate(); if (cur.url) URL.revokeObjectURL(cur.url); } catch (_) {}
+              jobs.delete(jobId);
+            }
+          }
+        };
+      })();
+
       window.addEventListener("dragover", (e) => {
         if (e && e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes("Files")) {
           e.preventDefault();

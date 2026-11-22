@@ -119,6 +119,8 @@ pub struct SpatialWorkspaceState {
     pub ifcx_diff_drawer_open: bool,
     // Phase 73: District Portfolio Retrofit Pareto Optimizer Drawer
     pub portfolio_drawer_open: bool,
+    // Phase 74: Live Earthquake Ground-Motion Replay & Async StructGNN-CRC Drawer
+    pub ground_motion_drawer_open: bool,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -212,6 +214,7 @@ impl Default for SpatialWorkspaceState {
             batch_pin_city_idx: 0,
             ifcx_diff_drawer_open: false,
             portfolio_drawer_open: false,
+            ground_motion_drawer_open: false,
         }
     }
 }
@@ -235,6 +238,7 @@ impl SpatialWorkspaceState {
             || self.api_key_popover_open
             || self.ifcx_diff_drawer_open
             || self.portfolio_drawer_open
+            || self.ground_motion_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -252,6 +256,7 @@ impl SpatialWorkspaceState {
         self.api_key_popover_open = false;
         self.ifcx_diff_drawer_open = false;
         self.portfolio_drawer_open = false;
+        self.ground_motion_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -272,6 +277,7 @@ impl SpatialWorkspaceState {
                     self.api_key_popover_open = false;
                     self.ifcx_diff_drawer_open = false;
                     self.portfolio_drawer_open = false;
+                    self.ground_motion_drawer_open = false;
                 } else {
                     self.vault_path_popover_open = false;
                 }
@@ -286,6 +292,7 @@ impl SpatialWorkspaceState {
                     self.api_key_popover_open = false;
                     self.ifcx_diff_drawer_open = false;
                     self.portfolio_drawer_open = false;
+                    self.ground_motion_drawer_open = false;
                 }
             }
             "history" => {
@@ -298,6 +305,7 @@ impl SpatialWorkspaceState {
                     self.api_key_popover_open = false;
                     self.ifcx_diff_drawer_open = false;
                     self.portfolio_drawer_open = false;
+                    self.ground_motion_drawer_open = false;
                 }
             }
             "api_key" => {
@@ -310,6 +318,7 @@ impl SpatialWorkspaceState {
                     self.history_popover_open = false;
                     self.ifcx_diff_drawer_open = false;
                     self.portfolio_drawer_open = false;
+                    self.ground_motion_drawer_open = false;
                 }
             }
             "ifcx_diff" => {
@@ -322,6 +331,7 @@ impl SpatialWorkspaceState {
                     self.history_popover_open = false;
                     self.api_key_popover_open = false;
                     self.portfolio_drawer_open = false;
+                    self.ground_motion_drawer_open = false;
                 }
             }
             "portfolio" => {
@@ -334,6 +344,20 @@ impl SpatialWorkspaceState {
                     self.history_popover_open = false;
                     self.api_key_popover_open = false;
                     self.ifcx_diff_drawer_open = false;
+                    self.ground_motion_drawer_open = false;
+                }
+            }
+            "ground_motion" => {
+                let next = !self.ground_motion_drawer_open;
+                self.ground_motion_drawer_open = next;
+                if next {
+                    self.vault_drawer_open = false;
+                    self.vault_path_popover_open = false;
+                    self.context_picker_open = false;
+                    self.history_popover_open = false;
+                    self.api_key_popover_open = false;
+                    self.ifcx_diff_drawer_open = false;
+                    self.portfolio_drawer_open = false;
                 }
             }
             _ => {}

@@ -7,6 +7,20 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.7.4] - 2026-11-22 — Real-Time WebWorker / Async Multi-Thread `StructGNN-CRC` & Live 60 FPS Earthquake Ground-Motion Replay
+
+### Added & Changed
+- **BIM & SSI-Coupled NL-THA, ASCE 41-17 Dynamic Plastic Hinges & Async `StructGNN-CRC` Kernel (`src/core/ground_motion_replay.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`, `src/core/vector_dossier.rs`)**:
+  - Added `run_ground_motion_replay_for_bim` (`GroundMotionReplayConfig`, `GroundMotionReplayReport`, `GroundMotionReplayFrame`, `PlasticHingeJointSnapshot`, `AsyncCrcReplayTelemetry`), coupling `BimProject`, 6-DOF `FemSolver`, `ModalEngine`, and `SubsurfaceSsiAnalysisReport` ($\tilde{T}_1$ period lengthening) with HHT-$\alpha$ nonlinear time-history integration (`Northridge 1994`, `Kobe 1995`, `El Centro 1940`, `Chi-Chi 1999`, `Sumatra 2004`; Bouc-Wen, Takeda Pinching, Bilinear) and Two-Stage `ARI v2 + StructGNN-CRC` conformal risk bounds.
+  - Added cross-platform non-blocking background execution via `AsyncReplayJobManager` (`std::thread::spawn` OS worker thread on Native; zero-header inline Blob WebWorker `window.EigenGraphWorkerBridge` in `index.html` + `src/core/web_bridge.rs` with 4-stage cooperative time-sliced Rust fallback on `wasm32`).
+  - Added non-destructive `.ifcx` overlay composition (`eigengraph::analysis::time_history_replay` via `IfcxStage::compose_with_time_history_replay_overlay`), `.eigen.json` archive persistence (`UnifiedWorkspaceArchive::ground_motion_replay`), and NL-THA hinge telemetry inside [`build_pure_vector_engineering_dossier_svg`](src/core/vector_dossier.rs).
+- **WebGL2 60 FPS Story-Sway Streaming & 3D Pulsing Plastic Hinge Beacons (`src/views/webgl_earth/`, `src/views/universal_canvas/`)**:
+  - Added `EarthBimLens::TimeHistoryReplay` and `hinge_vao/vbo/ibo` + `build_rtc_plastic_hinge_mesh` (`PlasticHingeGpuInput`) rendering analytical GLSL pulsing octahedral ASCE 41-17 plastic hinge beacons (`IO` blue, `LS` amber, `CP` crimson, `Mechanism` pulsing magenta at `material_kind >= 5.5`) and a dynamic seismic ground-pulse footprint ring synced at 60 FPS via `GroundMotionReplayReport::sample_interpolated` (backed by `paint_cpu_plastic_hinges_fallback`).
+- **Dynamic Island Replay Studio, Pure-Vector Time-History/Hysteresis Charts & Slash Commands (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added `SpatialLens::TimeHistoryReplay` (`EQ Replay`), the **`Ground Motion & Async CRC:`** sub-pill group inside `View & Lens`, live inline worker progress & `Play/Pause` / `Peak t*` / drift telemetry strip, the widening exclusive `Live Earthquake Replay & Async StructGNN-CRC` drawer featuring 3 pure-vector `egui::Painter` charts (Accelerogram $a_g(t)$, Roof Drift $\theta(t)$ vs. 2.0% ASCE 7-22 limit, and $V_b - u$ Hysteresis Loop) + critical hinge pills, and `/replay`, `/record`, `/hinges`, and `/replay-ifcx` commands—preserving `hud_rects.len() == 1` across `1280px`, `768px`, and `390px` viewports.
+
+---
+
 ## [v0.7.3] - 2026-11-22 — Autonomous Portfolio-Scale `ARI v2` Retrofit Optimization Across Multi-Building Districts
 
 ### Added & Changed

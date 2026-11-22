@@ -637,7 +637,7 @@ pub(super) fn push_city_builder_scene_enu(
     }
 }
 
-/// Dynamic active 3D BIM + 6-DOF FEM + Modal + N-1 disruption input for unified WebGL2 Pass 2B.
+/// Dynamic active 3D BIM + 6-DOF FEM + Modal + N-1 + Ground-Motion Replay input for unified WebGL2 Pass 2B.
 pub struct ActiveBimGpuInput<'a> {
     pub project: &'a BimProject,
     pub members: &'a [StructuralMember],
@@ -655,6 +655,10 @@ pub struct ActiveBimGpuInput<'a> {
     pub diff_added_bim: &'a [(BimElementKind, usize)],
     pub diff_modified_bim: &'a [(BimElementKind, usize)],
     pub diff_deleted_ghosts: &'a [([f64; 3], [f64; 3], String)],
+    pub replay_story_elevs_m: &'a [f64],
+    pub replay_story_disp_xy_m: &'a [[f64; 2]],
+    pub replay_ground_shake_xy_m: [f64; 2],
+    pub replay_hinge_states: &'a [(BimElementKind, usize, crate::core::nonlinear::PlasticHingeState)],
 }
 
 pub(super) fn structural_dcr_color(dcr: f64) -> [f32; 4] {
@@ -701,7 +705,44 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
     let rad = input.heading_deg.to_radians();
     let (sr, cr) = (rad.sin(), rad.cos());
 
-    // Live structural displacement field for DeformedShape / ModalVibration (meters in ENU)
+    let sample_replay_sway_xy = |z_m: f64| -> [f64; 2] {
+        if input.replay_story_elevs_m.is_empty() || input.replay_story_disp_xy_m.is_empty() {
+            return [0.0, 0.0];
+        }
+        let vis = (input.deform_scale * 0.25).clamp(1.0, 28.0);
+        let shake_x = input.replay_ground_shake_xy_m[0] * vis * 0.35;
+        let shake_y = input.replay_ground_shake_xy_m[1] * vis * 0.35;
+        if z_m < 0.0 {
+            let damp = (1.0 + z_m / 6.0).clamp(0.0, 1.0);
+            return [(shake_x * damp).clamp(-2.8, 2.8), (shake_y * damp).clamp(-2.8, 2.8)];
+        }
+        let n = input.replay_story_elevs_m.len().min(input.replay_story_disp_xy_m.len());
+        let mut dx = input.replay_story_disp_xy_m[n - 1][0];
+        let mut dy = input.replay_story_disp_xy_m[n - 1][1];
+        if z_m <= input.replay_story_elevs_m[0] {
+            dx = input.replay_story_disp_xy_m[0][0];
+            dy = input.replay_story_disp_xy_m[0][1];
+        } else {
+            for k in 1..n {
+                let e0 = input.replay_story_elevs_m[k - 1];
+                let e1 = input.replay_story_elevs_m[k];
+                if z_m <= e1 {
+                    let t = ((z_m - e0) / (e1 - e0).max(1e-4)).clamp(0.0, 1.0);
+                    let d0 = input.replay_story_disp_xy_m[k - 1];
+                    let d1 = input.replay_story_disp_xy_m[k];
+                    dx = d0[0] + (d1[0] - d0[0]) * t;
+                    dy = d0[1] + (d1[1] - d0[1]) * t;
+                    break;
+                }
+            }
+        }
+        [
+            (dx * vis + shake_x).clamp(-2.8, 2.8),
+            (dy * vis + shake_y).clamp(-2.8, 2.8),
+        ]
+    };
+
+    // Live structural displacement field for DeformedShape / ModalVibration / TimeHistoryReplay (meters in ENU)
     let anim_amp_m = match input.lens {
         EarthBimLens::DeformedShape => (input.deform_scale * 0.012).clamp(0.05, 1.8),
         EarthBimLens::ModalVibration => {
@@ -711,6 +752,11 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
     };
     let mode_idx = input.active_modal_mode % 3;
     let deform_offset = |x_m: f64, y_m: f64, z_m: f64| -> [f64; 3] {
+        if input.lens == EarthBimLens::TimeHistoryReplay && !input.replay_story_disp_xy_m.is_empty()
+        {
+            let d = sample_replay_sway_xy(z_m);
+            return [d[0], d[1], 0.0];
+        }
         if anim_amp_m.abs() < 1e-6 || z_m <= 0.05 {
             return [0.0, 0.0, 0.0];
         }
@@ -793,6 +839,24 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
                     .map(|m| (m.moment_my_knm.hypot(m.moment_mz_knm) / 250.0).clamp(0.0, 1.2))
                     .unwrap_or(0.45);
                 structural_dcr_color(mom)
+            }
+            EarthBimLens::TimeHistoryReplay => {
+                use crate::core::nonlinear::PlasticHingeState;
+                if let Some((_, _, st)) = input
+                    .replay_hinge_states
+                    .iter()
+                    .find(|&&(k, id, _)| k == kind && id == bim_id)
+                {
+                    match st {
+                        PlasticHingeState::Elastic => [0.22, 0.68, 0.78, 0.92],
+                        PlasticHingeState::ImmediateOccupancy => [0.04, 0.52, 1.00, 1.0],
+                        PlasticHingeState::LifeSafety => [1.00, 0.62, 0.04, 1.0],
+                        PlasticHingeState::CollapsePrevention => [1.00, 0.27, 0.23, 1.0],
+                        PlasticHingeState::Mechanism => [0.75, 0.35, 0.95, 1.0],
+                    }
+                } else {
+                    [0.24, 0.64, 0.74, 0.90]
+                }
             }
         }
     };
@@ -1739,6 +1803,172 @@ pub fn build_rtc_portfolio_retrofit_mesh(input: &PortfolioGpuOverlayInput<'_>) -
             let crit_col = [0.94_f32, 0.28, 0.24, 0.45];
             push_extruded_building_prism_enu(&mut verts, &mut idxs, &fp, h_m, 1.1, crit_col, crit_col);
         }
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
+/// Phase 74: 3D ASCE 41-17 Plastic Hinge Beacons & Ground-Motion Seismic Pulse Input.
+pub struct PlasticHingeGpuInput<'a> {
+    pub project: &'a BimProject,
+    pub frame: &'a crate::core::ground_motion_replay::GroundMotionReplayFrame,
+    pub show_hinges: bool,
+    pub deform_scale: f64,
+    pub heading_deg: f64,
+}
+
+fn push_octahedron_beacon_enu(
+    verts: &mut Vec<GpuEarthVertex>,
+    idxs: &mut Vec<u32>,
+    c: [f32; 3],
+    radius: f32,
+    rgba: [f32; 4],
+    severity_phase: f32,
+) {
+    let px = [c[0] + radius, c[1], c[2]];
+    let nx = [c[0] - radius, c[1], c[2]];
+    let py = [c[0], c[1] + radius, c[2]];
+    let ny = [c[0], c[1] - radius, c[2]];
+    let pz = [c[0], c[1], c[2] + radius * 1.15];
+    let nz = [c[0], c[1], c[2] - radius * 1.15];
+    let faces = [
+        [px, py, pz],
+        [py, nx, pz],
+        [nx, ny, pz],
+        [ny, px, pz],
+        [py, px, nz],
+        [nx, py, nz],
+        [ny, nx, nz],
+        [px, ny, nz],
+    ];
+    for [a, b, d] in faces {
+        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let v = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
+        let n = [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ];
+        let nl = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-5);
+        let norm = [n[0] / nl, n[1] / nl, n[2] / nl];
+        let base = verts.len() as u32;
+        for pt in [a, b, d] {
+            verts.push(GpuEarthVertex {
+                pos: pt,
+                normal: norm,
+                color: rgba,
+                meta: [6.0, c[2], 1.0, severity_phase],
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 1, base + 2]);
+    }
+}
+
+/// Builds 3D glowing octahedral ASCE 41-17 plastic hinge beacons (`material_kind = 6.0`) at yielded
+/// structural member ends plus a dynamic seismic ground-pulse footprint ring around the building base.
+pub fn build_rtc_plastic_hinge_mesh(input: &PlasticHingeGpuInput<'_>) -> GpuMeshPayload {
+    use crate::core::nonlinear::PlasticHingeState;
+
+    let mut verts = Vec::with_capacity(input.frame.active_hinges.len() * 24 + 96);
+    let mut idxs = Vec::with_capacity(input.frame.active_hinges.len() * 24 + 96);
+
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let vis = (input.deform_scale * 0.25).clamp(1.0, 28.0);
+    let shake_x = input.frame.ground_disp_m * vis * 0.35;
+    let shake_y = input.frame.ground_disp_m * 0.25 * vis * 0.35;
+
+    let sway_at_z = |z_m: f64| -> [f64; 2] {
+        let elevs = &input.frame.story_elevations_m;
+        let dx_list = &input.frame.story_disp_x_m;
+        let dy_list = &input.frame.story_disp_y_m;
+        let n = elevs.len().min(dx_list.len()).min(dy_list.len());
+        if n == 0 {
+            return [shake_x, shake_y];
+        }
+        let mut dx = dx_list[n - 1];
+        let mut dy = dy_list[n - 1];
+        if z_m <= elevs[0] {
+            dx = dx_list[0];
+            dy = dy_list[0];
+        } else {
+            for k in 1..n {
+                if z_m <= elevs[k] {
+                    let t = ((z_m - elevs[k - 1]) / (elevs[k] - elevs[k - 1]).max(1e-4))
+                        .clamp(0.0, 1.0);
+                    dx = dx_list[k - 1] + (dx_list[k] - dx_list[k - 1]) * t;
+                    dy = dy_list[k - 1] + (dy_list[k] - dy_list[k - 1]) * t;
+                    break;
+                }
+            }
+        }
+        [
+            (dx * vis + shake_x).clamp(-2.8, 2.8),
+            (dy * vis + shake_y).clamp(-2.8, 2.8),
+        ]
+    };
+
+    if input.show_hinges {
+        for h in &input.frame.active_hinges {
+            let (rgba, radius, sev) = match h.state {
+                PlasticHingeState::Elastic => continue,
+                PlasticHingeState::ImmediateOccupancy => ([0.04, 0.56, 1.00, 0.88], 0.36_f32, 0.25_f32),
+                PlasticHingeState::LifeSafety => ([1.00, 0.64, 0.08, 0.92], 0.44_f32, 0.55_f32),
+                PlasticHingeState::CollapsePrevention => ([1.00, 0.26, 0.22, 0.95], 0.54_f32, 0.80_f32),
+                PlasticHingeState::Mechanism => ([0.78, 0.34, 0.98, 0.98], 0.64_f32, 1.00_f32),
+            };
+            let d = sway_at_z(h.local_pos_m[2]);
+            let lx = h.local_pos_m[0] + d[0];
+            let ly = h.local_pos_m[1] + d[1];
+            let rx = (lx * cr - ly * sr) as f32;
+            let ry = (lx * sr + ly * cr) as f32;
+            let rz = h.local_pos_m[2] as f32;
+            push_octahedron_beacon_enu(&mut verts, &mut idxs, [rx, ry, rz], radius, rgba, sev);
+        }
+    }
+
+    // Dynamic ground-motion base seismic pulse ring beneath building footprint
+    let accel_intensity = (input.frame.ground_accel_g.abs() / 0.85).clamp(0.10, 1.0) as f32;
+    let (cx, cy, base_rad) = if let Some((bmin, bmax)) = input.project.plan_extents_mm() {
+        let mx = (bmin[0] + bmax[0]) * 0.0005;
+        let my = (bmin[1] + bmax[1]) * 0.0005;
+        let r = ((bmax[0] - bmin[0]).hypot(bmax[1] - bmin[1]) * 0.00055).max(5.0);
+        (mx * cr - my * sr, mx * sr + my * cr, r)
+    } else {
+        (0.0, 0.0, 7.0)
+    };
+    let r_inner = (base_rad + accel_intensity as f64 * 1.4) as f32;
+    let r_outer = r_inner + 0.65 + accel_intensity * 0.55;
+    let ring_col = [
+        0.22 + 0.76 * accel_intensity,
+        0.82 - 0.52 * accel_intensity,
+        0.88 - 0.56 * accel_intensity,
+        0.48 + 0.34 * accel_intensity,
+    ];
+    let segs = 28usize;
+    let base_v = verts.len() as u32;
+    for i in 0..=segs {
+        let th = (i as f32 / segs as f32) * std::f32::consts::TAU;
+        let (st, ct) = (th.sin(), th.cos());
+        verts.push(GpuEarthVertex {
+            pos: [cx as f32 + r_inner * ct, cy as f32 + r_inner * st, 0.14],
+            normal: [0.0, 0.0, 1.0],
+            color: ring_col,
+            meta: [6.0, 0.14, 1.0, accel_intensity],
+        });
+        verts.push(GpuEarthVertex {
+            pos: [cx as f32 + r_outer * ct, cy as f32 + r_outer * st, 0.14],
+            normal: [0.0, 0.0, 1.0],
+            color: [ring_col[0], ring_col[1], ring_col[2], 0.10],
+            meta: [6.0, 0.14, 1.0, accel_intensity],
+        });
+    }
+    for i in 0..segs {
+        let a = base_v + (i as u32) * 2;
+        idxs.extend_from_slice(&[a, a + 1, a + 3, a, a + 3, a + 2]);
     }
 
     GpuMeshPayload {

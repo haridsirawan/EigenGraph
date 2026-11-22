@@ -142,6 +142,12 @@ pub struct UniversalCanvasState {
     // Phase 73: Autonomous Portfolio-Scale `ARI v2` Retrofit Optimization & Pareto Overlay
     pub portfolio_retrofit_config: crate::core::portfolio_retrofit::PortfolioRetrofitConfig,
     pub last_portfolio_retrofit_report: Option<crate::core::portfolio_retrofit::DistrictPortfolioRetrofitReport>,
+    // Phase 74: Real-Time Async `StructGNN-CRC` & Live 60 FPS Earthquake Ground-Motion Replay
+    pub ground_motion_replay_config: crate::core::ground_motion_replay::GroundMotionReplayConfig,
+    pub last_ground_motion_replay_report: Option<crate::core::ground_motion_replay::GroundMotionReplayReport>,
+    pub replay_async_manager: crate::core::ground_motion_replay::AsyncReplayJobManager,
+    pub replay_anim_playing: bool,
+    pub replay_cursor_time_s: f64,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -255,6 +261,11 @@ impl Default for UniversalCanvasState {
             last_vector_dossier_seal: None,
             portfolio_retrofit_config: crate::core::portfolio_retrofit::PortfolioRetrofitConfig::default(),
             last_portfolio_retrofit_report: None,
+            ground_motion_replay_config: crate::core::ground_motion_replay::GroundMotionReplayConfig::default(),
+            last_ground_motion_replay_report: None,
+            replay_async_manager: crate::core::ground_motion_replay::AsyncReplayJobManager::default(),
+            replay_anim_playing: true,
+            replay_cursor_time_s: 0.0,
         }
     }
 }
@@ -391,7 +402,7 @@ impl UniversalCanvasState {
             .district_hazard
             .any_active()
             .then_some(&self.district_hazard_report);
-        crate::core::ifcx::IfcxDocument::build_layered_snapshot_for_workspace(
+        let mut doc = crate::core::ifcx::IfcxDocument::build_layered_snapshot_for_workspace(
             bim_project,
             Some((
                 self.ground_origin_lat_lon.0,
@@ -404,7 +415,14 @@ impl UniversalCanvasState {
             self.last_crc_cascade_report.as_ref(),
             self.last_subsurface_ssi_report.as_ref(),
             hazard_opt,
-        )
+        );
+        if let Some(ref replay) = self.last_ground_motion_replay_report {
+            doc = crate::core::ifcx::IfcxStage::compose_with_time_history_replay_overlay(
+                &doc,
+                replay,
+            );
+        }
+        doc
     }
 
     /// Captures the current layered `.ifcx` workspace graph as the baseline for visual diffing.
@@ -486,6 +504,69 @@ impl UniversalCanvasState {
         );
         self.portfolio_retrofit_config.active_frontier_index = rep.selected_frontier_idx;
         self.last_portfolio_retrofit_report = Some(rep);
+    }
+
+    /// Launches a non-blocking background Ground-Motion Replay & Async `StructGNN-CRC` worker job.
+    pub fn start_async_ground_motion_replay(&mut self, bim_project: &BimProject) {
+        let site = self.active_site_coupling();
+        let ssi_opt = if self.ground_motion_replay_config.use_ssi_period_coupling {
+            self.last_subsurface_ssi_report.clone()
+        } else {
+            None
+        };
+        self.replay_async_manager.start_job(
+            bim_project.clone(),
+            site,
+            ssi_opt,
+            self.ground_motion_replay_config.clone(),
+        );
+    }
+
+    /// Polls the active background replay job non-blockingly and commits completed reports.
+    pub fn poll_async_ground_motion_replay(&mut self) -> Option<Result<String, String>> {
+        let res = self.replay_async_manager.poll()?;
+        match res {
+            Ok(rep) => {
+                let summary = rep.summary.clone();
+                if self.replay_anim_playing {
+                    self.replay_cursor_time_s = 0.0;
+                } else {
+                    self.replay_cursor_time_s = rep.peak_time_s;
+                }
+                self.last_ground_motion_replay_report = Some(rep);
+                Some(Ok(summary))
+            }
+            Err(err) => Some(Err(err)),
+        }
+    }
+
+    /// Advances the 60 FPS live earthquake playback cursor smoothly by `dt_s`.
+    pub fn advance_ground_motion_replay_clock(&mut self, dt_s: f64) {
+        let Some(ref rep) = self.last_ground_motion_replay_report else {
+            return;
+        };
+        if !self.replay_anim_playing || rep.total_duration_s <= 0.05 {
+            return;
+        }
+        let step = dt_s.clamp(0.0, 0.05) * (self.ground_motion_replay_config.playback_speed as f64);
+        self.replay_cursor_time_s += step;
+        if self.replay_cursor_time_s > rep.total_duration_s {
+            if self.ground_motion_replay_config.replay_loop {
+                self.replay_cursor_time_s = 0.0;
+            } else {
+                self.replay_cursor_time_s = rep.total_duration_s;
+                self.replay_anim_playing = false;
+            }
+        }
+    }
+
+    /// Samples the interpolated earthquake replay frame at the active playback cursor time.
+    pub fn current_replay_frame(
+        &self,
+    ) -> Option<crate::core::ground_motion_replay::GroundMotionReplayFrame> {
+        self.last_ground_motion_replay_report
+            .as_ref()
+            .map(|rep| rep.sample_interpolated(self.replay_cursor_time_s))
     }
 
     /// Local ground relief offset (meters relative to Earth surface datum `0.0` at anchored origin).
@@ -606,6 +687,7 @@ impl UniversalCanvasState {
             district_hazard: self.district_hazard.clone(),
             subsurface_ssi: self.subsurface_ssi.clone(),
             portfolio_retrofit: self.portfolio_retrofit_config.clone(),
+            ground_motion_replay: self.ground_motion_replay_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -709,6 +791,7 @@ impl UniversalCanvasState {
         } else {
             self.last_portfolio_retrofit_report = None;
         }
+        self.ground_motion_replay_config = archive.ground_motion_replay;
         self.status_message = Some(format!(
             "Imported verified 1-file workspace '{}' ({} canvas objects)",
             archive.project_name,
@@ -1092,6 +1175,41 @@ impl UniversalCanvasState {
             } else {
                 (Vec::new(), Vec::new(), Vec::new())
             };
+            let replay_frame_opt = if self.earth_bim_author.active_lens == EarthBimLens::TimeHistoryReplay {
+                self.current_replay_frame()
+            } else {
+                None
+            };
+            let replay_elevs: Vec<f64> = replay_frame_opt
+                .as_ref()
+                .map(|f| f.story_elevations_m.clone())
+                .unwrap_or_default();
+            let replay_disp_pairs: Vec<[f64; 2]> = replay_frame_opt
+                .as_ref()
+                .map(|f| {
+                    f.story_disp_x_m
+                        .iter()
+                        .zip(f.story_disp_y_m.iter())
+                        .map(|(&x, &y)| [x, y])
+                        .collect()
+                })
+                .unwrap_or_default();
+            let replay_ground_shake = replay_frame_opt
+                .as_ref()
+                .map(|f| [f.ground_disp_m, f.ground_disp_m * 0.25])
+                .unwrap_or([0.0, 0.0]);
+            let replay_hinge_states: Vec<(
+                crate::core::BimElementKind,
+                usize,
+                crate::core::nonlinear::PlasticHingeState,
+            )> = if self.earth_bim_author.active_lens == EarthBimLens::TimeHistoryReplay {
+                self.last_ground_motion_replay_report
+                    .as_ref()
+                    .map(|rep| rep.worst_hinge_states_at(self.replay_cursor_time_s))
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             let active_bim_gpu = if !bim_project.is_empty() {
                 Some(crate::views::webgl_earth::ActiveBimGpuInput {
                     project: bim_project,
@@ -1110,6 +1228,23 @@ impl UniversalCanvasState {
                     diff_added_bim: &diff_added,
                     diff_modified_bim: &diff_modified,
                     diff_deleted_ghosts: &diff_deleted_ghosts,
+                    replay_story_elevs_m: &replay_elevs,
+                    replay_story_disp_xy_m: &replay_disp_pairs,
+                    replay_ground_shake_xy_m: replay_ground_shake,
+                    replay_hinge_states: &replay_hinge_states,
+                })
+            } else {
+                None
+            };
+            let hinge_gpu_input = if !bim_project.is_empty() {
+                replay_frame_opt.as_ref().map(|fr| {
+                    crate::views::webgl_earth::PlasticHingeGpuInput {
+                        project: bim_project,
+                        frame: fr,
+                        show_hinges: self.ground_motion_replay_config.show_plastic_hinges,
+                        deform_scale: self.earth_bim_author.deform_scale,
+                        heading_deg: active_heading_deg,
+                    }
                 })
             } else {
                 None
@@ -1157,6 +1292,7 @@ impl UniversalCanvasState {
                 hazard_gpu_input,
                 subsurface_gpu_input,
                 portfolio_gpu_input,
+                hinge_gpu_input,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
                 ui,
@@ -1183,6 +1319,11 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.portfolio_retrofit_config.overlay_visible {
                 self.paint_cpu_portfolio_retrofit_fallback(&painter, rect, theme, &xform);
+            }
+            if !gpu_globe_active
+                && self.earth_bim_author.active_lens == EarthBimLens::TimeHistoryReplay
+            {
+                self.paint_cpu_plastic_hinges_fallback(&painter, rect, theme, &xform, bim_project);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

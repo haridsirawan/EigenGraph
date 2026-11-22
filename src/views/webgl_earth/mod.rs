@@ -377,6 +377,11 @@ struct GpuEarthPipeline {
     portfolio_ibo: glow::Buffer,
     portfolio_index_count: i32,
     portfolio_revision_uploaded: u64,
+    hinge_vao: glow::VertexArray,
+    hinge_vbo: glow::Buffer,
+    hinge_ibo: glow::Buffer,
+    hinge_index_count: i32,
+    hinge_revision_uploaded: u64,
 }
 
 impl GpuEarthPipeline {
@@ -485,14 +490,18 @@ impl GpuEarthPipeline {
                     vec3 win_glow = mix(vec3(1.0, 0.84, 0.52), vec3(0.52, 0.88, 1.0), step(0.78, lit_hash));
                     float night_strength = max(u_night_mix, u_golden_mix * 0.45);
                     col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
-                }} else if (kind >= 3.5 && kind < 4.5) {{
-                    // Subsurface Geological Stratigraphy Bedding & Sedimentary Striations (0% raster)
-                    float bed = 0.88 + 0.12 * sin(v_pos.z * 7.5 + sin(v_pos.x * 0.45 + v_pos.y * 0.35) * 1.4);
-                    col *= bed;
+                }} else if (kind >= 5.5) {{
+                    // Analytical pulsing 3D Plastic Hinge Beacons & Ground-Motion Pulse Ring (0% raster)
+                    float pulse = 0.68 + 0.32 * sin(u_time * (3.2 + phase * 6.0));
+                    col = mix(col, v_color.rgb * 1.18, 0.55) * pulse;
                 }} else if (kind >= 4.5) {{
                     // Animated Groundwater Phreatic Table Surface Ripples (100% procedural)
                     float wave = 0.5 + 0.5 * sin(v_pos.x * 1.8 + u_time * 1.6) * cos(v_pos.y * 1.6 - u_time * 1.2);
                     col += vec3(0.08, 0.24, 0.32) * wave;
+                }} else if (kind >= 3.5 && kind < 4.5) {{
+                    // Subsurface Geological Stratigraphy Bedding & Sedimentary Striations (0% raster)
+                    float bed = 0.88 + 0.12 * sin(v_pos.z * 7.5 + sin(v_pos.x * 0.45 + v_pos.y * 0.35) * 1.4);
+                    col *= bed;
                 }} else if (kind < 1.5) {{
                     // Continents & 3D IfcSite TIN subtle coastal atmospheric rim
                     float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.2);
@@ -578,6 +587,7 @@ impl GpuEarthPipeline {
             let (hazard_vao, hazard_vbo, hazard_ibo) = setup_vao_pair()?;
             let (subsurface_vao, subsurface_vbo, subsurface_ibo) = setup_vao_pair()?;
             let (portfolio_vao, portfolio_vbo, portfolio_ibo) = setup_vao_pair()?;
+            let (hinge_vao, hinge_vbo, hinge_ibo) = setup_vao_pair()?;
 
             Ok(Self {
                 program,
@@ -611,6 +621,11 @@ impl GpuEarthPipeline {
                 portfolio_ibo,
                 portfolio_index_count: 0,
                 portfolio_revision_uploaded: 0,
+                hinge_vao,
+                hinge_vbo,
+                hinge_ibo,
+                hinge_index_count: 0,
+                hinge_revision_uploaded: 0,
             })
         }
     }
@@ -741,6 +756,27 @@ impl GpuEarthPipeline {
         self.portfolio_revision_uploaded = rev;
     }
 
+    fn upload_hinges(&mut self, gl: &glow::Context, rev: u64, mesh: &GpuMeshPayload) {
+        unsafe {
+            gl.bind_vertex_array(Some(self.hinge_vao));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.hinge_vbo));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                vertices_as_u8_slice(&mesh.vertices),
+                glow::DYNAMIC_DRAW,
+            );
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.hinge_ibo));
+            gl.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                indices_as_u8_slice(&mesh.indices),
+                glow::DYNAMIC_DRAW,
+            );
+            gl.bind_vertex_array(None);
+        }
+        self.hinge_index_count = mesh.indices.len() as i32;
+        self.hinge_revision_uploaded = rev;
+    }
+
     fn paint(&self, gl: &glow::Context, u: &RtcCameraUniforms) {
         unsafe {
             gl.use_program(Some(self.program));
@@ -781,13 +817,14 @@ impl GpuEarthPipeline {
                 gl.draw_elements(glow::TRIANGLES, self.planet_index_count, glow::UNSIGNED_INT, 0);
             }
 
-            // --- Pass 2: Floating-Origin RTC Local Site Scene (3D IfcSite TIN + City-Builder + Extruded IFCX + Active BIM/FEM/Modal/N-1 + Subsurface + Portfolio + Multi-Hazard) ---
+            // --- Pass 2: Floating-Origin RTC Local Site Scene (3D IfcSite TIN + City-Builder + Extruded IFCX + Active BIM/FEM/Modal/N-1/Replay + Subsurface + Portfolio + Multi-Hazard + Hinges) ---
             if u.render_site_pass
                 && (self.site_index_count > 0
                     || self.bim_index_count > 0
                     || self.subsurface_index_count > 0
                     || self.portfolio_index_count > 0
-                    || self.hazard_index_count > 0)
+                    || self.hazard_index_count > 0
+                    || self.hinge_index_count > 0)
             {
                 gl.clear_depth_f32(1.0);
                 gl.clear(glow::DEPTH_BUFFER_BIT);
@@ -802,6 +839,12 @@ impl GpuEarthPipeline {
                 if self.bim_index_count > 0 {
                     gl.bind_vertex_array(Some(self.bim_vao));
                     gl.draw_elements(glow::TRIANGLES, self.bim_index_count, glow::UNSIGNED_INT, 0);
+                }
+                if self.hinge_index_count > 0 {
+                    gl.depth_mask(false);
+                    gl.bind_vertex_array(Some(self.hinge_vao));
+                    gl.draw_elements(glow::TRIANGLES, self.hinge_index_count, glow::UNSIGNED_INT, 0);
+                    gl.depth_mask(true);
                 }
                 if self.subsurface_index_count > 0 {
                     gl.depth_mask(false);
@@ -850,6 +893,9 @@ impl GpuEarthPipeline {
             gl.delete_vertex_array(self.portfolio_vao);
             gl.delete_buffer(self.portfolio_vbo);
             gl.delete_buffer(self.portfolio_ibo);
+            gl.delete_vertex_array(self.hinge_vao);
+            gl.delete_buffer(self.hinge_vbo);
+            gl.delete_buffer(self.hinge_ibo);
         }
     }
 }
@@ -866,12 +912,14 @@ pub struct WebGlEarthState {
     cached_hazard_hash: u64,
     cached_subsurface_hash: u64,
     cached_portfolio_hash: u64,
+    cached_hinge_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
     pub last_hazard_tris: usize,
     pub last_subsurface_tris: usize,
     pub last_portfolio_tris: usize,
+    pub last_hinge_tris: usize,
 }
 
 impl std::fmt::Debug for WebGlEarthState {
@@ -1022,6 +1070,23 @@ impl WebGlEarthState {
             // Quantize animated sine phase at 1000 steps so GPU modal vibration updates smoothly at 60 FPS
             mix(&mut h, ((input.modal_phase_sin * 1000.0).round() as i32) as u64);
         }
+        if input.lens == EarthBimLens::TimeHistoryReplay {
+            mix(
+                &mut h,
+                ((input.replay_ground_shake_xy_m[0] * 10_000.0).round() as i64) as u64,
+            );
+            mix(
+                &mut h,
+                ((input.replay_ground_shake_xy_m[1] * 10_000.0).round() as i64) as u64,
+            );
+            for d in input.replay_story_disp_xy_m {
+                mix(&mut h, ((d[0] * 10_000.0).round() as i64) as u64);
+                mix(&mut h, ((d[1] * 10_000.0).round() as i64) as u64);
+            }
+            for &(k, id, st) in input.replay_hinge_states {
+                mix(&mut h, (k as u64 + 1) * 1_000_003 ^ id as u64 ^ (st as u64 * 97));
+            }
+        }
         h
     }
 
@@ -1073,6 +1138,7 @@ impl WebGlEarthState {
         hazard_input: Option<DistrictHazardGpuInput<'_>>,
         subsurface_input: Option<SubsurfaceSsiGpuInput<'_>>,
         portfolio_input: Option<PortfolioGpuOverlayInput<'_>>,
+        hinge_input: Option<PlasticHingeGpuInput<'_>>,
     ) -> bool {
         let Some(pipe_arc) = self.pipeline.clone() else {
             return false;
@@ -1264,12 +1330,41 @@ impl WebGlEarthState {
             None
         };
 
+        // Prepare 3D ASCE 41-17 Plastic Hinge Beacons & Seismic Ground-Pulse Ring mesh
+        let pending_hinges = if render_site_pass {
+            if let Some(ref hg_in) = hinge_input {
+                let mut rev = ((hg_in.frame.time_s * 1000.0).round() as u64).wrapping_mul(2_654_435_761)
+                    ^ (hg_in.frame.active_hinges.len() as u64).wrapping_mul(1_000_003)
+                    ^ u64::from(hg_in.show_hinges)
+                    ^ ((hg_in.deform_scale * 100.0).round() as u64)
+                    ^ ((hg_in.heading_deg * 100.0).round() as i64 as u64);
+                rev ^= (hg_in.frame.ground_accel_g * 10_000.0).round() as i64 as u64;
+                if rev != self.cached_hinge_hash {
+                    let mesh = build_rtc_plastic_hinge_mesh(hg_in);
+                    self.last_hinge_tris = mesh.indices.len() / 3;
+                    self.cached_hinge_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_hinge_hash != 0 {
+                self.cached_hinge_hash = 0;
+                self.last_hinge_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let planet_payload = Arc::new(Mutex::new(pending_planet));
         let site_payload = Arc::new(Mutex::new(pending_site));
         let bim_payload = Arc::new(Mutex::new(pending_bim));
         let hazard_payload = Arc::new(Mutex::new(pending_hazard));
         let subsurface_payload = Arc::new(Mutex::new(pending_subsurface));
         let portfolio_payload = Arc::new(Mutex::new(pending_portfolio));
+        let hinge_payload = Arc::new(Mutex::new(pending_hinges));
 
         let cb = egui_glow::CallbackFn::new(move |_info, glow_painter| {
             let gl = glow_painter.gl();
@@ -1316,6 +1411,13 @@ impl WebGlEarthState {
                         }
                     }
                 }
+                if let Ok(mut slot) = hinge_payload.lock() {
+                    if let Some((rev, mesh)) = slot.take() {
+                        if pipe.hinge_revision_uploaded != rev {
+                            pipe.upload_hinges(gl, rev, &mesh);
+                        }
+                    }
+                }
                 pipe.paint(gl, &uniforms);
             }
         });
@@ -1324,15 +1426,20 @@ impl WebGlEarthState {
             rect,
             callback: Arc::new(cb),
         });
-        // Smooth ocean shimmer, 60 FPS GPU modal oscillation, groundwater ripples, and seismic waves
+        // Smooth ocean shimmer, 60 FPS GPU modal oscillation, groundwater ripples, seismic waves, and NL-THA replay
         let hazard_animated = hazard_input
             .as_ref()
             .is_some_and(|h| h.config.is_animated());
         let subsurface_animated = subsurface_input
             .as_ref()
             .is_some_and(|s| s.config.xray_subsurface_visible);
+        let replay_animated = hinge_input.is_some()
+            || active_bim
+                .as_ref()
+                .is_some_and(|b| b.lens == EarthBimLens::TimeHistoryReplay);
         let frame_ms = if hazard_animated
             || subsurface_animated
+            || replay_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)
