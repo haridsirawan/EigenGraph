@@ -1028,6 +1028,7 @@ impl BlastEngine {
                     y,
                     z: 0.0,
                     fixity: BoundaryFixity::fixed(),
+                    spring_stiffness: [0.0; 6],
                 });
                 col.push(node_id);
                 node_id += 1;
@@ -1046,6 +1047,7 @@ impl BlastEngine {
                     y,
                     z: h,
                     fixity: BoundaryFixity::free(),
+                    spring_stiffness: [0.0; 6],
                 });
                 col.push(node_id);
                 node_id += 1;
@@ -1116,6 +1118,7 @@ impl BlastEngine {
                 y: barrier_y,
                 z: 0.0,
                 fixity: BoundaryFixity::fixed(),
+                spring_stiffness: [0.0; 6],
             });
             barrier_base_ids.push(node_id);
             node_id += 1;
@@ -1127,6 +1130,7 @@ impl BlastEngine {
                 y: barrier_y,
                 z: 3.2,
                 fixity: BoundaryFixity::free(),
+                spring_stiffness: [0.0; 6],
             });
             barrier_top_ids.push(node_id);
             node_id += 1;

@@ -2163,9 +2163,38 @@ impl BimProject {
         Vec<(usize, BimElementKind, usize)>,
         SiteLoadSummary,
     ) {
+        self.to_structural_model_with_site_loads_and_ssi(site, None)
+    }
+
+    /// Site-coupled 6-DOF 3D Frame builder optionally coupled to 3D subsurface geotechnical
+    /// stratigraphy, Seed–Idriss liquefaction degradation, and 6-DOF elastic Winkler foundation springs.
+    pub fn to_structural_model_with_site_loads_and_ssi(
+        &self,
+        site: &crate::core::SiteEnvironmentalCoupling,
+        ssi: Option<&crate::core::geotech::SubsurfaceSsiConfig>,
+    ) -> (
+        StructuralModel,
+        Vec<(usize, BimElementKind, usize)>,
+        SiteLoadSummary,
+    ) {
         let mut model = StructuralModel::new(self.project_name.clone());
         let mut fem_map: Vec<(usize, BimElementKind, usize)> = Vec::new();
         let tol_m = 0.05; // 50 mm node merging tolerance
+
+        let ssi_active = ssi.is_some_and(|c| c.ssi_coupling_enabled);
+        let ssi_profile = ssi
+            .filter(|c| c.ssi_coupling_enabled)
+            .map(|cfg| {
+                let pga = (site.seismic_pga_ss_g as f64 * 0.40).clamp(0.10, 1.20);
+                let (strata, _vs30, site_cls, _lpi, rec_pile_m) =
+                    crate::core::geotech::GeotechEngine::build_borehole_strata(
+                        cfg.borehole_preset,
+                        cfg.groundwater_depth_m,
+                        pga,
+                        cfg.liquefaction_trigger_active,
+                    );
+                (strata, site_cls, rec_pile_m, cfg.liquefaction_trigger_active)
+            });
 
         let find_or_add_node = |m: &mut StructuralModel, x_m: f64, y_m: f64, z_m: f64| -> usize {
             if let Some(existing) = m.nodes.iter().find(|n| {
@@ -2176,7 +2205,39 @@ impl BimProject {
             let id = m.nodes.len();
             let mut node = Node3D::new(id, x_m, y_m, z_m);
             if y_m.abs() <= 0.05 {
-                node.fixity = BoundaryFixity::fixed();
+                if let Some((ref strata, _, rec_pile_m, liq_on)) = ssi_profile {
+                    let matched_ftg = self.footings.iter().min_by(|a, b| {
+                        let da = (a.pos.0 * 1e-3 - x_m).hypot(a.pos.1 * 1e-3 - z_m);
+                        let db = (b.pos.0 * 1e-3 - x_m).hypot(b.pos.1 * 1e-3 - z_m);
+                        da.total_cmp(&db)
+                    });
+                    let (ftg_w, ftg_l) = match matched_ftg {
+                        Some(ftg) if (ftg.pos.0 * 1e-3 - x_m).hypot(ftg.pos.1 * 1e-3 - z_m) <= 1.5 => {
+                            (ftg.width_mm * 1e-3, ftg.length_mm * 1e-3)
+                        }
+                        _ => (2.0, 2.0),
+                    };
+                    let (w, _, _) =
+                        crate::core::geotech::GeotechEngine::compute_coupled_footing_winkler_springs(
+                            ftg_w,
+                            ftg_l,
+                            strata,
+                            rec_pile_m,
+                            liq_on,
+                        );
+                    // StructuralModel Y-up: X = East (kx), Y = Up (kz_vert), Z = North (ky)
+                    node.fixity = BoundaryFixity::free();
+                    node.spring_stiffness = [
+                        w.kx_trans_kn_m * 1000.0,
+                        w.kz_trans_kn_m * 1000.0,
+                        w.ky_trans_kn_m * 1000.0,
+                        w.k_theta_x_knm_rad * 1000.0,
+                        w.k_theta_z_knm_rad * 1000.0,
+                        w.k_theta_y_knm_rad * 1000.0,
+                    ];
+                } else {
+                    node.fixity = BoundaryFixity::fixed();
+                }
             }
             m.add_node(node);
             id
@@ -2428,10 +2489,15 @@ impl BimProject {
         let total_gravity_kn = (total_elev_weight_n / 1000.0).max(0.0);
 
         // 5. Site-Coupled SNI 1726:2019 / ASCE 7-22 ELF Seismic & Wind Lateral Forces
-        let site_class = crate::core::modal::SiteClass::from_soil_label(&site.recommended_soil_class);
+        let site_class = if let Some((_, bore_site_cls, _, _)) = ssi_profile {
+            bore_site_cls
+        } else {
+            crate::core::modal::SiteClass::from_soil_label(&site.recommended_soil_class)
+        };
         let ss = (site.seismic_pga_ss_g as f64).clamp(0.08, 2.5);
         let s1 = (site.seismic_pga_s1_g as f64).clamp(0.04, 1.5);
         let spectrum = crate::core::modal::Sni1726Spectrum::new(site_class, ss, s1, 8.0, 1.0);
+        let _ = ssi_active;
 
         let max_h_m = model
             .nodes

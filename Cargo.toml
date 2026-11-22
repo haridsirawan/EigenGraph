@@ -1,6 +1,6 @@
 [package]
 name = "eigengraph"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 default-run = "eigengraph"
 authors = ["Harids Irawan <harids.irawan@gmail.com>"]

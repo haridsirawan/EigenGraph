@@ -119,6 +119,17 @@ impl FemSolver {
             }
         }
 
+        // 1b. Assemble 6-DOF Elastic Winkler / SSI Foundation Springs onto Global Stiffness Diagonal
+        for (idx, node) in model.nodes.iter().enumerate() {
+            let base_dof = idx * 6;
+            for d in 0..6 {
+                let k_s = node.spring_stiffness[d];
+                if k_s.is_finite() && k_s > 0.0 {
+                    k_global[(base_dof + d, base_dof + d)] += k_s;
+                }
+            }
+        }
+
         // 2. Assemble Load Vector F
         let mut f_global = vec![0.0; total_dofs];
         for load in &model.loads {
@@ -574,7 +585,7 @@ impl SecondOrderStabilitySolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::model::{BoundaryFixity, CrossSection, Element3D, NodalLoad, Node3D};
+    use crate::core::model::{BoundaryFixity, CrossSection, Element3D, Material, NodalLoad, Node3D};
 
     #[test]
     fn test_sni_1727_lrfd_load_combination_envelope() {
@@ -668,5 +679,55 @@ mod tests {
         assert!(stability.member_b1_factors[0] >= 1.0);
         assert!(stability.is_stable);
         assert!(stability.stability_index_theta <= 0.25);
+    }
+
+    #[test]
+    fn test_phase71_6dof_winkler_elastic_spring_equilibrium() {
+        let mut fixed_model = StructuralModel::new("Rigid Base Column");
+        fixed_model.add_node(Node3D::new(0, 0.0, 0.0, 0.0).with_fixity(BoundaryFixity::fixed()));
+        fixed_model.add_node(Node3D::new(1, 0.0, 3.5, 0.0));
+        let sec = CrossSection::rectangular_rc("C400x400", 0.4, 0.4, 0.70);
+        let mat = Material::reinforced_concrete_fc30();
+        let k_col = (mat.elastic_modulus * sec.area) / 3.5;
+        fixed_model.add_element(
+            Element3D::new(1, "C1", 0, 1)
+                .with_type(ElementType::Frame3D)
+                .with_section(sec.clone())
+                .with_material(mat.clone()),
+        );
+        let f_vert = -100_000.0; // 100 kN downward along Y
+        fixed_model.add_load(NodalLoad::force_y(1, f_vert));
+        let fixed_res = FemSolver::solve(&fixed_model).expect("Fixed model should solve");
+
+        let kv = 80_000_000.0; // 80 MN/m vertical Winkler spring
+        let mut ssi_model = StructuralModel::new("Winkler SSI Column");
+        ssi_model.add_node(
+            Node3D::new(0, 0.0, 0.0, 0.0)
+                .with_fixity(BoundaryFixity::free())
+                .with_springs([65_000_000.0, kv, 65_000_000.0, 40_000_000.0, 25_000_000.0, 40_000_000.0]),
+        );
+        ssi_model.add_node(Node3D::new(1, 0.0, 3.5, 0.0));
+        ssi_model.add_element(
+            Element3D::new(1, "C1", 0, 1)
+                .with_type(ElementType::Frame3D)
+                .with_section(sec)
+                .with_material(mat),
+        );
+        ssi_model.add_load(NodalLoad::force_y(1, f_vert));
+        let ssi_res = FemSolver::solve(&ssi_model).expect("Winkler SSI model should solve");
+
+        let u_base_y = ssi_res.nodal_displacements[0][1];
+        let u_top_y = ssi_res.nodal_displacements[1][1];
+        let u_base_expected = f_vert / kv;
+        let u_top_expected = f_vert * (1.0 / k_col + 1.0 / kv);
+        assert!(
+            (u_base_y - u_base_expected).abs() < 1e-6,
+            "Base vertical settlement mismatch: got {u_base_y}, expected {u_base_expected}"
+        );
+        assert!(
+            (u_top_y - u_top_expected).abs() < 1e-6,
+            "Top vertical displacement mismatch: got {u_top_y}, expected {u_top_expected}"
+        );
+        assert!(u_top_y.abs() > fixed_res.nodal_displacements[1][1].abs());
     }
 }

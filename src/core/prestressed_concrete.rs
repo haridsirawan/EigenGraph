@@ -863,6 +863,7 @@ impl PrestressedConcreteEngine {
                     y,
                     z: 0.0,
                     fixity,
+                    spring_stiffness: [0.0; 6],
                 });
                 girder_node_ids.push(nid_girder);
 
@@ -874,6 +875,7 @@ impl PrestressedConcreteEngine {
                     y,
                     z: z_tendon,
                     fixity: crate::core::BoundaryFixity::free(),
+                    spring_stiffness: [0.0; 6],
                 });
                 tendon_node_ids.push(nid_tendon);
             }

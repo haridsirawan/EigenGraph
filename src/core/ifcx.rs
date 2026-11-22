@@ -63,6 +63,8 @@ pub mod ns {
     pub const EG_ARI: &str = "eigengraph::ari::v2";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
+    pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
+    pub const EG_GEOTECH_SSI: &str = "eigengraph::geotech::ssi_springs";
 }
 
 fn default_ifcx_version() -> String {
@@ -1132,6 +1134,20 @@ impl IfcxStage {
             crc_report.crc_overlay_ifcx.clone(),
         ]);
         stage.to_composed_document(&format!("{}_crc_cascade", base_doc.header.id))
+    }
+
+    /// Composes an existing base `.ifcx` document with a non-destructive 3D Subsurface
+    /// Geotechnical Stratigraphy & Winkler SSI overlay (`eigengraph::geotech::stratigraphy`
+    /// + `eigengraph::geotech::ssi_springs`) without mutating superstructure nodes.
+    pub fn compose_with_subsurface_ssi_overlay(
+        base_doc: &IfcxDocument,
+        ssi_report: &crate::core::geotech::SubsurfaceSsiAnalysisReport,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[
+            base_doc.clone(),
+            ssi_report.ssi_overlay_ifcx.clone(),
+        ]);
+        stage.to_composed_document(&format!("{}_subsurface_ssi", base_doc.header.id))
     }
 }
 

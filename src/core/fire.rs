@@ -789,6 +789,7 @@ impl FireEngine {
                     y,
                     z: 0.0,
                     fixity: BoundaryFixity::fixed(),
+                    spring_stiffness: [0.0; 6],
                 });
                 col.push(node_id);
                 node_id += 1;
@@ -806,6 +807,7 @@ impl FireEngine {
                     y,
                     z: h_story,
                     fixity: BoundaryFixity::free(),
+                    spring_stiffness: [0.0; 6],
                 });
                 col.push(node_id);
                 node_id += 1;

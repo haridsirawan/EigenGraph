@@ -615,6 +615,7 @@ impl ShearWallEngine {
                 } else {
                     crate::core::BoundaryFixity::free()
                 },
+                spring_stiffness: [0.0; 6],
             });
             node_id += 1;
 
@@ -629,6 +630,7 @@ impl ShearWallEngine {
                 } else {
                     crate::core::BoundaryFixity::free()
                 },
+                spring_stiffness: [0.0; 6],
             });
             node_id += 1;
 
@@ -643,6 +645,7 @@ impl ShearWallEngine {
                 } else {
                     crate::core::BoundaryFixity::free()
                 },
+                spring_stiffness: [0.0; 6],
             });
             node_id += 1;
 
@@ -657,6 +660,7 @@ impl ShearWallEngine {
                 } else {
                     crate::core::BoundaryFixity::free()
                 },
+                spring_stiffness: [0.0; 6],
             });
             node_id += 1;
 

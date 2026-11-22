@@ -4,7 +4,200 @@
 //! and Wolf / Veletsos & Meek Soil-Structure Interaction (SSI) Period Lengthening Shifts.
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+use crate::core::ari::AriEngine;
+use crate::core::bim::BimProject;
+use crate::core::ifcx::{ns as ifcx_ns, IfcxDocument, IfcxImport, IfcxNode, UsdGeomMesh};
+use crate::core::lifecycle_ops::SiteEnvironmentalCoupling;
+use crate::core::modal::{ModalEngine, SiteClass};
 use crate::core::model::StructuralModel;
+use crate::core::solver::FemSolver;
+
+pub const NS_EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
+pub const NS_EG_GEOTECH_SSI: &str = "eigengraph::geotech::ssi_springs";
+
+fn default_gwt_m() -> f64 {
+    2.5
+}
+
+fn slugify_geotech(raw: &str) -> String {
+    let s: String = raw
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if s.is_empty() {
+        "site_project".to_string()
+    } else {
+        s
+    }
+}
+
+/// Borehole Geotechnical Stratigraphy Archetype (Phase 71: Subsurface 3D & Winkler SSI).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum BoreholePreset {
+    AlluvialSoftClay,
+    CoastalLiquefiableSand,
+    #[default]
+    StiffVolcanicAlluvium,
+    DenseGravelBedrock,
+}
+
+impl BoreholePreset {
+    pub const ALL: [Self; 4] = [
+        Self::AlluvialSoftClay,
+        Self::CoastalLiquefiableSand,
+        Self::StiffVolcanicAlluvium,
+        Self::DenseGravelBedrock,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AlluvialSoftClay => "Alluvial Soft Marine Clay (Site Class SE)",
+            Self::CoastalLiquefiableSand => "Coastal Liquefiable Sand (Site Class SD)",
+            Self::StiffVolcanicAlluvium => "Stiff Volcanic Alluvium (Site Class SC)",
+            Self::DenseGravelBedrock => "Dense Gravel & Competent Bedrock (Site Class SB)",
+        }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::AlluvialSoftClay => "Soft Clay",
+            Self::CoastalLiquefiableSand => "Liquefiable",
+            Self::StiffVolcanicAlluvium => "Stiff Alluv",
+            Self::DenseGravelBedrock => "Dense Rock",
+        }
+    }
+
+    pub fn cycle_next(self) -> Self {
+        match self {
+            Self::AlluvialSoftClay => Self::CoastalLiquefiableSand,
+            Self::CoastalLiquefiableSand => Self::StiffVolcanicAlluvium,
+            Self::StiffVolcanicAlluvium => Self::DenseGravelBedrock,
+            Self::DenseGravelBedrock => Self::AlluvialSoftClay,
+        }
+    }
+
+    pub fn from_arg(arg: &str) -> Self {
+        let lower = arg.trim().to_ascii_lowercase();
+        if lower.contains("soft") || lower.contains("clay") || lower.contains("se") {
+            Self::AlluvialSoftClay
+        } else if lower.contains("liq") || lower.contains("coast") || lower.contains("sand") {
+            Self::CoastalLiquefiableSand
+        } else if lower.contains("rock") || lower.contains("dense") || lower.contains("bed") || lower.contains("sb") {
+            Self::DenseGravelBedrock
+        } else {
+            Self::StiffVolcanicAlluvium
+        }
+    }
+}
+
+/// Detailed 3D Subsurface Soil Horizon Stratum with SPT, Vs, and Seed-Idriss Liquefaction state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StratigraphyStratum {
+    pub name: String,
+    pub soil_type: SoilType,
+    pub depth_top_m: f64,
+    pub depth_bottom_m: f64,
+    pub n_spt: f64,
+    pub vs_m_s: f64,
+    pub fines_content_pct: f64,
+    pub unit_weight_kn_m3: f64,
+    pub subgrade_ks_kn_m3: f64,
+    pub liquefiable: bool,
+    pub liquefaction_fs: f64,
+    pub py_multiplier: f64,
+    pub color_rgba: [f32; 4],
+}
+
+/// Interactive Subsurface Geotechnical & 6-DOF Winkler SSI Configuration persisted in `.eigen.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubsurfaceSsiConfig {
+    #[serde(default)]
+    pub ssi_coupling_enabled: bool,
+    #[serde(default)]
+    pub xray_subsurface_visible: bool,
+    #[serde(default)]
+    pub borehole_preset: BoreholePreset,
+    #[serde(default = "default_gwt_m")]
+    pub groundwater_depth_m: f64,
+    #[serde(default)]
+    pub liquefaction_trigger_active: bool,
+}
+
+impl Default for SubsurfaceSsiConfig {
+    fn default() -> Self {
+        Self {
+            ssi_coupling_enabled: false,
+            xray_subsurface_visible: false,
+            borehole_preset: BoreholePreset::default(),
+            groundwater_depth_m: default_gwt_m(),
+            liquefaction_trigger_active: false,
+        }
+    }
+}
+
+impl SubsurfaceSsiConfig {
+    pub fn content_revision_hash(&self) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mix = |acc: &mut u64, v: u64| {
+            *acc ^= v;
+            *acc = acc.wrapping_mul(0x0000_0100_0000_01b3);
+        };
+        mix(&mut h, u64::from(self.ssi_coupling_enabled));
+        mix(&mut h, u64::from(self.xray_subsurface_visible));
+        mix(&mut h, self.borehole_preset as u64 + 1);
+        mix(&mut h, (self.groundwater_depth_m * 100.0).round() as i64 as u64);
+        mix(&mut h, u64::from(self.liquefaction_trigger_active));
+        h
+    }
+}
+
+/// Per-footing SSI spring, settlement, and pile embedment output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FootingSsiCouplingResult {
+    pub footing_id: usize,
+    pub footing_name: String,
+    pub pos_m: [f64; 2],
+    pub width_m: f64,
+    pub length_m: f64,
+    pub required_pile_length_m: f64,
+    pub bearing_stratum_name: String,
+    pub winkler_springs: WinklerSpringMatrix,
+    pub estimated_settlement_mm: f64,
+    pub liquefaction_risk_fs: f64,
+}
+
+/// Coupled 3D Subsurface Stratigraphy, Liquefaction & 6-DOF Winkler SSI Analysis Report (Phase 71).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubsurfaceSsiAnalysisReport {
+    pub preset: BoreholePreset,
+    pub site_class: SiteClass,
+    pub vs30_m_s: f64,
+    pub groundwater_depth_m: f64,
+    pub pga_g: f64,
+    pub strata: Vec<StratigraphyStratum>,
+    pub min_liquefaction_fs: f64,
+    pub liquefaction_potential_index: f64,
+    pub is_liquefaction_critical: bool,
+    pub recommended_pile_depth_m: f64,
+    pub footing_couplings: Vec<FootingSsiCouplingResult>,
+    pub fixed_base_period_t1_s: f64,
+    pub ssi_coupled_period_t1_s: f64,
+    pub period_lengthening_pct: f64,
+    pub fixed_base_ari: f64,
+    pub ssi_coupled_ari: f64,
+    pub max_foundation_settlement_mm: f64,
+    pub ssi_overlay_ifcx: IfcxDocument,
+    pub summary: String,
+}
 
 /// Soil Layer Stratigraphy Classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -595,11 +788,786 @@ impl GeotechEngine {
         doc.push_str("---\n*Certified and Generated autonomously by EigenGraph v0.0.5 Geotechnical Workstation.*\n");
         doc
     }
+
+    /// Generates a 30 m deep 3D subsurface soil stratigraphy profile with exact harmonic $V_{s30}$,
+    /// SNI 1726 `SiteClass`, simplified Seed–Idriss liquefaction $FS_L$ & Iwasaki $LPI$, lateral $p\text{-}y$
+    /// multipliers, and auto-seated deep bearing pile embedment depth.
+    pub fn build_borehole_strata(
+        preset: BoreholePreset,
+        groundwater_depth_m: f64,
+        pga_g: f64,
+        apply_liquefaction: bool,
+    ) -> (Vec<StratigraphyStratum>, f64, SiteClass, f64, f64) {
+        let gwt = groundwater_depth_m.clamp(0.0, 20.0);
+        let eff_pga = pga_g.clamp(0.10, 1.50);
+
+        struct RawLayer {
+            name: &'static str,
+            soil_type: SoilType,
+            top: f64,
+            bot: f64,
+            n_spt: f64,
+            vs: f64,
+            fc: f64,
+            gamma: f64,
+            ks: f64,
+            liquefiable: bool,
+            color: [f32; 4],
+        }
+
+        let specs: Vec<RawLayer> = match preset {
+            BoreholePreset::AlluvialSoftClay => vec![
+                RawLayer {
+                    name: "Silty Clay Fill",
+                    soil_type: SoilType::MediumClay,
+                    top: 0.0,
+                    bot: 3.0,
+                    n_spt: 6.0,
+                    vs: 135.0,
+                    fc: 55.0,
+                    gamma: 17.5,
+                    ks: 16_000.0,
+                    liquefiable: false,
+                    color: [0.55, 0.44, 0.34, 0.32],
+                },
+                RawLayer {
+                    name: "Soft Marine Clay",
+                    soil_type: SoilType::SoftClay,
+                    top: 3.0,
+                    bot: 13.0,
+                    n_spt: 4.0,
+                    vs: 105.0,
+                    fc: 78.0,
+                    gamma: 16.0,
+                    ks: 9_000.0,
+                    liquefiable: false,
+                    color: [0.36, 0.46, 0.52, 0.32],
+                },
+                RawLayer {
+                    name: "Medium Alluvial Clay",
+                    soil_type: SoilType::MediumClay,
+                    top: 13.0,
+                    bot: 22.0,
+                    n_spt: 14.0,
+                    vs: 165.0,
+                    fc: 58.0,
+                    gamma: 18.0,
+                    ks: 24_000.0,
+                    liquefiable: false,
+                    color: [0.46, 0.38, 0.30, 0.34],
+                },
+                RawLayer {
+                    name: "Dense Bearing Sand",
+                    soil_type: SoilType::DenseSand,
+                    top: 22.0,
+                    bot: 30.0,
+                    n_spt: 38.0,
+                    vs: 340.0,
+                    fc: 10.0,
+                    gamma: 20.5,
+                    ks: 68_000.0,
+                    liquefiable: false,
+                    color: [0.64, 0.56, 0.40, 0.38],
+                },
+            ],
+            BoreholePreset::CoastalLiquefiableSand => vec![
+                RawLayer {
+                    name: "Coastal Sand Fill",
+                    soil_type: SoilType::MediumSand,
+                    top: 0.0,
+                    bot: 2.0,
+                    n_spt: 11.0,
+                    vs: 165.0,
+                    fc: 8.0,
+                    gamma: 18.5,
+                    ks: 26_000.0,
+                    liquefiable: true,
+                    color: [0.76, 0.67, 0.46, 0.32],
+                },
+                RawLayer {
+                    name: "Loose Saturated Coastal Sand",
+                    soil_type: SoilType::LooseSand,
+                    top: 2.0,
+                    bot: 9.0,
+                    n_spt: 8.0,
+                    vs: 140.0,
+                    fc: 6.0,
+                    gamma: 17.5,
+                    ks: 14_000.0,
+                    liquefiable: true,
+                    color: [0.80, 0.58, 0.36, 0.34],
+                },
+                RawLayer {
+                    name: "Medium Silty Sand",
+                    soil_type: SoilType::MediumSand,
+                    top: 9.0,
+                    bot: 17.0,
+                    n_spt: 18.0,
+                    vs: 225.0,
+                    fc: 15.0,
+                    gamma: 19.0,
+                    ks: 36_000.0,
+                    liquefiable: true,
+                    color: [0.68, 0.54, 0.38, 0.34],
+                },
+                RawLayer {
+                    name: "Dense Marine Sand & Gravel",
+                    soil_type: SoilType::DenseSand,
+                    top: 17.0,
+                    bot: 30.0,
+                    n_spt: 42.0,
+                    vs: 420.0,
+                    fc: 8.0,
+                    gamma: 21.0,
+                    ks: 80_000.0,
+                    liquefiable: false,
+                    color: [0.46, 0.48, 0.50, 0.38],
+                },
+            ],
+            BoreholePreset::StiffVolcanicAlluvium => vec![
+                RawLayer {
+                    name: "Silty Loam Topsoil",
+                    soil_type: SoilType::MediumClay,
+                    top: 0.0,
+                    bot: 3.5,
+                    n_spt: 12.0,
+                    vs: 215.0,
+                    fc: 35.0,
+                    gamma: 18.5,
+                    ks: 30_000.0,
+                    liquefiable: false,
+                    color: [0.58, 0.46, 0.34, 0.32],
+                },
+                RawLayer {
+                    name: "Stiff Volcanic Tuff Clay",
+                    soil_type: SoilType::StiffClay,
+                    top: 3.5,
+                    bot: 10.0,
+                    n_spt: 22.0,
+                    vs: 275.0,
+                    fc: 45.0,
+                    gamma: 19.2,
+                    ks: 46_000.0,
+                    liquefiable: false,
+                    color: [0.52, 0.40, 0.32, 0.34],
+                },
+                RawLayer {
+                    name: "Dense Volcanic Sand",
+                    soil_type: SoilType::DenseSand,
+                    top: 10.0,
+                    bot: 18.0,
+                    n_spt: 34.0,
+                    vs: 375.0,
+                    fc: 12.0,
+                    gamma: 20.5,
+                    ks: 68_000.0,
+                    liquefiable: false,
+                    color: [0.60, 0.52, 0.42, 0.36],
+                },
+                RawLayer {
+                    name: "Cemented Andesitic Breccia",
+                    soil_type: SoilType::Bedrock,
+                    top: 18.0,
+                    bot: 30.0,
+                    n_spt: 55.0,
+                    vs: 620.0,
+                    fc: 5.0,
+                    gamma: 22.5,
+                    ks: 160_000.0,
+                    liquefiable: false,
+                    color: [0.40, 0.43, 0.48, 0.40],
+                },
+            ],
+            BoreholePreset::DenseGravelBedrock => vec![
+                RawLayer {
+                    name: "Compacted Gravel Subbase",
+                    soil_type: SoilType::DenseSand,
+                    top: 0.0,
+                    bot: 2.5,
+                    n_spt: 32.0,
+                    vs: 410.0,
+                    fc: 5.0,
+                    gamma: 20.5,
+                    ks: 85_000.0,
+                    liquefiable: false,
+                    color: [0.58, 0.55, 0.48, 0.32],
+                },
+                RawLayer {
+                    name: "Dense Cobble Alluvium",
+                    soil_type: SoilType::DenseSand,
+                    top: 2.5,
+                    bot: 12.0,
+                    n_spt: 48.0,
+                    vs: 640.0,
+                    fc: 4.0,
+                    gamma: 21.5,
+                    ks: 130_000.0,
+                    liquefiable: false,
+                    color: [0.48, 0.47, 0.46, 0.35],
+                },
+                RawLayer {
+                    name: "Competent Bedrock",
+                    soil_type: SoilType::Bedrock,
+                    top: 12.0,
+                    bot: 30.0,
+                    n_spt: 65.0,
+                    vs: 1150.0,
+                    fc: 2.0,
+                    gamma: 24.0,
+                    ks: 240_000.0,
+                    liquefiable: false,
+                    color: [0.35, 0.39, 0.44, 0.40],
+                },
+            ],
+        };
+
+        let mut strata = Vec::with_capacity(specs.len());
+        let mut travel_time_30 = 0.0_f64;
+        let mut lpi = 0.0_f64;
+        let mut recommended_pile_depth_m = 12.0_f64;
+        let mut found_bearing = false;
+
+        for raw in specs {
+            let thickness = (raw.bot - raw.top).max(0.1);
+            let h_in_30 = (raw.bot.min(30.0) - raw.top.min(30.0)).max(0.0);
+            travel_time_30 += h_in_30 / raw.vs.max(50.0);
+
+            if !found_bearing && (raw.n_spt >= 30.0 || raw.vs >= 320.0) {
+                recommended_pile_depth_m = (raw.top + 2.0).clamp(4.5, 28.0);
+                found_bearing = true;
+            }
+
+            let z_mid = 0.5 * (raw.top + raw.bot);
+            let (fs_l, py_mult) = if !raw.liquefiable || raw.bot <= gwt {
+                (3.0, 1.0)
+            } else {
+                let z_sat = gwt.min(z_mid);
+                let sigma_v = raw.gamma * z_mid;
+                let u_w = 9.81 * (z_mid - z_sat).max(0.0);
+                let sigma_v_eff = (sigma_v - u_w).max(15.0);
+                let cn = (100.0 / sigma_v_eff).sqrt().clamp(0.4, 1.7);
+                let n1_60cs =
+                    (raw.n_spt * cn * 1.05 + (raw.fc * 0.12).min(5.0)).clamp(2.0, 45.0);
+                let rd = (1.0 - 0.00765 * z_mid).clamp(0.50, 1.0);
+                let csr = 0.65 * eff_pga * (sigma_v / sigma_v_eff) * rd;
+                let n_cap = n1_60cs.min(29.5);
+                let crr_75 = (1.0 / (34.0 - n_cap)
+                    + n_cap / 135.0
+                    + 50.0 / (10.0 * n_cap + 45.0).powi(2)
+                    - 1.0 / 200.0)
+                    .clamp(0.05, 0.70);
+                let fs = (crr_75 / csr.max(0.02)).clamp(0.15, 3.5);
+
+                if z_mid <= 20.0 && fs < 1.0 {
+                    let w_z = (10.0 - 0.5 * z_mid).max(0.0);
+                    lpi += (1.0 - fs) * w_z * thickness;
+                }
+
+                let mult = if apply_liquefaction {
+                    if fs < 1.0 {
+                        (0.12 + 0.25 * fs).clamp(0.12, 0.37)
+                    } else if fs < 1.25 {
+                        (0.40 + 2.4 * (fs - 1.0)).clamp(0.40, 1.0)
+                    } else {
+                        1.0
+                    }
+                } else {
+                    1.0
+                };
+                (fs, mult)
+            };
+
+            strata.push(StratigraphyStratum {
+                name: raw.name.to_string(),
+                soil_type: raw.soil_type,
+                depth_top_m: raw.top,
+                depth_bottom_m: raw.bot,
+                n_spt: raw.n_spt,
+                vs_m_s: raw.vs,
+                fines_content_pct: raw.fc,
+                unit_weight_kn_m3: raw.gamma,
+                subgrade_ks_kn_m3: raw.ks,
+                liquefiable: raw.liquefiable,
+                liquefaction_fs: fs_l,
+                py_multiplier: py_mult,
+                color_rgba: raw.color,
+            });
+        }
+
+        let vs30 = (30.0 / travel_time_30.max(1e-3)).clamp(80.0, 2000.0);
+        let site_class = if vs30 > 1500.0 {
+            SiteClass::SA
+        } else if vs30 > 750.0 {
+            SiteClass::SB
+        } else if vs30 > 350.0 {
+            SiteClass::SC
+        } else if vs30 > 175.0 {
+            SiteClass::SD
+        } else {
+            SiteClass::SE
+        };
+
+        (strata, vs30, site_class, lpi, recommended_pile_depth_m)
+    }
+
+    /// Computes equivalent 6-DOF Winkler foundation springs combining shallow pile-cap subgrade
+    /// contact with a 4-pile shaft group embedded to `recommended_pile_depth_m`, applying Seed–Idriss
+    /// lateral $p\text{-}y$ degradation when liquefaction is active.
+    pub fn compute_coupled_footing_winkler_springs(
+        width_b_m: f64,
+        length_l_m: f64,
+        strata: &[StratigraphyStratum],
+        recommended_pile_depth_m: f64,
+        liquefaction_active: bool,
+    ) -> (WinklerSpringMatrix, f64, String) {
+        let b = width_b_m.max(0.8);
+        let l = length_l_m.max(0.8);
+        let area = b * l;
+
+        let top_ks = strata
+            .first()
+            .map(|s| s.subgrade_ks_kn_m3)
+            .unwrap_or(30_000.0);
+        let bearing = strata
+            .iter()
+            .find(|s| {
+                recommended_pile_depth_m >= s.depth_top_m
+                    && recommended_pile_depth_m <= s.depth_bottom_m + 0.1
+            })
+            .or_else(|| strata.last());
+        let bearing_ks = bearing.map(|s| s.subgrade_ks_kn_m3).unwrap_or(top_ks);
+        let bearing_name = bearing
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "Stiff Alluvium".to_string());
+
+        let mut min_fs = 3.0_f64;
+        let mut min_shallow_py = 1.0_f64;
+        for s in strata {
+            min_fs = min_fs.min(s.liquefaction_fs);
+            if s.depth_top_m <= 12.0 {
+                min_shallow_py = min_shallow_py.min(s.py_multiplier);
+            }
+        }
+        let lat_py = if liquefaction_active { min_shallow_py } else { 1.0 };
+
+        let pile_embed_fac = (recommended_pile_depth_m / 12.0).clamp(0.65, 1.85);
+        let ks_eff = 0.25 * top_ks + 0.75 * bearing_ks * pile_embed_fac;
+
+        // Vertical axial stiffness from cap contact + 4 deep pile shafts (kN/m)
+        let kz = (ks_eff * area * (0.45 + 0.35 * (bearing_ks / 60_000.0).clamp(0.4, 2.5)))
+            * if liquefaction_active && min_fs < 1.0 { 0.72 } else { 1.0 };
+        let kx = kz * 0.58 * lat_py;
+        let ky = kz * 0.58 * lat_py;
+
+        let ix = (b * l.powi(3)) / 12.0;
+        let iy = (l * b.powi(3)) / 12.0;
+        let iz = ix + iy;
+        let pile_rock_boost = 1.0 + 0.12 * pile_embed_fac;
+        let k_rot_x = ks_eff * ix * pile_rock_boost * (0.35 + 0.65 * lat_py);
+        let k_rot_y = ks_eff * iy * pile_rock_boost * (0.35 + 0.65 * lat_py);
+        let k_rot_z = ks_eff * iz * 0.55 * lat_py;
+
+        (
+            WinklerSpringMatrix {
+                kz_trans_kn_m: kz.max(1_000.0),
+                kx_trans_kn_m: kx.max(400.0),
+                ky_trans_kn_m: ky.max(400.0),
+                k_theta_x_knm_rad: k_rot_x.max(500.0),
+                k_theta_y_knm_rad: k_rot_y.max(500.0),
+                k_theta_z_knm_rad: k_rot_z.max(500.0),
+                subgrade_modulus_ks: ks_eff,
+            },
+            min_fs,
+            bearing_name,
+        )
+    }
+
+    /// Emits a non-destructive IFCX (IFC 5) subsurface stratigraphy & Winkler SSI layer
+    /// containing `IfcBorehole`, `IfcGeotechnicalStratum` (`usd::usdgeom::mesh`), groundwater table,
+    /// and coupled SSI telemetry under `/earth/sites/<slug>/subsurface/...`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_subsurface_ssi_ifcx_overlay(
+        project: &BimProject,
+        preset: BoreholePreset,
+        site_class: SiteClass,
+        vs30_m_s: f64,
+        gwt_m: f64,
+        pga_g: f64,
+        strata: &[StratigraphyStratum],
+        lpi: f64,
+        recommended_pile_depth_m: f64,
+        footing_couplings: &[FootingSsiCouplingResult],
+        t_fixed: f64,
+        t_ssi: f64,
+        ari_fixed: f64,
+        ari_ssi: f64,
+    ) -> IfcxDocument {
+        let slug = slugify_geotech(&project.project_name);
+        let mut doc = IfcxDocument::new(format!("subsurface_ssi_{slug}"));
+        doc.imports.push(IfcxImport {
+            uri: format!("eigengraph://{slug}.ifcx"),
+            integrity: None,
+            role: Some("base-building".to_string()),
+        });
+        doc.schemas.insert(
+            NS_EG_GEOTECH_STRATIGRAPHY.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph 3D Borehole Soil Stratigraphy & Seed-Idriss Liquefaction" } }),
+        );
+        doc.schemas.insert(
+            NS_EG_GEOTECH_SSI.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph 6-DOF Coupled Winkler Soil-Structure Interaction Springs" } }),
+        );
+
+        let site_path = format!("/earth/sites/{slug}");
+        let sub_path = format!("{site_path}/subsurface");
+        let borehole_path = format!("{sub_path}/borehole_01");
+        let gwt_path = format!("{sub_path}/groundwater_table");
+        let ssi_path = format!("{site_path}/buildings/{slug}/analysis/subsurface_ssi");
+
+        let (mut min_x, mut max_x, mut min_y, mut max_y) = (-12.0_f64, 12.0_f64, -12.0_f64, 12.0_f64);
+        if let Some((bmin, bmax)) = project.plan_extents_mm() {
+            min_x = bmin[0] * 0.001 - 6.0;
+            max_x = bmax[0] * 0.001 + 6.0;
+            min_y = bmin[1] * 0.001 - 6.0;
+            max_y = bmax[1] * 0.001 + 6.0;
+        }
+
+        let mut sub_node = IfcxNode::new(&sub_path).with_class("IfcGeotechnicalAssembly");
+        sub_node
+            .children
+            .insert("borehole_01".to_string(), borehole_path.clone());
+        sub_node
+            .children
+            .insert("groundwater_table".to_string(), gwt_path.clone());
+
+        let borehole_node = IfcxNode::new(&borehole_path)
+            .with_class("IfcBorehole")
+            .with_prop(
+                "BH-01",
+                preset.short_label(),
+                &format!("{} | Vs30={vs30_m_s:.1} m/s | {site_class:?}", preset.label()),
+            )
+            .with_attr(
+                NS_EG_GEOTECH_STRATIGRAPHY,
+                json!({
+                    "preset": preset.short_label(),
+                    "siteClass": format!("{site_class:?}"),
+                    "vs30Ms": vs30_m_s,
+                    "groundwaterDepthM": gwt_m,
+                    "pgaG": pga_g,
+                    "liquefactionPotentialIndex": lpi,
+                    "recommendedPileDepthM": recommended_pile_depth_m,
+                }),
+            );
+        doc.add_node(borehole_node);
+
+        for (i, s) in strata.iter().enumerate() {
+            let key = format!("stratum_{i:02}");
+            let spath = format!("{sub_path}/{key}");
+            sub_node.children.insert(key, spath.clone());
+            let mesh = UsdGeomMesh::from_box_m(
+                [min_x, min_y, -s.depth_bottom_m],
+                [max_x, max_y, -s.depth_top_m],
+                s.color_rgba,
+                4.0,
+            );
+            let snode = IfcxNode::new(&spath)
+                .with_class("IfcGeotechnicalStratum")
+                .with_prop(
+                    &s.name,
+                    s.soil_type.label(),
+                    &format!(
+                        "Depth {:.1}-{:.1}m | N-SPT={:.0} | Vs={:.0} m/s | FS_L={:.2} | p-y={:.2}",
+                        s.depth_top_m, s.depth_bottom_m, s.n_spt, s.vs_m_s, s.liquefaction_fs, s.py_multiplier
+                    ),
+                )
+                .with_mesh(&mesh)
+                .with_attr(
+                    NS_EG_GEOTECH_STRATIGRAPHY,
+                    json!({
+                        "depthTopM": s.depth_top_m,
+                        "depthBottomM": s.depth_bottom_m,
+                        "nSpt": s.n_spt,
+                        "vsMs": s.vs_m_s,
+                        "liquefiable": s.liquefiable,
+                        "liquefactionFs": s.liquefaction_fs,
+                        "pyMultiplier": s.py_multiplier,
+                    }),
+                );
+            doc.add_node(snode);
+        }
+
+        let gwt_mesh = UsdGeomMesh::from_box_m(
+            [min_x, min_y, -gwt_m - 0.12],
+            [max_x, max_y, -gwt_m],
+            [0.14, 0.72, 0.94, 0.36],
+            5.0,
+        );
+        let gwt_node = IfcxNode::new(&gwt_path)
+            .with_class("IfcGeographicElement")
+            .with_prop(
+                "Groundwater Table",
+                "Phreatic Surface",
+                &format!("Water table at -{gwt_m:.2} m below grade"),
+            )
+            .with_mesh(&gwt_mesh);
+        doc.add_node(gwt_node);
+        doc.add_node(sub_node);
+
+        let ssi_node = IfcxNode::new(&ssi_path)
+            .with_class("IfcStructuralAnalysisModel")
+            .with_prop(
+                "6-DOF Coupled Winkler SSI",
+                preset.short_label(),
+                &format!(
+                    "T1_fixed={t_fixed:.3}s -> T1_SSI={t_ssi:.3}s | Pile Depth={recommended_pile_depth_m:.1}m"
+                ),
+            )
+            .with_attr(
+                NS_EG_GEOTECH_SSI,
+                json!({
+                    "fixedBasePeriodSec": t_fixed,
+                    "ssiCoupledPeriodSec": t_ssi,
+                    "fixedBaseAri": ari_fixed,
+                    "ssiCoupledAri": ari_ssi,
+                    "recommendedPileDepthM": recommended_pile_depth_m,
+                    "footings": footing_couplings.iter().map(|f| json!({
+                        "id": f.footing_id,
+                        "name": f.footing_name,
+                        "posM": f.pos_m,
+                        "bearingStratum": f.bearing_stratum_name,
+                        "pileLenM": f.required_pile_length_m,
+                        "kzKnM": f.winkler_springs.kz_trans_kn_m,
+                        "kxKnM": f.winkler_springs.kx_trans_kn_m,
+                        "kyKnM": f.winkler_springs.ky_trans_kn_m,
+                        "settlementMm": f.estimated_settlement_mm,
+                        "liquefactionFs": f.liquefaction_risk_fs,
+                    })).collect::<Vec<_>>(),
+                }),
+            )
+            .with_attr(
+                ifcx_ns::EG_ARI,
+                json!({
+                    "ariSystem": ari_ssi,
+                    "ariAverage": ari_ssi,
+                    "isKinematicallyStable": true,
+                }),
+            );
+        doc.add_node(ssi_node);
+        doc
+    }
+}
+
+/// Evaluates coupled 3D subsurface stratigraphy, Seed–Idriss liquefaction screening, 6-DOF Winkler
+/// foundation springs, modal period shift, and non-destructive `.ifcx` overlay for a `BimProject`.
+pub fn evaluate_coupled_subsurface_ssi_for_bim(
+    project: &BimProject,
+    site: &SiteEnvironmentalCoupling,
+    config: &SubsurfaceSsiConfig,
+) -> Result<SubsurfaceSsiAnalysisReport, String> {
+    if project.is_empty() {
+        return Err(
+            "BIM project is empty — add structural columns/beams before evaluating 6-DOF Subsurface SSI."
+                .to_string(),
+        );
+    }
+
+    let pga_g = (site.seismic_pga_ss_g as f64 * 0.40).clamp(0.10, 1.20);
+    let (strata, vs30_m_s, site_class, lpi, recommended_pile_depth_m) =
+        GeotechEngine::build_borehole_strata(
+            config.borehole_preset,
+            config.groundwater_depth_m,
+            pga_g,
+            config.liquefaction_trigger_active,
+        );
+
+    let (fem_fixed, _map_fixed, load_fixed) = project.to_structural_model_with_site_loads(site);
+    let mut coupled_cfg = config.clone();
+    coupled_cfg.ssi_coupling_enabled = true;
+    let (fem_ssi, _map_ssi, load_ssi) =
+        project.to_structural_model_with_site_loads_and_ssi(site, Some(&coupled_cfg));
+
+    if fem_ssi.elements.is_empty() {
+        return Err("No analytical 3D frame elements available for coupled SSI analysis.".to_string());
+    }
+
+    let fea_ssi = FemSolver::solve(&fem_ssi)?;
+    let modal_fixed = ModalEngine::analyze_for_earth_3d(&fem_fixed, 3, load_fixed.spectrum)?;
+    let modal_ssi = ModalEngine::analyze_for_earth_3d(&fem_ssi, 3, load_ssi.spectrum)?;
+
+    let t_fixed = modal_fixed.fundamental_period_s.max(0.05);
+    let t_ssi = modal_ssi.fundamental_period_s.max(t_fixed);
+    let period_lengthening_pct = ((t_ssi / t_fixed) - 1.0) * 100.0;
+
+    let (fixed_base_ari, ssi_coupled_ari) =
+        if fem_ssi.nodes.len() <= 32 && fem_ssi.elements.len() <= 96 {
+            let fixed = AriEngine::evaluate_redundancy_fast(&fem_fixed)
+                .map(|a| a.average_ari)
+                .unwrap_or(0.85);
+            let ssi = AriEngine::evaluate_redundancy_fast(&fem_ssi)
+                .map(|a| a.average_ari)
+                .unwrap_or(fixed);
+            (fixed, ssi)
+        } else {
+            let max_dcr_fixed = FemSolver::solve(&fem_fixed)
+                .ok()
+                .and_then(|res| res.member_dcr_interactions.into_iter().reduce(f64::max))
+                .unwrap_or(0.35);
+            let max_dcr_ssi = fea_ssi
+                .member_dcr_interactions
+                .iter()
+                .copied()
+                .reduce(f64::max)
+                .unwrap_or(max_dcr_fixed);
+            (
+                (1.0 - max_dcr_fixed * 0.35).clamp(0.20, 0.96),
+                (1.0 - max_dcr_ssi * 0.35).clamp(0.20, 0.96),
+            )
+        };
+
+    let base_nodes: Vec<(f64, f64, f64)> = fem_ssi
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.y.abs() <= 0.05)
+        .map(|(idx, n)| {
+            let settle_mm = fea_ssi
+                .nodal_displacements
+                .get(idx)
+                .map(|d| (-d[1] * 1000.0).max(0.0))
+                .unwrap_or(0.0);
+            (n.x, n.z, settle_mm)
+        })
+        .collect();
+
+    let mut footing_couplings = Vec::new();
+    let mut max_foundation_settlement_mm = 0.0_f64;
+
+    if !project.footings.is_empty() {
+        for ftg in &project.footings {
+            let fx_m = ftg.pos.0 * 0.001;
+            let fy_m = ftg.pos.1 * 0.001;
+            let w_m = ftg.width_mm * 0.001;
+            let l_m = ftg.length_mm * 0.001;
+            let (winkler, min_fs, bearing_name) =
+                GeotechEngine::compute_coupled_footing_winkler_springs(
+                    w_m,
+                    l_m,
+                    &strata,
+                    recommended_pile_depth_m,
+                    config.liquefaction_trigger_active,
+                );
+            let settle_mm = base_nodes
+                .iter()
+                .min_by(|a, b| {
+                    (a.0 - fx_m)
+                        .hypot(a.1 - fy_m)
+                        .total_cmp(&(b.0 - fx_m).hypot(b.1 - fy_m))
+                })
+                .map(|n| n.2)
+                .unwrap_or(0.0);
+            max_foundation_settlement_mm = max_foundation_settlement_mm.max(settle_mm);
+            footing_couplings.push(FootingSsiCouplingResult {
+                footing_id: ftg.id,
+                footing_name: ftg.name.clone(),
+                pos_m: [fx_m, fy_m],
+                width_m: w_m,
+                length_m: l_m,
+                required_pile_length_m: recommended_pile_depth_m,
+                bearing_stratum_name: bearing_name,
+                winkler_springs: winkler,
+                estimated_settlement_mm: settle_mm,
+                liquefaction_risk_fs: min_fs,
+            });
+        }
+    } else {
+        for (i, &(nx_m, nz_m, settle_mm)) in base_nodes.iter().enumerate() {
+            let (winkler, min_fs, bearing_name) =
+                GeotechEngine::compute_coupled_footing_winkler_springs(
+                    2.0,
+                    2.0,
+                    &strata,
+                    recommended_pile_depth_m,
+                    config.liquefaction_trigger_active,
+                );
+            max_foundation_settlement_mm = max_foundation_settlement_mm.max(settle_mm);
+            footing_couplings.push(FootingSsiCouplingResult {
+                footing_id: i + 1,
+                footing_name: format!("Base-{}", i + 1),
+                pos_m: [nx_m, nz_m],
+                width_m: 2.0,
+                length_m: 2.0,
+                required_pile_length_m: recommended_pile_depth_m,
+                bearing_stratum_name: bearing_name,
+                winkler_springs: winkler,
+                estimated_settlement_mm: settle_mm,
+                liquefaction_risk_fs: min_fs,
+            });
+        }
+    }
+
+    let min_liquefaction_fs = strata
+        .iter()
+        .map(|s| s.liquefaction_fs)
+        .fold(3.0_f64, f64::min);
+    let is_liquefaction_critical = min_liquefaction_fs < 1.15;
+
+    let ssi_overlay_ifcx = GeotechEngine::build_subsurface_ssi_ifcx_overlay(
+        project,
+        config.borehole_preset,
+        site_class,
+        vs30_m_s,
+        config.groundwater_depth_m,
+        pga_g,
+        &strata,
+        lpi,
+        recommended_pile_depth_m,
+        &footing_couplings,
+        t_fixed,
+        t_ssi,
+        fixed_base_ari,
+        ssi_coupled_ari,
+    );
+
+    let liq_tag = if is_liquefaction_critical {
+        format!(
+            "LIQUEFACTION FS_L={min_liquefaction_fs:.2} (LPI={lpi:.1})"
+        )
+    } else {
+        format!("Non-Liquefiable FS_L={min_liquefaction_fs:.2}")
+    };
+    let summary = format!(
+        "Subsurface SSI ({}, {site_class:?}, Vs30={vs30_m_s:.0}m/s): T1 {t_fixed:.2}s -> {t_ssi:.2}s (+{period_lengthening_pct:.1}%) | Piles {recommended_pile_depth_m:.1}m | Δf={max_foundation_settlement_mm:.1}mm | ARI={ssi_coupled_ari:.3} | {liq_tag}",
+        config.borehole_preset.short_label(),
+    );
+
+    Ok(SubsurfaceSsiAnalysisReport {
+        preset: config.borehole_preset,
+        site_class,
+        vs30_m_s,
+        groundwater_depth_m: config.groundwater_depth_m,
+        pga_g,
+        strata,
+        min_liquefaction_fs,
+        liquefaction_potential_index: lpi,
+        is_liquefaction_critical,
+        recommended_pile_depth_m,
+        footing_couplings,
+        fixed_base_period_t1_s: t_fixed,
+        ssi_coupled_period_t1_s: t_ssi,
+        period_lengthening_pct,
+        fixed_base_ari,
+        ssi_coupled_ari,
+        max_foundation_settlement_mm,
+        ssi_overlay_ifcx,
+        summary,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::ifcx::IfcxStage;
 
     #[test]
     fn test_winkler_spring_matrix() {
@@ -632,5 +1600,83 @@ mod tests {
         assert!(audit.critical_perimeter_bo_mm > 0.0);
         assert!(audit.punching_stress_vu_mpa > 0.0);
         assert!(audit.concrete_capacity_phi_vc_mpa > 0.0);
+    }
+
+    #[test]
+    fn test_phase71_borehole_presets_vs30_and_liquefaction_screening() {
+        let (soft_strata, soft_vs30, soft_cls, _, soft_pile) =
+            GeotechEngine::build_borehole_strata(BoreholePreset::AlluvialSoftClay, 1.5, 0.35, false);
+        assert_eq!(soft_strata.len(), 4);
+        assert!(soft_vs30 < 175.0);
+        assert_eq!(soft_cls, SiteClass::SE);
+        assert!(soft_pile >= 20.0);
+
+        let (liq_strata, _, liq_cls, lpi, _) = GeotechEngine::build_borehole_strata(
+            BoreholePreset::CoastalLiquefiableSand,
+            1.5,
+            0.40,
+            true,
+        );
+        assert_eq!(liq_cls, SiteClass::SD);
+        assert!(
+            liq_strata.iter().any(|s| s.liquefaction_fs < 1.0 && s.py_multiplier < 0.40),
+            "Coastal saturated loose sand under 0.40g PGA must flag Seed-Idriss liquefaction & p-y degradation"
+        );
+        assert!(lpi > 5.0);
+
+        let (_, stiff_vs30, stiff_cls, _, _) = GeotechEngine::build_borehole_strata(
+            BoreholePreset::StiffVolcanicAlluvium,
+            2.5,
+            0.35,
+            false,
+        );
+        assert_eq!(stiff_cls, SiteClass::SC);
+        assert!(stiff_vs30 > 350.0);
+
+        let (_, rock_vs30, rock_cls, _, rock_pile) = GeotechEngine::build_borehole_strata(
+            BoreholePreset::DenseGravelBedrock,
+            4.0,
+            0.35,
+            false,
+        );
+        assert_eq!(rock_cls, SiteClass::SB);
+        assert!(rock_vs30 > 750.0);
+        assert!(rock_pile <= 5.0);
+    }
+
+    #[test]
+    fn test_phase71_coupled_subsurface_ssi_and_ifcx_overlay() {
+        let project = BimProject::sample_bimcraft_building();
+        let site = crate::core::compute_site_environmental_coupling(
+            -6.2088,
+            106.8456,
+            &crate::core::gis::earth_globe::PlanetaryWorldState::default(),
+        );
+        let cfg = SubsurfaceSsiConfig {
+            ssi_coupling_enabled: true,
+            xray_subsurface_visible: true,
+            borehole_preset: BoreholePreset::CoastalLiquefiableSand,
+            groundwater_depth_m: 1.5,
+            liquefaction_trigger_active: true,
+        };
+        let rep = evaluate_coupled_subsurface_ssi_for_bim(&project, &site, &cfg)
+            .expect("Coupled Subsurface SSI report should succeed");
+        assert!(rep.is_liquefaction_critical);
+        assert!(rep.ssi_coupled_period_t1_s > rep.fixed_base_period_t1_s);
+        assert!(rep.max_foundation_settlement_mm > 0.0);
+        assert!(!rep.footing_couplings.is_empty());
+
+        let base_ifcx = IfcxDocument::from_bim_project(&project, None, 0.0, None, None, None);
+        let base_count = base_ifcx.data.len();
+        let composed = IfcxStage::compose_with_subsurface_ssi_overlay(&base_ifcx, &rep);
+        assert!(composed.data.len() > base_count);
+        assert!(composed
+            .data
+            .iter()
+            .any(|n| n.attributes.contains_key(NS_EG_GEOTECH_STRATIGRAPHY)));
+        assert!(composed
+            .data
+            .iter()
+            .any(|n| n.attributes.contains_key(NS_EG_GEOTECH_SSI)));
     }
 }

@@ -82,8 +82,10 @@ pub use pushover::{
     PushoverCsmReport, PushoverEngine, SeismicPerformanceLevel,
 };
 pub use geotech::{
+    evaluate_coupled_subsurface_ssi_for_bim, BoreholePreset, FootingSsiCouplingResult,
     GeotechEngine, GeotechSsiReport, PileElement, PileGroupReport, PunchingShearAudit, SoilLayer,
-    SoilType, SsiModalShiftReport, WinklerSpringMatrix,
+    SoilType, SsiModalShiftReport, StratigraphyStratum, SubsurfaceSsiAnalysisReport,
+    SubsurfaceSsiConfig, WinklerSpringMatrix, NS_EG_GEOTECH_SSI, NS_EG_GEOTECH_STRATIGRAPHY,
 };
 pub use modal::{
     ModalAnalysisReport, ModalEngine, ModeShape, SiteClass, Sni1726Spectrum,

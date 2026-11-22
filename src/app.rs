@@ -2130,6 +2130,83 @@ impl EigenGraphApp {
                     .push_trace("No CRC cascade overlay available to export.", false);
             }
         }
+        if hud_actions.run_subsurface_ssi_sync {
+            if self.build_view.bim_bus.project.is_empty() {
+                if let Ok(msg) = self
+                    .build_view
+                    .bim_bus
+                    .execute_natural_language("portal 3x2 @6m 2floors")
+                {
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.spatial_workspace.push_trace(msg, true);
+                }
+            }
+            self.sync_bim_to_fem();
+            if let Some(ref rep) = self.universal_canvas.last_subsurface_ssi_report {
+                self.spatial_workspace
+                    .push_trace(rep.summary.clone(), !rep.is_liquefaction_critical);
+                self.ai_assistant_view
+                    .chat_history
+                    .push(crate::models::ChatMessage {
+                        is_user: false,
+                        message: format!(
+                            "[EigenAI Subsurface 6-DOF Winkler SSI]: {}",
+                            rep.summary
+                        ),
+                        time: crate::core::web_bridge::unix_timestamp_label(),
+                    });
+            } else {
+                self.spatial_workspace.push_trace(
+                    "Subsurface 6-DOF Winkler SSI disabled (Fixed-Base FEM restored)",
+                    true,
+                );
+            }
+        }
+        if hud_actions.export_subsurface_ssi_ifcx {
+            if self.universal_canvas.last_subsurface_ssi_report.is_none()
+                && !self.build_view.bim_bus.project.is_empty()
+            {
+                self.universal_canvas
+                    .refresh_subsurface_ssi(&self.build_view.bim_bus.project);
+            }
+            if let Some(ref rep) = self.universal_canvas.last_subsurface_ssi_report {
+                let raw_name =
+                    Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+                let fname = format!("{raw_name}_subsurface_ssi.ifcx");
+                let base_ifcx = crate::core::IfcxDocument::from_bim_project(
+                    &self.build_view.bim_bus.project,
+                    None,
+                    0.0,
+                    None,
+                    None,
+                    None,
+                );
+                let composed = crate::core::IfcxStage::compose_with_subsurface_ssi_overlay(
+                    &base_ifcx,
+                    rep,
+                );
+                let json = composed.to_json_pretty();
+                match crate::core::web_bridge::save_text_file(
+                    &fname,
+                    &json,
+                    "application/json;charset=utf-8",
+                ) {
+                    Ok(_) => {
+                        self.spatial_workspace.push_trace(
+                            format!(
+                                "Exported Non-Destructive Subsurface SSI IFCX ({fname}, {} nodes)",
+                                composed.data.len()
+                            ),
+                            true,
+                        );
+                    }
+                    Err(err) => self.spatial_workspace.push_trace(err, false),
+                }
+            } else {
+                self.spatial_workspace
+                    .push_trace("No Subsurface SSI overlay available to export.", false);
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {
@@ -3317,7 +3394,10 @@ impl EigenGraphApp {
             .map(|s| (s.removed_kind, s.removed_bim_id));
 
         let site_coupling = self.universal_canvas.active_site_coupling();
-        let (fem, fem_map, load_summary) = proj.to_structural_model_with_site_loads(&site_coupling);
+        let (fem, fem_map, load_summary) = proj.to_structural_model_with_site_loads_and_ssi(
+            &site_coupling,
+            Some(&self.universal_canvas.subsurface_ssi),
+        );
         let rev_hash = proj.content_revision_hash();
 
         let cache = &mut self.universal_canvas.earth_fem_cache;
@@ -3531,6 +3611,15 @@ impl EigenGraphApp {
             } else {
                 self.build_view.simulated_eliminated_ids.clear();
             }
+        }
+
+        if self.universal_canvas.subsurface_ssi.ssi_coupling_enabled
+            || self.universal_canvas.subsurface_ssi.xray_subsurface_visible
+        {
+            self.universal_canvas
+                .refresh_subsurface_ssi(&self.build_view.bim_bus.project);
+        } else {
+            self.universal_canvas.last_subsurface_ssi_report = None;
         }
 
         self.planning_view

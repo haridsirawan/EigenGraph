@@ -7,6 +7,28 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.7.1] - 2026-11-22 — 3D Subsurface Geotechnical Stratigraphy, Coupled 6-DOF Winkler SSI & Modular View Architecture
+
+### Added & Changed
+- **Modular Spatial View Architecture & Repository Hygiene (`src/views/{webgl_earth,universal_canvas,spatial_workspace}/`)**:
+  - Decomposed the monolithic view modules (`27,984` combined lines) into clean, single-responsibility directories:
+    - `src/views/webgl_earth/` (`mod.rs`, `mesh_builders.rs`, `tests.rs`)
+    - `src/views/universal_canvas/` (`mod.rs`, `types.rs`, `cad_ops.rs`, `interaction.rs`, `render_layers.rs`, `toolbars.rs`, `tests.rs`)
+    - `src/views/spatial_workspace/` (`mod.rs`, `types.rs`, `commands.rs`, `smart_popup.rs`, `drawers.rs`, `island_ui.rs`, `tests.rs`)
+  - Removed untracked filesystem artifact `src/.DS_Store`.
+- **Coupled 6-DOF Elastic Winkler SSI, Borehole Stratigraphy & Seed–Idriss Liquefaction (`src/core/model.rs`, `src/core/solver.rs`, `src/core/modal.rs`, `src/core/geotech.rs`, `src/core/bim.rs`, `src/core/ifcx.rs`)**:
+  - Extended `Node3D` with `spring_stiffness: [f64; 6]` (`with_springs`, `has_springs`) and assembled diagonal Winkler spring stiffnesses into `k_global[(base_dof + d, base_dof + d)]` inside `FemSolver::solve`.
+  - Updated `ModalEngine::synthesize_continuum_modes` with bounded Veletsos–Meek soil-structure interaction period lengthening and compliant base slip when spring-supported foundation nodes are active.
+  - Added 4 multi-horizon borehole stratigraphy archetypes (`BoreholePreset`: `AlluvialSoftClay`, `CoastalLiquefiableSand`, `StiffVolcanicAlluvium`, `DenseGravelBedrock`), harmonic-mean $V_{s30}$ site classification, Seed–Idriss cyclic stress ratio liquefaction screening ($FS_L$, Liquefaction Potential Index, $p$-$y$ spring degradation), per-footing 6-DOF Winkler spring synthesis (`GeotechEngine::compute_coupled_footing_winkler_springs`), `BimProject::to_structural_model_with_site_loads_and_ssi`, and `evaluate_coupled_subsurface_ssi_for_bim`.
+  - Added non-destructive OpenBIM `.ifcx` subsurface stratigraphy and SSI spring composition (`eigengraph::geotech::stratigraphy`, `eigengraph::geotech::ssi_springs`, `IfcxStage::compose_with_subsurface_ssi_overlay`) plus lossless `.eigen.json` workspace persistence (`UnifiedWorkspaceArchive::subsurface_ssi`).
+- **WebGL2 3D Subsurface Cutaway, Phreatic Table & Dynamic Pile Depth (`src/views/webgl_earth/`, `src/views/universal_canvas/`)**:
+  - Extended `ActiveBimGpuInput` with `subsurface_pile_depth_m` so subsurface foundation pile shafts beneath `BimFooting` caps dynamically extend into the governing competent bearing stratum with end-bearing tip collars.
+  - Added dedicated `subsurface_vao/vbo/ibo` GPU upload & blended `Pass 2` rendering (`build_rtc_subsurface_ssi_mesh`) featuring procedural GLSL sedimentary bedding striations (`kind >= 3.5 && kind < 4.5`), liquefaction hazard warning highlight, borehole BH-01 casing + horizon collars, and animated procedural groundwater table ripples (`kind >= 4.5`), backed by a pure-vector CPU projection fallback (`paint_cpu_subsurface_ssi_fallback`).
+- **Dynamic Island SSI Controls, GWT Steppers & Slash Commands (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the **`SSI & Soil:`** sub-pill bar inside the `GIS & Site` tab (`Winkler SSI`, `Soil: <archetype>`, `Liquefy`, `X-Ray Ground`, `SSI .ifcx`), compact inline `SSI` telemetry (`SiteClass`, `Vs30`, lengthened period $\tilde{T}$, $L_{\text{pile}}$, $FS_L$, $\delta_{\max}$) + interactive `GWT -0.5m / +0.5m` steppers in the active strip, and `/ssi`, `/borehole`, `/liquefaction`, `/subsurface`, `/ssi-ifcx` slash commands—preserving `hud_rects.len() == 1` with zero horizontal overflow across `1280px`, `768px`, and `390px` viewports.
+
+---
+
 ## [v0.7.0] - 2026-11-22 — Two-Stage `ARI v2 + StructGNN-CRC` Conformal Screening & 3D Progressive Collapse Cascade
 
 ### Added & Changed

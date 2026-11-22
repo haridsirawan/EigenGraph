@@ -502,7 +502,7 @@ impl ModalEngine {
             .fold(1.0_f64, f64::max);
 
         // Approximate fundamental period T1 = 0.0466 * H^0.9 (SNI 1726 Table 18 concrete MRF)
-        let t1 = (0.0466 * max_h.powf(0.9)).clamp(0.12, 4.5);
+        let mut t1 = (0.0466 * max_h.powf(0.9)).clamp(0.12, 4.5);
         let period_factors = [1.0, 0.86, 0.36];
         let mass_x_pcts = [76.5, 4.2, 12.8];
         let mass_y_pcts = [4.5, 74.8, 11.2];
@@ -518,6 +518,29 @@ impl ModalEngine {
         }
         total_mass_kg = total_mass_kg.max(1000.0);
 
+        // Apply Veletsos-Meek SSI period lengthening if foundation nodes carry elastic Winkler springs
+        let mut ssi_base_count = 0usize;
+        let mut sum_kx_n_m = 0.0_f64;
+        let mut sum_kr_nm_rad = 0.0_f64;
+        for node in &model.nodes {
+            if node.y <= 0.1 && node.has_springs() {
+                ssi_base_count += 1;
+                sum_kx_n_m += node.spring_stiffness[0].max(node.spring_stiffness[2]).max(1.0);
+                sum_kr_nm_rad += node.spring_stiffness[3].max(node.spring_stiffness[5]).max(1.0);
+            }
+        }
+        let has_ssi_base = ssi_base_count > 0;
+        if has_ssi_base {
+            let omega_fixed = 2.0 * std::f64::consts::PI / t1;
+            let k_fixed_n_m = total_mass_kg * omega_fixed * omega_fixed;
+            let h_eff = 0.70 * max_h;
+            let len_sq = 1.0
+                + (k_fixed_n_m / sum_kx_n_m.max(1e3))
+                + (k_fixed_n_m * h_eff * h_eff / sum_kr_nm_rad.max(1e4));
+            let ssi_ratio = len_sq.sqrt().clamp(1.04, 1.45);
+            t1 = (t1 * ssi_ratio).clamp(0.12, 6.0);
+        }
+
         let mut modes = Vec::with_capacity(num_modes.min(3));
         for m in 0..num_modes.min(3) {
             let period_s = (t1 * period_factors[m]).max(0.04);
@@ -526,19 +549,20 @@ impl ModalEngine {
             let mut nodal_deformations = Vec::with_capacity(model.nodes.len());
             for node in &model.nodes {
                 let h_frac = (node.y / max_h).clamp(0.0, 1.0);
-                if h_frac < 0.02 || node.fixity.is_fixed() {
+                if (h_frac < 0.02 && !node.has_springs()) || node.fixity.is_fixed() {
                     nodal_deformations.push([0.0, 0.0, 0.0]);
                     continue;
                 }
+                let base_slip = if has_ssi_base && h_frac < 0.02 { 0.08 } else { 0.0 };
                 let def = match m {
                     0 => {
                         // Mode 1: Fundamental lateral sway along X
-                        let amp = (0.5 * std::f64::consts::PI * h_frac).sin();
+                        let amp = (0.5 * std::f64::consts::PI * h_frac).sin().max(base_slip);
                         [amp, 0.0, 0.12 * amp]
                     }
                     1 => {
                         // Mode 2: Orthogonal lateral sway along Z
-                        let amp = (0.5 * std::f64::consts::PI * h_frac).sin();
+                        let amp = (0.5 * std::f64::consts::PI * h_frac).sin().max(base_slip);
                         [-0.12 * amp, 0.0, amp]
                     }
                     _ => {
@@ -546,7 +570,11 @@ impl ModalEngine {
                         let s2 = (1.5 * std::f64::consts::PI * h_frac).sin();
                         let rx = (node.x - cx) / max_r;
                         let rz = (node.z - cz) / max_r;
-                        [(-rz * h_frac + 0.45 * s2).clamp(-1.0, 1.0), 0.0, (rx * h_frac).clamp(-1.0, 1.0)]
+                        [
+                            (-rz * h_frac.max(base_slip) + 0.45 * s2).clamp(-1.0, 1.0),
+                            0.0,
+                            (rx * h_frac.max(base_slip)).clamp(-1.0, 1.0),
+                        ]
                     }
                 };
                 nodal_deformations.push(def);

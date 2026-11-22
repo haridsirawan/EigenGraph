@@ -65,6 +65,10 @@ pub struct Node3D {
     pub y: f64,
     pub z: f64,
     pub fixity: BoundaryFixity,
+    /// Optional 6-DOF elastic Winkler / SSI nodal foundation springs `[kx, ky, kz, krx, kry, krz]`
+    /// in SI units (`N/m` for translational DOFs, `N*m/rad` for rotational DOFs).
+    #[serde(default)]
+    pub spring_stiffness: [f64; 6],
 }
 
 impl Node3D {
@@ -75,12 +79,24 @@ impl Node3D {
             y,
             z,
             fixity: BoundaryFixity::free(),
+            spring_stiffness: [0.0; 6],
         }
     }
 
     pub fn with_fixity(mut self, fixity: BoundaryFixity) -> Self {
         self.fixity = fixity;
         self
+    }
+
+    pub fn with_springs(mut self, spring_stiffness: [f64; 6]) -> Self {
+        self.spring_stiffness = spring_stiffness;
+        self
+    }
+
+    pub fn has_springs(&self) -> bool {
+        self.spring_stiffness
+            .iter()
+            .any(|&k| k.is_finite() && k > 0.0)
     }
 
     pub fn distance_to(&self, other: &Node3D) -> f64 {

@@ -7,7 +7,7 @@
 ### Doctoral Dissertation Reference Platform (Rust + WebAssembly / WebGL2)
 
 [![Live Web App](https://img.shields.io/badge/web%20app-eigengraph.net-0A84FF?style=for-the-badge&logo=cloudflare&logoColor=white)](https://eigengraph.net/)
-[![Version](https://img.shields.io/badge/version-v0.7.0-5B92A5?style=for-the-badge)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.7.1-5B92A5?style=for-the-badge)](docs/CHANGELOG.md)
 [![Engine](https://img.shields.io/badge/engine-Rust%20%2B%20WebAssembly-orange?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/EigenGraph/EigenGraph)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue?style=for-the-badge)](LICENSE)
 
@@ -39,13 +39,13 @@ Rather than relying on purely topological graph metrics, **ARI** combines stiffn
 
 ---
 
-## EigenGraph Computational Platform (`v0.7.0`)
+## EigenGraph Computational Platform (`v0.7.1`)
 
 **EigenGraph** operationalizes the dissertation's ARI & Spectral Kinematic Guard engines inside a **100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5 JSON ECS) • 0% Raster** WebAssembly (Native WebGL2) spatial engineering platform deployed to [eigengraph.net](https://eigengraph.net/):
 
 - **ARI v2 + StructGNN-CRC Conformal Screening, Progressive Collapse & Automated Retrofit Core** ([src/core/ari.rs](src/core/ari.rs), [src/core/cascade.rs](src/core/cascade.rs), [src/core/retrofit.rs](src/core/retrofit.rs)): Fast $O(N^2)$ Sherman-Morrison linear ARI, rank-2 Woodbury $N-2$ disruption screening, SVD spectral kinematic guard, Two-Stage `ARI v2 + StructGNN-CRC` conformal screening ($\alpha=0.05$) + UFC 4-023-03 DAF-driven progressive collapse cascade (`eigengraph::analysis::crc_cascade`) with step-by-step WebGL2 domino ghosts, live $N-1$ member removal, and multi-strategy automated structural retrofit (`AutoBalanced`, 3D `BRB` bracing, RC jacketing, shear wall infill) emitting non-destructive `eigengraph::bim::retrofit_delta` `.ifcx` strengthening layers.
-- **Site-Coupled 6-DOF FEM, Dynamic Modal & District Multi-Hazard Engine** ([src/core/solver.rs](src/core/solver.rs), [src/core/modal.rs](src/core/modal.rs), [src/core/gis/district_hazard.rs](src/core/gis/district_hazard.rs)): 6-DOF 3D frame solver coupled to IFCX Earth SNI 1726 / ASCE 7 traveling seismic waves, phase-lag inter-building pounding, Venturi urban wind streamlines, 3D TIN flood inundation, and GPU-animated 3D modal eigenmodes (`Mode 1–3`).
-- **100% Pure-Rust IFCX (IFC 5) Living Earth, City-Builder & Streaming AI Frame Inference** ([src/core/ifcx.rs](src/core/ifcx.rs), [src/core/gis/city_builder.rs](src/core/gis/city_builder.rs), [src/views/webgl_earth.rs](src/views/webgl_earth.rs)): Composable JSON ECS scene graph (`earth_globe.ifcx` + georeferenced sites + `IfcRoad` / `IfcBridge` / `IfcSpatialZone` / `IfcSite` auto-graded pads + non-destructive retrofit & CRC cascade overlays + streaming AI real-building capture with automatic structural frame inference & ARI triage) streaming `usd::usdgeom::mesh` and active 3D BIM/FEM/Modal/N-1/Retrofit/Cascade/Hazard meshes into one 24-bit Z-buffered WebGL2 (`egui_glow`) pass, operated strictly through one dynamically widening Liquid Glass Dynamic Island (0% legacy STEP IFC, 0% raster pixels).
+- **Site-Coupled 6-DOF FEM, Subsurface Stratigraphy, Winkler SSI & District Multi-Hazard Engine** ([src/core/solver.rs](src/core/solver.rs), [src/core/modal.rs](src/core/modal.rs), [src/core/geotech.rs](src/core/geotech.rs), [src/core/gis/district_hazard.rs](src/core/gis/district_hazard.rs)): 6-DOF 3D frame solver with coupled elastic 6-DOF foundation Winkler springs (`[kx, ky, kz, krx, kry, krz]`), multi-horizon 3D subsurface borehole stratigraphy (`Vs30`, $N_{\text{SPT}}$, Seed–Idriss cyclic liquefaction screening with $p$-$y$ degradation), Veletsos–Meek SSI period lengthening (`T -> T̃`), SNI 1726 / ASCE 7 traveling seismic waves, phase-lag inter-building pounding, Venturi urban wind streamlines, 3D TIN flood inundation, and GPU-animated 3D modal eigenmodes (`Mode 1–3`).
+- **Modular 100% Pure-Rust IFCX (IFC 5) Living Earth, Subsurface Cutaway & Unified Dynamic Island** ([src/core/ifcx.rs](src/core/ifcx.rs), [src/core/gis/city_builder.rs](src/core/gis/city_builder.rs), [src/views/webgl_earth/mod.rs](src/views/webgl_earth/mod.rs), [src/views/universal_canvas/mod.rs](src/views/universal_canvas/mod.rs), [src/views/spatial_workspace/mod.rs](src/views/spatial_workspace/mod.rs)): Composable JSON ECS scene graph (`earth_globe.ifcx` + georeferenced sites + `IfcRoad` / `IfcBridge` / `IfcSpatialZone` / `IfcSite` auto-graded pads + non-destructive subsurface SSI, retrofit & CRC cascade overlays + streaming AI real-building capture) streaming `usd::usdgeom::mesh`, active 3D BIM/FEM/Modal/N-1/Retrofit/Cascade meshes, and 3D subsurface soil strata + dynamic pile depths into one 24-bit Z-buffered WebGL2 (`egui_glow`) pass, operated strictly through one dynamically widening Liquid Glass Dynamic Island (0% legacy STEP IFC, 0% raster pixels).
 
 ---
 
@@ -69,7 +69,7 @@ trunk build --release --public-url /
 
 ## Documentation & Citation
 
-- [Changelog (`v0.0.1` – `v0.7.0`)](docs/CHANGELOG.md)
+- [Changelog (`v0.0.1` – `v0.7.1`)](docs/CHANGELOG.md)
 - [IFCX Earth Architecture Roadmap](docs/IFCX%20Earth.md)
 - [Spatial UI Architecture Contract](docs/UI_ARCHITECTURE.md)
 - [Repository Guidelines](AGENTS.md)

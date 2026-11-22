@@ -1,0 +1,1367 @@
+//! views/universal_canvas.rs — Unified Synchronized 15-Pillar Drawing Canvas & Single-File Project Archive.
+//! Provides a canvas-first interactive 2D drafting & domain-overlay workspace across all 15 sidebar
+//! navigation modules, featuring a Freeze Canvas guard for uninterrupted vertical page scrolling,
+//! a floating collapsible domain inspector, and tamper-evident single-file `.eigen.json` sync.
+
+use egui::{Align2, Color32, CornerRadius, Frame, Margin, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+
+use crate::core::gis::earth_globe::{GlobeScreenTransform, PlanetaryWorldState};
+use crate::core::gis::SlippyMapState;
+use crate::core::{
+    compute_site_environmental_coupling, BimProject, DiskExporter, LifecycleOpsState,
+    SiteEnvironmentalCoupling,
+};
+use crate::models::{NavigationPillar, ParametricVariable, StructuralMember};
+use crate::theme::MacTheme;
+use crate::ui_kit;
+
+
+mod cad_ops;
+mod interaction;
+mod render_layers;
+mod toolbars;
+mod types;
+pub use types::*;
+
+/// Shared interactive drawing canvas state synchronized across all 15 sidebar navigation modules.
+pub struct UniversalCanvasState {
+    pub pan: Vec2,
+    pub zoom: f32,
+    pub is_frozen: bool,
+    pub active_tool: UniversalCanvasTool,
+    pub active_color_idx: usize,
+    pub stroke_width: f32,
+    pub show_grid: bool,
+    pub snap_to_grid: bool,
+    pub osnap_enabled: bool,
+    pub last_osnap_kind: OsnapKind,
+    pub last_osnap_radius_mm: f64,
+    pub ortho_mode: bool,
+    pub grid_spacing_mm: f64,
+    pub show_bim_base_layer: bool,
+    pub show_domain_overlay: bool,
+    pub sync_all_layers: bool,
+    pub inspector_open: bool,
+    pub canvas_height_ratio: f32,
+    pub callout_draft: String,
+    pub entities: Vec<CanvasEntity>,
+    pub next_entity_id: usize,
+    pub undo_stack: Vec<Vec<CanvasEntity>>,
+    pub redo_stack: Vec<Vec<CanvasEntity>>,
+    pub selected_entity_id: Option<usize>,
+    pub selected_entity_ids: Vec<usize>,
+    pending_start_mm: Option<[f64; 2]>,
+    marquee_anchor_mm: Option<[f64; 2]>,
+    marquee_current_mm: Option<[f64; 2]>,
+    active_freehand_mm: Vec<[f64; 2]>,
+    pub cursor_world_mm: [f64; 2],
+    pub cursor_lat_lon: (f64, f64),
+    pub world_map: crate::core::gis::SlippyMapState,
+    pub ground_origin_lat_lon: (f64, f64),
+    pub ground_origin_anchored: bool,
+    pub earth_search_query: String,
+    pub measure_active: bool,
+    pub measure_area_mode: bool,
+    pub measure_points_lat_lon: Vec<(f64, f64)>,
+    last_canvas_rect: Option<Rect>,
+    last_inspector_rect: Option<Rect>,
+    pub status_message: Option<String>,
+    pub import_json_open: bool,
+    pub import_json_buffer: String,
+    pub pending_imported_settings: Option<WorkspaceCanvasSettings>,
+    pub request_scroll_to_workbench: bool,
+    // Phase 41: Precision CAD input, transforms & bottom-toolbar Quick-Jump / Shortcuts
+    pub cad_step_mm: f64,
+    pub cad_rotate_deg: f64,
+    pub cad_cmd_input: String,
+    pub shortcuts_modal_open: bool,
+    pub quick_jump_query: String,
+    // Phase 43: Default 3D Google Earth Globe & Planetary Terraform / Megaproject Sandbox Game
+    pub globe_mode: bool,
+    pub earth_world: PlanetaryWorldState,
+    pub last_globe_xform: Option<GlobeScreenTransform>,
+    pub pending_earth_arc_start: Option<(f64, f64)>,
+    // Phase 45: Persisted MEP sizing, Commercial Procurement/VO, Site Diary, QA/QC & Earth Site Coupling
+    pub lifecycle_ops: LifecycleOpsState,
+    // Phase 46: Spatial Canvas Smart Picking & Highlight Sync
+    pub last_picked_bim_element: Option<(crate::core::BimElementKind, usize)>,
+    pub last_picked_earth_lat_lon: Option<(f64, f64)>,
+    pub highlighted_bim_element: Option<(crate::core::BimElementKind, usize)>,
+    pub spatial_pick_seq: u64,
+    // Phase 55: Direct BIM authoring & command emission straight onto Earth 3D
+    pub earth_bim_author: EarthBimAuthorConfig,
+    pub pending_earth_bim_commands: Vec<crate::core::BimCommand>,
+    // Phase 57: Planetary Digital Twin Multi-Building World Registry, HLOD & Unlocated Placement
+    pub world_index: crate::core::gis::WorldSpatialIndex,
+    pub active_world_project_rel_path: Option<String>,
+    pub placing_unlocated_rel_path: Option<String>,
+    pub placing_heading_deg: f64,
+    pub placing_hover_lat_lon: Option<(f64, f64)>,
+    pub clicked_world_building_rel_path: Option<String>,
+    pub pending_world_pin_event: Option<(String, f64, f64, f64)>,
+    // Phase 58: 3D TIN Relief Overlay & Neighbor Hover Telemetry
+    pub active_site_tin: Option<crate::core::gis::TinSurfaceMesh>,
+    pub site_tin_preset: crate::core::gis::DemTerrainPreset,
+    pub show_terrain_contours: bool,
+    pub hovered_world_building_rel_path: Option<String>,
+    // Phase 59 & 64: Offline Pure-Vector Site Layer, OpenBIM IFC Site TIN & Neighborhood Physics
+    pub urban_vectors: crate::core::gis::UrbanVectorLayerCache,
+    pub site_tin_from_ifc: bool,
+    pub neighborhood_report: crate::core::gis::NeighborhoodAuditReport,
+    pub show_neighborhood_hazards: bool,
+    pub active_vector_snap_az_deg: Option<f64>,
+    // Phase 63: O(1) Cached BIM-FEM Lookup, True 6-DOF Displacements, Modal Eigenmodes & N-1 Disruption
+    pub earth_fem_cache: EarthStructuralRenderCache,
+    // Phase 65: Native WebGL2 / OpenGL (`egui_glow`) 3D Pure-Vector Earth Renderer (0% Raster Pixels)
+    pub webgl_earth: crate::views::webgl_earth::WebGlEarthState,
+    // Phase 67: IFCX City-Builder Authoring (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`, Auto Cut/Fill Pads)
+    pub city_scene: crate::core::gis::IfcxCityScene,
+    // Phase 68: District-Scale Multi-Hazard & AI Real-Building Frame Inference Telemetry
+    pub district_hazard: crate::core::gis::DistrictHazardConfig,
+    pub district_hazard_report: crate::core::gis::DistrictMultiHazardReport,
+    pub last_ai_capture_report: Option<crate::core::ifcx::AiBuildingFrameInferenceReport>,
+    // Phase 69: Automated Structural Retrofit & Non-Destructive `.ifcx` Strengthening State
+    pub retrofit_strategy: crate::core::retrofit::RetrofitStrategy,
+    pub last_retrofit_report: Option<crate::core::retrofit::StructuralRetrofitReport>,
+    pub pre_retrofit_baseline: Option<BimProject>,
+    pub viewing_pre_retrofit_baseline: bool,
+    // Phase 70: Two-Stage `ARI v2 + StructGNN-CRC` Screening & Animated Progressive Collapse Cascade
+    pub last_crc_cascade_report: Option<crate::core::cascade::TwoStageCrcCascadeReport>,
+    pub active_cascade_step: usize,
+    pub cascade_daf: f64,
+    // Phase 71: 3D Subsurface Geotechnical Stratigraphy, Liquefaction & Coupled 6-DOF Winkler SSI
+    pub subsurface_ssi: crate::core::geotech::SubsurfaceSsiConfig,
+    pub last_subsurface_ssi_report: Option<crate::core::geotech::SubsurfaceSsiAnalysisReport>,
+}
+
+/// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WorldPickOutcome {
+    FlyToCluster { lat: f64, lon: f64, label: String },
+    HydrateBuilding(String),
+}
+
+impl Default for UniversalCanvasState {
+    fn default() -> Self {
+        Self {
+            pan: Vec2::ZERO,
+            zoom: 1.0,
+            // Phase 35: Frozen by default so vertical page scroll never zooms unintentionally; unfreeze to orbit/draw on 3D Earth
+            is_frozen: true,
+            active_tool: UniversalCanvasTool::SelectPan,
+            active_color_idx: 0,
+            stroke_width: 2.2,
+            show_grid: true,
+            snap_to_grid: true,
+            osnap_enabled: true,
+            last_osnap_kind: OsnapKind::None,
+            last_osnap_radius_mm: 450.0,
+            ortho_mode: false,
+            grid_spacing_mm: 500.0,
+            show_bim_base_layer: true,
+            show_domain_overlay: true,
+            sync_all_layers: true,
+            inspector_open: false,
+            canvas_height_ratio: 0.82,
+            callout_draft: "Note".to_string(),
+            entities: Vec::new(),
+            next_entity_id: 1,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            selected_entity_id: None,
+            selected_entity_ids: Vec::new(),
+            pending_start_mm: None,
+            marquee_anchor_mm: None,
+            marquee_current_mm: None,
+            active_freehand_mm: Vec::new(),
+            cursor_world_mm: [0.0, 0.0],
+            cursor_lat_lon: (5.0, 98.0),
+            world_map: crate::core::gis::SlippyMapState::default(),
+            ground_origin_lat_lon: (0.0, 0.0),
+            ground_origin_anchored: false,
+            earth_search_query: String::new(),
+            measure_active: false,
+            measure_area_mode: false,
+            measure_points_lat_lon: Vec::new(),
+            last_canvas_rect: None,
+            last_inspector_rect: None,
+            status_message: None,
+            import_json_open: false,
+            import_json_buffer: String::new(),
+            pending_imported_settings: None,
+            request_scroll_to_workbench: false,
+            cad_step_mm: 1000.0,
+            cad_rotate_deg: 90.0,
+            cad_cmd_input: String::new(),
+            shortcuts_modal_open: false,
+            quick_jump_query: String::new(),
+            globe_mode: true,
+            earth_world: PlanetaryWorldState::default(),
+            last_globe_xform: None,
+            pending_earth_arc_start: None,
+            lifecycle_ops: LifecycleOpsState::default(),
+            last_picked_bim_element: None,
+            last_picked_earth_lat_lon: None,
+            highlighted_bim_element: None,
+            spatial_pick_seq: 0,
+            earth_bim_author: EarthBimAuthorConfig::default(),
+            pending_earth_bim_commands: Vec::new(),
+            world_index: crate::core::gis::WorldSpatialIndex::default(),
+            active_world_project_rel_path: None,
+            placing_unlocated_rel_path: None,
+            placing_heading_deg: 0.0,
+            placing_hover_lat_lon: None,
+            clicked_world_building_rel_path: None,
+            pending_world_pin_event: None,
+            active_site_tin: None,
+            site_tin_preset: crate::core::gis::DemTerrainPreset::TerracedCutFillPad,
+            show_terrain_contours: false,
+            hovered_world_building_rel_path: None,
+            urban_vectors: crate::core::gis::UrbanVectorLayerCache::default(),
+            site_tin_from_ifc: false,
+            neighborhood_report: crate::core::gis::NeighborhoodAuditReport::default(),
+            show_neighborhood_hazards: true,
+            active_vector_snap_az_deg: None,
+            earth_fem_cache: EarthStructuralRenderCache::default(),
+            webgl_earth: crate::views::webgl_earth::WebGlEarthState::default(),
+            city_scene: crate::core::gis::IfcxCityScene::default(),
+            district_hazard: crate::core::gis::DistrictHazardConfig::default(),
+            district_hazard_report: crate::core::gis::DistrictMultiHazardReport::default(),
+            last_ai_capture_report: None,
+            retrofit_strategy: crate::core::retrofit::RetrofitStrategy::default(),
+            last_retrofit_report: None,
+            pre_retrofit_baseline: None,
+            viewing_pre_retrofit_baseline: false,
+            last_crc_cascade_report: None,
+            active_cascade_step: 1,
+            cascade_daf: 1.50,
+            subsurface_ssi: crate::core::geotech::SubsurfaceSsiConfig::default(),
+            last_subsurface_ssi_report: None,
+        }
+    }
+}
+
+impl UniversalCanvasState {
+    /// Initializes native WebGL2 / OpenGL GPU Vector Earth shaders from `eframe::CreationContext::gl`.
+    pub fn init_webgl_earth(&mut self, gl: &std::sync::Arc<eframe::glow::Context>) {
+        self.webgl_earth.init_gl(gl);
+    }
+    /// Computes crisp directional sun-lighting depth shading for 3D extruded Earth faces
+    /// against an SE solar azimuth `(0.707, -0.707)`.
+    pub fn directional_face_shade(base: Color32, p0: Pos2, p1: Pos2, is_top_cap: bool) -> Color32 {
+        if is_top_cap {
+            return base.gamma_multiply(0.82);
+        }
+        let dx = p1.x - p0.x;
+        let dy = p1.y - p0.y;
+        let len = dx.hypot(dy);
+        if len < 1e-3 {
+            return base.gamma_multiply(0.46);
+        }
+        let nx = dy / len;
+        let ny = -dx / len;
+        let sun_dot = nx * 0.707 + ny * -0.707;
+        let factor = if sun_dot > 0.25 {
+            0.64
+        } else if sun_dot < -0.25 {
+            0.30
+        } else {
+            0.46
+        };
+        base.gamma_multiply(factor)
+    }
+
+    /// Computes coupled geotechnical, seismic, wind, flood, and site logistics telemetry
+    /// from the currently anchored Earth coordinate (or viewport focus) and planetary terrain.
+    pub fn active_site_coupling(&self) -> SiteEnvironmentalCoupling {
+        let (lat, lon) = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        compute_site_environmental_coupling(lat, lon, &self.earth_world)
+    }
+
+    /// Generates `active_site_tin` on demand using pure-Rust procedural `site_tin_preset`
+    /// when no OpenBIM IFC `IfcSite` or local XYZ survey TIN has been loaded yet.
+    pub fn ensure_site_tin_generated(&mut self) {
+        if self.active_site_tin.is_none() {
+            self.active_site_tin = Some(crate::core::gis::TinSurfaceMesh::generate_from_dem_preset(
+                self.site_tin_preset,
+                400.0,
+                400.0,
+                28,
+                28,
+                1.0,
+            ));
+            self.site_tin_from_ifc = false;
+        }
+    }
+
+    /// Evaluates seismic pounding gaps, urban wind exposure & Venturi channeling, and debris zones
+    /// between the active BIM structure and all surrounding neighbors inside `world_index`.
+    pub fn refresh_neighborhood_coupling(&mut self, bim_project: &BimProject) {
+        if !self.ground_origin_anchored && self.world_index.buildings.is_empty() {
+            self.neighborhood_report = crate::core::gis::NeighborhoodAuditReport::default();
+            return;
+        }
+        let (hull, h_m) = crate::core::gis::bim_footprint_hull_m(bim_project);
+        let hdg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        self.neighborhood_report = crate::core::gis::evaluate_neighborhood_coupling(
+            self.ground_origin_lat_lon,
+            &hull,
+            hdg,
+            h_m,
+            self.active_world_project_rel_path.as_deref(),
+            &self.world_index,
+        );
+    }
+
+    /// Evaluates coupled district multi-hazard metrics (SNI 1726 seismic wave & pounding phase-lag,
+    /// ASCE 7 Venturi wind channeling streamlines, 3D flood inundation vs. `IfcSite` TIN contours,
+    /// and overall resilience score).
+    pub fn refresh_district_hazard(&mut self, bim_project: &BimProject) {
+        self.refresh_neighborhood_coupling(bim_project);
+        self.district_hazard_report = crate::core::gis::evaluate_district_multi_hazard(
+            &self.district_hazard,
+            &self.neighborhood_report,
+            self.active_site_tin.as_ref(),
+            &self.world_index,
+            self.ground_origin_lat_lon,
+            bim_project,
+            &self.city_scene,
+        );
+    }
+
+    /// Evaluates coupled 3D subsurface stratigraphy, Seed–Idriss liquefaction screening,
+    /// 6-DOF Winkler foundation springs, and modal SSI period shift for the active BIM project.
+    pub fn refresh_subsurface_ssi(&mut self, bim_project: &BimProject) {
+        if bim_project.is_empty() {
+            self.last_subsurface_ssi_report = None;
+            return;
+        }
+        let site = self.active_site_coupling();
+        match crate::core::geotech::evaluate_coupled_subsurface_ssi_for_bim(
+            bim_project,
+            &site,
+            &self.subsurface_ssi,
+        ) {
+            Ok(rep) => self.last_subsurface_ssi_report = Some(rep),
+            Err(_) => self.last_subsurface_ssi_report = None,
+        }
+    }
+
+    /// Local ground relief offset (meters relative to Earth surface datum `0.0` at anchored origin).
+    pub fn local_site_relief_m(&self, lat: f64, lon: f64) -> f64 {
+        if !self.show_terrain_contours {
+            return 0.0;
+        }
+        let Some(ref tin) = self.active_site_tin else {
+            return 0.0;
+        };
+        let [east_mm, north_mm] = SlippyMapState::lat_lon_to_world_mm(self.ground_origin_lat_lon, lat, lon);
+        let east_m = (east_mm * 0.001) as f32;
+        let north_m = (north_mm * 0.001) as f32;
+        if east_m.abs() > tin.extent_x_m * 0.5 || north_m.abs() > tin.extent_y_m * 0.5 {
+            return 0.0;
+        }
+        let (ref_z, _) = tin.sample_elevation_and_slope(0.0, 0.0);
+        let (local_z, _) = tin.sample_elevation_and_slope(east_m, north_m);
+        (local_z - ref_z) as f64
+    }
+    /// Theme-aware canvas viewport background matching Universal Canvas across all modules.
+    pub fn canvas_bg(theme: &MacTheme) -> Color32 {
+        if theme.is_dark() {
+            Color32::from_rgb(12, 15, 21)
+        } else {
+            Color32::from_rgb(248, 250, 253)
+        }
+    }
+
+    /// Unified height calculation used by Universal Canvas, Parametric, and Geometry viewports.
+    pub fn preferred_canvas_height(&self, ctx: &egui::Context) -> f32 {
+        let vp = MacTheme::viewport_size(ctx);
+        let is_mobile = vp.x < MacTheme::MOBILE_BREAKPOINT;
+        (vp.y * self.canvas_height_ratio).clamp(if is_mobile { 380.0 } else { 540.0 }, 960.0)
+    }
+
+    /// Frosted translucent floating HUD overlay frame (matches Universal Canvas inspector).
+    pub fn floating_panel_frame(theme: &MacTheme, is_overlay: bool) -> Frame {
+        let fill = if is_overlay {
+            if theme.is_dark() {
+                Color32::from_rgba_premultiplied(20, 24, 34, 240)
+            } else {
+                Color32::from_rgba_premultiplied(255, 255, 255, 244)
+            }
+        } else {
+            theme.bg_card
+        };
+
+        Frame::new()
+            .fill(fill)
+            .corner_radius(CornerRadius::same(10))
+            .stroke(Stroke::new(1.2, theme.accent_blue.gamma_multiply(0.55)))
+            .inner_margin(Margin::same(12))
+    }
+
+
+    // Methods split across cad_ops.rs, interaction.rs, render_layers.rs, and toolbars.rs
+    /// Returns `true` when the pointer hovers over the live, unfrozen canvas area (excluding the floating inspector).
+    pub fn is_pointer_in_live_canvas(&self, ctx: &egui::Context) -> bool {
+        if self.is_frozen {
+            return false;
+        }
+        let Some(pointer) = ctx.input(|i| i.pointer.hover_pos()) else {
+            return false;
+        };
+        let in_canvas = self.last_canvas_rect.is_some_and(|r| r.contains(pointer));
+        let in_inspector = self.inspector_open
+            && self
+                .last_inspector_rect
+                .is_some_and(|r| r.contains(pointer));
+        in_canvas && !in_inspector
+    }
+
+    pub fn active_color(&self) -> Color32 {
+        let [r, g, b] = PALETTE_SWATCHES
+            .get(self.active_color_idx)
+            .map(|(_, c)| *c)
+            .unwrap_or([56, 189, 248]);
+        Color32::from_rgb(r, g, b)
+    }
+
+    pub fn active_color_rgb(&self) -> [u8; 3] {
+        PALETTE_SWATCHES
+            .get(self.active_color_idx)
+            .map(|(_, c)| *c)
+            .unwrap_or([56, 189, 248])
+    }
+
+    pub fn build_unified_archive(
+        &self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+        variables: &[ParametricVariable],
+        workspace_settings: WorkspaceCanvasSettings,
+    ) -> UnifiedWorkspaceArchive {
+        UnifiedWorkspaceArchive {
+            format_version: "EIGEN-UNIFIED-1.0".to_string(),
+            engine_version: env!("CARGO_PKG_VERSION").to_string(),
+            project_name: bim_project.project_name.clone(),
+            bim_project: bim_project.clone(),
+            members: members.to_vec(),
+            parametric_variables: variables.to_vec(),
+            canvas_entities: self.entities.clone(),
+            workspace_settings,
+            world_origin_lat_lon: self
+                .ground_origin_anchored
+                .then_some(self.ground_origin_lat_lon),
+            map_center_lat_lon: Some(self.world_map.center_lat_lon),
+            map_zoom: Some(self.world_map.zoom_level),
+            globe_mode: self.globe_mode,
+            planetary_world: self.earth_world.clone(),
+            lifecycle_ops: {
+                let mut ops = self.lifecycle_ops.clone();
+                ops.site_coupling = self.active_site_coupling();
+                ops
+            },
+            city_scene: self.city_scene.clone(),
+            district_hazard: self.district_hazard.clone(),
+            subsurface_ssi: self.subsurface_ssi.clone(),
+            sha256_seal: String::new(),
+        }
+    }
+
+    /// Exports the entire synchronized workspace as 1 unified `.eigen.json` file.
+    pub fn export_unified_file(
+        &mut self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+        variables: &[ParametricVariable],
+        workspace_settings: WorkspaceCanvasSettings,
+    ) {
+        let archive =
+            self.build_unified_archive(bim_project, members, variables, workspace_settings);
+        match archive.to_pretty_json() {
+            Ok(json) => match DiskExporter::write_export_file(
+                "EigenGraph_Unified_Workspace.eigen.json",
+                &json,
+            ) {
+                Ok(dest) => {
+                    self.status_message = Some(format!(
+                        "Synced 1-file workspace ({} drawings, {} members) -> {dest}",
+                        self.entities.len(),
+                        members.len()
+                    ));
+                }
+                Err(err) => {
+                    self.status_message = Some(format!("Workspace export failed: {err}"));
+                }
+            },
+            Err(err) => {
+                self.status_message = Some(format!("Serialization error: {err}"));
+            }
+        }
+    }
+
+    /// Applies a verified unified archive back into the active application state.
+    pub fn apply_unified_archive(
+        &mut self,
+        json_str: &str,
+        bim_project: &mut BimProject,
+        members: &mut Vec<StructuralMember>,
+        variables: &mut Vec<ParametricVariable>,
+    ) -> Result<WorkspaceCanvasSettings, String> {
+        let archive = UnifiedWorkspaceArchive::from_verified_json(json_str)?;
+        self.push_undo();
+        *bim_project = archive.bim_project;
+        *members = archive.members;
+        *variables = archive.parametric_variables;
+        self.entities = archive.canvas_entities;
+        self.next_entity_id = self
+            .entities
+            .iter()
+            .map(|e| e.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        self.is_frozen = archive.workspace_settings.freeze_by_default;
+        self.canvas_height_ratio = archive
+            .workspace_settings
+            .canvas_height_ratio
+            .clamp(0.45, 1.15);
+        self.show_grid = archive.workspace_settings.show_grid;
+        self.snap_to_grid = archive.workspace_settings.snap_to_grid;
+        self.grid_spacing_mm = archive.workspace_settings.grid_spacing_mm.max(100.0);
+        self.show_bim_base_layer = archive.workspace_settings.show_bim_base_layer;
+        self.show_domain_overlay = archive.workspace_settings.show_domain_overlay;
+        self.sync_all_layers = archive.workspace_settings.sync_all_layers;
+        self.inspector_open = archive.workspace_settings.show_floating_inspector;
+        if let Some(orig) = archive.world_origin_lat_lon {
+            self.ground_origin_lat_lon = orig;
+            self.ground_origin_anchored = true;
+        }
+        if let Some(center) = archive.map_center_lat_lon {
+            self.world_map.set_center(center.0, center.1);
+        }
+        if let Some(zoom) = archive.map_zoom {
+            self.world_map.zoom_level = zoom.clamp(1.0, 19.0);
+        }
+        self.globe_mode = archive.globe_mode;
+        self.earth_world = archive.planetary_world;
+        self.earth_world.recompute_vitals();
+        self.lifecycle_ops = archive.lifecycle_ops;
+        self.lifecycle_ops.site_coupling = self.active_site_coupling();
+        self.city_scene = archive.city_scene;
+        self.district_hazard = archive.district_hazard;
+        if self.district_hazard.any_active() {
+            self.refresh_district_hazard(bim_project);
+        } else {
+            self.district_hazard_report = crate::core::gis::DistrictMultiHazardReport::default();
+        }
+        self.subsurface_ssi = archive.subsurface_ssi;
+        if self.subsurface_ssi.ssi_coupling_enabled || self.subsurface_ssi.xray_subsurface_visible {
+            self.refresh_subsurface_ssi(bim_project);
+        } else {
+            self.last_subsurface_ssi_report = None;
+        }
+        self.status_message = Some(format!(
+            "Imported verified 1-file workspace '{}' ({} canvas objects)",
+            archive.project_name,
+            self.entities.len()
+        ));
+        Ok(archive.workspace_settings)
+    }
+
+    /// Exports only the active module's entities when the user explicitly chooses to split files.
+    pub fn export_split_module_file(&mut self, pillar: NavigationPillar) {
+        let badge = pillar.badge();
+        let layer_entities: Vec<CanvasEntity> = self
+            .entities
+            .iter()
+            .filter(|e| e.pillar_badge == badge)
+            .cloned()
+            .collect();
+        let payload = ModuleLayerSplitExport {
+            format_version: "EIGEN-LAYER-SPLIT-1.0".to_string(),
+            pillar_badge: badge.to_string(),
+            pillar_name: pillar.clean_name().to_string(),
+            entities: layer_entities,
+        };
+        match serde_json::to_string_pretty(&payload) {
+            Ok(json) => {
+                let filename = format!("EigenGraph_Layer_{badge}.json");
+                match DiskExporter::write_export_file(&filename, &json) {
+                    Ok(dest) => {
+                        self.status_message = Some(format!(
+                            "Split module layer [{badge}] exported -> {dest}"
+                        ));
+                    }
+                    Err(err) => {
+                        self.status_message = Some(format!("Split export failed: {err}"));
+                    }
+                }
+            }
+            Err(err) => {
+                self.status_message = Some(format!("Split serialization failed: {err}"));
+            }
+        }
+    }
+
+    /// Exports synchronized canvas entities and BIM grids to vector SVG.
+    pub fn export_svg(&self, bim_project: &BimProject, active_pillar: NavigationPillar) -> String {
+        let mut svg = String::from(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"-2000 -11500 16000 13500\" width=\"1200\" height=\"900\" style=\"background:#0f1117\">\n",
+        );
+        svg.push_str(&format!(
+            "  <!-- EigenGraph Unified Canvas | Active Pillar: {} -->\n",
+            active_pillar.clean_name()
+        ));
+        for g in &bim_project.grids {
+            svg.push_str(&format!(
+                "  <line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#38bdf8\" stroke-opacity=\"0.35\" stroke-width=\"18\" stroke-dasharray=\"180,120\"/>\n",
+                g.start.0, -g.start.1, g.end.0, -g.end.1
+            ));
+        }
+        for w in &bim_project.walls {
+            svg.push_str(&format!(
+                "  <line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#94a3b8\" stroke-width=\"{:.1}\"/>\n",
+                w.start.0, -w.start.1, w.end.0, -w.end.1, w.thickness_mm.max(80.0)
+            ));
+        }
+        for ent in &self.entities {
+            if !self.sync_all_layers && ent.pillar_badge != active_pillar.badge() {
+                continue;
+            }
+            let [r, g, b] = ent.color_rgb;
+            let col = format!("rgb({r},{g},{b})");
+            let sw = ent.stroke_width * 24.0;
+            match &ent.kind {
+                CanvasShapeKind::Line { start_mm, end_mm }
+                | CanvasShapeKind::Dimension { start_mm, end_mm } => {
+                    svg.push_str(&format!(
+                        "  <line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"{col}\" stroke-width=\"{sw:.1}\"/>\n",
+                        start_mm[0], -start_mm[1], end_mm[0], -end_mm[1]
+                    ));
+                }
+                CanvasShapeKind::Rectangle { min_mm, max_mm } => {
+                    let x = min_mm[0].min(max_mm[0]);
+                    let y = (-max_mm[1]).min(-min_mm[1]);
+                    let w = (max_mm[0] - min_mm[0]).abs();
+                    let h = (max_mm[1] - min_mm[1]).abs();
+                    svg.push_str(&format!(
+                        "  <rect x=\"{x:.1}\" y=\"{y:.1}\" width=\"{w:.1}\" height=\"{h:.1}\" fill=\"none\" stroke=\"{col}\" stroke-width=\"{sw:.1}\"/>\n"
+                    ));
+                }
+                CanvasShapeKind::Circle {
+                    center_mm,
+                    radius_mm,
+                } => {
+                    svg.push_str(&format!(
+                        "  <circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"{:.1}\" fill=\"none\" stroke=\"{col}\" stroke-width=\"{sw:.1}\"/>\n",
+                        center_mm[0], -center_mm[1], radius_mm
+                    ));
+                }
+                CanvasShapeKind::Freehand { points_mm } => {
+                    if points_mm.len() >= 2 {
+                        let pts: Vec<String> = points_mm
+                            .iter()
+                            .map(|p| format!("{:.1},{:.1}", p[0], -p[1]))
+                            .collect();
+                        svg.push_str(&format!(
+                            "  <polyline fill=\"none\" stroke=\"{col}\" stroke-width=\"{sw:.1}\" points=\"{}\"/>\n",
+                            pts.join(" ")
+                        ));
+                    }
+                }
+                CanvasShapeKind::Callout { pos_mm, text } => {
+                    let safe = text.replace('&', "&amp;").replace('<', "&lt;");
+                    svg.push_str(&format!(
+                        "  <text x=\"{:.1}\" y=\"{:.1}\" fill=\"{col}\" font-size=\"260\" font-family=\"monospace\">{safe}</text>\n",
+                        pos_mm[0], -pos_mm[1]
+                    ));
+                }
+            }
+        }
+        svg.push_str("</svg>\n");
+        svg
+    }
+
+    /// Renders the unified canvas-first drawing workspace for the active sidebar module.
+    #[allow(clippy::too_many_arguments)]
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        active_pillar: NavigationPillar,
+        bim_project: &mut BimProject,
+        members: &mut Vec<StructuralMember>,
+        variables: &mut Vec<ParametricVariable>,
+        workspace_settings: WorkspaceCanvasSettings,
+        sidebar_toggle_inset_px: f32,
+    ) {
+        ui_kit::set_canvas_frozen(ui.ctx(), self.is_frozen);
+
+        let canvas_h = self.preferred_canvas_height(ui.ctx());
+
+        Frame::new()
+            .fill(theme.bg_sidebar)
+            .corner_radius(CornerRadius::same(12))
+            .stroke(Stroke::new(1.0, theme.border_card))
+            .inner_margin(Margin::same(8))
+            .show(ui, |ui| {
+                let outer_w = ui.available_width().max(160.0);
+                ui.set_width(outer_w);
+                ui.set_max_width(outer_w);
+
+                self.render_viewport_core(
+                    ui,
+                    theme,
+                    active_pillar,
+                    bim_project,
+                    members,
+                    Vec2::new(outer_w.max(200.0), canvas_h),
+                    sidebar_toggle_inset_px,
+                    false,
+                    true,
+                    10.0,
+                );
+
+                ui.add_space(6.0);
+
+                // 2. Coordinate & CAD Telemetry Bar directly below Viewport and above Bottom Toolbar
+                self.render_status_footer(ui, theme, active_pillar, bim_project);
+
+                // Optional status toast
+                Self::render_toast_bar(ui, theme, &mut self.status_message);
+
+                ui.add_space(6.0);
+
+                // 3. Bottom Canvas HUD Toolbar (rich drawing + modify buttons below Coordinate Bar)
+                self.render_canvas_toolbar(
+                    ui,
+                    theme,
+                    active_pillar,
+                    bim_project,
+                    members,
+                    variables,
+                    workspace_settings.clone(),
+                    sidebar_toggle_inset_px,
+                );
+
+                // 4. Bottom-Docked Collapsible Inspector Panel (exact full toolbar/viewport width)
+                if self.inspector_open {
+                    ui.add_space(6.0);
+                    self.render_floating_inspector_panel(
+                        ui,
+                        theme,
+                        active_pillar,
+                        bim_project,
+                        members,
+                        variables,
+                        workspace_settings,
+                        false,
+                    );
+                }
+            });
+    }
+
+    /// Phase 46: Renders the zero-chrome, edge-to-edge full-viewport Earth & BIM/CAD spatial canvas
+    /// without below-viewport toolbars or scroll-locking frames.
+    #[allow(clippy::too_many_arguments)]
+    pub fn show_spatial_fullscreen(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        active_pillar: NavigationPillar,
+        bim_project: &mut BimProject,
+        members: &[StructuralMember],
+        pointer_blocked_by_hud: bool,
+    ) -> Rect {
+        ui_kit::set_canvas_frozen(ui.ctx(), self.is_frozen);
+        let avail = ui.available_size().max(Vec2::new(240.0, 240.0));
+        self.render_viewport_core(
+            ui,
+            theme,
+            active_pillar,
+            bim_project,
+            members,
+            avail,
+            0.0,
+            pointer_blocked_by_hud,
+            false,
+            0.0,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_viewport_core(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        active_pillar: NavigationPillar,
+        bim_project: &mut BimProject,
+        members: &[StructuralMember],
+        viewport_size: Vec2,
+        sidebar_toggle_inset_px: f32,
+        pointer_blocked_by_hud: bool,
+        show_freeze_pill: bool,
+        corner_radius: f32,
+    ) -> Rect {
+        // Apply CAD Keyboard Shortcuts (Space freeze, Esc, Del, Ctrl+Z/Y, F8 Ortho, F3 Snap, single keys, G Globe, [ / ] Tilt)
+        self.handle_universal_shortcuts(ui.ctx(), bim_project);
+
+        // Step Earth animations (smooth auto-spin, inertia, Google Earth fly-to, planetary sim years)
+        if self.globe_mode && !self.is_frozen {
+            self.earth_world.step_animations(ui.ctx(), &mut self.world_map);
+        }
+
+        // 1. Main Interactive Drawing Viewport
+        let (response, painter) = ui.allocate_painter(viewport_size, Sense::click_and_drag());
+        let rect = response.rect;
+        self.last_canvas_rect = Some(rect);
+        self.last_inspector_rect = None;
+
+        if self.globe_mode {
+            self.last_globe_xform = Some(GlobeScreenTransform::from_view(
+                rect,
+                self.world_map.center_lat_lon.0,
+                self.world_map.center_lat_lon.1,
+                self.world_map.zoom_level,
+                &self.earth_world.camera,
+            ));
+        } else {
+            self.last_globe_xform = None;
+        }
+
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(corner_radius.round() as u8),
+            Self::canvas_bg(theme),
+        );
+
+        let (freeze_pill_rect, pointer_in_freeze_pill, freeze_pill_hovered) = if show_freeze_pill {
+            Self::interact_floating_freeze_pill(
+                ui,
+                rect,
+                "universal",
+                &mut self.is_frozen,
+                sidebar_toggle_inset_px,
+            )
+        } else {
+            (Rect::NOTHING, false, false)
+        };
+
+        // Handle Pan / Zoom / Drawing / Smart Element Picking (respecting Freeze Canvas & Floating Overlays)
+        self.handle_canvas_interaction(
+            ui,
+            &response,
+            rect,
+            active_pillar,
+            bim_project,
+            pointer_in_freeze_pill || pointer_blocked_by_hud,
+        );
+
+        // 1a. Phase 64–67: Native WebGL2 (`egui_glow`) 3D Pure-Vector IFCX Earth + City-Builder + Unified BIM/FEM/Modal/N-1
+        let active_globe_xform = if self.globe_mode {
+            let active_heading_deg = self
+                .active_world_project_rel_path
+                .as_deref()
+                .and_then(|r| self.world_index.get(r))
+                .map(|b| b.heading_deg)
+                .unwrap_or(0.0);
+            let modal_phase_sin = if self.earth_bim_author.modal_anim_playing {
+                ((ui.ctx().input(|i| i.time) * 3.8).sin()) as f32
+            } else {
+                1.0_f32
+            };
+            if self.district_hazard.any_active() {
+                self.district_hazard.sim_time_sec = ui.ctx().input(|i| i.time);
+                if self.district_hazard_report.streamlines.is_empty() {
+                    self.refresh_district_hazard(bim_project);
+                }
+            }
+            let active_bldg_h_m = bim_project
+                .levels
+                .iter()
+                .map(|l| l.elevation_mm * 0.001)
+                .fold(0.0_f64, f64::max)
+                .max(6.0);
+            let hazard_site_origin = if self.ground_origin_anchored {
+                self.ground_origin_lat_lon
+            } else {
+                self.world_map.center_lat_lon
+            };
+            let hazard_gpu_input = if self.district_hazard.any_active() {
+                Some(crate::views::webgl_earth::DistrictHazardGpuInput {
+                    config: &self.district_hazard,
+                    report: &self.district_hazard_report,
+                    neighborhood: &self.neighborhood_report,
+                    origin_lat_lon: hazard_site_origin,
+                    active_building_height_m: active_bldg_h_m,
+                    active_site_tin: self.active_site_tin.as_ref(),
+                })
+            } else {
+                None
+            };
+            let n1_removed_bim = self
+                .earth_fem_cache
+                .n1_simulation
+                .as_ref()
+                .map(|ov| (ov.removed_kind, ov.removed_bim_id));
+            let (cascade_failed_bim, cascade_step_progress) =
+                if let Some(ref crc) = self.last_crc_cascade_report {
+                    let step = self.active_cascade_step.clamp(1, crc.total_steps.max(1));
+                    let progress = if crc.total_steps > 0 {
+                        (step as f32 / crc.total_steps as f32).clamp(0.15, 1.0)
+                    } else {
+                        1.0
+                    };
+                    (crc.cumulative_failed_bim_up_to_step(step), progress)
+                } else {
+                    (Vec::new(), 0.0_f32)
+                };
+            let subsurface_pile_depth_m = self
+                .last_subsurface_ssi_report
+                .as_ref()
+                .map(|r| r.recommended_pile_depth_m as f32)
+                .unwrap_or(match self.subsurface_ssi.borehole_preset {
+                    crate::core::geotech::BoreholePreset::AlluvialSoftClay => 22.0,
+                    crate::core::geotech::BoreholePreset::CoastalLiquefiableSand => 18.0,
+                    crate::core::geotech::BoreholePreset::StiffVolcanicAlluvium => 10.0,
+                    crate::core::geotech::BoreholePreset::DenseGravelBedrock => 4.5,
+                });
+            let active_bim_gpu = if !bim_project.is_empty() {
+                Some(crate::views::webgl_earth::ActiveBimGpuInput {
+                    project: bim_project,
+                    members,
+                    lens: self.earth_bim_author.active_lens,
+                    erection_day_limit: self.earth_bim_author.erection_day_limit,
+                    deform_scale: self.earth_bim_author.deform_scale,
+                    active_modal_mode: self.earth_bim_author.active_modal_mode,
+                    modal_phase_sin,
+                    n1_removed_bim,
+                    cascade_failed_bim: &cascade_failed_bim,
+                    cascade_step_progress,
+                    heading_deg: active_heading_deg,
+                    subsurface_pile_depth_m,
+                })
+            } else {
+                None
+            };
+            let subsurface_gpu_input = if self.subsurface_ssi.xray_subsurface_visible {
+                Some(crate::views::webgl_earth::SubsurfaceSsiGpuInput {
+                    project: bim_project,
+                    config: &self.subsurface_ssi,
+                    report: self.last_subsurface_ssi_report.as_ref(),
+                    heading_deg: active_heading_deg,
+                })
+            } else {
+                None
+            };
+            let gpu_globe_active = self.webgl_earth.schedule_paint_pass(
+                ui,
+                &painter,
+                rect,
+                &self.earth_world,
+                &self.world_map,
+                self.ground_origin_lat_lon,
+                self.ground_origin_anchored,
+                self.show_terrain_contours,
+                self.active_site_tin.as_ref(),
+                &self.world_index,
+                self.active_world_project_rel_path.as_deref(),
+                &self.urban_vectors,
+                Some(&self.city_scene),
+                active_bim_gpu,
+                hazard_gpu_input,
+                subsurface_gpu_input,
+            );
+            let xform = self.earth_world.render_3d_globe_with_gpu_mode(
+                ui,
+                &painter,
+                rect,
+                theme,
+                &self.world_map,
+                self.ground_origin_lat_lon,
+                self.ground_origin_anchored,
+                self.show_grid,
+                self.active_tool.earth_brush_action(),
+                self.cursor_lat_lon,
+                self.is_frozen,
+                gpu_globe_active,
+            );
+            if !gpu_globe_active && self.district_hazard.any_active() {
+                self.paint_cpu_district_hazard_fallback(&painter, rect, theme, &xform);
+            }
+            if !gpu_globe_active && self.subsurface_ssi.xray_subsurface_visible {
+                self.paint_cpu_subsurface_ssi_fallback(&painter, rect, theme, &xform, bim_project);
+            }
+            self.last_globe_xform = Some(xform.clone());
+            Some(xform)
+        } else {
+            self.last_globe_xform = None;
+            self.world_map.render_world_background(
+                ui,
+                &painter,
+                rect,
+                theme,
+                self.ground_origin_lat_lon,
+                self.show_grid,
+                false,
+            );
+            None
+        };
+
+        // 1b. Render Pure-Vector Grid, Local Vault Vector Layers, IFC/Survey TIN & World Buildings
+        let world_to_screen = |w: [f64; 2]| self.world_to_screen(rect, w);
+        if self.show_grid && self.world_map.zoom_level >= 15.5 {
+            self.paint_grid(&painter, rect, theme, &world_to_screen);
+        }
+        if self.globe_mode {
+            if let Some(ref xform) = active_globe_xform {
+                if self.world_map.zoom_level >= 12.5 && self.urban_vectors.feature_count() > 0 {
+                    let (min_la, max_la, min_lo, max_lo) = self.visible_geo_bbox(xform);
+                    let vis_feats = self.urban_vectors.snapshot_visible(min_la, max_la, min_lo, max_lo, 900);
+                    self.earth_world.paint_urban_vector_features(&painter, xform, theme, &vis_feats);
+                }
+            }
+            if self.show_terrain_contours {
+                if let Some((ref tin, ref xform)) = self.active_site_tin.as_ref().zip(active_globe_xform.as_ref()) {
+                    self.earth_world.paint_site_tin_contours_and_hazards(
+                        &painter,
+                        xform,
+                        theme,
+                        self.ground_origin_lat_lon,
+                        0.0,
+                        tin,
+                    );
+                }
+            }
+            self.paint_planetary_world_buildings(&painter, rect, theme);
+            if self.show_neighborhood_hazards {
+                self.paint_neighborhood_hazards(&painter, rect, theme);
+            }
+        }
+        if self.show_bim_base_layer {
+            self.paint_bim_base_layer(
+                &painter,
+                rect,
+                theme,
+                bim_project,
+                members,
+                active_pillar,
+                &world_to_screen,
+            );
+        }
+        if self.show_domain_overlay {
+            self.paint_domain_overlay(
+                &painter,
+                rect,
+                theme,
+                active_pillar,
+                bim_project,
+                members,
+                &world_to_screen,
+            );
+        }
+        self.paint_entities(&painter, rect, theme, active_pillar, &world_to_screen);
+        self.paint_live_preview(&painter, rect, theme, &world_to_screen);
+
+        // Live Great-Circle Bridge / Corridor arc preview while dragging Earth megastructures
+        if let (Some(start_ll), Some(kind)) = (
+            self.pending_earth_arc_start,
+            self.active_tool.earth_megastructure_kind(),
+        ) {
+            let arc_pts = crate::core::gis::great_circle_arc(start_ll, self.cursor_lat_lon, 20);
+            let arc_color = kind.accent_color();
+            let clip_arc = painter.with_clip_rect(rect);
+            let proj_ll = |ll: (f64, f64)| -> Option<Pos2> {
+                if let Some(ref xf) = active_globe_xform {
+                    xf.project_lat_lon_elev(ll.0, ll.1, 0.0)
+                        .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
+                } else {
+                    Some(self.world_map.lat_lon_to_screen(ll.0, ll.1, rect))
+                }
+            };
+            for pair in arc_pts.windows(2) {
+                if let (Some(p0), Some(p1)) = (proj_ll(pair[0]), proj_ll(pair[1])) {
+                    clip_arc.line_segment([p0, p1], Stroke::new(2.6, arc_color));
+                }
+            }
+            if let Some(p_end) = proj_ll(self.cursor_lat_lon) {
+                clip_arc.circle_filled(p_end, 4.5, arc_color);
+            }
+        }
+
+        let geo_to_screen = |lat: f64, lon: f64| -> Pos2 {
+            if let Some(ref xf) = active_globe_xform {
+                if let Some((pos, _, vis)) = xf.project_lat_lon_elev(lat, lon, 0.0) {
+                    if vis {
+                        return pos;
+                    }
+                }
+                Pos2::new(-1e6, -1e6)
+            } else {
+                self.world_map.lat_lon_to_screen(lat, lon, rect)
+            }
+        };
+        self.render_geodetic_measure_overlay(&painter, rect, theme, &geo_to_screen);
+
+        // Highlight clicked Earth target pin when an open Earth location is inspected
+        if let Some((plat, plon)) = self.last_picked_earth_lat_lon {
+            let pin_pos = geo_to_screen(plat, plon);
+            if rect.expand(8.0).contains(pin_pos) {
+                let clip = painter.with_clip_rect(rect);
+                clip.circle_stroke(pin_pos, 13.0, Stroke::new(1.8, theme.accent_blue.gamma_multiply(0.85)));
+                clip.circle_stroke(pin_pos, 6.5, Stroke::new(2.0, Color32::WHITE));
+                clip.circle_filled(pin_pos, 3.8, theme.accent_blue);
+            }
+        }
+
+        // Highlight geodetic site anchor when zoomed out on World Map / 3D Globe
+        if !self.globe_mode
+            && self.world_map.zoom_level < 12.5
+            && (self.ground_origin_anchored || !self.entities.is_empty() || !bim_project.is_empty())
+        {
+            let site_pos = world_to_screen([0.0, 0.0]);
+            if rect.expand(16.0).contains(site_pos) {
+                painter.circle_filled(site_pos, 6.0, theme.accent_blue);
+                painter.circle_stroke(site_pos, 11.0, Stroke::new(1.6, theme.accent_blue));
+                painter.text(
+                    site_pos + Vec2::new(12.0, -6.0),
+                    Align2::LEFT_BOTTOM,
+                    format!(
+                        "Site Origin ({:.3}°, {:.3}°)",
+                        self.ground_origin_lat_lon.0, self.ground_origin_lat_lon.1
+                    ),
+                    egui::FontId::monospace(10.0),
+                    theme.text_primary,
+                );
+            }
+        }
+
+        if show_freeze_pill {
+            Self::paint_floating_freeze_pill(
+                &painter,
+                freeze_pill_rect,
+                theme,
+                self.is_frozen,
+                freeze_pill_hovered,
+            );
+        }
+
+        if corner_radius > 0.0 {
+            Self::paint_rounded_viewport_border(
+                &painter,
+                rect,
+                corner_radius,
+                theme.bg_sidebar,
+                theme.border_subtle,
+            );
+        }
+
+        rect
+    }
+
+    fn handle_universal_shortcuts(&mut self, ctx: &egui::Context, bim_project: &BimProject) {
+        let fb = Self::poll_cad_shortcuts(ctx, self.is_frozen);
+        if fb.toggle_freeze {
+            self.is_frozen = !self.is_frozen;
+            self.pending_start_mm = None;
+            self.active_freehand_mm.clear();
+            self.status_message = Some(if self.is_frozen {
+                "Canvas Frozen (Space) • Scroll safely".to_string()
+            } else {
+                "Canvas Live (Space) • CAD keys & pan/draw active".to_string()
+            });
+        }
+        if fb.escape {
+            self.pending_start_mm = None;
+            self.pending_earth_arc_start = None;
+            self.marquee_anchor_mm = None;
+            self.marquee_current_mm = None;
+            self.active_freehand_mm.clear();
+            self.measure_active = false;
+            self.set_single_selection(None);
+            self.active_tool = UniversalCanvasTool::SelectPan;
+        }
+        if fb.undo {
+            if self.active_tool.is_earth_tool() && self.earth_world.undo_earth() {
+                self.status_message = Some("Undo Earth modification (Ctrl/Cmd+Z)".to_string());
+            } else if self.undo() {
+                self.status_message = Some("Undo canvas action (Ctrl/Cmd+Z)".to_string());
+            } else if self.earth_world.undo_earth() {
+                self.status_message = Some("Undo Earth modification (Ctrl/Cmd+Z)".to_string());
+            }
+        }
+        if fb.redo {
+            if self.active_tool.is_earth_tool() && self.earth_world.redo_earth() {
+                self.status_message = Some("Redo Earth modification (Ctrl/Cmd+Y)".to_string());
+            } else if self.redo() {
+                self.status_message = Some("Redo canvas action (Ctrl/Cmd+Y)".to_string());
+            } else if self.earth_world.redo_earth() {
+                self.status_message = Some("Redo Earth modification (Ctrl/Cmd+Y)".to_string());
+            }
+        }
+        if fb.delete_selected && self.delete_selected_or_last() {
+            self.status_message = Some("Deleted canvas entity (Del)".to_string());
+        }
+        if fb.toggle_ortho {
+            self.ortho_mode = !self.ortho_mode;
+        }
+        if fb.toggle_snap {
+            self.snap_to_grid = !self.snap_to_grid;
+        }
+        if fb.toggle_osnap {
+            self.osnap_enabled = !self.osnap_enabled;
+            self.status_message = Some(format!(
+                "Object Snap (OSNAP F4): {}",
+                if self.osnap_enabled { "ON" } else { "OFF" }
+            ));
+        }
+        if fb.fit_model {
+            if let Some(extents) = bim_project.plan_extents_mm() {
+                self.fit_world_to_bim_extents(Some(extents));
+            } else {
+                self.fit_world_or_site(!bim_project.is_empty());
+            }
+        }
+        if !self.is_frozen && self.globe_mode && !ctx.egui_wants_keyboard_input() {
+            let (tilt_down, tilt_up, num_idx) = ctx.input(|i| {
+                let d = i.key_pressed(egui::Key::OpenBracket);
+                let u = i.key_pressed(egui::Key::CloseBracket);
+                let idx = if i.key_pressed(egui::Key::Num1) {
+                    Some(0)
+                } else if i.key_pressed(egui::Key::Num2) {
+                    Some(1)
+                } else if i.key_pressed(egui::Key::Num3) {
+                    Some(2)
+                } else if i.key_pressed(egui::Key::Num4) {
+                    Some(3)
+                } else if i.key_pressed(egui::Key::Num5) {
+                    Some(4)
+                } else if i.key_pressed(egui::Key::Num6) {
+                    Some(5)
+                } else if i.key_pressed(egui::Key::Num7) {
+                    Some(6)
+                } else if i.key_pressed(egui::Key::Num8) {
+                    Some(7)
+                } else if i.key_pressed(egui::Key::Num9) {
+                    Some(8)
+                } else {
+                    None
+                };
+                (d, u, idx)
+            });
+            if tilt_down {
+                self.earth_world.camera.tilt_deg =
+                    (self.earth_world.camera.tilt_deg - 5.0).clamp(0.0, 65.0);
+            }
+            if tilt_up {
+                self.earth_world.camera.tilt_deg =
+                    (self.earth_world.camera.tilt_deg + 5.0).clamp(0.0, 65.0);
+            }
+            if let Some(i) = num_idx {
+                if let Some(tool) = UniversalCanvasTool::EARTH_TOOLS.get(i).copied() {
+                    self.active_tool = tool;
+                    self.pending_start_mm = None;
+                    self.pending_earth_arc_start = None;
+                    self.status_message = Some(format!(
+                        "Selected Earth Tool: {} (key {})",
+                        tool.short_label(),
+                        i + 1
+                    ));
+                }
+            }
+        }
+        if let Some(ch) = fb.letter_key {
+            let mirror_x = bim_project
+                .plan_extents_mm()
+                .map_or(0.0, |(a, b)| 0.5 * (a[0] + b[0]));
+            match ch {
+                'G' => {
+                    self.globe_mode = !self.globe_mode;
+                    self.pending_earth_arc_start = None;
+                    self.status_message = Some(if self.globe_mode {
+                        "3D Google Earth Globe mode active (G)".to_string()
+                    } else {
+                        "2D Slippy World Map mode active (G)".to_string()
+                    });
+                }
+                'V' => self.active_tool = UniversalCanvasTool::BoxSelect,
+                'L' => self.active_tool = UniversalCanvasTool::Line,
+                'R' => self.active_tool = UniversalCanvasTool::Rectangle,
+                'C' => self.active_tool = UniversalCanvasTool::Circle,
+                'D' => self.active_tool = UniversalCanvasTool::Dimension,
+                'T' => self.active_tool = UniversalCanvasTool::Callout,
+                'E' => self.active_tool = UniversalCanvasTool::Eraser,
+                'M' => {
+                    if self.translate_selected_or_last(1000.0, 0.0) {
+                        self.status_message =
+                            Some("Moved selected/last entity +1000 mm East (M)".to_string());
+                    }
+                }
+                'O' => {
+                    if self.offset_selected_or_last(500.0) {
+                        self.status_message =
+                            Some("Offset duplicate +500 mm (O)".to_string());
+                    }
+                }
+                'X' => {
+                    if self.mirror_selected_or_last(mirror_x) {
+                        self.status_message =
+                            Some(format!("Mirrored duplicate across X={mirror_x:.0} mm (X)"));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+}
+
+pub(super) fn point_to_segment_dist(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let vx = b[0] - a[0];
+    let vy = b[1] - a[1];
+    let len_sq = vx * vx + vy * vy;
+    if len_sq <= 1e-9 {
+        return (p[0] - a[0]).hypot(p[1] - a[1]);
+    }
+    let t = (((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / len_sq).clamp(0.0, 1.0);
+    let proj = [a[0] + t * vx, a[1] + t * vy];
+    (p[0] - proj[0]).hypot(p[1] - proj[1])
+}
+
+pub(super) fn segment_intersection_2d(
+    p: [f64; 2],
+    r_end: [f64; 2],
+    q: [f64; 2],
+    s_end: [f64; 2],
+) -> Option<[f64; 2]> {
+    let rx = r_end[0] - p[0];
+    let ry = r_end[1] - p[1];
+    let sx = s_end[0] - q[0];
+    let sy = s_end[1] - q[1];
+    let denom = rx * sy - ry * sx;
+    if denom.abs() < 1e-6 {
+        return None;
+    }
+    let qpx = q[0] - p[0];
+    let qpy = q[1] - p[1];
+    let t = (qpx * sy - qpy * sx) / denom;
+    let u = (qpx * ry - qpy * rx) / denom;
+    if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+        Some([p[0] + t * rx, p[1] + t * ry])
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests;
