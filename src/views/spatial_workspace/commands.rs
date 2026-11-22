@@ -1295,6 +1295,95 @@ impl SpatialWorkspaceState {
                 "/dossier" | "/dossier-svg" | "/vector-dossier" => {
                     actions.export_vector_dossier_svg = true;
                 }
+                "/portfolio" | "/district-retrofit" => {
+                    let sub = arg.trim().to_ascii_lowercase();
+                    if sub == "off" || sub == "close" {
+                        self.portfolio_drawer_open = false;
+                        universal_canvas.portfolio_retrofit_config.overlay_visible = false;
+                        actions.run_portfolio_retrofit = true;
+                    } else if sub == "fly" || sub == "next" || sub == "jump" || sub == "world" {
+                        self.attach_context(AiContextAttachment::WorldPortfolio);
+                        let sum = universal_canvas.world_index.portfolio_summary();
+                        if sum.critical_count > 0 {
+                            actions.fly_to_next_world_building =
+                                Some(crate::core::gis::WorldPortfolioFilter::CriticalRisk);
+                        } else if sum.unlocated_count > 0 {
+                            actions.fly_to_next_world_building =
+                                Some(crate::core::gis::WorldPortfolioFilter::UnlocatedStaging);
+                        }
+                        self.push_trace(
+                            format!(
+                                "World Portfolio fly-to: {} total ({} unlocated, {} critical)",
+                                sum.total_buildings, sum.unlocated_count, sum.critical_count
+                            ),
+                            true,
+                        );
+                    } else {
+                        if !sub.is_empty() {
+                            universal_canvas.portfolio_retrofit_config.objective =
+                                crate::core::portfolio_retrofit::PortfolioOptimizationObjective::from_arg(arg);
+                        }
+                        self.attach_context(AiContextAttachment::WorldPortfolio);
+                        self.vault_drawer_open = false;
+                        self.vault_path_popover_open = false;
+                        self.context_picker_open = false;
+                        self.history_popover_open = false;
+                        self.api_key_popover_open = false;
+                        self.ifcx_diff_drawer_open = false;
+                        self.portfolio_drawer_open = true;
+                        universal_canvas.portfolio_retrofit_config.overlay_visible = true;
+                        actions.run_portfolio_retrofit = true;
+                    }
+                }
+                "/pareto" => {
+                    self.vault_drawer_open = false;
+                    self.vault_path_popover_open = false;
+                    self.context_picker_open = false;
+                    self.history_popover_open = false;
+                    self.api_key_popover_open = false;
+                    self.ifcx_diff_drawer_open = false;
+                    self.portfolio_drawer_open = true;
+                    universal_canvas.portfolio_retrofit_config.overlay_visible = true;
+                    actions.run_portfolio_retrofit = true;
+                }
+                "/budget" => {
+                    let raw = arg
+                        .trim()
+                        .trim_start_matches('$')
+                        .trim()
+                        .to_ascii_lowercase();
+                    let mult = if raw.ends_with('m') {
+                        1_000_000.0
+                    } else if raw.ends_with('k') {
+                        1_000.0
+                    } else {
+                        1.0
+                    };
+                    let num_str = raw.trim_end_matches(&['k', 'm'][..]).trim();
+                    if let Ok(v) = num_str.parse::<f64>() {
+                        if v.is_finite() && v > 0.0 {
+                            let scaled = if mult == 1.0 && v < 5_000.0 {
+                                v * 1_000.0
+                            } else {
+                                v * mult
+                            };
+                            universal_canvas.portfolio_retrofit_config.budget_cap_usd =
+                                scaled.clamp(25_000.0, 50_000_000.0);
+                        }
+                    }
+                    self.vault_drawer_open = false;
+                    self.vault_path_popover_open = false;
+                    self.context_picker_open = false;
+                    self.history_popover_open = false;
+                    self.api_key_popover_open = false;
+                    self.ifcx_diff_drawer_open = false;
+                    self.portfolio_drawer_open = true;
+                    universal_canvas.portfolio_retrofit_config.overlay_visible = true;
+                    actions.run_portfolio_retrofit = true;
+                }
+                "/portfolio-ifcx" => {
+                    actions.export_portfolio_retrofit_ifcx = true;
+                }
                 "/section" | "/cut" => {
                     let elev_opt = arg
                         .trim_end_matches('m')
@@ -1412,7 +1501,7 @@ impl SpatialWorkspaceState {
                     self.context_picker_open = true;
                     self.push_trace("Opened @ Add Context picker", true);
                 }
-                "/portfolio" => {
+                "/world-portfolio" => {
                     self.attach_context(AiContextAttachment::WorldPortfolio);
                     let sum = universal_canvas.world_index.portfolio_summary();
                     if sum.critical_count > 0 {

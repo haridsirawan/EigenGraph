@@ -41,6 +41,7 @@ pub mod ifcx;
 pub mod retrofit;
 pub mod gis;
 pub mod lifecycle_ops;
+pub mod portfolio_retrofit;
 pub mod web_bridge;
 pub mod vector_dossier;
 
@@ -206,6 +207,11 @@ pub use lifecycle_ops::{
 };
 pub use vector_dossier::{
     build_pure_vector_engineering_dossier_svg, VectorDossierExport, VectorDossierInput,
+};
+pub use portfolio_retrofit::{
+    optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,
+    PortfolioBuildingDecision, PortfolioOptimizationObjective, PortfolioParetoPoint,
+    PortfolioRetrofitConfig, NS_EG_PORTFOLIO_RETROFIT,
 };
 
 

@@ -2324,6 +2324,7 @@ impl EigenGraphApp {
                     ssi_report: self.universal_canvas.last_subsurface_ssi_report.as_ref(),
                     hazard_report: haz_opt,
                     diff_report: self.universal_canvas.last_ifcx_visual_diff.as_ref(),
+                    portfolio_report: self.universal_canvas.last_portfolio_retrofit_report.as_ref(),
                     sheet_code: "S-101",
                     revision: "REV 01",
                 },
@@ -2351,6 +2352,70 @@ impl EigenGraphApp {
                         });
                 }
                 Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.run_portfolio_retrofit {
+            if self.build_view.bim_bus.project.is_empty() {
+                if let Ok(msg) = self
+                    .build_view
+                    .bim_bus
+                    .execute_natural_language("portal 3x2 @6m 2floors")
+                {
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.spatial_workspace.push_trace(msg, true);
+                    self.sync_bim_to_fem();
+                }
+            }
+            self.universal_canvas
+                .refresh_portfolio_retrofit(&self.build_view.bim_bus.project, &self.members);
+            if let Some(ref rep) = self.universal_canvas.last_portfolio_retrofit_report {
+                self.spatial_workspace.push_trace(rep.summary.clone(), true);
+                self.ai_assistant_view
+                    .chat_history
+                    .push(crate::models::ChatMessage {
+                        is_user: false,
+                        message: format!(
+                            "[EigenAI District Portfolio Retrofit]: {}",
+                            rep.summary
+                        ),
+                        time: crate::core::web_bridge::unix_timestamp_label(),
+                    });
+            }
+        }
+        if hud_actions.export_portfolio_retrofit_ifcx {
+            if self.universal_canvas.last_portfolio_retrofit_report.is_none() {
+                self.universal_canvas
+                    .refresh_portfolio_retrofit(&self.build_view.bim_bus.project, &self.members);
+            }
+            if let Some(ref rep) = self.universal_canvas.last_portfolio_retrofit_report {
+                let raw_name =
+                    Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+                let fname = format!("{raw_name}_portfolio_retrofit.ifcx");
+                let layered = self
+                    .universal_canvas
+                    .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+                let composed =
+                    crate::core::IfcxStage::compose_with_portfolio_retrofit_overlay(&layered, rep);
+                let json = composed.to_json_pretty();
+                match crate::core::web_bridge::save_text_file(
+                    &fname,
+                    &json,
+                    "application/json;charset=utf-8",
+                ) {
+                    Ok(_) => {
+                        self.spatial_workspace.push_trace(
+                            format!(
+                                "Exported District Portfolio Retrofit IFCX ({fname}, {} nodes)",
+                                composed.data.len()
+                            ),
+                            true,
+                        );
+                    }
+                    Err(err) => self.spatial_workspace.push_trace(err, false),
+                }
+            } else {
+                self.spatial_workspace
+                    .push_trace("No District Portfolio Retrofit overlay available.", false);
             }
         }
     }

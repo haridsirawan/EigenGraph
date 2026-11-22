@@ -3334,3 +3334,96 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_phase73_portfolio_retrofit_pareto_slash_commands_and_zero_hud_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus = crate::core::BimCommandBus::from_project(
+            crate::core::BimProject::sample_bimcraft_building(),
+        );
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = MacTheme::default();
+
+        for cmd in ["/portfolio", "/pareto", "/budget", "/portfolio-ifcx"] {
+            assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == cmd));
+        }
+
+        let act_bgt = spatial.execute_spatial_input(
+            "/budget 350k",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_bgt.run_portfolio_retrofit);
+        assert!((canvas.portfolio_retrofit_config.budget_cap_usd - 350_000.0).abs() < 1.0);
+        assert!(spatial.portfolio_drawer_open);
+        assert!(canvas.portfolio_retrofit_config.overlay_visible);
+
+        let act_pf = spatial.execute_spatial_input(
+            "/portfolio carbon",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_pf.run_portfolio_retrofit);
+        assert_eq!(
+            canvas.portfolio_retrofit_config.objective,
+            crate::core::portfolio_retrofit::PortfolioOptimizationObjective::MinEmbodiedCarbon
+        );
+
+        let act_pexp = spatial.execute_spatial_input(
+            "/portfolio-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_pexp.export_portfolio_retrofit_ifcx);
+
+        canvas.refresh_portfolio_retrofit(&build.bim_bus.project, &members);
+        assert!(canvas.last_portfolio_retrofit_report.is_some());
+
+        spatial.mobile_deck_pinned = true;
+        spatial.studio_tab = DynamicIslandStudioTab::BimAndStory;
+        for win_w in [1280.0_f32, 768.0, 390.0] {
+            let ctx = egui::Context::default();
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 844.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                },
+            );
+            out.textures_delta.clear();
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 73 Portfolio Pareto Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
+        }
+    }

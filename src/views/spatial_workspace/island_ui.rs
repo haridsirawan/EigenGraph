@@ -487,6 +487,7 @@ impl SpatialWorkspaceState {
             || universal_canvas.subsurface_ssi.ssi_coupling_enabled
             || universal_canvas.subsurface_ssi.xray_subsurface_visible
             || universal_canvas.ifcx_diff_overlay_active
+            || universal_canvas.portfolio_retrofit_config.overlay_visible
             || universal_canvas.last_retrofit_report.is_some()
             || universal_canvas.last_crc_cascade_report.is_some()
             || build_view.ground_author_tool != Ground3DAuthorTool::Orbit
@@ -1468,6 +1469,40 @@ impl SpatialWorkspaceState {
                     actions.run_ifcx_visual_diff = true;
                 }
             }
+            if universal_canvas.portfolio_retrofit_config.overlay_visible {
+                let pf_badge = if let Some(pt) = universal_canvas
+                    .last_portfolio_retrofit_report
+                    .as_ref()
+                    .and_then(|r| r.active_frontier().map(|p| (r.pre_district_avg_ari, p)))
+                {
+                    let (pre_avg, p) = pt;
+                    format!(
+                        "Portfolio {}/{} • ARI {:.2}→{:.2} • ${:.0}k",
+                        p.retrofitted_buildings,
+                        p.total_buildings,
+                        pre_avg,
+                        p.district_avg_ari_after,
+                        p.total_cost_usd / 1000.0
+                    )
+                } else {
+                    "Portfolio Pareto Ready".to_string()
+                };
+                icons::pill_badge(ui, AppIcon::ChartLine, pf_badge, theme.accent_green);
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "Pareto",
+                    self.portfolio_drawer_open,
+                    theme.accent_blue,
+                    "Open District Portfolio ARI v2 Pareto Optimizer inside Dynamic Island",
+                )
+                .clicked()
+                {
+                    self.toggle_exclusive_drawer("portfolio");
+                    actions.run_portfolio_retrofit = true;
+                }
+            }
             let (rst_fg, rst_bg, rst_st) = theme.glass_chip_style(false, theme.accent_red);
             if icons::icon_only_button(
                 ui,
@@ -1497,6 +1532,8 @@ impl SpatialWorkspaceState {
                 universal_canvas.last_subsurface_ssi_report = None;
                 universal_canvas.ifcx_diff_overlay_active = false;
                 self.ifcx_diff_drawer_open = false;
+                universal_canvas.portfolio_retrofit_config.overlay_visible = false;
+                self.portfolio_drawer_open = false;
                 actions.sync_fem_and_earth = true;
             }
         });
@@ -1535,7 +1572,10 @@ impl SpatialWorkspaceState {
         );
         let wide_t = ctx.animate_bool(
             Id::new("eigengraph_dynamic_island_wide"),
-            has_embedded_panel || has_smart_inspector || self.ifcx_diff_drawer_open,
+            has_embedded_panel
+                || has_smart_inspector
+                || self.ifcx_diff_drawer_open
+                || self.portfolio_drawer_open,
         );
 
         let compact_w = if is_mobile {
@@ -2128,6 +2168,356 @@ impl SpatialWorkspaceState {
                                 } else {
                                     ui.label(
                                         RichText::new("No diff report yet — click 'Snapshot Base' or toggle overlays to compare IFCX layers.")
+                                            .size(9.5)
+                                            .color(theme.text_muted),
+                                    );
+                                }
+                            });
+                        ui.separator();
+                    }
+
+                    if self.portfolio_drawer_open {
+                        let pf_opt = universal_canvas.last_portfolio_retrofit_report.clone();
+                        Frame::new()
+                            .fill(Color32::TRANSPARENT)
+                            .inner_margin(Margin::symmetric(2, 4))
+                            .show(ui, |ui| {
+                                let dw = (cap_w - 10.0).max(160.0);
+                                ui.set_width(dw);
+                                ui.set_max_width(dw);
+                                ui.horizontal(|ui| {
+                                    icons::icon_label(
+                                        ui,
+                                        AppIcon::ChartLine,
+                                        12.5,
+                                        theme.accent_green,
+                                        "District Portfolio ARI v2 Pareto Optimizer",
+                                        11.0,
+                                        theme.text_primary,
+                                        true,
+                                    );
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        if icons::icon_only_button(
+                                            ui,
+                                            AppIcon::Close,
+                                            theme.text_secondary,
+                                            Color32::TRANSPARENT,
+                                            Stroke::NONE,
+                                            CornerRadius::same(6),
+                                            Vec2::splat(18.0),
+                                            "Close District Portfolio Pareto drawer",
+                                        )
+                                        .clicked()
+                                        {
+                                            self.portfolio_drawer_open = false;
+                                        }
+                                    });
+                                });
+                                ui.add_space(4.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        None,
+                                        "-$50k",
+                                        false,
+                                        theme.text_secondary,
+                                        "Reduce district retrofit budget cap by $50,000",
+                                    )
+                                    .clicked()
+                                    {
+                                        universal_canvas.portfolio_retrofit_config.budget_cap_usd =
+                                            (universal_canvas.portfolio_retrofit_config.budget_cap_usd - 50_000.0)
+                                                .clamp(25_000.0, 50_000_000.0);
+                                        actions.run_portfolio_retrofit = true;
+                                    }
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "Budget ${:.0}k",
+                                            universal_canvas.portfolio_retrofit_config.budget_cap_usd / 1000.0
+                                        ))
+                                        .size(9.5)
+                                        .strong()
+                                        .color(theme.text_primary),
+                                    );
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        None,
+                                        "+$50k",
+                                        false,
+                                        theme.text_secondary,
+                                        "Increase district retrofit budget cap by $50,000",
+                                    )
+                                    .clicked()
+                                    {
+                                        universal_canvas.portfolio_retrofit_config.budget_cap_usd =
+                                            (universal_canvas.portfolio_retrofit_config.budget_cap_usd + 50_000.0)
+                                                .clamp(25_000.0, 50_000_000.0);
+                                        actions.run_portfolio_retrofit = true;
+                                    }
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        None,
+                                        "-25t",
+                                        false,
+                                        theme.text_secondary,
+                                        "Reduce embodied carbon cap by 25 tCO2e",
+                                    )
+                                    .clicked()
+                                    {
+                                        universal_canvas.portfolio_retrofit_config.carbon_cap_kg_co2e =
+                                            (universal_canvas.portfolio_retrofit_config.carbon_cap_kg_co2e - 25_000.0)
+                                                .clamp(10_000.0, 10_000_000.0);
+                                        actions.run_portfolio_retrofit = true;
+                                    }
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "CO2 {:.0}t",
+                                            universal_canvas.portfolio_retrofit_config.carbon_cap_kg_co2e / 1000.0
+                                        ))
+                                        .size(9.5)
+                                        .strong()
+                                        .color(theme.text_primary),
+                                    );
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        None,
+                                        "+25t",
+                                        false,
+                                        theme.text_secondary,
+                                        "Increase embodied carbon cap by 25 tCO2e",
+                                    )
+                                    .clicked()
+                                    {
+                                        universal_canvas.portfolio_retrofit_config.carbon_cap_kg_co2e =
+                                            (universal_canvas.portfolio_retrofit_config.carbon_cap_kg_co2e + 25_000.0)
+                                                .clamp(10_000.0, 10_000_000.0);
+                                        actions.run_portfolio_retrofit = true;
+                                    }
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Target),
+                                        format!("Obj: {}", universal_canvas.portfolio_retrofit_config.objective.short_label()),
+                                        false,
+                                        theme.accent_blue,
+                                        "Cycle optimization objective (ARI/$ / Balanced / Low-CO2 / Max ARI)",
+                                    )
+                                    .clicked()
+                                    {
+                                        universal_canvas.portfolio_retrofit_config.objective =
+                                            universal_canvas.portfolio_retrofit_config.objective.cycle_next();
+                                        actions.run_portfolio_retrofit = true;
+                                    }
+                                    let ov_on = universal_canvas.portfolio_retrofit_config.overlay_visible;
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Layers),
+                                        "3D Overlay",
+                                        ov_on,
+                                        theme.accent_green,
+                                        "Toggle 3D WebGL2 district retrofit crown overlays",
+                                    )
+                                    .clicked()
+                                    {
+                                        universal_canvas.portfolio_retrofit_config.overlay_visible = !ov_on;
+                                        actions.run_portfolio_retrofit = true;
+                                    }
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Cube3D),
+                                        "Portfolio .ifcx",
+                                        false,
+                                        theme.accent_green,
+                                        "Export non-destructive eigengraph::portfolio::retrofit_plan .ifcx",
+                                    )
+                                    .clicked()
+                                    {
+                                        actions.export_portfolio_retrofit_ifcx = true;
+                                    }
+                                });
+                                ui.add_space(4.0);
+                                if let Some(ref rep) = pf_opt {
+                                    // Pure-vector mini Pareto scatter chart (Cost $k vs District Avg ARI)
+                                    let chart_w = dw.min(440.0);
+                                    let chart_h = 92.0_f32;
+                                    let (resp, painter) =
+                                        ui.allocate_painter(Vec2::new(chart_w, chart_h), egui::Sense::hover());
+                                    let r = resp.rect;
+                                    painter.rect_filled(
+                                        r,
+                                        CornerRadius::same(6),
+                                        theme.bg_card.gamma_multiply(0.55),
+                                    );
+                                    let max_cost_k = rep
+                                        .pareto_frontier
+                                        .iter()
+                                        .map(|p| p.total_cost_usd / 1000.0)
+                                        .fold(50.0_f64, f64::max)
+                                        .max(50.0);
+                                    let min_ari = rep.pre_district_avg_ari.min(0.40);
+                                    let max_ari = rep
+                                        .pareto_frontier
+                                        .iter()
+                                        .map(|p| p.district_avg_ari_after)
+                                        .fold(0.85_f64, f64::max)
+                                        .max(min_ari + 0.10);
+                                    let pad_l = 32.0_f32;
+                                    let pad_r = 12.0_f32;
+                                    let pad_t = 12.0_f32;
+                                    let pad_b = 18.0_f32;
+                                    let plot_w = (r.width() - pad_l - pad_r).max(40.0);
+                                    let plot_h = (r.height() - pad_t - pad_b).max(30.0);
+                                    painter.line_segment(
+                                        [
+                                            egui::Pos2::new(r.left() + pad_l, r.top() + pad_t),
+                                            egui::Pos2::new(r.left() + pad_l, r.bottom() - pad_b),
+                                        ],
+                                        Stroke::new(1.0, theme.border_card),
+                                    );
+                                    painter.line_segment(
+                                        [
+                                            egui::Pos2::new(r.left() + pad_l, r.bottom() - pad_b),
+                                            egui::Pos2::new(r.right() - pad_r, r.bottom() - pad_b),
+                                        ],
+                                        Stroke::new(1.0, theme.border_card),
+                                    );
+                                    painter.text(
+                                        egui::Pos2::new(r.left() + pad_l + 4.0, r.top() + 3.0),
+                                        Align2::LEFT_TOP,
+                                        "Pareto Frontier: Avg ARI vs Cost ($k)",
+                                        egui::FontId::proportional(9.0),
+                                        theme.text_muted,
+                                    );
+                                    let mut pts_screen = Vec::with_capacity(rep.pareto_frontier.len());
+                                    for p in &rep.pareto_frontier {
+                                        let nx = ((p.total_cost_usd / 1000.0) / max_cost_k).clamp(0.0, 1.0) as f32;
+                                        let ny = ((p.district_avg_ari_after - min_ari) / (max_ari - min_ari)).clamp(0.0, 1.0) as f32;
+                                        let px = r.left() + pad_l + nx * plot_w;
+                                        let py = r.bottom() - pad_b - ny * plot_h;
+                                        pts_screen.push(egui::Pos2::new(px, py));
+                                    }
+                                    for win in pts_screen.windows(2) {
+                                        painter.line_segment(
+                                            [win[0], win[1]],
+                                            Stroke::new(1.5, theme.accent_blue.gamma_multiply(0.8)),
+                                        );
+                                    }
+                                    for (idx, sp) in pts_screen.iter().enumerate() {
+                                        let is_sel = idx == rep.selected_frontier_idx;
+                                        let p = &rep.pareto_frontier[idx];
+                                        let col = if p.total_cost_usd <= rep.config.budget_cap_usd + 1.0 {
+                                            theme.accent_green
+                                        } else {
+                                            theme.accent_orange
+                                        };
+                                        painter.circle_filled(*sp, if is_sel { 5.0 } else { 3.5 }, col);
+                                        if is_sel {
+                                            painter.circle_stroke(*sp, 7.5, Stroke::new(1.4, theme.text_primary));
+                                        }
+                                    }
+                                    ui.add_space(4.0);
+                                    ui.horizontal_wrapped(|ui| {
+                                        for (idx, pt) in rep.pareto_frontier.iter().enumerate() {
+                                            let active = idx == rep.selected_frontier_idx;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                None,
+                                                format!(
+                                                    "F{} {} (${:.0}k | ARI {:.2})",
+                                                    pt.frontier_id,
+                                                    pt.label,
+                                                    pt.total_cost_usd / 1000.0,
+                                                    pt.district_avg_ari_after
+                                                ),
+                                                active,
+                                                theme.accent_green,
+                                                "Select Pareto frontier allocation point",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.portfolio_retrofit_config.active_frontier_index = idx;
+                                                if let Some(ref mut rep_mut) =
+                                                    universal_canvas.last_portfolio_retrofit_report
+                                                {
+                                                    rep_mut.selected_frontier_idx = idx;
+                                                }
+                                            }
+                                        }
+                                    });
+                                    ui.add_space(4.0);
+                                    if let Some(active_pt) = rep.active_frontier() {
+                                        ScrollArea::vertical()
+                                            .id_salt("portfolio_decisions_scroll")
+                                            .max_width(dw)
+                                            .max_height(130.0)
+                                            .auto_shrink([false, true])
+                                            .show(ui, |ui| {
+                                                for d in &active_pt.decisions {
+                                                    ui.horizontal_wrapped(|ui| {
+                                                        let (badge, col) = if let Some(s) = d.selected_strategy {
+                                                            (s.short_label(), theme.accent_green)
+                                                        } else if d.pre_min_ari < rep.config.target_min_ari {
+                                                            ("Deferred", theme.accent_red)
+                                                        } else {
+                                                            ("Safe", theme.text_muted)
+                                                        };
+                                                        icons::pill_badge(
+                                                            ui,
+                                                            AppIcon::Building,
+                                                            format!("#{} {} [{}]", d.priority_rank, d.name, badge),
+                                                            col,
+                                                        );
+                                                        ui.label(
+                                                            RichText::new(format!(
+                                                                "ARI {:.2}->{:.2} | ${:.0}k | {:.1}t",
+                                                                d.pre_min_ari,
+                                                                d.post_min_ari,
+                                                                d.estimated_cost_usd / 1000.0,
+                                                                d.embodied_carbon_kg_co2e / 1000.0
+                                                            ))
+                                                            .size(9.2)
+                                                            .monospace()
+                                                            .color(theme.text_secondary),
+                                                        );
+                                                        if Self::glass_pill_button(
+                                                            ui,
+                                                            theme,
+                                                            Some(AppIcon::Target),
+                                                            "Fly",
+                                                            false,
+                                                            theme.accent_blue,
+                                                            "Fly Earth camera directly to building parcel",
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                                                            universal_canvas.globe_mode = true;
+                                                            universal_canvas.earth_world.start_fly_to(
+                                                                &universal_canvas.world_map,
+                                                                d.lat,
+                                                                d.lon,
+                                                                17.5,
+                                                                &d.name,
+                                                            );
+                                                            self.push_trace(
+                                                                format!("Flying Earth -> {}", d.name),
+                                                                true,
+                                                            );
+                                                        }
+                                                    });
+                                                }
+                                            });
+                                    }
+                                } else {
+                                    ui.label(
+                                        RichText::new("Click Budget/Obj controls or run /portfolio to synthesize district Pareto frontier.")
                                             .size(9.5)
                                             .color(theme.text_muted),
                                     );
@@ -3259,6 +3649,110 @@ impl SpatialWorkspaceState {
                                                 {
                                                     actions.export_retrofit_delta_ifcx = true;
                                                 }
+                                            }
+                                        },
+                                    );
+                                    ui.add_space(4.0);
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new("District Portfolio:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            let pf_on = universal_canvas.portfolio_retrofit_config.overlay_visible
+                                                || self.portfolio_drawer_open;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::ChartLine),
+                                                "Portfolio Pareto",
+                                                pf_on,
+                                                theme.accent_green,
+                                                "Run multi-building district ARI v2 Pareto optimizer & open frontier drawer",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.portfolio_retrofit_config.overlay_visible = true;
+                                                self.toggle_exclusive_drawer("portfolio");
+                                                actions.run_portfolio_retrofit = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Target),
+                                                format!(
+                                                    "Obj: {}",
+                                                    universal_canvas
+                                                        .portfolio_retrofit_config
+                                                        .objective
+                                                        .short_label()
+                                                ),
+                                                false,
+                                                theme.accent_blue,
+                                                "Cycle portfolio Pareto selection objective (ARI/$ / Balanced / Low-CO2 / Max ARI)",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.portfolio_retrofit_config.objective =
+                                                    universal_canvas
+                                                        .portfolio_retrofit_config
+                                                        .objective
+                                                        .cycle_next();
+                                                actions.run_portfolio_retrofit = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Coins),
+                                                format!(
+                                                    "Cap: ${:.0}k",
+                                                    universal_canvas
+                                                        .portfolio_retrofit_config
+                                                        .budget_cap_usd
+                                                        / 1000.0
+                                                ),
+                                                false,
+                                                theme.accent_orange,
+                                                "Cycle district budget cap ($100k / $250k / $500k / $1000k)",
+                                            )
+                                            .clicked()
+                                            {
+                                                let cur = universal_canvas
+                                                    .portfolio_retrofit_config
+                                                    .budget_cap_usd;
+                                                let next = if cur < 150_000.0 {
+                                                    250_000.0
+                                                } else if cur < 375_000.0 {
+                                                    500_000.0
+                                                } else if cur < 750_000.0 {
+                                                    1_000_000.0
+                                                } else {
+                                                    100_000.0
+                                                };
+                                                universal_canvas
+                                                    .portfolio_retrofit_config
+                                                    .budget_cap_usd = next;
+                                                actions.run_portfolio_retrofit = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Cube3D),
+                                                "Portfolio .ifcx",
+                                                false,
+                                                theme.accent_green,
+                                                "Export non-destructive eigengraph::portfolio::retrofit_plan .ifcx overlay",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.export_portfolio_retrofit_ifcx = true;
                                             }
                                         },
                                     );

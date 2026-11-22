@@ -256,6 +256,8 @@ pub struct UnifiedWorkspaceArchive {
     pub district_hazard: crate::core::gis::DistrictHazardConfig,
     #[serde(default)]
     pub subsurface_ssi: crate::core::geotech::SubsurfaceSsiConfig,
+    #[serde(default)]
+    pub portfolio_retrofit: crate::core::portfolio_retrofit::PortfolioRetrofitConfig,
     pub sha256_seal: String,
 }
 

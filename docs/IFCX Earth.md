@@ -173,5 +173,11 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 - **A3 Pure-Vector Engineering Dossier SVG Exporter (`src/core/vector_dossier.rs`, `src/views/spatial_workspace/`, `src/app.rs`)**:
   - Synthesizes 6-panel A3 landscape (`1600 × 1131`, 0% raster pixels) engineering calculation dossiers uniting structural framing plan, storey elevation + subsurface stratigraphy cut, ARI v2 / LRFD DCR% governing chart, multi-physics scorecard, IFCX diff manifest, and SHA-256 integrity seal, driven via `/snapshot`, `/diff`, `/diff-ifcx`, `/dossier` and the widened Dynamic Island Diff Inspector.
 
-### Planned Next Phases (`v0.7.3`)
-- **Phase 73 (`v0.7.3`) — Autonomous Portfolio-Scale `ARI v2` Retrofit Optimization Across Multi-Building Districts**: District-wide coupled retrofit synthesis across multiple `.ifcx` buildings with joint budget/carbon Pareto frontiers.
+### Phase 73 (`v0.7.3`) — Autonomous Portfolio-Scale `ARI v2` Retrofit Optimization Across Multi-Building Districts *(Implemented)*
+- **District Portfolio Optimizer & `eigengraph::portfolio::retrofit_plan` Overlay (`src/core/portfolio_retrofit.rs`, `src/core/ifcx.rs`)**:
+  - Evaluates coupled structural retrofit strategies across multi-building `.ifcx` district inventories (`WorldSpatialIndex`), solving a constrained Cost (`USD`) vs. Embodied Carbon (`kgCO2e`) vs. District `ARI v2` multi-objective Pareto frontier (`optimize_district_portfolio_retrofit`) and emitting non-destructive `eigengraph::portfolio::retrofit_plan` stages (`IfcxStage::compose_with_portfolio_retrofit_overlay`).
+- **3D District Retrofit Crowns & Dynamic Island Pareto Frontier Drawer (`src/views/webgl_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/core/vector_dossier.rs`)**:
+  - Projects per-building district retrofit status directly in 3D via WebGL2 Pass 2 (`build_rtc_portfolio_retrofit_mesh`) and CPU fallback (glowing emerald/cyan/amber retrofit crowns and deferred crimson alerts), renders a pure-vector Pareto scatter chart (`egui::Painter`) with selectable `F1..Fk` frontier solutions and ranked building cards with `Fly` camera targets inside the widening Dynamic Island `District Portfolio:` drawer, exposes `/portfolio`, `/pareto`, `/budget`, and `/portfolio-ifcx`, and embeds active portfolio KPIs inside exported A3 Pure-Vector Engineering Dossiers.
+
+### Planned Next Phases (`v0.7.4`)
+- **Phase 74 (`v0.7.4`) — Real-Time WebWorker / Async Multi-Thread `StructGNN-CRC` & Live Earthquake Ground-Motion Replay**: Background browser/native surrogate inference pipeline streaming time-history drift envelopes and nonlinear plastic hinge animations cleanly at 60 FPS inside the 3D IFCX Earth viewport.

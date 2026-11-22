@@ -1988,6 +1988,74 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Pure-CPU translucent district portfolio retrofit crown fallback when WebGL2 is inactive.
+    pub(super) fn paint_cpu_portfolio_retrofit_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        theme: &MacTheme,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.portfolio_retrofit_config.overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref rep) = self.last_portfolio_retrofit_report else {
+            return;
+        };
+        let Some(pt) = rep.active_frontier() else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        for d in &pt.decisions {
+            let off_mm =
+                crate::core::gis::SlippyMapState::lat_lon_to_world_mm(origin, d.lat, d.lon);
+            let cx_m = off_mm[0] * 0.001;
+            let cy_m = off_mm[1] * 0.001;
+            if cx_m.hypot(cy_m) > 15_000.0 || d.footprint_local_m.len() < 3 {
+                continue;
+            }
+            let rad = d.heading_deg.to_radians();
+            let (sr, cr) = (rad.sin(), rad.cos());
+            let mut poly = Vec::with_capacity(d.footprint_local_m.len());
+            for &[lx, ly] in &d.footprint_local_m {
+                let wx = cx_m + lx * cr - ly * sr;
+                let wy = cy_m + lx * sr + ly * cr;
+                let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                    origin,
+                    [wx * 1000.0, wy * 1000.0],
+                );
+                if let Some((sp, _, true)) = xform.project_lat_lon_elev(ll.0, ll.1, d.height_m) {
+                    poly.push(sp);
+                }
+            }
+            if poly.len() >= 3 {
+                let (fill, stroke_col) = if d.selected_strategy.is_some() {
+                    (
+                        Color32::from_rgba_unmultiplied(30, 224, 158, 72),
+                        theme.accent_green,
+                    )
+                } else if d.pre_min_ari < rep.config.target_min_ari || d.pre_max_dcr > 0.85 {
+                    (
+                        Color32::from_rgba_unmultiplied(240, 72, 62, 62),
+                        theme.accent_red,
+                    )
+                } else {
+                    continue;
+                };
+                clip.add(egui::Shape::convex_polygon(
+                    poly,
+                    fill,
+                    Stroke::new(1.5, stroke_col),
+                ));
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

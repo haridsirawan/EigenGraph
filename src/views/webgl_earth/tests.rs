@@ -442,3 +442,44 @@ use crate::core::ifcx::IfcxDocument;
             "Deleted IFCX nodes must emit translucent crimson AABB ghost prisms"
         );
     }
+
+    #[test]
+    fn test_phase73_gpu_district_portfolio_retrofit_overlay_mesh() {
+        use crate::core::portfolio_retrofit::{
+            optimize_district_portfolio_retrofit, PortfolioRetrofitConfig,
+        };
+
+        let proj = BimProject::sample_bimcraft_building();
+        let site = crate::core::compute_site_environmental_coupling(
+            -6.2088,
+            106.8456,
+            &crate::core::gis::earth_globe::PlanetaryWorldState::default(),
+        );
+        let rep = optimize_district_portfolio_retrofit(
+            &WorldSpatialIndex::default(),
+            &proj,
+            None,
+            &[],
+            (-6.2088, 106.8456),
+            &site,
+            &PortfolioRetrofitConfig {
+                budget_cap_usd: 250_000.0,
+                overlay_visible: true,
+                ..Default::default()
+            },
+        );
+
+        let pf_mesh = build_rtc_portfolio_retrofit_mesh(&PortfolioGpuOverlayInput {
+            report: &rep,
+            origin_lat_lon: (-6.2088, 106.8456),
+        });
+        assert!(pf_mesh.indices.len() / 3 >= 24);
+        assert!(
+            pf_mesh.vertices.iter().any(|v| v.color[1] > 0.82 && v.color[3] > 0.45),
+            "Retrofitted district buildings must render glowing emerald/cyan/amber parity crowns"
+        );
+        assert!(pf_mesh
+            .vertices
+            .iter()
+            .all(|v| v.pos.iter().all(|f| f.is_finite()) && v.normal.iter().all(|f| f.is_finite())));
+    }

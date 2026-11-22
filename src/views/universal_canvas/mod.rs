@@ -139,6 +139,9 @@ pub struct UniversalCanvasState {
     pub ifcx_diff_overlay_active: bool,
     pub ifcx_diff_filter: crate::core::ifcx::IfcxDiffLayerFilter,
     pub last_vector_dossier_seal: Option<String>,
+    // Phase 73: Autonomous Portfolio-Scale `ARI v2` Retrofit Optimization & Pareto Overlay
+    pub portfolio_retrofit_config: crate::core::portfolio_retrofit::PortfolioRetrofitConfig,
+    pub last_portfolio_retrofit_report: Option<crate::core::portfolio_retrofit::DistrictPortfolioRetrofitReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -250,6 +253,8 @@ impl Default for UniversalCanvasState {
             ifcx_diff_overlay_active: false,
             ifcx_diff_filter: crate::core::ifcx::IfcxDiffLayerFilter::default(),
             last_vector_dossier_seal: None,
+            portfolio_retrofit_config: crate::core::portfolio_retrofit::PortfolioRetrofitConfig::default(),
+            last_portfolio_retrofit_report: None,
         }
     }
 }
@@ -458,6 +463,31 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Evaluates autonomous multi-building portfolio `ARI v2` retrofit Pareto optimization.
+    pub fn refresh_portfolio_retrofit(
+        &mut self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+    ) {
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let site = self.active_site_coupling();
+        let rep = crate::core::portfolio_retrofit::optimize_district_portfolio_retrofit(
+            &self.world_index,
+            bim_project,
+            self.active_world_project_rel_path.as_deref(),
+            members,
+            origin,
+            &site,
+            &self.portfolio_retrofit_config,
+        );
+        self.portfolio_retrofit_config.active_frontier_index = rep.selected_frontier_idx;
+        self.last_portfolio_retrofit_report = Some(rep);
+    }
+
     /// Local ground relief offset (meters relative to Earth surface datum `0.0` at anchored origin).
     pub fn local_site_relief_m(&self, lat: f64, lon: f64) -> f64 {
         if !self.show_terrain_contours {
@@ -575,6 +605,7 @@ impl UniversalCanvasState {
             city_scene: self.city_scene.clone(),
             district_hazard: self.district_hazard.clone(),
             subsurface_ssi: self.subsurface_ssi.clone(),
+            portfolio_retrofit: self.portfolio_retrofit_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -671,6 +702,12 @@ impl UniversalCanvasState {
             self.refresh_subsurface_ssi(bim_project);
         } else {
             self.last_subsurface_ssi_report = None;
+        }
+        self.portfolio_retrofit_config = archive.portfolio_retrofit;
+        if self.portfolio_retrofit_config.overlay_visible {
+            self.refresh_portfolio_retrofit(bim_project, members);
+        } else {
+            self.last_portfolio_retrofit_report = None;
         }
         self.status_message = Some(format!(
             "Imported verified 1-file workspace '{}' ({} canvas objects)",
@@ -1087,6 +1124,21 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let portfolio_origin = if self.ground_origin_anchored {
+                self.ground_origin_lat_lon
+            } else {
+                self.world_map.center_lat_lon
+            };
+            let portfolio_gpu_input = if self.portfolio_retrofit_config.overlay_visible {
+                self.last_portfolio_retrofit_report.as_ref().map(|rep| {
+                    crate::views::webgl_earth::PortfolioGpuOverlayInput {
+                        report: rep,
+                        origin_lat_lon: portfolio_origin,
+                    }
+                })
+            } else {
+                None
+            };
             let gpu_globe_active = self.webgl_earth.schedule_paint_pass(
                 ui,
                 &painter,
@@ -1104,6 +1156,7 @@ impl UniversalCanvasState {
                 active_bim_gpu,
                 hazard_gpu_input,
                 subsurface_gpu_input,
+                portfolio_gpu_input,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
                 ui,
@@ -1127,6 +1180,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.ifcx_diff_overlay_active {
                 self.paint_cpu_ifcx_diff_ghosts_fallback(&painter, rect, theme, &xform);
+            }
+            if !gpu_globe_active && self.portfolio_retrofit_config.overlay_visible {
+                self.paint_cpu_portfolio_retrofit_fallback(&painter, rect, theme, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

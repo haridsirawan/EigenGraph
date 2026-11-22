@@ -1684,3 +1684,66 @@ pub fn build_rtc_site_scene_mesh(
     GpuMeshPayload { vertices, indices }
 }
 
+/// Phase 73: 3D District Portfolio Retrofit Allocation & Structural Crown Overlay Input.
+pub struct PortfolioGpuOverlayInput<'a> {
+    pub report: &'a crate::core::portfolio_retrofit::DistrictPortfolioRetrofitReport,
+    pub origin_lat_lon: (f64, f64),
+}
+
+/// Builds hardware 3D WebGL2 translucent retrofit envelopes & glowing rooftop parity crowns across
+/// every multi-building parcel inside the active district Pareto frontier (`PortfolioParetoPoint`).
+pub fn build_rtc_portfolio_retrofit_mesh(input: &PortfolioGpuOverlayInput<'_>) -> GpuMeshPayload {
+    let Some(pt) = input.report.active_frontier() else {
+        return GpuMeshPayload::default();
+    };
+    let mut verts = Vec::with_capacity(pt.decisions.len() * 64);
+    let mut idxs = Vec::with_capacity(pt.decisions.len() * 96);
+
+    for d in &pt.decisions {
+        let off_mm = SlippyMapState::lat_lon_to_world_mm(input.origin_lat_lon, d.lat, d.lon);
+        let cx_m = off_mm[0] * 0.001;
+        let cy_m = off_mm[1] * 0.001;
+        if cx_m.hypot(cy_m) > 15_000.0 || d.footprint_local_m.len() < 3 {
+            continue;
+        }
+        let rad = d.heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let fp: Vec<[f64; 2]> = d
+            .footprint_local_m
+            .iter()
+            .map(|&[lx, ly]| {
+                let slx = lx * 1.04;
+                let sly = ly * 1.04;
+                [cx_m + slx * cr - sly * sr, cy_m + slx * sr + sly * cr]
+            })
+            .collect();
+        let h_m = d.height_m.clamp(3.6, 650.0) as f32;
+
+        if let Some(strat) = d.selected_strategy {
+            let crown_col = match strat {
+                crate::core::retrofit::RetrofitStrategy::AutoBalanced
+                | crate::core::retrofit::RetrofitStrategy::BrbBracingOnly => {
+                    [0.12_f32, 0.88, 0.62, 0.56]
+                }
+                crate::core::retrofit::RetrofitStrategy::RcJacketingOnly => {
+                    [0.22_f32, 0.74, 0.96, 0.56]
+                }
+                crate::core::retrofit::RetrofitStrategy::ShearWallCore => {
+                    [0.96_f32, 0.70, 0.18, 0.56]
+                }
+            };
+            let shell_col = [crown_col[0], crown_col[1], crown_col[2], 0.22];
+            push_extruded_building_prism_enu(&mut verts, &mut idxs, &fp, 0.0, h_m, shell_col, crown_col);
+            push_extruded_building_prism_enu(&mut verts, &mut idxs, &fp, h_m, 1.2, crown_col, crown_col);
+        } else if d.pre_min_ari < input.report.config.target_min_ari || d.pre_max_dcr > 0.85 {
+            let crit_col = [0.94_f32, 0.28, 0.24, 0.45];
+            push_extruded_building_prism_enu(&mut verts, &mut idxs, &fp, h_m, 1.1, crit_col, crit_col);
+        }
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

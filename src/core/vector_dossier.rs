@@ -30,6 +30,7 @@ pub struct VectorDossierInput<'a> {
     pub ssi_report: Option<&'a SubsurfaceSsiAnalysisReport>,
     pub hazard_report: Option<&'a DistrictMultiHazardReport>,
     pub diff_report: Option<&'a IfcxVisualDiffReport>,
+    pub portfolio_report: Option<&'a crate::core::portfolio_retrofit::DistrictPortfolioRetrofitReport>,
     pub sheet_code: &'a str,
     pub revision: &'a str,
 }
@@ -595,6 +596,17 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
             r.after_max_dcr_pct,
             r.estimated_cost_usd
         )
+    } else if let Some(pt) = input.portfolio_report.and_then(|p| p.active_frontier()) {
+        let port = input.portfolio_report.unwrap();
+        format!(
+            "District {}/{} bldgs | ARI {:.2}->{:.2} | ${:.0}k | {:.1}tCO2e",
+            pt.retrofitted_buildings,
+            pt.total_buildings,
+            port.pre_district_avg_ari,
+            pt.district_avg_ari_after,
+            pt.total_cost_usd / 1000.0,
+            pt.total_carbon_kg_co2e / 1000.0
+        )
     } else {
         "Baseline Intact (No retrofit delta active)".to_string()
     };
@@ -929,6 +941,7 @@ mod tests {
             ssi_report: Some(&ssi_rep),
             hazard_report: None,
             diff_report: Some(&diff),
+            portfolio_report: None,
             sheet_code: "S-101",
             revision: "REV 01",
         });

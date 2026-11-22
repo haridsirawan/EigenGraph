@@ -67,6 +67,7 @@ pub mod ns {
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
     pub const EG_GEOTECH_SSI: &str = "eigengraph::geotech::ssi_springs";
     pub const EG_IFCX_DIFF: &str = "eigengraph::ifcx::diff_manifest";
+    pub const EG_PORTFOLIO_RETROFIT: &str = "eigengraph::portfolio::retrofit_plan";
 }
 
 fn default_ifcx_version() -> String {
@@ -1307,10 +1308,22 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), diff.to_diff_manifest_ifcx()]);
         stage.to_composed_document(&format!("{}_diff", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive multi-building District Portfolio
+    /// Retrofit plan overlay (`eigengraph::portfolio::retrofit_plan`).
+    pub fn compose_with_portfolio_retrofit_overlay(
+        base_doc: &IfcxDocument,
+        portfolio: &crate::core::portfolio_retrofit::DistrictPortfolioRetrofitReport,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[base_doc.clone(), portfolio.portfolio_overlay_ifcx.clone()]);
+        stage.to_composed_document(&format!("{}_portfolio_retrofit", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_RETROFIT) {
+    if node.attributes.contains_key(ns::EG_PORTFOLIO_RETROFIT) {
+        "Portfolio Retrofit".to_string()
+    } else if node.attributes.contains_key(ns::EG_RETROFIT) {
         "Retrofit Delta".to_string()
     } else if node.attributes.contains_key(ns::EG_CASCADE_CRC) {
         "CRC Cascade".to_string()

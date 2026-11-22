@@ -372,6 +372,11 @@ struct GpuEarthPipeline {
     subsurface_ibo: glow::Buffer,
     subsurface_index_count: i32,
     subsurface_revision_uploaded: u64,
+    portfolio_vao: glow::VertexArray,
+    portfolio_vbo: glow::Buffer,
+    portfolio_ibo: glow::Buffer,
+    portfolio_index_count: i32,
+    portfolio_revision_uploaded: u64,
 }
 
 impl GpuEarthPipeline {
@@ -572,6 +577,7 @@ impl GpuEarthPipeline {
             let (bim_vao, bim_vbo, bim_ibo) = setup_vao_pair()?;
             let (hazard_vao, hazard_vbo, hazard_ibo) = setup_vao_pair()?;
             let (subsurface_vao, subsurface_vbo, subsurface_ibo) = setup_vao_pair()?;
+            let (portfolio_vao, portfolio_vbo, portfolio_ibo) = setup_vao_pair()?;
 
             Ok(Self {
                 program,
@@ -600,6 +606,11 @@ impl GpuEarthPipeline {
                 subsurface_ibo,
                 subsurface_index_count: 0,
                 subsurface_revision_uploaded: 0,
+                portfolio_vao,
+                portfolio_vbo,
+                portfolio_ibo,
+                portfolio_index_count: 0,
+                portfolio_revision_uploaded: 0,
             })
         }
     }
@@ -709,6 +720,27 @@ impl GpuEarthPipeline {
         self.subsurface_revision_uploaded = rev;
     }
 
+    fn upload_portfolio(&mut self, gl: &glow::Context, rev: u64, mesh: &GpuMeshPayload) {
+        unsafe {
+            gl.bind_vertex_array(Some(self.portfolio_vao));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.portfolio_vbo));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                vertices_as_u8_slice(&mesh.vertices),
+                glow::DYNAMIC_DRAW,
+            );
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.portfolio_ibo));
+            gl.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                indices_as_u8_slice(&mesh.indices),
+                glow::DYNAMIC_DRAW,
+            );
+            gl.bind_vertex_array(None);
+        }
+        self.portfolio_index_count = mesh.indices.len() as i32;
+        self.portfolio_revision_uploaded = rev;
+    }
+
     fn paint(&self, gl: &glow::Context, u: &RtcCameraUniforms) {
         unsafe {
             gl.use_program(Some(self.program));
@@ -749,11 +781,12 @@ impl GpuEarthPipeline {
                 gl.draw_elements(glow::TRIANGLES, self.planet_index_count, glow::UNSIGNED_INT, 0);
             }
 
-            // --- Pass 2: Floating-Origin RTC Local Site Scene (3D IfcSite TIN + City-Builder + Extruded IFCX + Active BIM/FEM/Modal/N-1 + Subsurface + Multi-Hazard) ---
+            // --- Pass 2: Floating-Origin RTC Local Site Scene (3D IfcSite TIN + City-Builder + Extruded IFCX + Active BIM/FEM/Modal/N-1 + Subsurface + Portfolio + Multi-Hazard) ---
             if u.render_site_pass
                 && (self.site_index_count > 0
                     || self.bim_index_count > 0
                     || self.subsurface_index_count > 0
+                    || self.portfolio_index_count > 0
                     || self.hazard_index_count > 0)
             {
                 gl.clear_depth_f32(1.0);
@@ -774,6 +807,12 @@ impl GpuEarthPipeline {
                     gl.depth_mask(false);
                     gl.bind_vertex_array(Some(self.subsurface_vao));
                     gl.draw_elements(glow::TRIANGLES, self.subsurface_index_count, glow::UNSIGNED_INT, 0);
+                    gl.depth_mask(true);
+                }
+                if self.portfolio_index_count > 0 {
+                    gl.depth_mask(false);
+                    gl.bind_vertex_array(Some(self.portfolio_vao));
+                    gl.draw_elements(glow::TRIANGLES, self.portfolio_index_count, glow::UNSIGNED_INT, 0);
                     gl.depth_mask(true);
                 }
                 if self.hazard_index_count > 0 {
@@ -808,6 +847,9 @@ impl GpuEarthPipeline {
             gl.delete_vertex_array(self.subsurface_vao);
             gl.delete_buffer(self.subsurface_vbo);
             gl.delete_buffer(self.subsurface_ibo);
+            gl.delete_vertex_array(self.portfolio_vao);
+            gl.delete_buffer(self.portfolio_vbo);
+            gl.delete_buffer(self.portfolio_ibo);
         }
     }
 }
@@ -823,11 +865,13 @@ pub struct WebGlEarthState {
     cached_bim_hash: u64,
     cached_hazard_hash: u64,
     cached_subsurface_hash: u64,
+    cached_portfolio_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
     pub last_hazard_tris: usize,
     pub last_subsurface_tris: usize,
+    pub last_portfolio_tris: usize,
 }
 
 impl std::fmt::Debug for WebGlEarthState {
@@ -1028,6 +1072,7 @@ impl WebGlEarthState {
         active_bim: Option<ActiveBimGpuInput<'_>>,
         hazard_input: Option<DistrictHazardGpuInput<'_>>,
         subsurface_input: Option<SubsurfaceSsiGpuInput<'_>>,
+        portfolio_input: Option<PortfolioGpuOverlayInput<'_>>,
     ) -> bool {
         let Some(pipe_arc) = self.pipeline.clone() else {
             return false;
@@ -1194,11 +1239,37 @@ impl WebGlEarthState {
             None
         };
 
+        // Prepare 3D District Portfolio Retrofit Crown Overlay mesh
+        let pending_portfolio = if render_site_pass {
+            if let Some(ref pf_in) = portfolio_input {
+                let rev = pf_in.report.config.content_revision_hash()
+                    ^ (pf_in.report.selected_frontier_idx as u64 + 1).wrapping_mul(1_000_003)
+                    ^ (pf_in.report.total_buildings_evaluated as u64).wrapping_mul(2_654_435_761);
+                if rev != self.cached_portfolio_hash {
+                    let mesh = build_rtc_portfolio_retrofit_mesh(pf_in);
+                    self.last_portfolio_tris = mesh.indices.len() / 3;
+                    self.cached_portfolio_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_portfolio_hash != 0 {
+                self.cached_portfolio_hash = 0;
+                self.last_portfolio_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let planet_payload = Arc::new(Mutex::new(pending_planet));
         let site_payload = Arc::new(Mutex::new(pending_site));
         let bim_payload = Arc::new(Mutex::new(pending_bim));
         let hazard_payload = Arc::new(Mutex::new(pending_hazard));
         let subsurface_payload = Arc::new(Mutex::new(pending_subsurface));
+        let portfolio_payload = Arc::new(Mutex::new(pending_portfolio));
 
         let cb = egui_glow::CallbackFn::new(move |_info, glow_painter| {
             let gl = glow_painter.gl();
@@ -1235,6 +1306,13 @@ impl WebGlEarthState {
                     if let Some((rev, mesh)) = slot.take() {
                         if pipe.subsurface_revision_uploaded != rev {
                             pipe.upload_subsurface(gl, rev, &mesh);
+                        }
+                    }
+                }
+                if let Ok(mut slot) = portfolio_payload.lock() {
+                    if let Some((rev, mesh)) = slot.take() {
+                        if pipe.portfolio_revision_uploaded != rev {
+                            pipe.upload_portfolio(gl, rev, &mesh);
                         }
                     }
                 }

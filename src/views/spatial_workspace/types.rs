@@ -940,7 +940,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Layers,
     },
     SlashCommandSpec {
-        cmd: "/portfolio",
+        cmd: "/world-portfolio",
         category: "World",
         description: "Jump Earth 3D to next unlocated Staging or critical Risk building across Vault",
         icon: AppIcon::Globe,
@@ -1155,6 +1155,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export publication-grade 100% Pure-Vector SVG engineering calculation dossier",
         icon: AppIcon::Printer,
     },
+    SlashCommandSpec {
+        cmd: "/portfolio",
+        category: "AI",
+        description: "Run autonomous multi-building district ARI v2 retrofit Pareto optimization",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/pareto",
+        category: "AI",
+        description: "Open District Portfolio Budget/Carbon Pareto Frontier drawer inside Dynamic Island",
+        icon: AppIcon::ChartBar,
+    },
+    SlashCommandSpec {
+        cmd: "/budget",
+        category: "AI",
+        description: "Set district retrofit budget cap in USD (e.g. /budget 300k)",
+        icon: AppIcon::Coins,
+    },
+    SlashCommandSpec {
+        cmd: "/portfolio-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::portfolio::retrofit_plan .ifcx district overlay",
+        icon: AppIcon::Cube3D,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1200,6 +1224,8 @@ pub struct SpatialHudActions {
     pub run_ifcx_visual_diff: bool,
     pub export_ifcx_diff_manifest: bool,
     pub export_vector_dossier_svg: bool,
+    pub run_portfolio_retrofit: bool,
+    pub export_portfolio_retrofit_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -1549,5 +1575,7 @@ impl SpatialHudActions {
         self.run_ifcx_visual_diff |= other.run_ifcx_visual_diff;
         self.export_ifcx_diff_manifest |= other.export_ifcx_diff_manifest;
         self.export_vector_dossier_svg |= other.export_vector_dossier_svg;
+        self.run_portfolio_retrofit |= other.run_portfolio_retrofit;
+        self.export_portfolio_retrofit_ifcx |= other.export_portfolio_retrofit_ifcx;
     }
 }

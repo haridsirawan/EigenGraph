@@ -7,6 +7,19 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.7.3] - 2026-11-22 — Autonomous Portfolio-Scale `ARI v2` Retrofit Optimization Across Multi-Building Districts
+
+### Added & Changed
+- **Portfolio-Scale Multi-Building `ARI v2` Retrofit & Cost/Carbon Pareto Kernel (`src/core/portfolio_retrofit.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`, `src/core/vector_dossier.rs`)**:
+  - Implemented `optimize_district_portfolio_retrofit` (`PortfolioOptimizationObjective`: `MaxAriPerDollar`, `BalancedCostCarbon`, `MinEmbodiedCarbon`, `MaxDistrictResilience`, `PortfolioRetrofitConfig`, `PortfolioBuildingDecision`, `PortfolioParetoPoint`, `DistrictPortfolioRetrofitReport`).
+  - Evaluates four strengthening strategies (`AutoBalanced`, `BrbBracingOnly`, `RcJacketingOnly`, `ShearWallCore`) across multi-building district inventories (`WorldSpatialIndex` or active-project contextual district), sweeps 12 scalarized budget/carbon combinations + Full District Shield ceiling, prunes strictly dominated solutions into a non-dominated Cost vs. Embodied Carbon vs. District ARI Pareto frontier, emits non-destructive `.ifcx` overlays (`eigengraph::portfolio::retrofit_plan` composable via `IfcxStage::compose_with_portfolio_retrofit_overlay`), and surfaces active portfolio metrics inside [`build_pure_vector_engineering_dossier_svg`](src/core/vector_dossier.rs).
+- **WebGL2 3D District Retrofit Crowns & CPU Projection Fallback (`src/views/webgl_earth/`, `src/views/universal_canvas/`)**:
+  - Added `portfolio_vao/vbo/ibo` and `build_rtc_portfolio_retrofit_mesh` (`PortfolioGpuOverlayInput`) rendering translucent strengthening envelopes + glowing rooftop parity crowns across district buildings colored emerald (`AutoBalanced`/`BRB`), cyan (`RC Jacketing`), amber (`ShearWallCore`), or crimson (deferred critical parcels), backed by `paint_cpu_portfolio_retrofit_fallback` and persisted in `.eigen.json` (`UnifiedWorkspaceArchive::portfolio_retrofit`).
+- **Dynamic Island Pareto Frontier Drawer, Interactive Vector Chart & Slash Commands (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the **`District Portfolio:`** sub-pill bar inside the `BIM & Story` tab (`Portfolio Pareto`, `Obj: <short>`, `Cap: $<k>`, `Portfolio .ifcx`), the widening `District Portfolio ARI v2 Pareto Optimizer` drawer with budget/carbon steppers (`-$50k / +$50k`, `-25t / +25t`), 100% pure-vector Pareto scatter chart (`egui::Painter`), selectable frontier pills (`F1..Fk`), ranked per-building cards with 1-click `Fly` earth camera focus, inline active-strip status badge, and `/portfolio`, `/pareto`, `/budget`, and `/portfolio-ifcx` commands—preserving `hud_rects.len() == 1` across `1280px`, `768px`, and `390px` viewports.
+
+---
+
 ## [v0.7.2] - 2026-11-22 — Multi-Layer IFCX Visual Diffing & Pure-Vector Engineering Dossier Exporter
 
 ### Added & Changed
