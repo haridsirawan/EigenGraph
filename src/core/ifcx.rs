@@ -10,7 +10,7 @@
 //!   Capture -> User Continuation Edits -> 6-DOF FEM/ARI Structural Overlay)
 //! - `IfcxStage::build_earth_globe_layer`: builds the entire 3D Vector Earth Globe (ocean sphere,
 //!   continents, Indonesian archipelago, mountain ridges, major rivers) as native `IfcxNode`s with
-//!   `usd::usdgeom::mesh` ready for 1:1 WebGL2 VBO/IBO upload
+//!   `usd::usdgeom::mesh` ready for 1:1 WebGPU (WGSL) vertex/index buffer upload
 //! - Lossless `BimProject` <-> `.ifcx` round-trip AND automatic reconstruction of editable 6-DOF
 //!   `BimProject` / `StructuralModel` from external or AI-generated `.ifcx` meshes
 //! - Pure-JSON IFCX Health Audit, Spatial Clash Detection, Layer Diff, and Undo/Redo `IfcxEditSession`
@@ -69,6 +69,7 @@ pub mod ns {
     pub const EG_IFCX_DIFF: &str = "eigengraph::ifcx::diff_manifest";
     pub const EG_PORTFOLIO_RETROFIT: &str = "eigengraph::portfolio::retrofit_plan";
     pub const EG_TIME_HISTORY_REPLAY: &str = "eigengraph::analysis::time_history_replay";
+    pub const EG_FRAGILITY_LOSS: &str = "eigengraph::analysis::fema_p58_fragility";
 }
 
 fn default_ifcx_version() -> String {
@@ -168,7 +169,7 @@ pub struct IfcxNode {
     pub attributes: BTreeMap<String, Value>,
 }
 
-/// Typed `usd::usdgeom::mesh` payload mapping 1:1 to WebGL2 VBO/IBO buffers.
+/// Typed `usd::usdgeom::mesh` payload mapping 1:1 to WebGPU (WGSL) vertex/index buffers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct UsdGeomMesh {
     pub points: Vec<[f64; 3]>,
@@ -1329,10 +1330,22 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), replay.replay_overlay_ifcx.clone()]);
         stage.to_composed_document(&format!("{}_time_history_replay", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive FEMA P-58 Fragility & Probabilistic Loss
+    /// overlay (`eigengraph::analysis::fema_p58_fragility`).
+    pub fn compose_with_fragility_loss_overlay(
+        base_doc: &IfcxDocument,
+        replay: &crate::core::ground_motion_replay::GroundMotionReplayReport,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[base_doc.clone(), replay.fragility_overlay_ifcx.clone()]);
+        stage.to_composed_document(&format!("{}_fema_p58_fragility", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_TIME_HISTORY_REPLAY) {
+    if node.attributes.contains_key(ns::EG_FRAGILITY_LOSS) {
+        "FEMA P-58 Fragility".to_string()
+    } else if node.attributes.contains_key(ns::EG_TIME_HISTORY_REPLAY) {
         "Time-History Replay".to_string()
     } else if node.attributes.contains_key(ns::EG_PORTFOLIO_RETROFIT) {
         "Portfolio Retrofit".to_string()

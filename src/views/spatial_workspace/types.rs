@@ -409,9 +409,12 @@ pub enum PlannedProposalAction {
     ApplyModalLens(usize),
     SimulateN1(usize),
     RestoreN1,
-    // Phase 74: Async Multi-Thread / WebWorker StructGNN-CRC & Ground-Motion Replay
+    // Phase 74 & 75: Async Multi-Thread / WebWorker StructGNN-CRC, PEER .at2/.csv, Tri-Dir & FEMA P-58
     RunEqReplay(Option<crate::core::time_history::GroundMotionRecord>),
     TogglePlasticHinges,
+    ToggleTriDirectional(Option<crate::core::ground_motion_replay::TriDirectionalMode>),
+    ToggleAutoMatchSa,
+    OpenFragilityTab,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -465,9 +468,12 @@ pub enum GeminiDirective {
     ApplyModalLens(usize),
     SimulateN1(usize),
     RestoreN1,
-    // Phase 74: Async Multi-Thread / WebWorker StructGNN-CRC & Ground-Motion Replay
+    // Phase 74 & 75: Async Multi-Thread / WebWorker StructGNN-CRC, PEER .at2/.csv, Tri-Dir & FEMA P-58
     RunEqReplay(Option<crate::core::time_history::GroundMotionRecord>),
     TogglePlasticHinges,
+    ToggleTriDirectional(Option<crate::core::ground_motion_replay::TriDirectionalMode>),
+    ToggleAutoMatchSa,
+    OpenFragilityTab,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -637,6 +643,19 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::RunEqReplay(rec));
             } else if upper == "TOGGLE_HINGES" {
                 directives.push(GeminiDirective::TogglePlasticHinges);
+            } else if upper == "TOGGLE_TRIDIR" || upper.starts_with("TOGGLE_TRIDIR:") {
+                use crate::core::ground_motion_replay::TriDirectionalMode;
+                let mode = upper.strip_prefix("TOGGLE_TRIDIR:").and_then(|s| match s.trim() {
+                    "X" | "1D" => Some(TriDirectionalMode::UniaxialX),
+                    "XY" | "2D" => Some(TriDirectionalMode::BiaxialXY),
+                    "XYZ" | "3D" => Some(TriDirectionalMode::TriDirectionalXYZ),
+                    _ => None,
+                });
+                directives.push(GeminiDirective::ToggleTriDirectional(mode));
+            } else if upper == "MATCH_SA_SPECTRUM" {
+                directives.push(GeminiDirective::ToggleAutoMatchSa);
+            } else if upper == "OPEN_FRAGILITY" {
+                directives.push(GeminiDirective::OpenFragilityTab);
             }
             cursor = &after_start[end + 2..];
         } else {
@@ -1005,7 +1024,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/gpu",
         category: "Earth",
-        description: "Toggle WebGL2 hardware-accelerated 3D Vector Earth pass vs. CPU vector fallback",
+        description: "Toggle 100% Pure WebGPU (WGSL) 3D Vector Earth pass vs. CPU vector fallback",
         icon: AppIcon::Globe,
     },
     SlashCommandSpec {
@@ -1137,7 +1156,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/subsurface",
         category: "View",
-        description: "Toggle 3D WebGL2 subsurface geological stratigraphy & groundwater X-Ray cutaway",
+        description: "Toggle 3D WebGPU subsurface geological stratigraphy & groundwater X-Ray cutaway",
         icon: AppIcon::SectionCut,
     },
     SlashCommandSpec {
@@ -1218,6 +1237,36 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export non-destructive eigengraph::analysis::time_history_replay .ifcx overlay",
         icon: AppIcon::Cube3D,
     },
+    SlashCommandSpec {
+        cmd: "/at2",
+        category: "AI",
+        description: "Upload PEER NGA (.at2) or (.csv) accelerogram (/at2 sample | clear)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/tridir",
+        category: "AI",
+        description: "Switch 1D X / 2D XY / 3D XYZ seismic excitation coupling (/tridir xyz)",
+        icon: AppIcon::Cube3D,
+    },
+    SlashCommandSpec {
+        cmd: "/match-sa",
+        category: "AI",
+        description: "Auto-scale ground motion Sa(T1) to SNI 1726 / ASCE 7-22 design spectrum",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/fragility",
+        category: "AI",
+        description: "Open real-time FEMA P-58 fragility curves & 3D per-story loss halo",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/fragility-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::fema_p58_fragility .ifcx overlay",
+        icon: AppIcon::Cube3D,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1267,6 +1316,8 @@ pub struct SpatialHudActions {
     pub export_portfolio_retrofit_ifcx: bool,
     pub run_async_ground_motion_replay: bool,
     pub export_ground_motion_replay_ifcx: bool,
+    pub open_accelerogram_file_picker: bool,
+    pub export_fragility_loss_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -1620,5 +1671,7 @@ impl SpatialHudActions {
         self.export_portfolio_retrofit_ifcx |= other.export_portfolio_retrofit_ifcx;
         self.run_async_ground_motion_replay |= other.run_async_ground_motion_replay;
         self.export_ground_motion_replay_ifcx |= other.export_ground_motion_replay_ifcx;
+        self.open_accelerogram_file_picker |= other.open_accelerogram_file_picker;
+        self.export_fragility_loss_ifcx |= other.export_fragility_loss_ifcx;
     }
 }

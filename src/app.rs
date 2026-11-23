@@ -180,11 +180,11 @@ const ALL_PILLARS: [NavigationPillar; 15] = [
 ];
 
 impl EigenGraphApp {
-    /// Initializes `EigenGraphApp` with native WebGL2 / OpenGL GPU Vector Earth shaders when `cc.gl` is present.
+    /// Initializes `EigenGraphApp` with 100% Pure WebGPU (`egui_wgpu` / WGSL) 3D Vector Earth pipelines.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = Self::default();
-        if let Some(gl) = &cc.gl {
-            app.universal_canvas.init_webgl_earth(gl);
+        if let Some(render_state) = &cc.wgpu_render_state {
+            app.universal_canvas.init_webgpu_earth(render_state);
         }
         app
     }
@@ -982,11 +982,7 @@ impl App for EigenGraphApp {
         }
     }
 
-    fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
-        if let Some(gl) = gl {
-            self.universal_canvas.webgl_earth.destroy(gl);
-        }
-    }
+    fn on_exit(&mut self) {}
 }
 
 impl crate::views::spatial_workspace::SpatialIslandHost for EigenGraphApp {
@@ -2468,12 +2464,23 @@ impl EigenGraphApp {
                 .start_async_ground_motion_replay(&self.build_view.bim_bus.project);
             self.spatial_workspace.push_trace(
                 format!(
-                    "Streaming async StructGNN-CRC & {} ({:.2}x) NL-THA...",
-                    crate::core::ground_motion_replay::GroundMotionReplayConfig::record_short_label(
-                        self.universal_canvas.ground_motion_replay_config.record
-                    ),
+                    "Streaming async StructGNN-CRC & {} ({} • {:.2}x) NL-THA...",
+                    self.universal_canvas
+                        .ground_motion_replay_config
+                        .active_record_label(),
+                    self.universal_canvas
+                        .ground_motion_replay_config
+                        .tridirectional_mode
+                        .short_label(),
                     self.universal_canvas.ground_motion_replay_config.scale_factor
                 ),
+                true,
+            );
+        }
+        if hud_actions.open_accelerogram_file_picker {
+            crate::core::web_bridge::trigger_file_picker(".at2,.csv,.txt");
+            self.spatial_workspace.push_trace(
+                "Select a PEER NGA (.at2) or 2/3-column (.csv) accelerogram file...",
                 true,
             );
         }
@@ -2525,6 +2532,56 @@ impl EigenGraphApp {
             } else {
                 self.spatial_workspace
                     .push_trace("No Ground-Motion Replay overlay available.", false);
+            }
+        }
+        if hud_actions.export_fragility_loss_ifcx {
+            if self
+                .universal_canvas
+                .last_ground_motion_replay_report
+                .is_none()
+                && !self.build_view.bim_bus.project.is_empty()
+            {
+                let site = self.universal_canvas.active_site_coupling();
+                if let Ok(rep) = crate::core::ground_motion_replay::run_ground_motion_replay_for_bim(
+                    &self.build_view.bim_bus.project,
+                    &site,
+                    self.universal_canvas.last_subsurface_ssi_report.as_ref(),
+                    &self.universal_canvas.ground_motion_replay_config,
+                    "FEMA P-58 IFCX Export",
+                    None,
+                ) {
+                    self.universal_canvas.last_ground_motion_replay_report = Some(rep);
+                }
+            }
+            if let Some(ref rep) = self.universal_canvas.last_ground_motion_replay_report {
+                let raw_name =
+                    Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+                let fname = format!("{raw_name}_fema_p58_fragility.ifcx");
+                let layered = self
+                    .universal_canvas
+                    .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+                let composed =
+                    crate::core::IfcxStage::compose_with_fragility_loss_overlay(&layered, rep);
+                let json = composed.to_json_pretty();
+                match crate::core::web_bridge::save_text_file(
+                    &fname,
+                    &json,
+                    "application/json;charset=utf-8",
+                ) {
+                    Ok(_) => {
+                        self.spatial_workspace.push_trace(
+                            format!(
+                                "Exported FEMA P-58 Fragility & Loss IFCX ({fname}, {} nodes)",
+                                composed.data.len()
+                            ),
+                            true,
+                        );
+                    }
+                    Err(err) => self.spatial_workspace.push_trace(err, false),
+                }
+            } else {
+                self.spatial_workspace
+                    .push_trace("No FEMA P-58 Fragility synthesis available.", false);
             }
         }
     }
@@ -4067,6 +4124,52 @@ impl EigenGraphApp {
                 }
             }
             return;
+        }
+
+        if crate::core::looks_like_accelerogram_payload(&payload.filename, trimmed) {
+            match crate::core::parse_custom_accelerogram(trimmed, &payload.filename) {
+                Ok(acc) => {
+                    let rec_name = acc.name.clone();
+                    let pga = acc.pga_x_g;
+                    let dt = acc.dt_s;
+                    let n_pts = acc.accel_x_g.len();
+                    self.universal_canvas
+                        .ground_motion_replay_config
+                        .custom_accelerogram = Some(acc);
+                    if self.build_view.bim_bus.project.is_empty() {
+                        if let Ok(msg) = self
+                            .build_view
+                            .bim_bus
+                            .execute_natural_language("portal 3x2 @6m 2floors")
+                        {
+                            self.universal_canvas.ground_origin_anchored = true;
+                            self.spatial_workspace.push_trace(msg, true);
+                            self.sync_bim_to_fem();
+                        }
+                    }
+                    self.spatial_workspace.apply_lens_to_views(
+                        crate::views::spatial_workspace::SpatialLens::TimeHistoryReplay,
+                        &mut self.build_view,
+                        &mut self.universal_canvas,
+                    );
+                    self.spatial_workspace.open_ground_motion_drawer();
+                    self.universal_canvas
+                        .start_async_ground_motion_replay(&self.build_view.bim_bus.project);
+                    self.spatial_workspace.push_trace(
+                        format!(
+                            "Loaded PEER/CSV accelerogram '{rec_name}' (PGA={pga:.3}g, dt={dt:.4}s, {n_pts} pts) — streaming async NL-THA..."
+                        ),
+                        true,
+                    );
+                    return;
+                }
+                Err(err) => {
+                    if lower.ends_with(".at2") {
+                        self.spatial_workspace.push_trace(err, false);
+                        return;
+                    }
+                }
+            }
         }
 
         if self.ingest_geojson_or_survey_onto_earth(&payload.filename, payload.content.trim_start_matches('\u{FEFF}')) {

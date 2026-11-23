@@ -99,11 +99,12 @@ pub struct StoryComponentGroup {
 }
 
 /// REDi™ Resilience Rating Tier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum REDiResilienceTier {
     Platinum,
     Gold,
     Silver,
+    #[default]
     StandardCode,
 }
 
@@ -222,6 +223,48 @@ pub struct FemaP58Report {
     pub story_losses: Vec<StoryLossSummary>,
     pub compliance_audit: Vec<FemaComplianceItem>,
     pub fragility_sample_curves: Vec<(String, Vec<(f64, f64)>)>,
+}
+
+/// Continuous FEMA P-58 lognormal fragility exceedance point parameterized by spectral acceleration `Sa(T1)`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReplayFragilityCurvePoint {
+    pub sa_g: f64,
+    pub p_io: f64,
+    pub p_ls: f64,
+    pub p_cp: f64,
+    pub p_collapse: f64,
+}
+
+/// Real-time story-level repair cost, downtime, and carbon loss derived from BIM + NL-THA demands.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StoryFragilityLoss {
+    pub story_number: usize,
+    pub elevation_m: f64,
+    pub peak_drift_ratio: f64,
+    pub peak_floor_accel_g: f64,
+    pub repair_cost_usd: f64,
+    pub loss_ratio: f64,
+    pub downtime_days: f64,
+    pub embodied_carbon_kg: f64,
+    pub governing_component: String,
+}
+
+/// Coupled BIM + NL-THA real-time FEMA P-58 fragility and probabilistic loss synthesis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ReplayFemaP58Synthesis {
+    pub building_replacement_value_usd: f64,
+    pub total_repair_cost_usd: f64,
+    pub repair_loss_ratio: f64,
+    pub downtime_days: f64,
+    pub business_interruption_usd: f64,
+    pub total_economic_loss_usd: f64,
+    pub repair_embodied_carbon_kg: f64,
+    pub collapse_probability: f64,
+    pub demolition_probability: f64,
+    pub achieved_redi_tier: REDiResilienceTier,
+    pub sa_t1_g: f64,
+    pub story_losses: Vec<StoryFragilityLoss>,
+    pub fragility_curves: Vec<ReplayFragilityCurvePoint>,
 }
 
 /// Core computational engine for FEMA P-58 / REDi assessment.
@@ -798,6 +841,195 @@ impl FemaP58Engine {
         md.push_str("\n---\n*Certified by EigenGraph Web Structural Engine*\n");
         md
     }
+
+    /// Evaluates real-time FEMA P-58 fragility curves, story-level repair cost, downtime, and REDi tier
+    /// directly from actual BIM geometry/counts and coupled tri-directional NL-THA Engineering Demand Parameters.
+    pub fn evaluate_from_replay_demands(
+        project: &crate::core::bim::BimProject,
+        story_elevs_m: &[f64],
+        peak_story_drifts: &[f64],
+        scaled_pga_g: f64,
+        peak_az_g: f64,
+        sa_t1_g: f64,
+    ) -> ReplayFemaP58Synthesis {
+        use crate::core::bim::RunCategory;
+
+        let db = Self::build_standard_fragility_database();
+        let num_stories = peak_story_drifts.len().max(1);
+        let floor_area_m2 = project
+            .plan_extents_mm()
+            .map(|(mn, mx)| {
+                let dx = ((mx[0] - mn[0]) * 0.001).max(6.0);
+                let dy = ((mx[1] - mn[1]) * 0.001).max(6.0);
+                (dx * dy).clamp(64.0, 25_000.0)
+            })
+            .unwrap_or(320.0);
+        let total_area_m2 = floor_area_m2 * (num_stories as f64);
+        let replacement_value_usd = (total_area_m2 * 2_200.0).max(250_000.0);
+        let story_val_usd = replacement_value_usd / (num_stories as f64);
+
+        let beam_count = project
+            .runs
+            .iter()
+            .filter(|r| matches!(r.category, RunCategory::StructuralBeam | RunCategory::StructuralBrace))
+            .count();
+        let avg_joints_per_floor = ((project.columns.len() + beam_count) as f64 / num_stories as f64)
+            .clamp(4.0, 200.0);
+        let avg_walls_per_floor = (project.walls.len() as f64 / num_stories as f64).clamp(2.0, 80.0);
+        let avg_height_m = story_elevs_m
+            .last()
+            .copied()
+            .unwrap_or(3.6 * num_stories as f64)
+            .max(3.0);
+
+        let mut story_losses = Vec::with_capacity(num_stories);
+        let mut total_repair_cost = 0.0_f64;
+        let mut total_embodied_carbon = 0.0_f64;
+        let mut max_story_labor_days = 0.0_f64;
+        let mut max_drift = 0.0_f64;
+
+        let frame_joints = avg_joints_per_floor.round().max(6.0);
+        let partition_units = (floor_area_m2 / 140.0).max(avg_walls_per_floor * 0.5).clamp(2.0, 80.0);
+        let facade_bays = ((floor_area_m2.sqrt() * 4.0) / 8.0).clamp(4.0, 60.0);
+        let ceiling_units = (floor_area_m2 / 220.0).clamp(1.0, 40.0);
+        let mep_units = (floor_area_m2 / 360.0).clamp(1.0, 25.0);
+        let quantities = [
+            frame_joints,
+            partition_units,
+            facade_bays,
+            ceiling_units,
+            mep_units,
+        ];
+
+        for s in 0..num_stories {
+            let elev_m = story_elevs_m
+                .get(s + 1)
+                .copied()
+                .unwrap_or(((s + 1) as f64) * 3.6);
+            let frac = (elev_m / avg_height_m).clamp(0.0, 1.0);
+            let drift = peak_story_drifts[s].clamp(0.0, 0.12);
+            if drift > max_drift {
+                max_drift = drift;
+            }
+            let pfa_h = scaled_pga_g * (1.0 + 1.55 * frac.powf(1.1));
+            let pfa = pfa_h.hypot(0.30 * peak_az_g);
+
+            let mut s_cost = 0.0_f64;
+            let mut s_labor = 0.0_f64;
+            let mut s_carbon = 0.0_f64;
+            let mut gov_comp = "None".to_string();
+            let mut max_comp_cost = 0.0_f64;
+
+            for (idx, comp) in db.iter().enumerate() {
+                let edp = match comp.edp_kind {
+                    EdpKind::PeakInterstoryDriftRatio => drift,
+                    EdpKind::PeakFloorAcceleration => pfa,
+                    EdpKind::ResidualDriftRatio => drift * 0.25,
+                };
+                let qty = quantities[idx % quantities.len()];
+                let num_ds = comp.damage_states.len();
+                let mut p_exceed = Vec::with_capacity(num_ds + 1);
+                for ds in &comp.damage_states {
+                    p_exceed.push(Self::evaluate_fragility(edp, ds.median_theta, ds.beta));
+                }
+                p_exceed.push(0.0);
+
+                let mut comp_cost = 0.0_f64;
+                let mut comp_labor = 0.0_f64;
+                let mut comp_carbon = 0.0_f64;
+                for i in 0..num_ds {
+                    let p_ds = (p_exceed[i] - p_exceed[i + 1]).max(0.0);
+                    let ds = &comp.damage_states[i];
+                    comp_cost += p_ds * ds.unit_repair_cost_usd * qty;
+                    comp_labor += p_ds * ds.unit_repair_labor_days * qty;
+                    comp_carbon += p_ds * ds.unit_embodied_carbon_kg * qty;
+                }
+                if comp_cost > max_comp_cost {
+                    max_comp_cost = comp_cost;
+                    gov_comp = comp.name.clone();
+                }
+                s_cost += comp_cost;
+                s_labor += comp_labor;
+                s_carbon += comp_carbon;
+            }
+
+            if s_labor > max_story_labor_days {
+                max_story_labor_days = s_labor;
+            }
+            total_repair_cost += s_cost;
+            total_embodied_carbon += s_carbon;
+            story_losses.push(StoryFragilityLoss {
+                story_number: s + 1,
+                elevation_m: elev_m,
+                peak_drift_ratio: drift,
+                peak_floor_accel_g: pfa,
+                repair_cost_usd: s_cost,
+                loss_ratio: (s_cost / story_val_usd).clamp(0.0, 1.0),
+                downtime_days: ((s_labor / 8.0) * 1.35 + 2.0).round(),
+                embodied_carbon_kg: s_carbon,
+                governing_component: gov_comp,
+            });
+        }
+
+        let repair_loss_ratio = (total_repair_cost / replacement_value_usd).clamp(0.0, 1.0);
+        let inspection_delay = if repair_loss_ratio > 0.05 { 14.0 } else { 3.0 };
+        let downtime_days = ((max_story_labor_days / 8.0) * 1.35 + inspection_delay).round();
+        let daily_revenue = replacement_value_usd * 0.0012;
+        let business_interruption_usd = downtime_days * daily_revenue;
+        let total_economic_loss_usd = total_repair_cost + business_interruption_usd;
+
+        let effective_sa = sa_t1_g.max(0.02);
+        let collapse_probability = Self::evaluate_fragility(effective_sa, 1.35, 0.40);
+        let demolition_probability = Self::evaluate_fragility(max_drift * 0.28, 0.012, 0.35);
+
+        let achieved_redi_tier = if downtime_days <= 7.0 && repair_loss_ratio <= 0.05 {
+            REDiResilienceTier::Platinum
+        } else if downtime_days <= 30.0 && repair_loss_ratio <= 0.10 {
+            REDiResilienceTier::Gold
+        } else if downtime_days <= 60.0 && repair_loss_ratio <= 0.20 {
+            REDiResilienceTier::Silver
+        } else {
+            REDiResilienceTier::StandardCode
+        };
+
+        // Calibrate 25-point continuous lognormal fragility curves against Sa(T1)
+        let median_shift = (effective_sa / (max_drift / 0.020).max(0.25)).clamp(0.45, 2.20);
+        let m_io = 0.28 * median_shift;
+        let m_ls = 0.56 * median_shift;
+        let m_cp = 0.92 * median_shift;
+        let m_col = 1.35 * median_shift;
+        let mut fragility_curves = Vec::with_capacity(25);
+        for i in 0..25 {
+            let sa = 0.05 + (i as f64 / 24.0) * 2.45;
+            let p_col = Self::evaluate_fragility(sa, m_col, 0.42);
+            let p_cp = Self::evaluate_fragility(sa, m_cp, 0.40).max(p_col);
+            let p_ls = Self::evaluate_fragility(sa, m_ls, 0.38).max(p_cp);
+            let p_io = Self::evaluate_fragility(sa, m_io, 0.35).max(p_ls);
+            fragility_curves.push(ReplayFragilityCurvePoint {
+                sa_g: sa,
+                p_io,
+                p_ls,
+                p_cp,
+                p_collapse: p_col,
+            });
+        }
+
+        ReplayFemaP58Synthesis {
+            building_replacement_value_usd: replacement_value_usd,
+            total_repair_cost_usd: total_repair_cost,
+            repair_loss_ratio,
+            downtime_days,
+            business_interruption_usd,
+            total_economic_loss_usd,
+            repair_embodied_carbon_kg: total_embodied_carbon,
+            collapse_probability,
+            demolition_probability,
+            achieved_redi_tier,
+            sa_t1_g: effective_sa,
+            story_losses,
+            fragility_curves,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -845,5 +1077,34 @@ mod tests {
         let (nodes, elements) = FemaP58Engine::generate_fema_resilience_archetype();
         assert_eq!(nodes.len(), 12 * 11, "12 nodes per floor x 11 levels");
         assert!(!elements.is_empty());
+    }
+
+    #[test]
+    fn test_phase75_replay_fema_p58_fragility_and_loss_synthesis() {
+        let proj = crate::core::bim::BimProject::sample_bimcraft_building();
+        let elevs = [0.0, 4.0, 8.0];
+        let low = FemaP58Engine::evaluate_from_replay_demands(
+            &proj,
+            &elevs,
+            &[0.003, 0.002],
+            0.25,
+            0.12,
+            0.35,
+        );
+        let high = FemaP58Engine::evaluate_from_replay_demands(
+            &proj,
+            &elevs,
+            &[0.024, 0.018],
+            0.85,
+            0.48,
+            1.40,
+        );
+        assert_eq!(high.story_losses.len(), 2);
+        assert!(high.total_repair_cost_usd > low.total_repair_cost_usd);
+        assert!(high.collapse_probability > low.collapse_probability);
+        assert_eq!(high.fragility_curves.len(), 25);
+        for pt in &high.fragility_curves {
+            assert!(pt.p_io >= pt.p_ls && pt.p_ls >= pt.p_cp && pt.p_cp >= pt.p_collapse);
+        }
     }
 }

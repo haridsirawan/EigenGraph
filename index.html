@@ -1142,8 +1142,14 @@ self.onmessage = function (ev) {
   try {
     const p = JSON.parse(msg.payloadJson || "{}");
     const g = 9.80665;
-    const dt = Math.max(0.005, Math.min(0.025, Number(p.dtS || 0.01)));
-    const totalTime = Math.max(8.0, Math.min(40.0, Number(p.durationS || 20.0)));
+    const hasCustom = Array.isArray(p.customAccelX) && p.customAccelX.length >= 16;
+    const customX = hasCustom ? p.customAccelX : null;
+    const customY = (hasCustom && Array.isArray(p.customAccelY) && p.customAccelY.length > 0) ? p.customAccelY : null;
+    const customZ = (hasCustom && Array.isArray(p.customAccelZ) && p.customAccelZ.length > 0) ? p.customAccelZ : null;
+    const dt = hasCustom
+      ? Math.max(0.002, Math.min(0.05, Number(p.customDtS || p.dtS || 0.01)))
+      : Math.max(0.005, Math.min(0.025, Number(p.dtS || 0.01)));
+    const totalTime = Math.max(2.0, Math.min(90.0, Number(p.durationS || 20.0)));
     const scaleFactor = Math.max(0.25, Math.min(3.0, Number(p.scaleFactor || 1.15)));
     const heightM = Math.max(3.0, Number(p.heightM || 12.0));
     const weightKn = Math.max(100.0, Number(p.weightKn || 2500.0));
@@ -1153,15 +1159,21 @@ self.onmessage = function (ev) {
     const postYield = Math.max(0.01, Math.min(0.35, Number(p.postYieldRatio || 0.04)));
     const hystKey = String(p.hysteresisKey || "BoucWen");
     const recKey = String(p.recordKey || "Northridge");
+    const tridirMode = String(p.tridirMode || "XYZ");
 
     let pgaG = 0.843, omegaP = 2.2 * Math.PI, zetaG = 0.35, tPeak = 4.2;
     if (recKey === "Kobe") { pgaG = 0.671; omegaP = 1.8 * Math.PI; zetaG = 0.30; tPeak = 5.0; }
     else if (recKey === "ElCentro") { pgaG = 0.348; omegaP = 2.8 * Math.PI; zetaG = 0.40; tPeak = 6.0; }
     else if (recKey === "ChiChi") { pgaG = 0.512; omegaP = 1.2 * Math.PI; zetaG = 0.25; tPeak = 9.5; }
     else if (recKey === "Sumatra") { pgaG = 0.425; omegaP = 0.8 * Math.PI; zetaG = 0.20; tPeak = 16.0; }
+    if (customX) {
+      let maxAbs = 0.05;
+      for (let k = 0; k < customX.length; k++) maxAbs = Math.max(maxAbs, Math.abs(Number(customX[k] || 0)));
+      pgaG = maxAbs;
+    }
 
     const pga = pgaG * scaleFactor * g;
-    const numSteps = Math.ceil(totalTime / dt);
+    const numSteps = customX ? customX.length : Math.ceil(totalTime / dt);
     const totalMass = (weightKn * 1000.0) / g;
     const omega1 = (2.0 * Math.PI) / t1S;
     const kElastic = totalMass * omega1 * omega1;
@@ -1182,20 +1194,35 @@ self.onmessage = function (ev) {
     if (hystKey === "Takeda") { hystMult = 1.08; pinchFactor = 0.84; }
     else if (hystKey === "Bilinear") { hystMult = 0.94; pinchFactor = 1.05; }
 
-    self.postMessage({ type: "progress", jobId, progress: 0.22, stage: "WebWorker HHT-alpha NL-THA..." });
+    self.postMessage({ type: "progress", jobId, progress: 0.22, stage: customX ? "WebWorker Custom PEER NL-THA..." : "WebWorker HHT-alpha NL-THA..." });
     const halfStep = Math.floor(numSteps * 0.5);
+    const pgaXScaled = pgaG * scaleFactor;
     for (let i = 0; i < numSteps; i++) {
       const t = i * dt;
-      let env = 0.0;
-      if (t >= 0.1) {
-        const tau = t / tPeak;
-        env = Math.max(0.0, Math.min(1.8, (tau * tau) * Math.exp(-2.0 * (tau - 1.0))));
+      let axG = 0.0;
+      if (customX) {
+        axG = Number(customX[i] || 0) * scaleFactor;
+      } else {
+        let env = 0.0;
+        if (t >= 0.1) {
+          const tau = t / tPeak;
+          env = Math.max(0.0, Math.min(1.8, (tau * tau) * Math.exp(-2.0 * (tau - 1.0))));
+        }
+        const p1 = Math.sin(omegaP * t) * Math.exp(-zetaG * omegaP * Math.abs(t - tPeak) * 0.15);
+        const p2 = Math.sin(2.1 * omegaP * t + 0.5) * 0.45;
+        const p3 = Math.cos(0.5 * omegaP * t - 0.8) * 0.35;
+        axG = Math.max(-1.0, Math.min(1.0, env * (p1 + p2 + p3))) * pgaXScaled;
       }
-      const p1 = Math.sin(omegaP * t) * Math.exp(-zetaG * omegaP * Math.abs(t - tPeak) * 0.15);
-      const p2 = Math.sin(2.1 * omegaP * t + 0.5) * 0.45;
-      const p3 = Math.cos(0.5 * omegaP * t - 0.8) * 0.35;
-      const rawA = Math.max(-1.0, Math.min(1.0, env * (p1 + p2 + p3)));
-      const aG = rawA * pga;
+      const aG = axG * g;
+      let ayG = 0.0, azG = 0.0;
+      if (tridirMode === "XY" || tridirMode === "XYZ") {
+        ayG = customY ? Number(customY[Math.min(i, customY.length - 1)] || 0) * scaleFactor
+          : 0.78 * axG * (0.45 + 0.55 * Math.cos(t * 1.9 + 0.85)) + 0.14 * pgaXScaled * Math.sin(t * 3.1);
+      }
+      if (tridirMode === "XYZ") {
+        azG = customZ ? Number(customZ[Math.min(i, customZ.length - 1)] || 0) * scaleFactor
+          : 0.67 * axG * (0.35 + 0.65 * Math.sin(t * 4.4 + 0.4));
+      }
 
       const uPred = u + dt * v + dt * dt * (0.5 - beta) * a;
       const vPred = v + dt * (1.0 - gamma) * a;
@@ -1242,7 +1269,9 @@ self.onmessage = function (ev) {
       if (i % sampleRate === 0) {
         samples.push({
           time_s: t,
-          ground_accel_g: aG / g,
+          ground_accel_g: axG,
+          ground_accel_y_g: ayG,
+          ground_accel_z_g: azG,
           roof_disp_mm: uEff * 1000.0,
           roof_drift_ratio: uEff / heightM,
           base_shear_kn: fS / 1000.0,

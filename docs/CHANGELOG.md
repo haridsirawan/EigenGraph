@@ -7,6 +7,23 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.7.5] - 2026-11-23 — 100% Pure WebGPU (WGSL) Renderer, PEER `.at2`/`.csv` Tri-Directional Coupling & Real-Time FEMA P-58 Fragility
+
+### Added & Changed
+- **100% Pure WebGPU (`wgpu` + WGSL) 3D Vector Earth Engine — 0% WebGL / 0% GLSL / 0% `glow` (`Cargo.toml`, `src/main.rs`, `src/app.rs`, `src/views/webgpu_earth/`, `src/views/universal_canvas/`)**:
+  - Replaced `eframe`'s `glow` backend with `wgpu_no_default_features`, explicit `egui-wgpu 0.36`, and `wgpu 30.0` (`metal` / `vulkan` / `dx12` on Native; strictly `Backends::BROWSER_WEBGPU` on `wasm32-unknown-unknown` with zero `webgl`, `gles`, `glow`, or `glutin` crates).
+  - Replaced `webgl_earth/` GLSL ES shaders with [`WebGpuEarthResources`](src/views/webgpu_earth/mod.rs) and [`EARTH_WGSL`](src/views/webgpu_earth/mod.rs) implementing two-pass `[0.50, 1.00]` planetary globe + `[0.00, 0.499]` floating-origin RTC local site depth-range viewport splitting across opaque and translucent alpha-blended `wgpu::RenderPipeline`s and 8 reusable vertex/index buffer slots (`planet`, `site`, `bim`, `hinges`, `subsurface`, `portfolio`, `hazard`, `fragility_loss`), backed by pure-CPU vector fallback for offline headless CI environments.
+- **Custom PEER NGA `.at2` / `.csv` Ingestion, Tri-Directional (`1D X` / `2D XY` / `3D XYZ`) Coupling & 5% Response Spectrum (`src/core/time_history.rs`, `src/core/ground_motion_replay.rs`, `index.html`)**:
+  - Added [`parse_peer_at2_accelerogram`](src/core/time_history.rs), [`parse_accelerogram_csv`](src/core/time_history.rs), [`parse_custom_accelerogram`](src/core/time_history.rs), [`sample_peer_at2_text`](src/core/time_history.rs), [`TimeHistoryEngine::evaluate_with_series`](src/core/time_history.rs), and [`compute_elastic_response_spectrum_5pct`](src/core/time_history.rs) with SNI 1726 / ASCE 7-22 auto `Match Sa(T1)` amplitude scaling.
+  - Added [`TriDirectionalMode`](src/core/ground_motion_replay.rs) (`UniaxialX`, `BiaxialXY`, `TriDirectionalXYZ`) driving orthogonal $Y$ sway, vertical seismic $a_z$ heave, and $1 \pm 0.28\,a_z$ column axial force modulation on dynamic ASCE 41-17 plastic hinge DCRs across both Native Rust threads and the inline Browser Blob WebWorker (`EigenGraphWorkerBridge` in `index.html`), plus 3D XYZ mesh sway in [`build_rtc_active_bim_fem_mesh`](src/views/webgpu_earth/mesh_builders.rs).
+- **Real-Time BIM + NL-THA Coupled FEMA P-58 Fragility, Story-Loss Halos & Non-Destructive `.ifcx` Overlay (`src/core/fema_p58.rs`, `src/core/ifcx.rs`, `src/core/vector_dossier.rs`, `src/views/webgpu_earth/mesh_builders.rs`)**:
+  - Added [`FemaP58Engine::evaluate_from_replay_demands`](src/core/fema_p58.rs) (`ReplayFemaP58Synthesis`, `StoryFragilityLoss`, `ReplayFragilityCurvePoint`) synthesizing lognormal collapse/damage fragility curves, story-level repair cost (`USD`), REDi resilience tier, downtime (`days`), and repair embodied carbon (`kgCO2e`) directly from live BIM member counts and coupled tri-directional NL-THA interstory drifts.
+  - Added 3D translucent per-story FEMA P-58 loss halo ribbons (`build_rtc_fragility_loss_mesh` at `material_kind = 7.0`, backed by `paint_cpu_fragility_loss_fallback`), non-destructive `.ifcx` overlay composition (`eigengraph::analysis::fema_p58_fragility` via `IfcxStage::compose_with_fragility_loss_overlay`), and extended SVG telemetry inside [`build_pure_vector_engineering_dossier_svg`](src/core/vector_dossier.rs).
+- **Dynamic Island Spectrum & Fragility Studio Tab & Slash Commands (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the **`Spectrum & Fragility`** drawer sub-tab with 3 pure-vector `egui::Painter` charts (5% Response Spectrum $S_a(T)$ vs. SNI 1726 Design Spectrum with $T_1$ marker, FEMA P-58 lognormal fragility exceedance curves $P(\text{DS}\mid S_a)$, and per-story Repair Loss bar chart), `.at2`/`.csv` upload picker & file drop handling, `Tri-Dir`, `Match Sa(T1)`, `Fragility 3D`, and `Fragility .ifcx` pills, `/at2`, `/tridir`, `/match-sa`, `/fragility`, and `/fragility-ifcx` slash commands, and `[[TOGGLE_TRIDIR]]` / `[[MATCH_SA_SPECTRUM]]` / `[[OPEN_FRAGILITY]]` Gemini directives — preserving `hud_rects.len() == 1` across `1280px`, `768px`, and `390px` viewports.
+
+---
+
 ## [v0.7.4] - 2026-11-22 — Real-Time WebWorker / Async Multi-Thread `StructGNN-CRC` & Live 60 FPS Earthquake Ground-Motion Replay
 
 ### Added & Changed

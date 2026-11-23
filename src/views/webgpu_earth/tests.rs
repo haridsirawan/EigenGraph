@@ -30,9 +30,17 @@ use crate::core::ifcx::IfcxDocument;
             let (cpu_sp, _, front) = xf_orb.project_lat_lon_elev(lat, lon, 0.0).expect("cpu proj");
             assert!(front);
             let p_w = lat_lon_to_unit_sphere(lat, lon);
+            let pt = [p_w[0] as f32, p_w[1] as f32, p_w[2] as f32];
             let gpu_sp = u_orb
-                .project_planet_to_screen([p_w[0] as f32, p_w[1] as f32, p_w[2] as f32], rect)
+                .project_planet_to_screen(pt, rect)
                 .expect("gpu planet proj");
+            let ndc_z = u_orb
+                .project_planet_ndc_z(pt, rect)
+                .expect("gpu planet ndc z");
+            assert!(
+                (0.0..=1.0).contains(&ndc_z),
+                "WebGPU Planetary NDC z must stay within [0.0, 1.0], got {ndc_z}"
+            );
             let err_px = (cpu_sp - gpu_sp).length();
             assert!(
                 err_px < 0.05,
@@ -40,7 +48,7 @@ use crate::core::ifcx::IfcxDocument;
             );
         }
 
-        // 2. Street-scale Floating-Origin RTC matrix parity (zoom = 18.5, zero f32 jitter!)
+        // 2. Street-scale Floating-Origin RTC matrix parity (zoom = 18.5, WebGPU z in [0, 1])
         let site = (-6.2088, 106.8456);
         let xf_site = GlobeScreenTransform::from_view(rect, -6.2085, 106.8459, 18.5, &cam);
         let u_site = RtcCameraUniforms::from_globe_xform(
@@ -55,9 +63,17 @@ use crate::core::ifcx::IfcxDocument;
             let ll = SlippyMapState::world_mm_to_lat_lon(site, [east_m * 1000.0, north_m * 1000.0]);
             let (cpu_sp, _, front) = xf_site.project_lat_lon_elev(ll.0, ll.1, up_m).expect("cpu site proj");
             assert!(front);
+            let pt = [east_m as f32, north_m as f32, up_m as f32];
             let gpu_sp = u_site
-                .project_site_to_screen([east_m as f32, north_m as f32, up_m as f32], rect)
+                .project_site_to_screen(pt, rect)
                 .expect("gpu rtc site proj");
+            let ndc_z = u_site
+                .project_site_ndc_z(pt, rect)
+                .expect("gpu rtc site ndc z");
+            assert!(
+                (0.0..=1.0).contains(&ndc_z),
+                "WebGPU RTC Site NDC z must stay within [0.0, 1.0], got {ndc_z}"
+            );
             let err_px = (cpu_sp - gpu_sp).length();
             assert!(
                 err_px < 0.25,
@@ -184,8 +200,8 @@ use crate::core::ifcx::IfcxDocument;
             diff_modified_bim: &[],
             diff_deleted_ghosts: &[],
             replay_story_elevs_m: &[],
-            replay_story_disp_xy_m: &[],
-            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_story_disp_xyz_m: &[],
+            replay_ground_shake_xyz_m: [0.0, 0.0, 0.0],
             replay_hinge_states: &[],
         });
         let modal_n1_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
@@ -206,8 +222,8 @@ use crate::core::ifcx::IfcxDocument;
             diff_modified_bim: &[],
             diff_deleted_ghosts: &[],
             replay_story_elevs_m: &[],
-            replay_story_disp_xy_m: &[],
-            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_story_disp_xyz_m: &[],
+            replay_ground_shake_xyz_m: [0.0, 0.0, 0.0],
             replay_hinge_states: &[],
         });
         assert!(clean_mesh.indices.len() / 3 > 400);
@@ -334,8 +350,8 @@ use crate::core::ifcx::IfcxDocument;
             diff_modified_bim: &[],
             diff_deleted_ghosts: &[],
             replay_story_elevs_m: &[],
-            replay_story_disp_xy_m: &[],
-            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_story_disp_xyz_m: &[],
+            replay_ground_shake_xyz_m: [0.0, 0.0, 0.0],
             replay_hinge_states: &[],
         });
         assert!(mesh.indices.len() / 3 > 200);
@@ -409,8 +425,8 @@ use crate::core::ifcx::IfcxDocument;
             diff_modified_bim: &[],
             diff_deleted_ghosts: &[],
             replay_story_elevs_m: &[],
-            replay_story_disp_xy_m: &[],
-            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_story_disp_xyz_m: &[],
+            replay_ground_shake_xyz_m: [0.0, 0.0, 0.0],
             replay_hinge_states: &[],
         });
         assert!(
@@ -444,8 +460,8 @@ use crate::core::ifcx::IfcxDocument;
             diff_modified_bim: &modified,
             diff_deleted_ghosts: &ghosts,
             replay_story_elevs_m: &[],
-            replay_story_disp_xy_m: &[],
-            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_story_disp_xyz_m: &[],
+            replay_ground_shake_xyz_m: [0.0, 0.0, 0.0],
             replay_hinge_states: &[],
         });
 
@@ -532,11 +548,14 @@ use crate::core::ifcx::IfcxDocument;
         .expect("Replay report");
 
         let frame = rep.sample_interpolated(rep.peak_time_s);
-        let disp_pairs: Vec<[f64; 2]> = frame
-            .story_disp_x_m
-            .iter()
-            .zip(frame.story_disp_y_m.iter())
-            .map(|(&x, &y)| [x, y])
+        let disp_triples: Vec<[f64; 3]> = (0..frame.story_elevations_m.len())
+            .map(|i| {
+                [
+                    frame.story_disp_x_m.get(i).copied().unwrap_or(0.0),
+                    frame.story_disp_y_m.get(i).copied().unwrap_or(0.0),
+                    frame.story_disp_z_m.get(i).copied().unwrap_or(0.0),
+                ]
+            })
             .collect();
         let hinge_states = rep.worst_hinge_states_at(rep.peak_time_s);
 
@@ -558,8 +577,8 @@ use crate::core::ifcx::IfcxDocument;
             diff_modified_bim: &[],
             diff_deleted_ghosts: &[],
             replay_story_elevs_m: &[],
-            replay_story_disp_xy_m: &[],
-            replay_ground_shake_xy_m: [0.0, 0.0],
+            replay_story_disp_xyz_m: &[],
+            replay_ground_shake_xyz_m: [0.0, 0.0, 0.0],
             replay_hinge_states: &[],
         });
 
@@ -581,8 +600,12 @@ use crate::core::ifcx::IfcxDocument;
             diff_modified_bim: &[],
             diff_deleted_ghosts: &[],
             replay_story_elevs_m: &frame.story_elevations_m,
-            replay_story_disp_xy_m: &disp_pairs,
-            replay_ground_shake_xy_m: [frame.ground_disp_m, frame.ground_disp_m * 0.25],
+            replay_story_disp_xyz_m: &disp_triples,
+            replay_ground_shake_xyz_m: [
+                frame.ground_disp_m,
+                frame.ground_disp_y_m,
+                frame.ground_disp_z_m,
+            ],
             replay_hinge_states: &hinge_states,
         });
 
@@ -615,4 +638,135 @@ use crate::core::ifcx::IfcxDocument;
             .vertices
             .iter()
             .all(|v| v.pos.iter().all(|f| f.is_finite()) && v.meta[0] >= 5.5));
+    }
+
+    #[test]
+    fn test_phase75_webgpu_tridirectional_sway_and_fragility_loss_mesh() {
+        use crate::core::ground_motion_replay::{
+            run_ground_motion_replay_for_bim, GroundMotionReplayConfig, TriDirectionalMode,
+        };
+        use crate::core::time_history::{parse_custom_accelerogram, sample_peer_at2_text};
+
+        let proj = BimProject::sample_bimcraft_building();
+        let site = crate::core::compute_site_environmental_coupling(
+            -6.2088,
+            106.8456,
+            &crate::core::gis::earth_globe::PlanetaryWorldState::default(),
+        );
+        let acc = parse_custom_accelerogram(sample_peer_at2_text(), "sample_peer.at2")
+            .expect("Sample PEER .at2 should parse");
+
+        let rep = run_ground_motion_replay_for_bim(
+            &proj,
+            &site,
+            None,
+            &GroundMotionReplayConfig {
+                tridirectional_mode: TriDirectionalMode::TriDirectionalXYZ,
+                custom_accelerogram: Some(acc),
+                auto_match_sa_t1: true,
+                show_fragility_loss_overlay: true,
+                ..Default::default()
+            },
+            "WebGpuPhase75Test",
+            None,
+        )
+        .expect("Tri-directional PEER replay report");
+
+        let frame = rep.sample_interpolated(rep.peak_time_s);
+        let disp_triples: Vec<[f64; 3]> = (0..frame.story_elevations_m.len())
+            .map(|i| {
+                [
+                    frame.story_disp_x_m.get(i).copied().unwrap_or(0.0),
+                    frame.story_disp_y_m.get(i).copied().unwrap_or(0.0),
+                    frame.story_disp_z_m.get(i).copied().unwrap_or(0.0),
+                ]
+            })
+            .collect();
+        let hinge_states = rep.worst_hinge_states_at(rep.peak_time_s);
+
+        let base_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
+            project: &proj,
+            members: &[],
+            lens: EarthBimLens::Clean,
+            erection_day_limit: 999,
+            deform_scale: 40.0,
+            active_modal_mode: 0,
+            modal_phase_sin: 0.0,
+            n1_removed_bim: None,
+            cascade_failed_bim: &[],
+            cascade_step_progress: 0.0,
+            heading_deg: 0.0,
+            subsurface_pile_depth_m: 4.0,
+            diff_overlay_active: false,
+            diff_added_bim: &[],
+            diff_modified_bim: &[],
+            diff_deleted_ghosts: &[],
+            replay_story_elevs_m: &[],
+            replay_story_disp_xyz_m: &[],
+            replay_ground_shake_xyz_m: [0.0, 0.0, 0.0],
+            replay_hinge_states: &[],
+        });
+
+        let tridir_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
+            project: &proj,
+            members: &[],
+            lens: EarthBimLens::TimeHistoryReplay,
+            erection_day_limit: 999,
+            deform_scale: 40.0,
+            active_modal_mode: 0,
+            modal_phase_sin: 0.0,
+            n1_removed_bim: None,
+            cascade_failed_bim: &[],
+            cascade_step_progress: 0.0,
+            heading_deg: 0.0,
+            subsurface_pile_depth_m: 4.0,
+            diff_overlay_active: false,
+            diff_added_bim: &[],
+            diff_modified_bim: &[],
+            diff_deleted_ghosts: &[],
+            replay_story_elevs_m: &frame.story_elevations_m,
+            replay_story_disp_xyz_m: &disp_triples,
+            replay_ground_shake_xyz_m: [
+                frame.ground_disp_m,
+                frame.ground_disp_y_m,
+                frame.ground_disp_z_m,
+            ],
+            replay_hinge_states: &hinge_states,
+        });
+
+        assert!(tridir_mesh
+            .vertices
+            .iter()
+            .all(|v| v.pos.iter().all(|f| f.is_finite())));
+        let max_dz = base_mesh
+            .vertices
+            .iter()
+            .zip(tridir_mesh.vertices.iter())
+            .filter(|(a, _)| a.pos[2] > 2.0)
+            .map(|(a, b)| (b.pos[2] - a.pos[2]).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_dz > 1e-4,
+            "TriAxialXYZ replay must propagate vertical seismic heave to BIM vertices (max_dz={max_dz})"
+        );
+
+        let frag_mesh = build_rtc_fragility_loss_mesh(&FragilityLossGpuInput {
+            project: &proj,
+            synthesis: &rep.fragility_loss,
+            visible: true,
+            heading_deg: 0.0,
+        });
+        assert!(frag_mesh.indices.len() / 3 >= 8);
+        assert!(frag_mesh
+            .vertices
+            .iter()
+            .all(|v| v.pos.iter().all(|f| f.is_finite()) && (v.meta[0] - 7.0).abs() < 0.01));
+
+        let hidden_frag = build_rtc_fragility_loss_mesh(&FragilityLossGpuInput {
+            project: &proj,
+            synthesis: &rep.fragility_loss,
+            visible: false,
+            heading_deg: 0.0,
+        });
+        assert!(hidden_frag.vertices.is_empty() && hidden_frag.indices.is_empty());
     }

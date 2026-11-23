@@ -112,8 +112,8 @@ pub struct UniversalCanvasState {
     pub active_vector_snap_az_deg: Option<f64>,
     // Phase 63: O(1) Cached BIM-FEM Lookup, True 6-DOF Displacements, Modal Eigenmodes & N-1 Disruption
     pub earth_fem_cache: EarthStructuralRenderCache,
-    // Phase 65: Native WebGL2 / OpenGL (`egui_glow`) 3D Pure-Vector Earth Renderer (0% Raster Pixels)
-    pub webgl_earth: crate::views::webgl_earth::WebGlEarthState,
+    // Phase 65 / 75: 100% Pure WebGPU (`wgpu` + WGSL) 3D Vector Earth Renderer (0% Raster Pixels, 0% WebGL)
+    pub webgpu_earth: crate::views::webgpu_earth::WebGpuEarthState,
     // Phase 67: IFCX City-Builder Authoring (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`, Auto Cut/Fill Pads)
     pub city_scene: crate::core::gis::IfcxCityScene,
     // Phase 68: District-Scale Multi-Hazard & AI Real-Building Frame Inference Telemetry
@@ -239,7 +239,7 @@ impl Default for UniversalCanvasState {
             show_neighborhood_hazards: true,
             active_vector_snap_az_deg: None,
             earth_fem_cache: EarthStructuralRenderCache::default(),
-            webgl_earth: crate::views::webgl_earth::WebGlEarthState::default(),
+            webgpu_earth: crate::views::webgpu_earth::WebGpuEarthState::default(),
             city_scene: crate::core::gis::IfcxCityScene::default(),
             district_hazard: crate::core::gis::DistrictHazardConfig::default(),
             district_hazard_report: crate::core::gis::DistrictMultiHazardReport::default(),
@@ -271,9 +271,9 @@ impl Default for UniversalCanvasState {
 }
 
 impl UniversalCanvasState {
-    /// Initializes native WebGL2 / OpenGL GPU Vector Earth shaders from `eframe::CreationContext::gl`.
-    pub fn init_webgl_earth(&mut self, gl: &std::sync::Arc<eframe::glow::Context>) {
-        self.webgl_earth.init_gl(gl);
+    /// Initializes native Pure WebGPU (`wgpu` + WGSL) 3D Vector Earth pipelines from `egui_wgpu::RenderState`.
+    pub fn init_webgpu_earth(&mut self, render_state: &egui_wgpu::RenderState) {
+        self.webgpu_earth.init_wgpu(render_state);
     }
     /// Computes crisp directional sun-lighting depth shading for 3D extruded Earth faces
     /// against an SE solar azimuth `(0.707, -0.707)`.
@@ -418,6 +418,10 @@ impl UniversalCanvasState {
         );
         if let Some(ref replay) = self.last_ground_motion_replay_report {
             doc = crate::core::ifcx::IfcxStage::compose_with_time_history_replay_overlay(
+                &doc,
+                replay,
+            );
+            doc = crate::core::ifcx::IfcxStage::compose_with_fragility_loss_overlay(
                 &doc,
                 replay,
             );
@@ -1089,7 +1093,7 @@ impl UniversalCanvasState {
             pointer_in_freeze_pill || pointer_blocked_by_hud,
         );
 
-        // 1a. Phase 64–67: Native WebGL2 (`egui_glow`) 3D Pure-Vector IFCX Earth + City-Builder + Unified BIM/FEM/Modal/N-1
+        // 1a. Phase 64–75: 100% Pure WebGPU (`wgpu` / WGSL) 3D Pure-Vector IFCX Earth + City-Builder + Unified BIM/FEM/Modal/N-1
         let active_globe_xform = if self.globe_mode {
             let active_heading_deg = self
                 .active_world_project_rel_path
@@ -1120,7 +1124,7 @@ impl UniversalCanvasState {
                 self.world_map.center_lat_lon
             };
             let hazard_gpu_input = if self.district_hazard.any_active() {
-                Some(crate::views::webgl_earth::DistrictHazardGpuInput {
+                Some(crate::views::webgpu_earth::DistrictHazardGpuInput {
                     config: &self.district_hazard,
                     report: &self.district_hazard_report,
                     neighborhood: &self.neighborhood_report,
@@ -1184,20 +1188,24 @@ impl UniversalCanvasState {
                 .as_ref()
                 .map(|f| f.story_elevations_m.clone())
                 .unwrap_or_default();
-            let replay_disp_pairs: Vec<[f64; 2]> = replay_frame_opt
+            let replay_disp_triples: Vec<[f64; 3]> = replay_frame_opt
                 .as_ref()
                 .map(|f| {
-                    f.story_disp_x_m
-                        .iter()
-                        .zip(f.story_disp_y_m.iter())
-                        .map(|(&x, &y)| [x, y])
+                    (0..f.story_elevations_m.len())
+                        .map(|i| {
+                            [
+                                f.story_disp_x_m.get(i).copied().unwrap_or(0.0),
+                                f.story_disp_y_m.get(i).copied().unwrap_or(0.0),
+                                f.story_disp_z_m.get(i).copied().unwrap_or(0.0),
+                            ]
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
             let replay_ground_shake = replay_frame_opt
                 .as_ref()
-                .map(|f| [f.ground_disp_m, f.ground_disp_m * 0.25])
-                .unwrap_or([0.0, 0.0]);
+                .map(|f| [f.ground_disp_m, f.ground_disp_y_m, f.ground_disp_z_m])
+                .unwrap_or([0.0, 0.0, 0.0]);
             let replay_hinge_states: Vec<(
                 crate::core::BimElementKind,
                 usize,
@@ -1211,7 +1219,7 @@ impl UniversalCanvasState {
                 Vec::new()
             };
             let active_bim_gpu = if !bim_project.is_empty() {
-                Some(crate::views::webgl_earth::ActiveBimGpuInput {
+                Some(crate::views::webgpu_earth::ActiveBimGpuInput {
                     project: bim_project,
                     members,
                     lens: self.earth_bim_author.active_lens,
@@ -1229,8 +1237,8 @@ impl UniversalCanvasState {
                     diff_modified_bim: &diff_modified,
                     diff_deleted_ghosts: &diff_deleted_ghosts,
                     replay_story_elevs_m: &replay_elevs,
-                    replay_story_disp_xy_m: &replay_disp_pairs,
-                    replay_ground_shake_xy_m: replay_ground_shake,
+                    replay_story_disp_xyz_m: &replay_disp_triples,
+                    replay_ground_shake_xyz_m: replay_ground_shake,
                     replay_hinge_states: &replay_hinge_states,
                 })
             } else {
@@ -1238,7 +1246,7 @@ impl UniversalCanvasState {
             };
             let hinge_gpu_input = if !bim_project.is_empty() {
                 replay_frame_opt.as_ref().map(|fr| {
-                    crate::views::webgl_earth::PlasticHingeGpuInput {
+                    crate::views::webgpu_earth::PlasticHingeGpuInput {
                         project: bim_project,
                         frame: fr,
                         show_hinges: self.ground_motion_replay_config.show_plastic_hinges,
@@ -1249,8 +1257,22 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let fragility_gpu_input = if !bim_project.is_empty()
+                && self.ground_motion_replay_config.show_fragility_loss_overlay
+            {
+                self.last_ground_motion_replay_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::FragilityLossGpuInput {
+                        project: bim_project,
+                        synthesis: &rep.fragility_loss,
+                        visible: true,
+                        heading_deg: active_heading_deg,
+                    }
+                })
+            } else {
+                None
+            };
             let subsurface_gpu_input = if self.subsurface_ssi.xray_subsurface_visible {
-                Some(crate::views::webgl_earth::SubsurfaceSsiGpuInput {
+                Some(crate::views::webgpu_earth::SubsurfaceSsiGpuInput {
                     project: bim_project,
                     config: &self.subsurface_ssi,
                     report: self.last_subsurface_ssi_report.as_ref(),
@@ -1266,7 +1288,7 @@ impl UniversalCanvasState {
             };
             let portfolio_gpu_input = if self.portfolio_retrofit_config.overlay_visible {
                 self.last_portfolio_retrofit_report.as_ref().map(|rep| {
-                    crate::views::webgl_earth::PortfolioGpuOverlayInput {
+                    crate::views::webgpu_earth::PortfolioGpuOverlayInput {
                         report: rep,
                         origin_lat_lon: portfolio_origin,
                     }
@@ -1274,7 +1296,7 @@ impl UniversalCanvasState {
             } else {
                 None
             };
-            let gpu_globe_active = self.webgl_earth.schedule_paint_pass(
+            let gpu_globe_active = self.webgpu_earth.schedule_paint_pass(
                 ui,
                 &painter,
                 rect,
@@ -1293,6 +1315,7 @@ impl UniversalCanvasState {
                 subsurface_gpu_input,
                 portfolio_gpu_input,
                 hinge_gpu_input,
+                fragility_gpu_input,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
                 ui,
@@ -1324,6 +1347,14 @@ impl UniversalCanvasState {
                 && self.earth_bim_author.active_lens == EarthBimLens::TimeHistoryReplay
             {
                 self.paint_cpu_plastic_hinges_fallback(&painter, rect, theme, &xform, bim_project);
+                if self.ground_motion_replay_config.show_fragility_loss_overlay {
+                    self.paint_cpu_fragility_loss_fallback(&painter, rect, theme, &xform, bim_project);
+                }
+            } else if !gpu_globe_active
+                && self.ground_motion_replay_config.show_fragility_loss_overlay
+                && self.last_ground_motion_replay_report.is_some()
+            {
+                self.paint_cpu_fragility_loss_fallback(&painter, rect, theme, &xform, bim_project);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

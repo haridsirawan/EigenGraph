@@ -247,7 +247,7 @@ impl DossierExporter {
         let mut md = String::new();
 
         md.push_str("# 📜 OFFICIAL STRUCTURAL REDUNDANCY & PROGRESSIVE COLLAPSE AUDIT DOSSIER\n\n");
-        md.push_str("> **Analytical Platform:** EigenGraph WebAssembly Engine (Rust / WebGL2)\n");
+        md.push_str("> **Analytical Platform:** EigenGraph WebAssembly Engine (Rust / Pure WebGPU WGSL)\n");
         md.push_str("> **Theoretical Foundation:** EigenGraph Structural Redundancy Framework (2026)\n");
         md.push_str("> **Verification Authority:** EigenGraph Structural Systems\n");
         md.push_str("> **Technical Dossier:** *Formulation & Validation of Adjusted Redundancy Index for Pre-Analysis Disruption Screening in Linear-Elastic Structures*\n\n");
@@ -619,7 +619,7 @@ impl DstvExporter {
     }
 }
 
-/// Standalone Interactive WebGL / HTML5 Dossier Exporter.
+/// Standalone Interactive HTML5 Vector Dossier Exporter.
 /// Generates a single, self-contained HTML5 file with an embedded 3D canvas viewport,
 /// mouse orbit/pan/zoom, member click inspection, ARI gradient contouring, and cryptographic audit seal.
 pub struct HtmlViewerExporter;

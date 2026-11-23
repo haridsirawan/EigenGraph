@@ -341,6 +341,44 @@ impl SpatialWorkspaceState {
                         true,
                     );
                 }
+                PlannedProposalAction::ToggleTriDirectional(mode_opt) => {
+                    let next = mode_opt.unwrap_or_else(|| {
+                        universal_canvas.ground_motion_replay_config.tridirectional_mode.next()
+                    });
+                    universal_canvas.ground_motion_replay_config.tridirectional_mode = next;
+                    self.apply_lens_to_views(
+                        SpatialLens::TimeHistoryReplay,
+                        build_view,
+                        universal_canvas,
+                    );
+                    out.run_async_ground_motion_replay = true;
+                    self.push_trace(format!("Tri-Directional coupling: {}", next.short_label()), true);
+                }
+                PlannedProposalAction::ToggleAutoMatchSa => {
+                    let next = !universal_canvas.ground_motion_replay_config.auto_match_sa_t1;
+                    universal_canvas.ground_motion_replay_config.auto_match_sa_t1 = next;
+                    self.ground_motion_drawer_tab = 1;
+                    self.open_ground_motion_drawer();
+                    out.run_async_ground_motion_replay = true;
+                    self.push_trace(
+                        format!("Auto Match Sa(T1) spectrum scaling: {}", if next { "ON" } else { "OFF" }),
+                        true,
+                    );
+                }
+                PlannedProposalAction::OpenFragilityTab => {
+                    universal_canvas.ground_motion_replay_config.show_fragility_loss_overlay = true;
+                    self.ground_motion_drawer_tab = 1;
+                    self.open_ground_motion_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::TimeHistoryReplay,
+                        build_view,
+                        universal_canvas,
+                    );
+                    if universal_canvas.last_ground_motion_replay_report.is_none() {
+                        out.run_async_ground_motion_replay = true;
+                    }
+                    self.push_trace("Opened Real-Time FEMA P-58 Fragility & Spectrum tab", true);
+                }
             }
         }
         self.sessions_dirty = true;
@@ -487,6 +525,15 @@ impl SpatialWorkspaceState {
                             GeminiDirective::TogglePlasticHinges => {
                                 PlannedProposalAction::TogglePlasticHinges
                             }
+                            GeminiDirective::ToggleTriDirectional(m) => {
+                                PlannedProposalAction::ToggleTriDirectional(*m)
+                            }
+                            GeminiDirective::ToggleAutoMatchSa => {
+                                PlannedProposalAction::ToggleAutoMatchSa
+                            }
+                            GeminiDirective::OpenFragilityTab => {
+                                PlannedProposalAction::OpenFragilityTab
+                            }
                         })
                         .collect();
                     let preview: String = directives
@@ -526,6 +573,14 @@ impl SpatialWorkspaceState {
                             GeminiDirective::RestoreN1 => "RestoreN1".to_string(),
                             GeminiDirective::RunEqReplay(_) => "AsyncEqReplay".to_string(),
                             GeminiDirective::TogglePlasticHinges => "ToggleHinges".to_string(),
+                            GeminiDirective::ToggleTriDirectional(m) => {
+                                format!(
+                                    "TriDir({})",
+                                    m.map(|v| v.short_label()).unwrap_or("Cycle")
+                                )
+                            }
+                            GeminiDirective::ToggleAutoMatchSa => "MatchSaT1".to_string(),
+                            GeminiDirective::OpenFragilityTab => "OpenFemaP58".to_string(),
                         })
                         .collect::<Vec<_>>()
                         .join(" + ");
@@ -1049,11 +1104,11 @@ impl SpatialWorkspaceState {
                     self.push_trace("Earth Vector lighting set to Night (22:00, procedural windows)", true);
                 }
                 "/gpu" => {
-                    universal_canvas.webgl_earth.enabled = !universal_canvas.webgl_earth.enabled;
-                    let mode = if universal_canvas.webgl_earth.is_active() {
-                        "WebGL2 GPU 3D active"
-                    } else if universal_canvas.webgl_earth.enabled {
-                        "GPU enabled (CPU fallback in headless context)"
+                    universal_canvas.webgpu_earth.enabled = !universal_canvas.webgpu_earth.enabled;
+                    let mode = if universal_canvas.webgpu_earth.is_active() {
+                        "WebGPU (WGSL) 3D active"
+                    } else if universal_canvas.webgpu_earth.enabled {
+                        "WebGPU enabled (CPU fallback in headless context)"
                     } else {
                         "CPU Pure-Vector mode"
                     };
@@ -1529,6 +1584,129 @@ impl SpatialWorkspaceState {
                 }
                 "/replay-ifcx" => {
                     actions.export_ground_motion_replay_ifcx = true;
+                }
+                "/at2" | "/accelerogram" => {
+                    let sub = arg.trim().to_ascii_lowercase();
+                    if sub == "clear" || sub == "off" || sub == "reset" {
+                        universal_canvas.ground_motion_replay_config.custom_accelerogram = None;
+                        self.open_ground_motion_drawer();
+                        self.apply_lens_to_views(
+                            SpatialLens::TimeHistoryReplay,
+                            build_view,
+                            universal_canvas,
+                        );
+                        actions.run_async_ground_motion_replay = true;
+                        self.push_trace(
+                            "Cleared custom accelerogram; reverted to built-in benchmark suite",
+                            true,
+                        );
+                    } else if sub == "sample" || sub == "demo" || sub == "peer" {
+                        match crate::core::time_history::parse_custom_accelerogram(
+                            crate::core::time_history::sample_peer_at2_text(),
+                            "PEER_Sample_Northridge_Sylmar.at2",
+                        ) {
+                            Ok(acc) => {
+                                let label = format!(
+                                    "{} (PGA={:.2}g, dt={:.3}s)",
+                                    acc.name, acc.pga_x_g, acc.dt_s
+                                );
+                                universal_canvas
+                                    .ground_motion_replay_config
+                                    .custom_accelerogram = Some(acc);
+                                self.open_ground_motion_drawer();
+                                self.apply_lens_to_views(
+                                    SpatialLens::TimeHistoryReplay,
+                                    build_view,
+                                    universal_canvas,
+                                );
+                                actions.run_async_ground_motion_replay = true;
+                                self.push_trace(format!("Loaded sample PEER .at2: {label}"), true);
+                            }
+                            Err(err) => self.push_trace(err, false),
+                        }
+                    } else {
+                        self.open_ground_motion_drawer();
+                        actions.open_accelerogram_file_picker = true;
+                    }
+                }
+                "/tridir" | "/3axis" => {
+                    use crate::core::ground_motion_replay::TriDirectionalMode;
+                    let sub = arg.trim().to_ascii_lowercase();
+                    let next = match sub.as_str() {
+                        "x" | "1d" | "uniaxial" => TriDirectionalMode::UniaxialX,
+                        "xy" | "2d" | "biaxial" => TriDirectionalMode::BiaxialXY,
+                        "xyz" | "3d" | "tridirectional" => TriDirectionalMode::TriDirectionalXYZ,
+                        _ => universal_canvas
+                            .ground_motion_replay_config
+                            .tridirectional_mode
+                            .next(),
+                    };
+                    universal_canvas.ground_motion_replay_config.tridirectional_mode = next;
+                    self.open_ground_motion_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::TimeHistoryReplay,
+                        build_view,
+                        universal_canvas,
+                    );
+                    actions.run_async_ground_motion_replay = true;
+                    self.push_trace(
+                        format!("Tri-Directional seismic coupling: {}", next.short_label()),
+                        true,
+                    );
+                }
+                "/match-sa" => {
+                    let sub = arg.trim().to_ascii_lowercase();
+                    let next = match sub.as_str() {
+                        "on" | "1" | "true" => true,
+                        "off" | "0" | "false" => false,
+                        _ => !universal_canvas.ground_motion_replay_config.auto_match_sa_t1,
+                    };
+                    universal_canvas.ground_motion_replay_config.auto_match_sa_t1 = next;
+                    self.ground_motion_drawer_tab = 1;
+                    self.open_ground_motion_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::TimeHistoryReplay,
+                        build_view,
+                        universal_canvas,
+                    );
+                    actions.run_async_ground_motion_replay = true;
+                    self.push_trace(
+                        format!(
+                            "Auto Match SNI 1726 Sa(T1) spectrum scaling: {}",
+                            if next { "ON" } else { "OFF" }
+                        ),
+                        true,
+                    );
+                }
+                "/fragility" | "/p58" => {
+                    let sub = arg.trim().to_ascii_lowercase();
+                    if sub == "off" || sub == "hide" {
+                        universal_canvas
+                            .ground_motion_replay_config
+                            .show_fragility_loss_overlay = false;
+                        self.push_trace("FEMA P-58 3D story-loss halo overlay OFF", true);
+                    } else {
+                        universal_canvas
+                            .ground_motion_replay_config
+                            .show_fragility_loss_overlay = true;
+                        self.ground_motion_drawer_tab = 1;
+                        self.open_ground_motion_drawer();
+                        self.apply_lens_to_views(
+                            SpatialLens::TimeHistoryReplay,
+                            build_view,
+                            universal_canvas,
+                        );
+                        if universal_canvas.last_ground_motion_replay_report.is_none() {
+                            actions.run_async_ground_motion_replay = true;
+                        }
+                        self.push_trace(
+                            "Opened FEMA P-58 Fragility & Spectrum tab with 3D story-loss halo",
+                            true,
+                        );
+                    }
+                }
+                "/fragility-ifcx" => {
+                    actions.export_fragility_loss_ifcx = true;
                 }
                 "/section" | "/cut" => {
                     let elev_opt = arg

@@ -16,6 +16,7 @@ use serde_json::json;
 use crate::core::ari::{AriEngine, MARGIN_TOL};
 use crate::core::bim::{BimElementKind, BimProject, RunCategory};
 use crate::core::cascade::{CrcRiskTier, StructGnnCrcScenario};
+use crate::core::fema_p58::{FemaP58Engine, ReplayFemaP58Synthesis};
 use crate::core::geotech::SubsurfaceSsiAnalysisReport;
 use crate::core::ifcx::{ns, sanitize_slug, IfcxAriOverlay, IfcxDocument, IfcxImport, IfcxNode};
 use crate::core::lifecycle_ops::SiteEnvironmentalCoupling;
@@ -23,12 +24,50 @@ use crate::core::modal::{ModalEngine, SiteClass, Sni1726Spectrum};
 use crate::core::nonlinear::PlasticHingeState;
 use crate::core::solver::FemSolver;
 use crate::core::time_history::{
-    GroundMotionRecord, HysteresisModel, TimeHistoryEngine, TimeHistoryInput, TimeHistorySample,
-    TimeIntegrationScheme,
+    compute_elastic_response_spectrum_5pct, CustomAccelerogram, GroundMotionRecord,
+    HysteresisModel, ResponseSpectrumPoint, TimeHistoryEngine, TimeHistoryInput,
+    TimeHistorySample, TimeIntegrationScheme,
 };
 
 /// Custom IFCX namespace storing Nonlinear Earthquake Ground-Motion Replay & Async `StructGNN-CRC` telemetry.
 pub const NS_EG_TIME_HISTORY_REPLAY: &str = "eigengraph::analysis::time_history_replay";
+/// Custom IFCX namespace storing real-time FEMA P-58 fragility & story loss synthesis overlay.
+pub const NS_EG_FRAGILITY_LOSS: &str = "eigengraph::analysis::fema_p58_fragility";
+
+/// Earthquake excitation axis coupling mode (ASCE 7-22 §16.2.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TriDirectionalMode {
+    UniaxialX,
+    BiaxialXY,
+    #[default]
+    TriDirectionalXYZ,
+}
+
+impl TriDirectionalMode {
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            Self::UniaxialX => "1D X",
+            Self::BiaxialXY => "2D XY",
+            Self::TriDirectionalXYZ => "3D XYZ",
+        }
+    }
+
+    pub fn worker_key(&self) -> &'static str {
+        match self {
+            Self::UniaxialX => "X",
+            Self::BiaxialXY => "XY",
+            Self::TriDirectionalXYZ => "XYZ",
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::UniaxialX => Self::BiaxialXY,
+            Self::BiaxialXY => Self::TriDirectionalXYZ,
+            Self::TriDirectionalXYZ => Self::UniaxialX,
+        }
+    }
+}
 
 fn default_scale_factor() -> f64 {
     1.15
@@ -65,6 +104,14 @@ pub struct GroundMotionReplayConfig {
     pub replay_loop: bool,
     #[serde(default = "default_true")]
     pub use_ssi_period_coupling: bool,
+    #[serde(default)]
+    pub tridirectional_mode: TriDirectionalMode,
+    #[serde(default)]
+    pub custom_accelerogram: Option<CustomAccelerogram>,
+    #[serde(default)]
+    pub show_fragility_loss_overlay: bool,
+    #[serde(default)]
+    pub auto_match_sa_t1: bool,
 }
 
 impl Default for GroundMotionReplayConfig {
@@ -78,6 +125,10 @@ impl Default for GroundMotionReplayConfig {
             show_plastic_hinges: true,
             replay_loop: true,
             use_ssi_period_coupling: true,
+            tridirectional_mode: TriDirectionalMode::TriDirectionalXYZ,
+            custom_accelerogram: None,
+            show_fragility_loss_overlay: false,
+            auto_match_sa_t1: false,
         }
     }
 }
@@ -191,6 +242,14 @@ impl GroundMotionReplayConfig {
         };
     }
 
+    pub fn active_record_label(&self) -> String {
+        if let Some(ref c) = self.custom_accelerogram {
+            c.name.clone()
+        } else {
+            Self::record_short_label(self.record).to_string()
+        }
+    }
+
     pub fn content_revision_hash(&self) -> u64 {
         let mut h = 0xcbf2_9ce4_8422_2325_u64;
         let mix = |acc: &mut u64, v: u64| {
@@ -203,6 +262,13 @@ impl GroundMotionReplayConfig {
         mix(&mut h, (self.damping_ratio * 10000.0).round() as u64);
         mix(&mut h, u64::from(self.show_plastic_hinges));
         mix(&mut h, u64::from(self.use_ssi_period_coupling));
+        mix(&mut h, self.tridirectional_mode as u64 + 1);
+        mix(&mut h, u64::from(self.show_fragility_loss_overlay));
+        mix(&mut h, u64::from(self.auto_match_sa_t1));
+        if let Some(ref c) = self.custom_accelerogram {
+            mix(&mut h, c.accel_x_g.len() as u64);
+            mix(&mut h, (c.pga_x_g * 10_000.0).round() as u64);
+        }
         h
     }
 }
@@ -223,12 +289,20 @@ pub struct PlasticHingeJointSnapshot {
     pub state: PlasticHingeState,
 }
 
-/// Single time-sampled frame from BIM-coupled NL-THA for smooth 60 FPS GPU/CPU playback.
+/// Single time-sampled frame from BIM-coupled NL-THA for smooth 60 FPS WebGPU / CPU playback.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GroundMotionReplayFrame {
     pub time_s: f64,
     pub ground_accel_g: f64,
+    #[serde(default)]
+    pub ground_accel_y_g: f64,
+    #[serde(default)]
+    pub ground_accel_z_g: f64,
     pub ground_disp_m: f64,
+    #[serde(default)]
+    pub ground_disp_y_m: f64,
+    #[serde(default)]
+    pub ground_disp_z_m: f64,
     pub roof_disp_mm: f64,
     pub roof_drift_ratio: f64,
     pub base_shear_kn: f64,
@@ -236,6 +310,8 @@ pub struct GroundMotionReplayFrame {
     pub story_elevations_m: Vec<f64>,
     pub story_disp_x_m: Vec<f64>,
     pub story_disp_y_m: Vec<f64>,
+    #[serde(default)]
+    pub story_disp_z_m: Vec<f64>,
     pub story_drift_ratios: Vec<f64>,
     pub active_hinges: Vec<PlasticHingeJointSnapshot>,
     pub count_io: usize,
@@ -261,7 +337,7 @@ pub struct AsyncCrcReplayTelemetry {
     pub top_scenarios: Vec<StructGnnCrcScenario>,
 }
 
-/// Complete BIM + SSI-coupled Nonlinear Ground-Motion Replay & Async `StructGNN-CRC` Report.
+/// Complete BIM + SSI-coupled Nonlinear Ground-Motion Replay, Fragility Loss & Async `StructGNN-CRC` Report.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GroundMotionReplayReport {
     pub project_name: String,
@@ -272,6 +348,20 @@ pub struct GroundMotionReplayReport {
     pub fundamental_period_t1_s: f64,
     pub ssi_coupled: bool,
     pub scaled_pga_g: f64,
+    #[serde(default)]
+    pub tridirectional_mode: TriDirectionalMode,
+    #[serde(default)]
+    pub custom_record_name: Option<String>,
+    #[serde(default)]
+    pub scaled_pga_y_g: f64,
+    #[serde(default)]
+    pub scaled_pga_z_g: f64,
+    #[serde(default)]
+    pub sa_record_t1_g: f64,
+    #[serde(default)]
+    pub sa_design_t1_g: f64,
+    #[serde(default)]
+    pub sa_match_ratio: f64,
     pub total_duration_s: f64,
     pub peak_time_s: f64,
     pub peak_roof_disp_mm: f64,
@@ -289,19 +379,33 @@ pub struct GroundMotionReplayReport {
     pub peak_count_mechanism: usize,
     pub frames: Vec<GroundMotionReplayFrame>,
     pub async_crc: AsyncCrcReplayTelemetry,
+    #[serde(default)]
+    pub response_spectrum: Vec<ResponseSpectrumPoint>,
+    #[serde(default)]
+    pub fragility_loss: ReplayFemaP58Synthesis,
     pub replay_overlay_ifcx: IfcxDocument,
+    #[serde(default = "default_empty_ifcx")]
+    pub fragility_overlay_ifcx: IfcxDocument,
     pub summary: String,
 }
 
+fn default_empty_ifcx() -> IfcxDocument {
+    IfcxDocument::new("fema_p58_fragility")
+}
+
 impl GroundMotionReplayReport {
-    /// Linearly interpolates structural story displacements and ground motion telemetry at `time_s`
-    /// for silky 60 FPS WebGL2 / CPU animations.
+    /// Linearly interpolates structural story displacements (X/Y/Z) and ground motion telemetry at `time_s`
+    /// for silky 60 FPS WebGPU / CPU animations.
     pub fn sample_interpolated(&self, time_s: f64) -> GroundMotionReplayFrame {
         if self.frames.is_empty() {
             return GroundMotionReplayFrame {
                 time_s: 0.0,
                 ground_accel_g: 0.0,
+                ground_accel_y_g: 0.0,
+                ground_accel_z_g: 0.0,
                 ground_disp_m: 0.0,
+                ground_disp_y_m: 0.0,
+                ground_disp_z_m: 0.0,
                 roof_disp_mm: 0.0,
                 roof_drift_ratio: 0.0,
                 base_shear_kn: 0.0,
@@ -309,6 +413,7 @@ impl GroundMotionReplayReport {
                 story_elevations_m: vec![0.0, self.building_height_m],
                 story_disp_x_m: vec![0.0, 0.0],
                 story_disp_y_m: vec![0.0, 0.0],
+                story_disp_z_m: vec![0.0, 0.0],
                 story_drift_ratios: vec![0.0],
                 active_hinges: Vec::new(),
                 count_io: 0,
@@ -338,9 +443,13 @@ impl GroundMotionReplayReport {
         let n_lvls = f0.story_elevations_m.len().min(f1.story_elevations_m.len());
         let mut story_disp_x_m = Vec::with_capacity(n_lvls);
         let mut story_disp_y_m = Vec::with_capacity(n_lvls);
+        let mut story_disp_z_m = Vec::with_capacity(n_lvls);
         for i in 0..n_lvls {
             story_disp_x_m.push(lerp(f0.story_disp_x_m[i], f1.story_disp_x_m[i]));
             story_disp_y_m.push(lerp(f0.story_disp_y_m[i], f1.story_disp_y_m[i]));
+            let z0 = f0.story_disp_z_m.get(i).copied().unwrap_or(0.0);
+            let z1 = f1.story_disp_z_m.get(i).copied().unwrap_or(0.0);
+            story_disp_z_m.push(lerp(z0, z1));
         }
         let n_drifts = f0.story_drift_ratios.len().min(f1.story_drift_ratios.len());
         let mut story_drift_ratios = Vec::with_capacity(n_drifts);
@@ -352,7 +461,11 @@ impl GroundMotionReplayReport {
         GroundMotionReplayFrame {
             time_s,
             ground_accel_g: lerp(f0.ground_accel_g, f1.ground_accel_g),
+            ground_accel_y_g: lerp(f0.ground_accel_y_g, f1.ground_accel_y_g),
+            ground_accel_z_g: lerp(f0.ground_accel_z_g, f1.ground_accel_z_g),
             ground_disp_m: lerp(f0.ground_disp_m, f1.ground_disp_m),
+            ground_disp_y_m: lerp(f0.ground_disp_y_m, f1.ground_disp_y_m),
+            ground_disp_z_m: lerp(f0.ground_disp_z_m, f1.ground_disp_z_m),
             roof_disp_mm: lerp(f0.roof_disp_mm, f1.roof_disp_mm),
             roof_drift_ratio: lerp(f0.roof_drift_ratio, f1.roof_drift_ratio),
             base_shear_kn: lerp(f0.base_shear_kn, f1.base_shear_kn),
@@ -360,6 +473,7 @@ impl GroundMotionReplayReport {
             story_elevations_m: f0.story_elevations_m[..n_lvls].to_vec(),
             story_disp_x_m,
             story_disp_y_m,
+            story_disp_z_m,
             story_drift_ratios,
             active_hinges: hinge_src.active_hinges.clone(),
             count_io: hinge_src.count_io,
@@ -400,12 +514,14 @@ struct BimJointDescriptor {
 
 #[derive(Debug, Clone)]
 struct PreparedReplayContext {
+    project: BimProject,
     project_name: String,
     bim_revision_hash: u64,
     num_stories: usize,
     building_height_m: f64,
     fundamental_period_t1_s: f64,
     ssi_coupled: bool,
+    spectrum: Sni1726Spectrum,
     total_seismic_weight_kn: f64,
     yield_shear_coeff_cy: f64,
     sorted_level_elevs_m: Vec<f64>,
@@ -443,6 +559,10 @@ struct BaseCrcScenarioInput {
 struct WorkerSampleRecord {
     time_s: f64,
     ground_accel_g: f64,
+    #[serde(default)]
+    ground_accel_y_g: f64,
+    #[serde(default)]
+    ground_accel_z_g: f64,
     roof_disp_mm: f64,
     roof_drift_ratio: f64,
     base_shear_kn: f64,
@@ -476,6 +596,16 @@ struct WorkerReplayPayload {
     cy: f64,
     #[serde(rename = "postYieldRatio")]
     post_yield_ratio: f64,
+    #[serde(rename = "tridirMode")]
+    tridir_mode: String,
+    #[serde(rename = "customDtS")]
+    custom_dt_s: Option<f64>,
+    #[serde(rename = "customAccelX")]
+    custom_accel_x: Option<Vec<f64>>,
+    #[serde(rename = "customAccelY")]
+    custom_accel_y: Option<Vec<f64>>,
+    #[serde(rename = "customAccelZ")]
+    custom_accel_z: Option<Vec<f64>>,
     scenarios: Vec<BaseCrcScenarioInput>,
 }
 
@@ -581,7 +711,7 @@ fn prepare_replay_context(
         8.0,
         1.0,
     );
-    let fixed_t1 = ModalEngine::analyze_for_earth_3d(&fem, 3, spectrum)
+    let fixed_t1 = ModalEngine::analyze_for_earth_3d(&fem, 3, spectrum.clone())
         .map(|m| m.fundamental_period_s)
         .unwrap_or_else(|_| 0.0466 * building_height_m.powf(0.9))
         .clamp(0.18, 3.80);
@@ -743,12 +873,14 @@ fn prepare_replay_context(
     }
 
     Ok(PreparedReplayContext {
+        project: project.clone(),
         project_name: project.project_name.clone(),
         bim_revision_hash: project.content_revision_hash(),
         num_stories,
         building_height_m,
         fundamental_period_t1_s,
         ssi_coupled,
+        spectrum,
         total_seismic_weight_kn,
         yield_shear_coeff_cy,
         sorted_level_elevs_m: level_elevs,
@@ -774,19 +906,93 @@ impl SiteSoilExt for SiteEnvironmentalCoupling {
     }
 }
 
+fn synthesize_tridir_accel_yz(
+    ax_g: f64,
+    t_s: f64,
+    pga_x_g: f64,
+    mode: TriDirectionalMode,
+    custom_y: Option<f64>,
+    custom_z: Option<f64>,
+) -> (f64, f64) {
+    match mode {
+        TriDirectionalMode::UniaxialX => (0.0, 0.0),
+        TriDirectionalMode::BiaxialXY => {
+            let ay = custom_y.unwrap_or_else(|| {
+                0.78 * ax_g * (0.45 + 0.55 * (t_s * 1.9 + 0.85).cos())
+                    + 0.14 * pga_x_g * (t_s * 3.1).sin()
+            });
+            (ay, 0.0)
+        }
+        TriDirectionalMode::TriDirectionalXYZ => {
+            let ay = custom_y.unwrap_or_else(|| {
+                0.78 * ax_g * (0.45 + 0.55 * (t_s * 1.9 + 0.85).cos())
+                    + 0.14 * pga_x_g * (t_s * 3.1).sin()
+            });
+            let az = custom_z.unwrap_or_else(|| {
+                0.67 * ax_g * (0.35 + 0.65 * (t_s * 4.4 + 0.4).sin())
+            });
+            (ay, az)
+        }
+    }
+}
+
+fn unscaled_accel_series_g(config: &GroundMotionReplayConfig) -> (f64, Vec<f64>) {
+    if let Some(ref custom) = config.custom_accelerogram {
+        (custom.dt_s.clamp(0.002, 0.05), custom.accel_x_g.clone())
+    } else {
+        let g = 9.80665;
+        let dt = 0.010;
+        let dur = simulation_duration_for_record(config.record);
+        let ser = TimeHistoryEngine::generate_ground_acceleration_series(config.record, 1.0, dt, dur);
+        (dt, ser.into_iter().map(|s| s.1 / g).collect())
+    }
+}
+
+fn effective_scale_and_sa(
+    ctx: &PreparedReplayContext,
+    config: &GroundMotionReplayConfig,
+) -> (f64, f64, f64) {
+    let (dt_u, ser_u) = unscaled_accel_series_g(config);
+    let sa_unscaled_t1 = compute_elastic_response_spectrum_5pct(
+        dt_u,
+        &ser_u,
+        config.damping_ratio.clamp(0.01, 0.15),
+        &[ctx.fundamental_period_t1_s],
+    )
+    .first()
+    .copied()
+    .unwrap_or(0.25)
+    .max(0.05);
+    let sa_design_t1 = ctx.spectrum.spectral_acceleration(ctx.fundamental_period_t1_s).max(0.08);
+    let sf = if config.auto_match_sa_t1 {
+        (sa_design_t1 / sa_unscaled_t1).clamp(0.40, 3.00)
+    } else {
+        config.scale_factor.clamp(0.50, 2.50)
+    };
+    (sf, sa_unscaled_t1 * sf, sa_design_t1)
+}
+
 fn integrate_nltha_samples(
     ctx: &PreparedReplayContext,
     config: &GroundMotionReplayConfig,
 ) -> (Vec<WorkerSampleRecord>, f64, f64, f64, f64) {
-    let duration_s = simulation_duration_for_record(config.record);
-    let dt_s = if ctx.fundamental_period_t1_s < 0.35 {
-        0.005
+    let g = 9.80665;
+    let (scale_eff, _, _) = effective_scale_and_sa(ctx, config);
+    let (duration_s, dt_s) = if let Some(ref custom) = config.custom_accelerogram {
+        (custom.duration_s.max(2.0), custom.dt_s.clamp(0.002, 0.05))
     } else {
-        0.010
+        (
+            simulation_duration_for_record(config.record),
+            if ctx.fundamental_period_t1_s < 0.35 {
+                0.005
+            } else {
+                0.010
+            },
+        )
     };
     let th_input = TimeHistoryInput {
         ground_motion: config.record,
-        scale_factor: config.scale_factor.clamp(0.50, 2.50),
+        scale_factor: scale_eff,
         time_step_dt_s: dt_s,
         simulation_duration_s: duration_s,
         building_height_m: ctx.building_height_m,
@@ -803,22 +1009,62 @@ fn integrate_nltha_samples(
         hysteresis_rule: config.hysteresis_model,
         integration_scheme: TimeIntegrationScheme::HilberHughesTaylorAlpha,
     };
-    let raw = TimeHistoryEngine::evaluate(&th_input);
+    let raw = if let Some(ref custom) = config.custom_accelerogram {
+        let series_m_s2: Vec<(f64, f64)> = custom
+            .accel_x_g
+            .iter()
+            .enumerate()
+            .map(|(i, &ag)| (i as f64 * dt_s, ag * scale_eff * g))
+            .collect();
+        TimeHistoryEngine::evaluate_with_series(&th_input, dt_s, &series_m_s2)
+    } else {
+        TimeHistoryEngine::evaluate(&th_input)
+    };
     let (hyst_disp_mult, shear_mult) = match config.hysteresis_model {
         HysteresisModel::BoucWenDifferential => (1.00, 1.00),
         HysteresisModel::TakedaDegradingPinching => (1.08, 0.94),
         HysteresisModel::BilinearHardening => (0.94, 1.04),
     };
+    let base_pga_x = raw.scaled_pga_g.max(0.1);
+    let custom_dt = config.custom_accelerogram.as_ref().map(|c| c.dt_s.max(1e-4)).unwrap_or(dt_s);
     let samples: Vec<WorkerSampleRecord> = raw
         .time_history_trace
         .iter()
-        .map(|s: &TimeHistorySample| WorkerSampleRecord {
-            time_s: s.time_s,
-            ground_accel_g: s.ground_accel_g,
-            roof_disp_mm: s.roof_disp_mm * hyst_disp_mult,
-            roof_drift_ratio: s.roof_drift_ratio * hyst_disp_mult,
-            base_shear_kn: s.base_shear_kn * shear_mult,
-            hysteretic_energy_kj: s.hysteretic_energy_kj,
+        .map(|s: &TimeHistorySample| {
+            let cy_opt = config.custom_accelerogram.as_ref().and_then(|c| {
+                if c.accel_y_g.is_empty() {
+                    None
+                } else {
+                    let idx = ((s.time_s / custom_dt).round() as usize).min(c.accel_y_g.len() - 1);
+                    Some(c.accel_y_g[idx] * scale_eff)
+                }
+            });
+            let cz_opt = config.custom_accelerogram.as_ref().and_then(|c| {
+                if c.accel_z_g.is_empty() {
+                    None
+                } else {
+                    let idx = ((s.time_s / custom_dt).round() as usize).min(c.accel_z_g.len() - 1);
+                    Some(c.accel_z_g[idx] * scale_eff)
+                }
+            });
+            let (ay_g, az_g) = synthesize_tridir_accel_yz(
+                s.ground_accel_g,
+                s.time_s,
+                base_pga_x,
+                config.tridirectional_mode,
+                cy_opt,
+                cz_opt,
+            );
+            WorkerSampleRecord {
+                time_s: s.time_s,
+                ground_accel_g: s.ground_accel_g,
+                ground_accel_y_g: ay_g,
+                ground_accel_z_g: az_g,
+                roof_disp_mm: s.roof_disp_mm * hyst_disp_mult,
+                roof_drift_ratio: s.roof_drift_ratio * hyst_disp_mult,
+                base_shear_kn: s.base_shear_kn * shear_mult,
+                hysteretic_energy_kj: s.hysteretic_energy_kj,
+            }
         })
         .collect();
     (
@@ -846,7 +1092,7 @@ fn classify_plastic_hinge(dcr_dyn: f64) -> PlasticHingeState {
 
 fn assemble_replay_report(
     ctx: PreparedReplayContext,
-    config: GroundMotionReplayConfig,
+    mut config: GroundMotionReplayConfig,
     execution_backend: &str,
     samples: Vec<WorkerSampleRecord>,
     _worker_peak_roof_mm: f64,
@@ -857,8 +1103,15 @@ fn assemble_replay_report(
     let duration_s = samples
         .last()
         .map(|s| s.time_s)
-        .unwrap_or_else(|| simulation_duration_for_record(config.record));
-    let scale_norm = config.scale_factor.clamp(0.50, 2.50);
+        .unwrap_or_else(|| {
+            config
+                .custom_accelerogram
+                .as_ref()
+                .map(|c| c.duration_s)
+                .unwrap_or_else(|| simulation_duration_for_record(config.record))
+        });
+    let (scale_norm, sa_record_t1_g, sa_design_t1_g) = effective_scale_and_sa(&ctx, &config);
+    config.scale_factor = scale_norm;
     let total_e_h_max = samples
         .iter()
         .map(|s| s.hysteretic_energy_kj)
@@ -869,16 +1122,63 @@ fn assemble_replay_report(
     let mut peak_roof_disp_mm = 0.0_f64;
     let mut peak_roof_drift_ratio = 0.0_f64;
     let mut peak_interstory_drift_ratio = 0.0_f64;
+    let mut peak_story_drifts = vec![0.0_f64; ctx.num_stories];
     let mut peak_time_s = 0.0_f64;
     let mut peak_base_shear_kn = worker_peak_shear_kn;
+    let mut scaled_pga_x_obs = 0.0_f64;
+    let mut scaled_pga_y_g = 0.0_f64;
+    let mut scaled_pga_z_g = 0.0_f64;
 
     // Track cumulative peak damage per joint monotonically across ground motion duration
     let mut running_max_dcr = vec![0.0_f64; ctx.joints.len()];
     let mut running_best_joints: Vec<PlasticHingeJointSnapshot> = Vec::new();
     let mut peak_hinges: Vec<PlasticHingeJointSnapshot> = Vec::new();
     let mut governing_hinge_state = PlasticHingeState::Elastic;
+    let rec_pga_ref = config
+        .custom_accelerogram
+        .as_ref()
+        .map(|c| c.pga_x_g)
+        .unwrap_or_else(|| config.record.pga_g())
+        .max(0.08);
+    let custom_dt = config
+        .custom_accelerogram
+        .as_ref()
+        .map(|c| c.dt_s.max(1e-4))
+        .unwrap_or(0.01);
 
     for sample in &samples {
+        let cy_opt = config.custom_accelerogram.as_ref().and_then(|c| {
+            if c.accel_y_g.is_empty() {
+                None
+            } else {
+                let idx = ((sample.time_s / custom_dt).round() as usize).min(c.accel_y_g.len() - 1);
+                Some(c.accel_y_g[idx] * scale_norm)
+            }
+        });
+        let cz_opt = config.custom_accelerogram.as_ref().and_then(|c| {
+            if c.accel_z_g.is_empty() {
+                None
+            } else {
+                let idx = ((sample.time_s / custom_dt).round() as usize).min(c.accel_z_g.len() - 1);
+                Some(c.accel_z_g[idx] * scale_norm)
+            }
+        });
+        let (ay_g, az_g) = if sample.ground_accel_y_g != 0.0 || sample.ground_accel_z_g != 0.0 {
+            (sample.ground_accel_y_g, sample.ground_accel_z_g)
+        } else {
+            synthesize_tridir_accel_yz(
+                sample.ground_accel_g,
+                sample.time_s,
+                rec_pga_ref * scale_norm,
+                config.tridirectional_mode,
+                cy_opt,
+                cz_opt,
+            )
+        };
+        scaled_pga_x_obs = scaled_pga_x_obs.max(sample.ground_accel_g.abs());
+        scaled_pga_y_g = scaled_pga_y_g.max(ay_g.abs());
+        scaled_pga_z_g = scaled_pga_z_g.max(az_g.abs());
+
         let roof_m = sample.roof_disp_mm * 0.001;
         let roof_drift = (roof_m / ctx.building_height_m).abs();
         let abs_roof_mm = sample.roof_disp_mm.abs();
@@ -891,17 +1191,34 @@ fn assemble_replay_report(
 
         let mut story_disp_x_m = Vec::with_capacity(ctx.sorted_level_elevs_m.len());
         let mut story_disp_y_m = Vec::with_capacity(ctx.sorted_level_elevs_m.len());
-        let whiplash = (sample.ground_accel_g / (config.record.pga_g() * scale_norm).max(0.1))
-            .clamp(-1.0, 1.0);
+        let mut story_disp_z_m = Vec::with_capacity(ctx.sorted_level_elevs_m.len());
+        let whiplash = (sample.ground_accel_g / (rec_pga_ref * scale_norm).max(0.1)).clamp(-1.0, 1.0);
+        let y_amp = match config.tridirectional_mode {
+            TriDirectionalMode::UniaxialX => 0.12,
+            TriDirectionalMode::BiaxialXY | TriDirectionalMode::TriDirectionalXYZ => 0.52,
+        };
+        let y_norm = (ay_g / (rec_pga_ref * scale_norm).max(0.1)).clamp(-1.0, 1.0);
 
         for &z in &ctx.sorted_level_elevs_m {
             let xi = (z / ctx.building_height_m).clamp(0.0, 1.0);
             let phi1 = (std::f64::consts::FRAC_PI_2 * xi).sin();
             let phi2 = 0.14 * (1.5 * std::f64::consts::PI * xi).sin() * whiplash;
             let ux = roof_m * (phi1 + phi2);
-            let uy = 0.20 * roof_m * phi1 * (sample.time_s * 1.4).cos();
+            let uy = match config.tridirectional_mode {
+                TriDirectionalMode::UniaxialX => 0.12 * roof_m * phi1 * (sample.time_s * 1.4).cos(),
+                TriDirectionalMode::BiaxialXY | TriDirectionalMode::TriDirectionalXYZ => {
+                    abs_roof_mm * 0.001 * y_amp * phi1 * y_norm
+                }
+            };
+            let uz = match config.tridirectional_mode {
+                TriDirectionalMode::TriDirectionalXYZ => {
+                    (-az_g * (0.018 + 0.032 * xi)).clamp(-0.08, 0.08)
+                }
+                _ => 0.0,
+            };
             story_disp_x_m.push(ux);
             story_disp_y_m.push(uy);
+            story_disp_z_m.push(uz);
         }
 
         let mut story_drift_ratios = Vec::with_capacity(ctx.num_stories);
@@ -913,9 +1230,17 @@ fn assemble_replay_report(
             if dr > peak_interstory_drift_ratio {
                 peak_interstory_drift_ratio = dr;
             }
+            if dr > peak_story_drifts[s] {
+                peak_story_drifts[s] = dr;
+            }
             story_drift_ratios.push(dr);
         }
 
+        // Dynamic column axial P/Py modulation from tri-directional vertical acceleration az(t)
+        let vertical_axial_amp = match config.tridirectional_mode {
+            TriDirectionalMode::TriDirectionalXYZ => 1.0 + 0.24 * az_g.abs().clamp(0.0, 1.5),
+            _ => 1.0,
+        };
         let park_ang_term = 0.22 * (sample.hysteretic_energy_kj / total_e_h_max).clamp(0.0, 1.0);
         let mut active_hinges = Vec::new();
         let (mut c_io, mut c_ls, mut c_cp, mut c_mech) = (0usize, 0usize, 0usize, 0usize);
@@ -926,7 +1251,12 @@ fn assemble_replay_report(
                 .copied()
                 .unwrap_or(roof_drift);
             let drift_norm = dr / 0.0072; // ~0.72% RC frame nominal yield interstory drift
-            let dcr_dyn = (j.base_dcr * (0.45 + 0.58 * scale_norm)
+            let axial_factor = if j.bim_kind == BimElementKind::Column {
+                vertical_axial_amp
+            } else {
+                1.0
+            };
+            let dcr_dyn = ((j.base_dcr * (0.45 + 0.58 * scale_norm) * axial_factor)
                 + 0.48 * drift_norm * j.sensitivity
                 + park_ang_term * j.sensitivity)
                 .max(running_max_dcr[j_idx]);
@@ -967,15 +1297,20 @@ fn assemble_replay_report(
             peak_hinges = active_hinges.clone();
         }
 
-        // Visual base shaking offset (oscillates cleanly in proportion to ground acceleration)
+        // Visual base shaking offset in X, Y, Z
         let omega_g = 12.0;
-        let ground_disp_m = (sample.ground_accel_g * 9.80665 / (omega_g * omega_g))
-            .clamp(-0.18, 0.18);
+        let ground_disp_m = (sample.ground_accel_g * 9.80665 / (omega_g * omega_g)).clamp(-0.18, 0.18);
+        let ground_disp_y_m = (ay_g * 9.80665 / (omega_g * omega_g)).clamp(-0.15, 0.15);
+        let ground_disp_z_m = (az_g * 9.80665 / (omega_g * omega_g) * 0.5).clamp(-0.08, 0.08);
 
         frames.push(GroundMotionReplayFrame {
             time_s: sample.time_s,
             ground_accel_g: sample.ground_accel_g,
+            ground_accel_y_g: ay_g,
+            ground_accel_z_g: az_g,
             ground_disp_m,
+            ground_disp_y_m,
+            ground_disp_z_m,
             roof_disp_mm: sample.roof_disp_mm,
             roof_drift_ratio: roof_drift,
             base_shear_kn: sample.base_shear_kn,
@@ -983,6 +1318,7 @@ fn assemble_replay_report(
             story_elevations_m: ctx.sorted_level_elevs_m.clone(),
             story_disp_x_m,
             story_disp_y_m,
+            story_disp_z_m,
             story_drift_ratios,
             active_hinges,
             count_io: c_io,
@@ -1100,8 +1436,45 @@ fn assemble_replay_report(
         top_scenarios: crc_scenarios.into_iter().take(12).collect(),
     };
 
-    let scaled_pga_g = config.record.pga_g() * scale_norm;
+    let scaled_pga_g = if let Some(ref c) = config.custom_accelerogram {
+        (c.pga_x_g * scale_norm).max(scaled_pga_x_obs)
+    } else {
+        (config.record.pga_g() * scale_norm).max(scaled_pga_x_obs)
+    };
     let is_drift_compliant = peak_interstory_drift_ratio <= 0.020;
+
+    // 5%-damped Elastic Response Spectrum Sa(T) vs. Site SNI 1726 / ASCE 7-22 Design Spectrum
+    let (spec_dt, spec_unscaled_g) = unscaled_accel_series_g(&config);
+    let periods: Vec<f64> = (0..24)
+        .map(|i| 0.05 + (i as f64 / 23.0) * 2.95)
+        .collect();
+    let sa_unscaled_curve = compute_elastic_response_spectrum_5pct(
+        spec_dt,
+        &spec_unscaled_g,
+        config.damping_ratio.clamp(0.01, 0.15),
+        &periods,
+    );
+    let response_spectrum: Vec<ResponseSpectrumPoint> = periods
+        .iter()
+        .zip(sa_unscaled_curve.iter())
+        .map(|(&p, &sa_u)| ResponseSpectrumPoint {
+            period_s: p,
+            sa_record_g: sa_u * scale_norm,
+            sa_design_g: ctx.spectrum.spectral_acceleration(p),
+        })
+        .collect();
+    let sa_match_ratio = (sa_record_t1_g / sa_design_t1_g.max(0.05)).clamp(0.05, 5.0);
+
+    // Coupled Real-Time FEMA P-58 Fragility & Loss Synthesis directly on active BIM + NL-THA
+    let fragility_loss = FemaP58Engine::evaluate_from_replay_demands(
+        &ctx.project,
+        &ctx.sorted_level_elevs_m,
+        &peak_story_drifts,
+        scaled_pga_g,
+        scaled_pga_z_g,
+        sa_record_t1_g,
+    );
+
     let replay_overlay_ifcx = build_replay_overlay_ifcx(
         &ctx,
         &config,
@@ -1118,32 +1491,53 @@ fn assemble_replay_report(
         &peak_hinges,
         &async_crc,
     );
+    let fragility_overlay_ifcx = build_fragility_loss_overlay_ifcx(
+        &ctx,
+        &config,
+        scaled_pga_g,
+        scaled_pga_y_g,
+        scaled_pga_z_g,
+        sa_record_t1_g,
+        sa_design_t1_g,
+        &fragility_loss,
+    );
 
+    let rec_name = config.active_record_label();
+    let custom_record_name = config.custom_accelerogram.as_ref().map(|c| c.name.clone());
     let summary = format!(
-        "{} ({:.2}x, PGA {:.2}g) via {}: Peak Drift {:.2}% @ t={:.1}s ({}) | Hinges {} IO/{} LS/{} CP/{} Mech | Async CRC {:.0}% pruned",
-        GroundMotionReplayConfig::record_short_label(config.record),
+        "{} ({}, {:.2}x, PGA {:.2}g) via {}: Drift {:.2}% @ {:.1}s | Hinges {} IO/{} LS/{} CP/{} M | Repair ${:.0}k ({:.0}d {:?})",
+        rec_name,
+        config.tridirectional_mode.short_label(),
         scale_norm,
         scaled_pga_g,
         execution_backend,
         peak_interstory_drift_ratio * 100.0,
         peak_time_s,
-        if is_drift_compliant { "PASS" } else { "EXCEEDS 2%" },
         peak_io,
         peak_ls,
         peak_cp,
         peak_mech,
-        async_crc.scenario_reduction_pct,
+        fragility_loss.total_repair_cost_usd / 1000.0,
+        fragility_loss.downtime_days,
+        fragility_loss.achieved_redi_tier,
     );
 
     GroundMotionReplayReport {
         project_name: ctx.project_name,
-        config,
+        config: config.clone(),
         bim_revision_hash: ctx.bim_revision_hash,
         num_stories: ctx.num_stories,
         building_height_m: ctx.building_height_m,
         fundamental_period_t1_s: ctx.fundamental_period_t1_s,
         ssi_coupled: ctx.ssi_coupled,
         scaled_pga_g,
+        tridirectional_mode: config.tridirectional_mode,
+        custom_record_name,
+        scaled_pga_y_g,
+        scaled_pga_z_g,
+        sa_record_t1_g,
+        sa_design_t1_g,
+        sa_match_ratio,
         total_duration_s: duration_s,
         peak_time_s,
         peak_roof_disp_mm,
@@ -1161,9 +1555,95 @@ fn assemble_replay_report(
         peak_count_mechanism: peak_mech,
         frames,
         async_crc,
+        response_spectrum,
+        fragility_loss,
         replay_overlay_ifcx,
+        fragility_overlay_ifcx,
         summary,
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_fragility_loss_overlay_ifcx(
+    ctx: &PreparedReplayContext,
+    config: &GroundMotionReplayConfig,
+    scaled_pga_x_g: f64,
+    scaled_pga_y_g: f64,
+    scaled_pga_z_g: f64,
+    sa_record_t1_g: f64,
+    sa_design_t1_g: f64,
+    loss: &ReplayFemaP58Synthesis,
+) -> IfcxDocument {
+    let slug = sanitize_slug(&ctx.project_name);
+    let mut doc = IfcxDocument::new(format!("fema_p58_fragility_{slug}"));
+    doc.imports.push(IfcxImport {
+        uri: format!("eigengraph://{slug}.ifcx"),
+        integrity: None,
+        role: Some("base-building".to_string()),
+    });
+    doc.schemas.insert(
+        NS_EG_FRAGILITY_LOSS.to_string(),
+        json!({
+            "value": {
+                "dataType": "Object",
+                "spec": "EigenGraph PEER Tri-Directional NL-THA Coupled FEMA P-58 Fragility & REDi Probabilistic Loss Overlay"
+            }
+        }),
+    );
+    let site_path = format!("/earth/sites/{slug}");
+    let bldg_path = format!("{site_path}/buildings/{slug}");
+    let analysis_path = format!("{bldg_path}/analysis");
+    let frag_path = format!("{analysis_path}/fema_p58_fragility");
+
+    let payload = json!({
+        "record": config.active_record_label(),
+        "triDirectionalMode": config.tridirectional_mode.short_label(),
+        "pgaXYZ_g": [scaled_pga_x_g, scaled_pga_y_g, scaled_pga_z_g],
+        "saRecordT1_g": sa_record_t1_g,
+        "saDesignT1_g": sa_design_t1_g,
+        "replacementValueUsd": loss.building_replacement_value_usd,
+        "totalRepairCostUsd": loss.total_repair_cost_usd,
+        "repairLossRatio": loss.repair_loss_ratio,
+        "downtimeDays": loss.downtime_days,
+        "businessInterruptionUsd": loss.business_interruption_usd,
+        "repairEmbodiedCarbonKg": loss.repair_embodied_carbon_kg,
+        "collapseProbability": loss.collapse_probability,
+        "demolitionProbability": loss.demolition_probability,
+        "achievedRediTier": format!("{:?}", loss.achieved_redi_tier),
+        "storyLosses": loss.story_losses,
+    });
+
+    let mut bldg_node = IfcxNode::new(&bldg_path).with_class("IfcBuilding");
+    bldg_node
+        .children
+        .insert("analysis".to_string(), analysis_path.clone());
+    bldg_node
+        .attributes
+        .insert(NS_EG_FRAGILITY_LOSS.to_string(), payload.clone());
+    doc.add_node(bldg_node);
+
+    let mut analysis_node = IfcxNode::new(&analysis_path).with_class("IfcTask");
+    analysis_node
+        .children
+        .insert("fema_p58_fragility".to_string(), frag_path.clone());
+    doc.add_node(analysis_node);
+
+    let frag_node = IfcxNode::new(&frag_path)
+        .with_class("IfcTask")
+        .with_prop(
+            "FEMA P-58 Real-Time Fragility & Loss",
+            &format!("{:?}", loss.achieved_redi_tier),
+            &format!(
+                "Repair ${:.0}k ({:.1}%) | Downtime {:.0}d | Collapse {:.2}%",
+                loss.total_repair_cost_usd / 1000.0,
+                loss.repair_loss_ratio * 100.0,
+                loss.downtime_days,
+                loss.collapse_probability * 100.0
+            ),
+        )
+        .with_attr(NS_EG_FRAGILITY_LOSS, payload);
+    doc.add_node(frag_node);
+    doc
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1473,16 +1953,42 @@ impl AsyncReplayJobManager {
                 if let Ok(ctx) =
                     prepare_replay_context(&project, &site, ssi_report.as_ref(), &config)
                 {
-                    let duration_s = simulation_duration_for_record(config.record);
-                    let dt_s = if ctx.fundamental_period_t1_s < 0.35 {
-                        0.005
+                    let (scale_eff, _, _) = effective_scale_and_sa(&ctx, &config);
+                    let (duration_s, dt_s) = if let Some(ref c) = config.custom_accelerogram {
+                        (c.duration_s.max(2.0), c.dt_s.clamp(0.002, 0.05))
                     } else {
-                        0.010
+                        (
+                            simulation_duration_for_record(config.record),
+                            if ctx.fundamental_period_t1_s < 0.35 {
+                                0.005
+                            } else {
+                                0.010
+                            },
+                        )
                     };
+                    let (custom_dt_s, custom_accel_x, custom_accel_y, custom_accel_z) =
+                        if let Some(ref c) = config.custom_accelerogram {
+                            (
+                                Some(c.dt_s.clamp(0.002, 0.05)),
+                                Some(c.accel_x_g.clone()),
+                                if c.accel_y_g.is_empty() {
+                                    None
+                                } else {
+                                    Some(c.accel_y_g.clone())
+                                },
+                                if c.accel_z_g.is_empty() {
+                                    None
+                                } else {
+                                    Some(c.accel_z_g.clone())
+                                },
+                            )
+                        } else {
+                            (None, None, None, None)
+                        };
                     let payload = WorkerReplayPayload {
                         record_key: GroundMotionReplayConfig::record_worker_key(config.record)
                             .to_string(),
-                        scale_factor: config.scale_factor.clamp(0.50, 2.50),
+                        scale_factor: scale_eff,
                         hysteresis_key: GroundMotionReplayConfig::hysteresis_worker_key(
                             config.hysteresis_model,
                         )
@@ -1500,6 +2006,11 @@ impl AsyncReplayJobManager {
                             HysteresisModel::BoucWenDifferential => 0.035,
                             HysteresisModel::TakedaDegradingPinching => 0.025,
                         },
+                        tridir_mode: config.tridirectional_mode.worker_key().to_string(),
+                        custom_dt_s,
+                        custom_accel_x,
+                        custom_accel_y,
+                        custom_accel_z,
                         scenarios: ctx.base_scenarios.clone(),
                     };
                     if let Ok(payload_json) = serde_json::to_string(&payload) {
@@ -1866,5 +2377,52 @@ mod tests {
             mgr.phase,
             AsyncReplayJobPhase::Completed { job_id: active_id }
         );
+    }
+
+    #[test]
+    fn phase75_peer_at2_tridirectional_vertical_axial_and_fema_p58_replay() {
+        use crate::core::ifcx::IfcxStage;
+        use crate::core::time_history::{parse_custom_accelerogram, sample_peer_at2_text};
+
+        let proj = BimProject::sample_bimcraft_building();
+        let site = SiteEnvironmentalCoupling::default();
+        let at2 = parse_custom_accelerogram(sample_peer_at2_text(), "RSN1063_RRS228.AT2")
+            .expect("Sample PEER AT2");
+
+        let cfg_1d = GroundMotionReplayConfig {
+            custom_accelerogram: Some(at2.clone()),
+            tridirectional_mode: TriDirectionalMode::UniaxialX,
+            scale_factor: 1.0,
+            auto_match_sa_t1: false,
+            ..Default::default()
+        };
+        let cfg_3d = GroundMotionReplayConfig {
+            custom_accelerogram: Some(at2),
+            tridirectional_mode: TriDirectionalMode::TriDirectionalXYZ,
+            scale_factor: 1.0,
+            auto_match_sa_t1: true,
+            show_fragility_loss_overlay: true,
+            ..Default::default()
+        };
+
+        let rep_1d = run_ground_motion_replay_for_bim(&proj, &site, None, &cfg_1d, "Test1D", None)
+            .expect("1D custom PEER replay");
+        let rep_3d = run_ground_motion_replay_for_bim(&proj, &site, None, &cfg_3d, "Test3D", None)
+            .expect("3D matched PEER replay");
+
+        assert_eq!(rep_3d.custom_record_name.as_deref(), Some("RSN1063_RRS228.AT2"));
+        assert!(rep_3d.scaled_pga_z_g > 0.10);
+        assert!(rep_3d.frames.iter().any(|f| f.story_disp_z_m.iter().any(|z| z.abs() > 1e-4)));
+        assert!((rep_3d.sa_match_ratio - 1.0).abs() < 0.25 || rep_3d.config.scale_factor != 1.0);
+        assert_eq!(rep_3d.response_spectrum.len(), 24);
+        assert!(rep_3d.fragility_loss.total_repair_cost_usd > 0.0);
+        assert!(rep_1d.scaled_pga_z_g.abs() < 1e-6);
+
+        let base_doc = IfcxDocument::from_bim_project(&proj, None, 0.0, None, None, None);
+        let composed = IfcxStage::compose_with_fragility_loss_overlay(&base_doc, &rep_3d);
+        assert!(composed
+            .data
+            .iter()
+            .any(|n| n.attributes.contains_key(NS_EG_FRAGILITY_LOSS)));
     }
 }

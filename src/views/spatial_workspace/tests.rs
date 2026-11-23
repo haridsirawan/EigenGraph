@@ -2560,7 +2560,7 @@ use crate::theme::MacTheme;
         let mut db_components = Vec::new();
         let theme = crate::theme::MacTheme::default();
 
-        // 1. Slash commands control Day / Dusk / Night solar presets and WebGL2 GPU toggle
+        // 1. Slash commands control Day / Dusk / Night solar presets and Pure WebGPU toggle
         for cmd in ["/day", "/dusk", "/night", "/gpu"] {
             assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == cmd));
         }
@@ -3558,5 +3558,158 @@ use crate::theme::MacTheme;
                 r.right() <= win_w + 1.0 && r.left() >= -1.0,
                 "Phase 74 Ground-Motion Replay Dynamic Island overflowed viewport {win_w}: {r:?}"
             );
+        }
+    }
+
+    #[test]
+    fn test_phase75_peer_at2_tridir_fragility_slash_commands_and_zero_hud_overflow() {
+        use crate::core::ground_motion_replay::{
+            run_ground_motion_replay_for_bim, GroundMotionReplayConfig, TriDirectionalMode,
+        };
+
+        for cmd in ["/at2", "/tridir", "/match-sa", "/fragility", "/fragility-ifcx"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|s| s.cmd == cmd),
+                "Missing Phase 75 slash command {cmd}"
+            );
+        }
+
+        let (text_no_tags, directives) = parse_gemini_action_directives(
+            "Applying tri-directional matched PEER analysis [[TOGGLE_TRIDIR:XYZ]] [[MATCH_SA_SPECTRUM]] [[OPEN_FRAGILITY]]",
+        );
+        assert_eq!(text_no_tags, "Applying tri-directional matched PEER analysis");
+        assert_eq!(directives.len(), 3);
+        assert_eq!(
+            directives[0],
+            GeminiDirective::ToggleTriDirectional(Some(TriDirectionalMode::TriDirectionalXYZ))
+        );
+        assert_eq!(directives[1], GeminiDirective::ToggleAutoMatchSa);
+        assert_eq!(directives[2], GeminiDirective::OpenFragilityTab);
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = crate::views::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+        let theme = crate::theme::MacTheme::default();
+        let _ = build
+            .bim_bus
+            .execute_natural_language("portal 3x2 @6m 2floors");
+
+        let act_at2 = spatial.execute_spatial_input(
+            "/at2 sample",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_at2.run_async_ground_motion_replay);
+        assert!(canvas.ground_motion_replay_config.custom_accelerogram.is_some());
+
+        let act_tri = spatial.execute_spatial_input(
+            "/tridir xyz",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_tri.run_async_ground_motion_replay);
+        assert_eq!(
+            canvas.ground_motion_replay_config.tridirectional_mode,
+            TriDirectionalMode::TriDirectionalXYZ
+        );
+
+        let act_sa = spatial.execute_spatial_input(
+            "/match-sa",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_sa.run_async_ground_motion_replay);
+        assert!(canvas.ground_motion_replay_config.auto_match_sa_t1);
+        assert_eq!(spatial.ground_motion_drawer_tab, 1);
+
+        let _ = spatial.execute_spatial_input(
+            "/fragility",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(canvas.ground_motion_replay_config.show_fragility_loss_overlay);
+        assert!(spatial.ground_motion_drawer_open);
+
+        let act_ifcx = spatial.execute_spatial_input(
+            "/fragility-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_ifcx.export_fragility_loss_ifcx);
+
+        let site = canvas.active_site_coupling();
+        let rep = run_ground_motion_replay_for_bim(
+            &build.bim_bus.project,
+            &site,
+            None,
+            &GroundMotionReplayConfig {
+                tridirectional_mode: TriDirectionalMode::TriDirectionalXYZ,
+                custom_accelerogram: canvas.ground_motion_replay_config.custom_accelerogram.clone(),
+                auto_match_sa_t1: true,
+                show_fragility_loss_overlay: true,
+                ..Default::default()
+            },
+            "Phase75HudTest",
+            None,
+        )
+        .expect("Phase 75 replay report");
+        canvas.last_ground_motion_replay_report = Some(rep);
+
+        spatial.mobile_deck_pinned = true;
+        spatial.studio_tab = DynamicIslandStudioTab::ViewAndLens;
+        for tab_idx in [0_usize, 1_usize] {
+            spatial.ground_motion_drawer_tab = tab_idx;
+            for win_w in [1280.0_f32, 768.0, 390.0] {
+                let ctx = egui::Context::default();
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, 844.0))),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let _ = spatial.render_hud_overlays(
+                            ui.ctx(),
+                            &theme,
+                            &mut canvas,
+                            &mut build,
+                            &mut ai,
+                            &members,
+                            &projects,
+                            &mut db_components,
+                        );
+                    },
+                );
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 75 tab={tab_idx} Dynamic Island overflowed viewport {win_w}: {r:?}"
+                );
+            }
         }
     }

@@ -614,15 +614,18 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
 
     let haz_line = if let Some(rep) = input.replay_report {
         format!(
-            "NL-THA {} ({:.2}g) | Drift {:.2}% | Hinges {} IO/{} LS/{} CP/{} M | CRC -{:.0}%",
-            crate::core::ground_motion_replay::GroundMotionReplayConfig::record_short_label(rep.config.record),
+            "NL-THA {} ({}, {:.2}g) | Drift {:.2}% | Hinges {}IO/{}LS/{}CP/{}M | Fragility ${:.0}k ({:.0}d {:?})",
+            rep.config.active_record_label(),
+            rep.tridirectional_mode.short_label(),
             rep.scaled_pga_g,
             rep.peak_interstory_drift_ratio * 100.0,
             rep.peak_count_io,
             rep.peak_count_ls,
             rep.peak_count_cp,
             rep.peak_count_mechanism,
-            rep.async_crc.scenario_reduction_pct
+            rep.fragility_loss.total_repair_cost_usd / 1000.0,
+            rep.fragility_loss.downtime_days,
+            rep.fragility_loss.achieved_redi_tier,
         )
     } else if let Some(h) = input.hazard_report {
         format!(

@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.4` Delivered** (`v0.7.5` Planned)  
-> **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% Raster Pixels**  
-> **Current Platform**: EigenGraph `v0.7.4` (Real-Time WebWorker / Async Multi-Thread `StructGNN-CRC` & Live 60 FPS Earthquake Ground-Motion Replay)  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.5` Delivered** (`v0.7.6` Planned)  
+> **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% Raster Pixels**  
+> **Current Platform**: EigenGraph `v0.7.5` (100% Pure WebGPU/WGSL Renderer, PEER `.at2`/`.csv` Tri-Directional Coupling & Real-Time FEMA P-58 Fragility)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -23,10 +23,10 @@ Every single entity in the application—from the planetary Earth globe, contine
    - Opening a project feels like **continuing directly on top of an already-living Earth**—users modify, add, or strengthen structural elements without ever mutating or duplicating base layers.
 3. **Future-Ready AI Real-World Building Ingestion**:
    - Because IFCX cleanly separates semantic BIM tags (`bsi::ifc::class`), triangulated vector meshes (`usd::usdgeom::mesh`), world coordinates (`eigengraph::geo::wgs84`), and structural properties (`eigengraph::bim::element`), future multimodal AI vision/3D-reconstruction pipelines can scan real buildings and emit lightweight `.ifcx` layers that drop straight onto EigenGraph's Earth Globe and immediately convert into editable 6-DOF BIM/FEM models.
-4. **1:1 Direct Mapping to WebGL2 GPU Buffers (Zero Raster Pixels)**:
-   - Every IFCX node's `usd::usdgeom::mesh` (`points`, `faceVertexCounts`, `faceVertexIndices`, `normals`, `displayColor`) streams directly into `egui_glow` WebGL2 VBO/IBO buffers with zero intermediate tessellation engines and **0% raster pixels** across the entire Rust/WASM codebase.
-5. **Ultra-Minimal 4-Crate Dependency Footprint**:
-   - The entire runtime core depends solely on **`egui` + `eframe` (with built-in `glow` WebGL2)** and **`serde` + `serde_json`** (plus standard `wasm-bindgen`/`web-sys` on `wasm32`), delivering instant 0 ms offline load and lean WebAssembly binaries.
+4. **1:1 Direct Mapping to 100% Pure WebGPU (WGSL) Buffers (Zero WebGL & Zero Raster Pixels)**:
+   - Every IFCX node's `usd::usdgeom::mesh` (`points`, `faceVertexCounts`, `faceVertexIndices`, `normals`, `displayColor`) streams directly into `egui-wgpu` / `wgpu` vertex and index buffers rendered via pure WGSL compute/vertex/fragment pipelines (Metal/Vulkan/DX12 Native, Browser WebGPU on `wasm32`) with zero GLSL, zero `glow`, and **0% raster pixels** across the entire Rust/WASM codebase.
+5. **Minimal Pure-Rust Stack**:
+   - The runtime graphics and persistence core depends cleanly on **`egui` + `eframe` (`wgpu_no_default_features`) + `egui-wgpu` + `wgpu`** and **`serde` + `serde_json`** (plus standard `wasm-bindgen`/`web-sys` on `wasm32`), delivering instant offline load and zero WebGL/GLSL bloat.
 
 ---
 
@@ -114,7 +114,7 @@ Because 100% of Earth and buildings live in analytical vector `.ifcx` nodes, cri
 
 ---
 
-## 6. Phased Implementation Roadmap (`v0.6.4 – v0.7.4`)
+## 6. Phased Implementation Roadmap (`v0.6.4 – v0.7.5`)
 
 Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.md` — advancing one patch digit per phase):
 
@@ -185,5 +185,11 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 - **60 FPS WebGL2 Story Sway, Pulsing 3D Plastic Hinge Beacons & Dynamic Island Vector Charts (`src/views/webgl_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/core/vector_dossier.rs`, `src/app.rs`)**:
   - Drives interpolated 60 FPS structural sway (`EarthBimLens::TimeHistoryReplay`), pulsing octahedral 3D plastic hinge beacons (`hinge_vao/vbo/ibo`, GLSL `kind >= 5.5` with CPU projection fallback), interactive accelerogram/drift/hysteresis pure-vector charts inside the widening Dynamic Island drawer, `/replay`, `/record`, `/hinges`, `/replay-ifcx` commands, and pure-vector A3 dossier telemetry.
 
-### Planned Next Phases (`v0.7.5`)
-- **Phase 75 (`v0.7.5`) — Custom PEER `.at2` / `.csv` Accelerogram Ingestion, Tri-Directional Ground-Motion Coupling & Real-Time Fragility Curve Synthesis**: Streaming user-uploaded earthquake accelerograms and probabilistic FEMA P-58 repair cost/downtime fragility envelopes directly onto IFCX Earth.
+### Phase 75 (`v0.7.5`) — 100% Pure WebGPU (WGSL) Renderer, PEER `.at2`/`.csv` Tri-Directional Coupling & Real-Time FEMA P-58 Fragility *(Implemented)*
+- **100% Pure WebGPU (`wgpu` + WGSL) Pipeline (`Cargo.toml`, `src/main.rs`, `src/views/webgpu_earth/`, `src/views/universal_canvas/`)**:
+  - Removed all WebGL, GLSL ES, `egui_glow`, and `glow` backends; rebuilt 3D Vector Earth rendering in native `wgpu` + WGSL (`WebGpuEarthResources`) with two-pass viewport depth-band splitting (`[0.50, 1.00]` Planet Globe, `[0.00, 0.499]` Floating-Origin RTC Site) across Native Metal/Vulkan/DX12 and Browser WebGPU (`Backends::BROWSER_WEBGPU`), backed by offline CPU vector fallbacks for CI.
+- **Custom PEER `.at2`/`.csv` Ingestion, Tri-Directional Coupling & Real-Time FEMA P-58 Fragility (`src/core/{time_history.rs, fema_p58.rs, ifcx.rs, ground_motion_replay.rs, vector_dossier.rs}`, `index.html`, `src/views/spatial_workspace/`)**:
+  - Added PEER NGA `.at2` and `.csv` accelerogram parsing, 5%-damped elastic response spectrum with SNI 1726 `Match Sa(T1)` auto-scaling, Tri-Directional `1D X` / `2D XY` / `3D XYZ` ground-motion excitation with vertical $a_z$ axial hinge modulation and 3D WebGPU story sway, real-time BIM+NL-THA FEMA P-58 fragility & per-story repair loss synthesis (`eigengraph::analysis::fema_p58_fragility`, 3D translucent story-loss halos at `material_kind = 7.0`), the `Spectrum & Fragility` Dynamic Island sub-tab with pure-vector charts, and `/at2`, `/tridir`, `/match-sa`, `/fragility`, `/fragility-ifcx` commands.
+
+### Planned Next Phases (`v0.7.6`)
+- **Phase 76 (`v0.7.6`) — Live SHM Digital Twin & ATC-20 Post-Earthquake Placard Triage**: Streaming real-time accelerometer/strain-gauge structural health monitoring telemetry against modal baseline fingerprints for automated ATC-20 Green/Yellow/Red placard safety triage directly on Pure WebGPU IFCX Earth.

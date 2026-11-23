@@ -121,6 +121,8 @@ pub struct SpatialWorkspaceState {
     pub portfolio_drawer_open: bool,
     // Phase 74: Live Earthquake Ground-Motion Replay & Async StructGNN-CRC Drawer
     pub ground_motion_drawer_open: bool,
+    // Phase 75: Replay Drawer Sub-Tab (0 = Time-History, 1 = Response Spectrum & FEMA P-58 Fragility)
+    pub ground_motion_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -215,6 +217,7 @@ impl Default for SpatialWorkspaceState {
             ifcx_diff_drawer_open: false,
             portfolio_drawer_open: false,
             ground_motion_drawer_open: false,
+            ground_motion_drawer_tab: 0,
         }
     }
 }
@@ -362,6 +365,19 @@ impl SpatialWorkspaceState {
             }
             _ => {}
         }
+    }
+
+    /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
+    /// closing all competing exclusive drawers without collapsing an already-open panel.
+    pub fn open_ground_motion_drawer(&mut self) {
+        self.vault_drawer_open = false;
+        self.vault_path_popover_open = false;
+        self.context_picker_open = false;
+        self.history_popover_open = false;
+        self.api_key_popover_open = false;
+        self.ifcx_diff_drawer_open = false;
+        self.portfolio_drawer_open = false;
+        self.ground_motion_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

@@ -316,7 +316,7 @@ pub struct GlobeCamera {
     pub angular_vel_lon: f32,
     pub day_night_lighting: bool,
     pub sun_lon_deg: f32,
-    /// Local solar hour (`0.0..=24.0`) used for Day / Golden Hour / Night WebGL2 lighting (Phase 65).
+    /// Local solar hour (`0.0..=24.0`) used for Day / Golden Hour / Night WebGPU WGSL lighting (Phase 65/75).
     #[serde(default = "default_sun_time_of_day")]
     pub sun_time_of_day: f32,
     #[serde(skip)]
@@ -1355,7 +1355,7 @@ impl PlanetaryWorldState {
     }
 
     /// Renders the 3D Vector Earth overlay; when `gpu_globe_active` is true, the ocean dome,
-    /// extruded continents, rivers, and ridges have already been rendered on WebGL2 hardware Z-buffer
+    /// extruded continents, rivers, and ridges have already been rendered on Pure WebGPU hardware Z-buffer
     /// and this method layers only crisp HUD vector grids, terraformed cells, megastructures, and markers.
     #[allow(clippy::too_many_arguments)]
     pub fn render_3d_globe_with_gpu_mode(

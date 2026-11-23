@@ -8,8 +8,13 @@ fn main() -> eframe::Result {
     use egui::Vec2;
 
     let mut native_options = NativeOptions::default();
-    // Phase 65: Request 24-bit hardware Z-buffer for WebGL2 / OpenGL 3D Vector Earth rendering
+    // Request 24-bit hardware Z-buffer for Pure WebGPU / Metal / Vulkan / DX12 3D Vector Earth rendering
     native_options.depth_buffer = 24;
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(ref mut create_new) =
+        native_options.wgpu_options.wgpu_setup
+    {
+        create_new.instance_descriptor.backends = eframe::wgpu::Backends::PRIMARY;
+    }
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("EigenGraph")
         .with_inner_size(Vec2::new(1440.0, 900.0))
@@ -51,6 +56,11 @@ fn main() {
 
     let mut web_options = eframe::WebOptions::default();
     web_options.depth_buffer = 24;
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(ref mut create_new) =
+        web_options.wgpu_options.wgpu_setup
+    {
+        create_new.instance_descriptor.backends = eframe::wgpu::Backends::BROWSER_WEBGPU;
+    }
 
     wasm_bindgen_futures::spawn_local(async {
         let Some(window) = web_sys::window() else {
@@ -83,12 +93,12 @@ fn main() {
                 }
                 Err(e) => {
                     loading.set_inner_html(
-                        "<div style=\"max-width:460px;padding:24px;border-radius:12px;background:#1a1e28;border:1px solid #ef4444;color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-align:center;\">\
-                         <h2 style=\"margin:0 0 8px;color:#ef4444;font-size:18px;\">WebGL2 / WebAssembly Initialization Error</h2>\
-                         <p style=\"margin:0;color:#a5b4ca;font-size:13px;line-height:1.5;\">EigenGraph requires a modern browser with WebGL2 and WebAssembly enabled.</p>\
+                        "<div style=\"max-width:480px;padding:24px;border-radius:14px;background:#0f1928;border:1px solid #ef4444;color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-align:center;\">\
+                         <h2 style=\"margin:0 0 8px;color:#ef4444;font-size:18px;\">WebGPU / WebAssembly Initialization Error</h2>\
+                         <p style=\"margin:0;color:#cbd5e1;font-size:13px;line-height:1.55;\">EigenGraph runs 100% natively on WebGPU (0% WebGL). Please open this workstation over HTTPS in Chrome/Edge 113+, Safari 26+, or Firefox 141+ with hardware WebGPU enabled.</p>\
                          </div>",
                     );
-                    log::error!("Failed to start EigenGraph WebRunner: {e:?}");
+                    log::error!("Failed to start EigenGraph WebGPU WebRunner: {e:?}");
                 }
             }
         }

@@ -2098,7 +2098,7 @@ impl SpatialWorkspaceState {
                                         "3D Overlay",
                                         ov_on,
                                         theme.accent_green,
-                                        "Highlight Added/Modified/Deleted nodes in WebGL2 3D view",
+                                        "Highlight Added/Modified/Deleted nodes in WebGPU (WGSL) 3D view",
                                     )
                                     .clicked()
                                     {
@@ -2400,7 +2400,7 @@ impl SpatialWorkspaceState {
                                         "3D Overlay",
                                         ov_on,
                                         theme.accent_green,
-                                        "Toggle 3D WebGL2 district retrofit crown overlays",
+                                        "Toggle 3D WebGPU (WGSL) district retrofit crown overlays",
                                     )
                                     .clicked()
                                     {
@@ -4046,7 +4046,7 @@ impl SpatialWorkspaceState {
                                                 format!("Sun: {sun_preset}"),
                                                 sun_preset != "Day",
                                                 theme.accent_orange,
-                                                "Cycle WebGL2 Earth Vector solar lighting: Day (13:30) / Golden Dusk (17:24) / Night (22:00)",
+                                                "Cycle Pure WebGPU Earth Vector solar lighting: Day (13:30) / Golden Dusk (17:24) / Night (22:00)",
                                             )
                                             .clicked()
                                             {
@@ -4071,10 +4071,10 @@ impl SpatialWorkspaceState {
                                                     true,
                                                 );
                                             }
-                                            let gpu_on = universal_canvas.webgl_earth.is_active();
+                                            let gpu_on = universal_canvas.webgpu_earth.is_active();
                                             let gpu_lbl = if gpu_on {
-                                                "GPU 3D"
-                                            } else if universal_canvas.webgl_earth.is_available() {
+                                                "WebGPU"
+                                            } else if universal_canvas.webgpu_earth.is_available() {
                                                 "CPU Vec"
                                             } else {
                                                 "Vec 3D"
@@ -4086,12 +4086,12 @@ impl SpatialWorkspaceState {
                                                 gpu_lbl,
                                                 gpu_on,
                                                 theme.accent_blue,
-                                                "Toggle WebGL2 hardware Z-buffer 3D Vector Earth pass vs. CPU vector fallback",
+                                                "Toggle 100% Pure WebGPU (WGSL) 3D Vector Earth pass vs. CPU vector fallback",
                                             )
                                             .clicked()
                                             {
-                                                universal_canvas.webgl_earth.enabled =
-                                                    !universal_canvas.webgl_earth.enabled;
+                                                universal_canvas.webgpu_earth.enabled =
+                                                    !universal_canvas.webgpu_earth.enabled;
                                             }
                                             ui.separator();
                                             if Self::glass_pill_button(
@@ -4620,7 +4620,7 @@ impl SpatialWorkspaceState {
                                                 "X-Ray Ground",
                                                 xray_on,
                                                 theme.accent_blue,
-                                                "Toggle 3D WebGL2 subsurface stratigraphy, borehole casing & groundwater table cutaway",
+                                                "Toggle 3D Pure WebGPU subsurface stratigraphy, borehole casing & groundwater table cutaway",
                                             )
                                             .clicked()
                                             {
@@ -5215,7 +5215,7 @@ impl SpatialWorkspaceState {
                         AppIcon::Bolt,
                         12.5,
                         theme.accent_orange,
-                        "Live Earthquake Replay & Async StructGNN-CRC",
+                        "Live Earthquake Replay, Tri-Dir .AT2 & FEMA P-58",
                         11.0,
                         theme.text_primary,
                         true,
@@ -5237,11 +5237,37 @@ impl SpatialWorkspaceState {
                         }
                     });
                 });
+                ui.add_space(3.0);
+                ui.horizontal_wrapped(|ui| {
+                    for (tab_idx, tab_lbl) in [
+                        (0_usize, "Time-History"),
+                        (1_usize, "Spectrum & Fragility"),
+                    ] {
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            tab_lbl,
+                            self.ground_motion_drawer_tab == tab_idx,
+                            theme.accent_blue,
+                            "Switch between 60 FPS time-history waveforms and 5% response spectrum + FEMA P-58 fragility synthesis",
+                        )
+                        .clicked()
+                        {
+                            self.ground_motion_drawer_tab = tab_idx;
+                        }
+                    }
+                });
                 ui.add_space(4.0);
 
                 ui.horizontal_wrapped(|ui| {
+                    let custom_active = universal_canvas
+                        .ground_motion_replay_config
+                        .custom_accelerogram
+                        .is_some();
                     for rec in GroundMotionReplayConfig::ALL_RECORDS {
-                        let active = universal_canvas.ground_motion_replay_config.record == rec;
+                        let active = !custom_active
+                            && universal_canvas.ground_motion_replay_config.record == rec;
                         if Self::glass_pill_button(
                             ui,
                             theme,
@@ -5253,12 +5279,81 @@ impl SpatialWorkspaceState {
                         )
                         .clicked()
                         {
+                            universal_canvas
+                                .ground_motion_replay_config
+                                .custom_accelerogram = None;
                             universal_canvas.ground_motion_replay_config.record = rec;
                             self.apply_lens_to_views(
                                 SpatialLens::TimeHistoryReplay,
                                 build_view,
                                 universal_canvas,
                             );
+                            actions.run_async_ground_motion_replay = true;
+                        }
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Document),
+                        "Load .at2/.csv",
+                        false,
+                        theme.accent_green,
+                        "Upload custom PEER NGA (.at2) or 2/3-column (.csv) earthquake accelerogram",
+                    )
+                    .clicked()
+                    {
+                        actions.open_accelerogram_file_picker = true;
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "Sample .at2",
+                        false,
+                        theme.accent_blue,
+                        "Load built-in PEER NGA-West2 Northridge Sylmar .AT2 accelerogram sample",
+                    )
+                    .clicked()
+                    {
+                        if let Ok(acc) = crate::core::time_history::parse_custom_accelerogram(
+                            crate::core::time_history::sample_peer_at2_text(),
+                            "PEER_Sample_Northridge_Sylmar.at2",
+                        ) {
+                            universal_canvas
+                                .ground_motion_replay_config
+                                .custom_accelerogram = Some(acc);
+                            self.apply_lens_to_views(
+                                SpatialLens::TimeHistoryReplay,
+                                build_view,
+                                universal_canvas,
+                            );
+                            actions.run_async_ground_motion_replay = true;
+                        }
+                    }
+                    if let Some(ref custom) =
+                        universal_canvas.ground_motion_replay_config.custom_accelerogram
+                    {
+                        let custom_name = custom.name.clone();
+                        icons::pill_badge(
+                            ui,
+                            AppIcon::Document,
+                            format!("{custom_name} ({:.2}g)", custom.pga_x_g),
+                            theme.accent_green,
+                        );
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            "×",
+                            false,
+                            theme.accent_red,
+                            "Clear custom accelerogram and revert to built-in benchmark suite",
+                        )
+                        .clicked()
+                        {
+                            universal_canvas
+                                .ground_motion_replay_config
+                                .custom_accelerogram = None;
                             actions.run_async_ground_motion_replay = true;
                         }
                     }
@@ -5330,6 +5425,67 @@ impl SpatialWorkspaceState {
                         );
                         actions.run_async_ground_motion_replay = true;
                     }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        format!(
+                            "Tri-Dir: {}",
+                            universal_canvas
+                                .ground_motion_replay_config
+                                .tridirectional_mode
+                                .short_label()
+                        ),
+                        universal_canvas
+                            .ground_motion_replay_config
+                            .tridirectional_mode
+                            != crate::core::ground_motion_replay::TriDirectionalMode::UniaxialX,
+                        theme.accent_blue,
+                        "Cycle seismic excitation coupling (1D X / 2D XY / 3D XYZ with vertical axial hinge modulation)",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas
+                            .ground_motion_replay_config
+                            .tridirectional_mode = universal_canvas
+                            .ground_motion_replay_config
+                            .tridirectional_mode
+                            .next();
+                        actions.run_async_ground_motion_replay = true;
+                    }
+                    let match_on = universal_canvas.ground_motion_replay_config.auto_match_sa_t1;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "Match Sa(T1)",
+                        match_on,
+                        theme.accent_orange,
+                        "Auto-scale record spectral acceleration Sa(T1) to match site SNI 1726 / ASCE 7-22 design spectrum",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.ground_motion_replay_config.auto_match_sa_t1 = !match_on;
+                        actions.run_async_ground_motion_replay = true;
+                    }
+                    let frag_on = universal_canvas
+                        .ground_motion_replay_config
+                        .show_fragility_loss_overlay;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "Fragility 3D",
+                        frag_on,
+                        theme.accent_red,
+                        "Toggle 3D translucent per-story FEMA P-58 repair-loss halo overlay",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas
+                            .ground_motion_replay_config
+                            .show_fragility_loss_overlay = !frag_on;
+                    }
                     let ssi_on = universal_canvas
                         .ground_motion_replay_config
                         .use_ssi_period_coupling;
@@ -5379,6 +5535,19 @@ impl SpatialWorkspaceState {
                     .clicked()
                     {
                         actions.export_ground_motion_replay_ifcx = true;
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Shield),
+                        "Fragility .ifcx",
+                        false,
+                        theme.accent_blue,
+                        "Export non-destructive eigengraph::analysis::fema_p58_fragility .ifcx overlay",
+                    )
+                    .clicked()
+                    {
+                        actions.export_fragility_loss_ifcx = true;
                     }
                 });
 
@@ -5472,101 +5641,123 @@ impl SpatialWorkspaceState {
                         .max_height(max_scroll_h)
                         .show(ui, |ui| {
                             ui.set_width((dw - 4.0).max(150.0));
-                            self.paint_ground_motion_vector_charts(
-                                ui,
-                                theme,
-                                rep,
-                                universal_canvas.replay_cursor_time_s,
-                                (dw - 6.0).max(150.0),
-                            );
-                            ui.add_space(5.0);
-                            ui.horizontal_wrapped(|ui| {
-                                icons::pill_badge(
+                            if self.ground_motion_drawer_tab == 1 {
+                                self.paint_spectrum_and_fragility_vector_charts(
                                     ui,
-                                    AppIcon::Shield,
-                                    format!(
-                                        "Async CRC: {}/{} pruned ({:.0}%, 100% recall, -{:.1}g CO2)",
-                                        rep.async_crc.stage1_pruned,
-                                        rep.async_crc.total_scenarios,
-                                        rep.async_crc.scenario_reduction_pct,
-                                        rep.async_crc.green_ai_co2_saved_g
-                                    ),
-                                    theme.accent_green,
+                                    theme,
+                                    rep,
+                                    (dw - 6.0).max(150.0),
                                 );
-                                icons::pill_badge(
+                            } else {
+                                self.paint_ground_motion_vector_charts(
                                     ui,
-                                    AppIcon::Building,
-                                    format!(
-                                        "T1={:.2}s{} • Max Drift {:.2}% ({})",
-                                        rep.fundamental_period_t1_s,
-                                        if rep.ssi_coupled { " SSI" } else { "" },
-                                        rep.peak_interstory_drift_ratio * 100.0,
-                                        if rep.is_drift_compliant { "PASS" } else { ">2%" }
-                                    ),
-                                    if rep.is_drift_compliant {
-                                        theme.accent_blue
-                                    } else {
-                                        theme.accent_red
-                                    },
+                                    theme,
+                                    rep,
+                                    universal_canvas.replay_cursor_time_s,
+                                    (dw - 6.0).max(150.0),
                                 );
-                                ui.label(
-                                    RichText::new(format!("Backend: {}", rep.async_crc.execution_backend))
-                                        .size(9.0)
-                                        .monospace()
-                                        .color(theme.text_muted),
-                                );
-                            });
-                            if !rep.peak_hinges.is_empty() {
-                                ui.add_space(3.0);
+                                ui.add_space(5.0);
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.label(
-                                        RichText::new("Critical Hinges:")
-                                            .size(9.2)
-                                            .strong()
-                                            .color(theme.text_secondary),
+                                    icons::pill_badge(
+                                        ui,
+                                        AppIcon::Shield,
+                                        format!(
+                                            "Async CRC: {}/{} pruned ({:.0}%, 100% recall, -{:.1}g CO2)",
+                                            rep.async_crc.stage1_pruned,
+                                            rep.async_crc.total_scenarios,
+                                            rep.async_crc.scenario_reduction_pct,
+                                            rep.async_crc.green_ai_co2_saved_g
+                                        ),
+                                        theme.accent_green,
                                     );
-                                    for h in rep.peak_hinges.iter().take(6) {
-                                        let col = match h.state {
-                                            PlasticHingeState::Elastic => theme.accent_green,
-                                            PlasticHingeState::ImmediateOccupancy => {
-                                                Color32::from_rgb(10, 132, 255)
-                                            }
-                                            PlasticHingeState::LifeSafety => {
-                                                Color32::from_rgb(255, 159, 10)
-                                            }
-                                            PlasticHingeState::CollapsePrevention => {
-                                                Color32::from_rgb(255, 69, 58)
-                                            }
-                                            PlasticHingeState::Mechanism => {
-                                                Color32::from_rgb(191, 90, 242)
-                                            }
-                                        };
-                                        let tag = match h.state {
-                                            PlasticHingeState::Elastic => "EL",
-                                            PlasticHingeState::ImmediateOccupancy => "IO",
-                                            PlasticHingeState::LifeSafety => "LS",
-                                            PlasticHingeState::CollapsePrevention => "CP",
-                                            PlasticHingeState::Mechanism => "MECH",
-                                        };
-                                        icons::pill_badge(
-                                            ui,
-                                            AppIcon::Target,
-                                            format!(
-                                                "{}.{} {} ({:.2})",
-                                                h.element_name,
-                                                if h.joint_end == 0 { "I" } else { "J" },
-                                                tag,
-                                                h.dcr_dynamic
-                                            ),
-                                            col,
-                                        );
-                                    }
+                                    icons::pill_badge(
+                                        ui,
+                                        AppIcon::Building,
+                                        format!(
+                                            "T1={:.2}s{} • {} • Drift {:.2}% ({})",
+                                            rep.fundamental_period_t1_s,
+                                            if rep.ssi_coupled { " SSI" } else { "" },
+                                            rep.tridirectional_mode.short_label(),
+                                            rep.peak_interstory_drift_ratio * 100.0,
+                                            if rep.is_drift_compliant { "PASS" } else { ">2%" }
+                                        ),
+                                        if rep.is_drift_compliant {
+                                            theme.accent_blue
+                                        } else {
+                                            theme.accent_red
+                                        },
+                                    );
+                                    icons::pill_badge(
+                                        ui,
+                                        AppIcon::Coins,
+                                        format!(
+                                            "P-58 ${:.0}k ({:.1}% | {}d | {})",
+                                            rep.fragility_loss.total_repair_cost_usd * 0.001,
+                                            rep.fragility_loss.repair_loss_ratio * 100.0,
+                                            rep.fragility_loss.downtime_days.round() as i64,
+                                            rep.fragility_loss.achieved_redi_tier.label()
+                                        ),
+                                        theme.accent_orange,
+                                    );
+                                    ui.label(
+                                        RichText::new(format!("Backend: {}", rep.async_crc.execution_backend))
+                                            .size(9.0)
+                                            .monospace()
+                                            .color(theme.text_muted),
+                                    );
                                 });
+                                if !rep.peak_hinges.is_empty() {
+                                    ui.add_space(3.0);
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(
+                                            RichText::new("Critical Hinges:")
+                                                .size(9.2)
+                                                .strong()
+                                                .color(theme.text_secondary),
+                                        );
+                                        for h in rep.peak_hinges.iter().take(6) {
+                                            let col = match h.state {
+                                                PlasticHingeState::Elastic => theme.accent_green,
+                                                PlasticHingeState::ImmediateOccupancy => {
+                                                    Color32::from_rgb(10, 132, 255)
+                                                }
+                                                PlasticHingeState::LifeSafety => {
+                                                    Color32::from_rgb(255, 159, 10)
+                                                }
+                                                PlasticHingeState::CollapsePrevention => {
+                                                    Color32::from_rgb(255, 69, 58)
+                                                }
+                                                PlasticHingeState::Mechanism => {
+                                                    Color32::from_rgb(191, 90, 242)
+                                                }
+                                            };
+                                            let tag = match h.state {
+                                                PlasticHingeState::Elastic => "EL",
+                                                PlasticHingeState::ImmediateOccupancy => "IO",
+                                                PlasticHingeState::LifeSafety => "LS",
+                                                PlasticHingeState::CollapsePrevention => "CP",
+                                                PlasticHingeState::Mechanism => "MECH",
+                                            };
+                                            icons::pill_badge(
+                                                ui,
+                                                AppIcon::Target,
+                                                format!(
+                                                    "{}.{} {} ({:.2})",
+                                                    h.element_name,
+                                                    if h.joint_end == 0 { "I" } else { "J" },
+                                                    tag,
+                                                    h.dcr_dynamic
+                                                ),
+                                                col,
+                                            );
+                                        }
+                                    });
+                                }
                             }
                         });
                 } else {
                     ui.label(
-                        RichText::new("Click 'Async EQ' or run /replay to stream background StructGNN-CRC & 60 FPS earthquake ground-motion replay.")
+                        RichText::new("Click 'Run Async', 'Sample .at2', or run /replay to stream Pure WebGPU & StructGNN-CRC nonlinear time-history.")
                             .size(9.5)
                             .color(theme.text_muted),
                     );
@@ -5758,5 +5949,274 @@ impl SpatialWorkspaceState {
                 draw_hysteresis(ui, cw);
             });
         }
+    }
+
+    fn paint_spectrum_and_fragility_vector_charts(
+        &self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        rep: &crate::core::ground_motion_replay::GroundMotionReplayReport,
+        avail_w: f32,
+    ) {
+        let two_col = avail_w >= 540.0;
+        let cw = if two_col {
+            ((avail_w - 8.0) * 0.5).max(180.0)
+        } else {
+            avail_w.max(150.0)
+        };
+        let ch = if two_col { 86.0_f32 } else { 76.0_f32 };
+
+        let draw_spectrum = |ui: &mut Ui| {
+            let (resp, p) = ui.allocate_painter(Vec2::new(cw, ch), egui::Sense::hover());
+            let r = resp.rect;
+            p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+            p.text(
+                egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                Align2::LEFT_TOP,
+                format!(
+                    "5% Spectrum Sa(T1={:.2}s) Rec {:.2}g vs Des {:.2}g ({:.2}x)",
+                    rep.fundamental_period_t1_s,
+                    rep.sa_record_t1_g,
+                    rep.sa_design_t1_g,
+                    rep.sa_match_ratio
+                ),
+                egui::FontId::proportional(8.6),
+                theme.text_muted,
+            );
+            let t_max = rep
+                .response_spectrum
+                .iter()
+                .map(|pt| pt.period_s)
+                .fold(4.0_f64, f64::max)
+                .max(1.0);
+            let max_sa = rep
+                .response_spectrum
+                .iter()
+                .map(|pt| pt.sa_record_g.max(pt.sa_design_g))
+                .fold(0.5_f64, f64::max)
+                .max(0.2);
+            let pad_t = 17.0_f32;
+            let pad_b = 7.0_f32;
+            let h = (r.height() - pad_t - pad_b).max(12.0);
+            let w = (r.width() - 12.0).max(20.0);
+            let to_xy = |t: f64, sa: f64| -> egui::Pos2 {
+                egui::Pos2::new(
+                    r.left() + 6.0 + (t / t_max).clamp(0.0, 1.0) as f32 * w,
+                    r.bottom() - pad_b - (sa / max_sa).clamp(0.0, 1.0) as f32 * h,
+                )
+            };
+            let des_pts: Vec<egui::Pos2> = rep
+                .response_spectrum
+                .iter()
+                .map(|pt| to_xy(pt.period_s, pt.sa_design_g))
+                .collect();
+            for win in des_pts.windows(2) {
+                p.line_segment([win[0], win[1]], Stroke::new(1.2, theme.accent_orange));
+            }
+            let rec_pts: Vec<egui::Pos2> = rep
+                .response_spectrum
+                .iter()
+                .map(|pt| to_xy(pt.period_s, pt.sa_record_g))
+                .collect();
+            for win in rec_pts.windows(2) {
+                p.line_segment([win[0], win[1]], Stroke::new(1.5, theme.accent_blue));
+            }
+            let t1_x = r.left() + 6.0 + (rep.fundamental_period_t1_s / t_max).clamp(0.0, 1.0) as f32 * w;
+            p.line_segment(
+                [egui::Pos2::new(t1_x, r.top() + pad_t), egui::Pos2::new(t1_x, r.bottom() - pad_b)],
+                Stroke::new(1.1, theme.accent_green),
+            );
+        };
+
+        let draw_fragility = |ui: &mut Ui| {
+            let (resp, p) = ui.allocate_painter(Vec2::new(cw, ch), egui::Sense::hover());
+            let r = resp.rect;
+            p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+            p.text(
+                egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                Align2::LEFT_TOP,
+                format!(
+                    "FEMA P-58 Fragility P(DS|Sa) @ Sa(T1)={:.2}g (Pcol {:.1}%)",
+                    rep.fragility_loss.sa_t1_g,
+                    rep.fragility_loss.collapse_probability * 100.0
+                ),
+                egui::FontId::proportional(8.6),
+                theme.text_muted,
+            );
+            let sa_max = rep
+                .fragility_loss
+                .fragility_curves
+                .iter()
+                .map(|c| c.sa_g)
+                .fold(2.0_f64, f64::max)
+                .max(0.5);
+            let pad_t = 17.0_f32;
+            let pad_b = 7.0_f32;
+            let h = (r.height() - pad_t - pad_b).max(12.0);
+            let w = (r.width() - 12.0).max(20.0);
+            let to_pt = |sa: f64, prob: f64| -> egui::Pos2 {
+                egui::Pos2::new(
+                    r.left() + 6.0 + (sa / sa_max).clamp(0.0, 1.0) as f32 * w,
+                    r.bottom() - pad_b - prob.clamp(0.0, 1.0) as f32 * h,
+                )
+            };
+            let curves = [
+                (
+                    theme.accent_blue,
+                    rep.fragility_loss
+                        .fragility_curves
+                        .iter()
+                        .map(|c| to_pt(c.sa_g, c.p_io))
+                        .collect::<Vec<_>>(),
+                ),
+                (
+                    theme.accent_orange,
+                    rep.fragility_loss
+                        .fragility_curves
+                        .iter()
+                        .map(|c| to_pt(c.sa_g, c.p_ls))
+                        .collect::<Vec<_>>(),
+                ),
+                (
+                    theme.accent_red,
+                    rep.fragility_loss
+                        .fragility_curves
+                        .iter()
+                        .map(|c| to_pt(c.sa_g, c.p_cp))
+                        .collect::<Vec<_>>(),
+                ),
+                (
+                    Color32::from_rgb(191, 90, 242),
+                    rep.fragility_loss
+                        .fragility_curves
+                        .iter()
+                        .map(|c| to_pt(c.sa_g, c.p_collapse))
+                        .collect::<Vec<_>>(),
+                ),
+            ];
+            for (col, pts) in curves {
+                for win in pts.windows(2) {
+                    p.line_segment([win[0], win[1]], Stroke::new(1.3, col));
+                }
+            }
+            let sa_x =
+                r.left() + 6.0 + (rep.fragility_loss.sa_t1_g / sa_max).clamp(0.0, 1.0) as f32 * w;
+            p.line_segment(
+                [egui::Pos2::new(sa_x, r.top() + pad_t), egui::Pos2::new(sa_x, r.bottom() - pad_b)],
+                Stroke::new(1.2, theme.accent_green),
+            );
+        };
+
+        let draw_story_loss_bars = |ui: &mut Ui, bw: f32| {
+            let n_rows = rep.fragility_loss.story_losses.len().clamp(1, 6);
+            let bh = 20.0 + (n_rows as f32) * 11.5;
+            let (resp, p) = ui.allocate_painter(Vec2::new(bw, bh), egui::Sense::hover());
+            let r = resp.rect;
+            p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+            p.text(
+                egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                Align2::LEFT_TOP,
+                format!(
+                    "Story Repair Loss Breakdown (Total ${:.0}k • {:.1}% RV)",
+                    rep.fragility_loss.total_repair_cost_usd * 0.001,
+                    rep.fragility_loss.repair_loss_ratio * 100.0
+                ),
+                egui::FontId::proportional(8.6),
+                theme.text_muted,
+            );
+            let max_lr = rep
+                .fragility_loss
+                .story_losses
+                .iter()
+                .map(|s| s.loss_ratio)
+                .fold(0.05_f64, f64::max)
+                .max(0.02);
+            let bar_x0 = r.left() + 38.0;
+            let bar_max_w = (r.width() - 122.0).max(24.0);
+            for (i, st) in rep.fragility_loss.story_losses.iter().take(6).enumerate() {
+                let y = r.top() + 18.0 + (i as f32) * 11.2;
+                let frac = (st.loss_ratio / max_lr).clamp(0.03, 1.0) as f32;
+                let col = if st.loss_ratio >= 0.15 {
+                    theme.accent_red
+                } else if st.loss_ratio >= 0.05 {
+                    theme.accent_orange
+                } else {
+                    theme.accent_green
+                };
+                p.text(
+                    egui::Pos2::new(r.left() + 6.0, y + 4.5),
+                    Align2::LEFT_CENTER,
+                    format!("L{:02}", st.story_number),
+                    egui::FontId::monospace(8.4),
+                    theme.text_secondary,
+                );
+                p.rect_filled(
+                    Rect::from_min_size(egui::Pos2::new(bar_x0, y), Vec2::new(bar_max_w * frac, 7.5)),
+                    CornerRadius::same(2),
+                    col,
+                );
+                p.text(
+                    egui::Pos2::new(bar_x0 + bar_max_w + 5.0, y + 4.0),
+                    Align2::LEFT_CENTER,
+                    format!("${:.0}k ({:.1}%)", st.repair_cost_usd * 0.001, st.loss_ratio * 100.0),
+                    egui::FontId::monospace(8.2),
+                    theme.text_muted,
+                );
+            }
+        };
+
+        if two_col {
+            ui.horizontal(|ui| {
+                draw_spectrum(ui);
+                draw_fragility(ui);
+            });
+            ui.add_space(4.0);
+            draw_story_loss_bars(ui, avail_w.max(180.0));
+        } else {
+            ui.vertical(|ui| {
+                draw_spectrum(ui);
+                ui.add_space(3.0);
+                draw_fragility(ui);
+                ui.add_space(3.0);
+                draw_story_loss_bars(ui, cw);
+            });
+        }
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            icons::pill_badge(
+                ui,
+                AppIcon::Coins,
+                format!(
+                    "Repair ${:.0}k • Econ ${:.0}k",
+                    rep.fragility_loss.total_repair_cost_usd * 0.001,
+                    rep.fragility_loss.total_economic_loss_usd * 0.001
+                ),
+                theme.accent_orange,
+            );
+            icons::pill_badge(
+                ui,
+                AppIcon::Shield,
+                format!(
+                    "REDi {} • {:.0}d Downtime • {:.1}% Pcol",
+                    rep.fragility_loss.achieved_redi_tier.label(),
+                    rep.fragility_loss.downtime_days,
+                    rep.fragility_loss.collapse_probability * 100.0
+                ),
+                if rep.fragility_loss.collapse_probability < 0.05 {
+                    theme.accent_green
+                } else {
+                    theme.accent_red
+                },
+            );
+            icons::pill_badge(
+                ui,
+                AppIcon::Leaf,
+                format!(
+                    "Repair Carbon {:.1}t CO2e",
+                    rep.fragility_loss.repair_embodied_carbon_kg * 0.001
+                ),
+                theme.accent_blue,
+            );
+        });
     }
 }

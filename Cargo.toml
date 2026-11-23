@@ -1,10 +1,10 @@
 [package]
 name = "eigengraph"
-version = "0.7.4"
+version = "0.7.5"
 edition = "2021"
 default-run = "eigengraph"
 authors = ["Harids Irawan <harids.irawan@gmail.com>"]
-description = "EigenGraph — 100% Pure-Rust Vector Earth, OpenBIM IFCX (IFC 5) & Structural Graph Analytics (WebAssembly Web App)"
+description = "EigenGraph — 100% Pure-Rust Vector Earth, WebGPU (WGSL), OpenBIM IFCX (IFC 5) & Structural Graph Analytics"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/EigenGraph/EigenGraph"
@@ -12,11 +12,24 @@ repository = "https://github.com/EigenGraph/EigenGraph"
 [dependencies]
 eframe = { version = "0.36", default-features = false, features = [
     "default_fonts",
-    "glow",
+    "wgpu_no_default_features",
     "wayland",
     "x11",
 ] }
 egui = "0.36"
+egui-wgpu = { version = "0.36", default-features = false, features = [
+    "fragile-send-sync-non-atomic-wasm",
+    "macos-window-resize-jitter-fix",
+] }
+wgpu = { version = "30.0", default-features = false, features = [
+    "std",
+    "parking_lot",
+    "wgsl",
+    "webgpu",
+    "metal",
+    "vulkan",
+    "dx12",
+] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

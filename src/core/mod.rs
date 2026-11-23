@@ -159,12 +159,16 @@ pub use isolation::{
     SeismicIsolationInput, SeismicIsolationReport,
 };
 pub use time_history::{
-    GroundMotionRecord, HysteresisModel, StoryResponseProfile, TimeHistoryEngine,
-    TimeHistoryInput, TimeHistoryReport, TimeHistorySample, TimeIntegrationScheme,
+    compute_elastic_response_spectrum_5pct, looks_like_accelerogram_payload, parse_accelerogram_csv,
+    parse_custom_accelerogram, parse_peer_at2_accelerogram, sample_peer_at2_text,
+    AccelerogramFormat, CustomAccelerogram, GroundMotionRecord, HysteresisModel,
+    ResponseSpectrumPoint, StoryResponseProfile, TimeHistoryEngine, TimeHistoryInput,
+    TimeHistoryReport, TimeHistorySample, TimeIntegrationScheme,
 };
 pub use fema_p58::{
     ComponentFragility, DamageStateDef, EdpKind, FemaComponentCategory, FemaComplianceItem,
-    FemaP58Engine, FemaP58Input, FemaP58Report, REDiResilienceTier, StoryLossSummary,
+    FemaP58Engine, FemaP58Input, FemaP58Report, REDiResilienceTier, ReplayFemaP58Synthesis,
+    ReplayFragilityCurvePoint, StoryFragilityLoss, StoryLossSummary,
 };
 pub use blast::{
     BlastAnalysisInput, BlastAnalysisReport, BlastComponentKind, BlastComplianceItem, BlastEngine,
@@ -217,7 +221,8 @@ pub use portfolio_retrofit::{
 pub use ground_motion_replay::{
     run_ground_motion_replay_for_bim, AsyncCrcReplayTelemetry, AsyncReplayJobManager,
     AsyncReplayJobPhase, GroundMotionReplayConfig, GroundMotionReplayFrame,
-    GroundMotionReplayReport, PlasticHingeJointSnapshot, NS_EG_TIME_HISTORY_REPLAY,
+    GroundMotionReplayReport, PlasticHingeJointSnapshot, TriDirectionalMode,
+    NS_EG_FRAGILITY_LOSS, NS_EG_TIME_HISTORY_REPLAY,
 };
 
 

@@ -96,7 +96,7 @@ impl DistrictHazardConfig {
         self.seismic_wave_active || self.venturi_wind_active || self.flood_plane_active
     }
 
-    /// Deterministic hash used to avoid regenerating WebGL2 buffers unless hazard parameters or
+    /// Deterministic hash used to avoid regenerating WebGPU vertex buffers unless hazard parameters or
     /// quantized animation frames advance.
     pub fn content_revision_hash(&self) -> u64 {
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;

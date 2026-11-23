@@ -209,6 +209,440 @@ pub struct TimeHistoryReport {
     pub is_design_acceptable: bool,
 }
 
+/// Input source format for user-uploaded earthquake accelerograms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AccelerogramFormat {
+    PeerAt2,
+    CsvUniaxial,
+    CsvTriDirectional,
+}
+
+impl Default for AccelerogramFormat {
+    fn default() -> Self {
+        Self::PeerAt2
+    }
+}
+
+/// Custom PEER `.AT2` or `.CSV` earthquake ground-motion accelerogram (units of `g`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CustomAccelerogram {
+    pub name: String,
+    pub station: String,
+    pub dt_s: f64,
+    pub accel_x_g: Vec<f64>,
+    #[serde(default)]
+    pub accel_y_g: Vec<f64>,
+    #[serde(default)]
+    pub accel_z_g: Vec<f64>,
+    pub pga_x_g: f64,
+    #[serde(default)]
+    pub pga_y_g: f64,
+    #[serde(default)]
+    pub pga_z_g: f64,
+    pub duration_s: f64,
+    pub format: AccelerogramFormat,
+}
+
+/// Paired 5%-damped elastic response spectrum point vs. site SNI 1726 / ASCE 7-22 design spectrum.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResponseSpectrumPoint {
+    pub period_s: f64,
+    pub sa_record_g: f64,
+    pub sa_design_g: f64,
+}
+
+fn downsample_accelerogram_series(vals: &[f64], factor: usize) -> Vec<f64> {
+    if factor <= 1 {
+        return vals.to_vec();
+    }
+    vals.iter().step_by(factor).copied().collect()
+}
+
+/// Parses an official PEER NGA-West2 `.AT2` ground-motion record (4 header lines + multi-column floats in `g`).
+pub fn parse_peer_at2_accelerogram(raw: &str, filename: &str) -> Result<CustomAccelerogram, String> {
+    let lines: Vec<&str> = raw.lines().collect();
+    if lines.len() < 5 {
+        return Err("Invalid PEER .AT2 file: fewer than 5 lines.".to_string());
+    }
+    let header_line = lines[1].trim();
+    let station = if header_line.is_empty() {
+        "PEER NGA Station".to_string()
+    } else {
+        header_line.to_string()
+    };
+
+    let mut dt_opt: Option<f64> = None;
+    let mut header_end_idx = 4usize;
+    for (idx, line) in lines.iter().enumerate().take(8) {
+        let upper = line.to_ascii_uppercase();
+        if let Some(dt_pos) = upper.find("DT=") {
+            let after = line[dt_pos + 3..].trim_start();
+            let num_str: String = after
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || matches!(c, '.' | '+' | '-' | 'e' | 'E'))
+                .collect();
+            if let Ok(parsed_dt) = num_str.parse::<f64>() {
+                if parsed_dt > 0.0 && parsed_dt <= 1.0 {
+                    dt_opt = Some(parsed_dt);
+                    header_end_idx = idx + 1;
+                }
+            }
+        }
+    }
+    let mut dt_s = dt_opt.ok_or_else(|| {
+        "PEER .AT2 header missing valid DT= time increment (e.g. NPTS=..., DT=0.0050 SEC).".to_string()
+    })?;
+
+    let mut accel_x = Vec::with_capacity(lines.len().saturating_sub(header_end_idx) * 5);
+    for line in &lines[header_end_idx..] {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        for tok in trimmed.split_whitespace() {
+            if let Ok(v) = tok.parse::<f64>() {
+                if v.is_finite() {
+                    accel_x.push(v);
+                }
+            }
+        }
+    }
+    if accel_x.len() < 16 {
+        return Err("PEER .AT2 file contains too few acceleration samples (< 16).".to_string());
+    }
+
+    if accel_x.len() > 16_000 {
+        let factor = (accel_x.len() as f64 / 16_000.0).ceil() as usize;
+        accel_x = downsample_accelerogram_series(&accel_x, factor.max(2));
+        dt_s *= factor.max(2) as f64;
+    }
+
+    let pga_x = accel_x.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+    if pga_x <= 1e-6 {
+        return Err("PEER .AT2 record has near-zero acceleration amplitude.".to_string());
+    }
+    let duration_s = ((accel_x.len().saturating_sub(1)) as f64) * dt_s;
+    let clean_name = filename
+        .split(['/', '\\'])
+        .next_back()
+        .unwrap_or(filename)
+        .to_string();
+
+    Ok(CustomAccelerogram {
+        name: clean_name,
+        station,
+        dt_s,
+        accel_x_g: accel_x,
+        accel_y_g: Vec::new(),
+        accel_z_g: Vec::new(),
+        pga_x_g: pga_x,
+        pga_y_g: 0.0,
+        pga_z_g: 0.0,
+        duration_s,
+        format: AccelerogramFormat::PeerAt2,
+    })
+}
+
+/// Parses 2-column `(time_s, ax_g)` or 4-column tri-directional `(time_s, ax_g, ay_g, az_g)` CSV/TXT accelerograms.
+pub fn parse_accelerogram_csv(raw: &str, filename: &str) -> Result<CustomAccelerogram, String> {
+    let mut times = Vec::new();
+    let mut ax = Vec::new();
+    let mut ay = Vec::new();
+    let mut az = Vec::new();
+    let mut saw_tri = false;
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") {
+            continue;
+        }
+        let cols: Vec<f64> = trimmed
+            .split([',', ';', '\t', ' '])
+            .filter(|t| !t.is_empty())
+            .filter_map(|t| t.trim().parse::<f64>().ok())
+            .filter(|v| v.is_finite())
+            .collect();
+        if cols.len() >= 4 {
+            saw_tri = true;
+            times.push(cols[0]);
+            ax.push(cols[1]);
+            ay.push(cols[2]);
+            az.push(cols[3]);
+        } else if cols.len() == 2 {
+            times.push(cols[0]);
+            ax.push(cols[1]);
+        } else if cols.len() == 3 {
+            // 3 columns: allow (t, ax, ay) tri-axial horizontal CSV
+            times.push(cols[0]);
+            ax.push(cols[1]);
+            ay.push(cols[2]);
+        }
+    }
+
+    if times.len() < 16 {
+        return Err("Accelerogram CSV requires at least 16 numeric time-series rows.".to_string());
+    }
+
+    let mut dts: Vec<f64> = times
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .filter(|&d| d > 1e-5 && d <= 0.5)
+        .collect();
+    if dts.is_empty() {
+        return Err("Accelerogram CSV timestamps must be strictly increasing in seconds.".to_string());
+    }
+    dts.sort_by(|a, b| a.total_cmp(b));
+    let mut dt_s = dts[dts.len() / 2];
+
+    if ax.len() > 16_000 {
+        let factor = ((ax.len() as f64 / 16_000.0).ceil() as usize).max(2);
+        ax = downsample_accelerogram_series(&ax, factor);
+        if !ay.is_empty() {
+            ay = downsample_accelerogram_series(&ay, factor);
+        }
+        if !az.is_empty() {
+            az = downsample_accelerogram_series(&az, factor);
+        }
+        dt_s *= factor as f64;
+    }
+
+    let pga_x = ax.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+    let pga_y = ay.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+    let pga_z = az.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+    let duration_s = ((ax.len().saturating_sub(1)) as f64) * dt_s;
+    let clean_name = filename
+        .split(['/', '\\'])
+        .next_back()
+        .unwrap_or(filename)
+        .to_string();
+
+    Ok(CustomAccelerogram {
+        name: clean_name.clone(),
+        station: format!("Uploaded CSV ({})", clean_name),
+        dt_s,
+        accel_x_g: ax,
+        accel_y_g: ay,
+        accel_z_g: az,
+        pga_x_g: pga_x,
+        pga_y_g: pga_y,
+        pga_z_g: pga_z,
+        duration_s,
+        format: if saw_tri {
+            AccelerogramFormat::CsvTriDirectional
+        } else {
+            AccelerogramFormat::CsvUniaxial
+        },
+    })
+}
+
+/// Safely detects whether an uploaded/dropped text file is an earthquake accelerogram (`.at2` or CSV time history)
+/// without misclassifying 3-column XYZ terrain survey files.
+pub fn looks_like_accelerogram_payload(filename: &str, raw: &str) -> bool {
+    let lower_name = filename.to_ascii_lowercase();
+    if lower_name.ends_with(".at2") {
+        return true;
+    }
+    let head: String = raw.lines().take(6).collect::<Vec<_>>().join("\n");
+    let head_upper = head.to_ascii_uppercase();
+    if head_upper.contains("PEER NGA")
+        || (head_upper.contains("NPTS=") && head_upper.contains("DT="))
+        || head_upper.contains("ACCELERATION TIME SERIES")
+    {
+        return true;
+    }
+    if !(lower_name.ends_with(".csv") || lower_name.ends_with(".txt")) {
+        return false;
+    }
+    if head_upper.contains("ACCEL")
+        || head_upper.contains("PGA")
+        || head_upper.contains("AG(")
+        || head_upper.contains("AX_G")
+    {
+        return true;
+    }
+    // Check first 10 numeric rows for 2 or 4 columns with monotonic time <= 300s and |accel| <= 15g
+    let mut prev_t: Option<f64> = None;
+    let mut valid_rows = 0usize;
+    for line in raw.lines().take(24) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let cols: Vec<f64> = trimmed
+            .split([',', ';', '\t', ' '])
+            .filter(|t| !t.is_empty())
+            .filter_map(|t| t.trim().parse::<f64>().ok())
+            .filter(|v| v.is_finite())
+            .collect();
+        if !(cols.len() == 2 || cols.len() == 4) {
+            if !cols.is_empty() {
+                return false;
+            }
+            continue;
+        }
+        let t = cols[0];
+        let a_ok = cols[1..].iter().all(|v| v.abs() <= 15.0);
+        if !(0.0..=300.0).contains(&t) || !a_ok {
+            return false;
+        }
+        if let Some(pt) = prev_t {
+            if t <= pt || (t - pt) > 0.25 {
+                return false;
+            }
+        }
+        prev_t = Some(t);
+        valid_rows += 1;
+        if valid_rows >= 8 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Dispatches custom accelerogram parsing automatically between PEER `.AT2` and `.CSV`/`.TXT` formats.
+pub fn parse_custom_accelerogram(raw: &str, filename: &str) -> Result<CustomAccelerogram, String> {
+    let head_upper: String = raw
+        .lines()
+        .take(8)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_uppercase();
+    if filename.to_ascii_lowercase().ends_with(".at2")
+        || head_upper.contains("PEER NGA")
+        || (head_upper.contains("NPTS=") && head_upper.contains("DT="))
+    {
+        parse_peer_at2_accelerogram(raw, filename)
+    } else {
+        parse_accelerogram_csv(raw, filename)
+    }
+}
+
+/// Returns a built-in PEER NGA-West2 format sample accelerogram (1994 Northridge - Rinaldi Receiving Station).
+pub fn sample_peer_at2_text() -> &'static str {
+    concat!(
+        "PEER NGA STRONG MOTION DATABASE RECORD\n",
+        "NORTHRIDGE 01/17/94 1231, RINALDI RECEIVING STA, 228\n",
+        "ACCELERATION TIME SERIES IN UNITS OF G\n",
+        "NPTS= 160, DT= 0.0500 SEC\n",
+        "   0.000000e+00   4.210000e-03  -1.150000e-02   2.840000e-02  -4.960000e-02\n",
+        "   7.120000e-02  -9.850000e-02   1.340000e-01  -1.820000e-01   2.450000e-01\n",
+        "  -3.180000e-01   4.120000e-01  -5.240000e-01   6.480000e-01  -7.550000e-01\n",
+        "   8.240000e-01  -7.920000e-01   6.850000e-01  -5.410000e-01   4.180000e-01\n",
+        "  -3.060000e-01   2.150000e-01  -1.480000e-01   9.720000e-02  -1.640000e-01\n",
+        "   2.890000e-01  -4.150000e-01   5.620000e-01  -6.380000e-01   5.940000e-01\n",
+        "  -4.880000e-01   3.710000e-01  -2.640000e-01   1.920000e-01  -1.350000e-01\n",
+        "   1.040000e-01  -1.420000e-01   2.180000e-01  -3.040000e-01   3.880000e-01\n",
+        "  -4.460000e-01   4.190000e-01  -3.520000e-01   2.780000e-01  -2.140000e-01\n",
+        "   1.650000e-01  -1.220000e-01   9.400000e-02  -8.100000e-02   1.120000e-01\n",
+        "  -1.680000e-01   2.250000e-01  -2.640000e-01   2.480000e-01  -2.090000e-01\n",
+        "   1.640000e-01  -1.280000e-01   9.600000e-02  -7.200000e-02   5.400000e-02\n",
+        "  -4.100000e-02   3.800000e-02  -6.200000e-02   9.800000e-02  -1.340000e-01\n",
+        "   1.580000e-01  -1.460000e-01   1.190000e-01  -9.200000e-02   7.100000e-02\n",
+        "  -5.400000e-02   4.100000e-02  -3.200000e-02   2.500000e-02  -1.900000e-02\n",
+        "   1.500000e-02  -2.400000e-02   4.200000e-02  -6.800000e-02   8.900000e-02\n",
+        "  -9.600000e-02   8.400000e-02  -6.700000e-02   5.100000e-02  -3.900000e-02\n",
+        "   3.000000e-02  -2.300000e-02   1.800000e-02  -1.400000e-02   1.100000e-02\n",
+        "  -9.000000e-03   8.000000e-03  -1.400000e-02   2.600000e-02  -3.900000e-02\n",
+        "   4.800000e-02  -4.400000e-02   3.500000e-02  -2.600000e-02   2.000000e-02\n",
+        "  -1.500000e-02   1.100000e-02  -9.000000e-03   7.000000e-03  -5.500000e-03\n",
+        "   4.200000e-03  -3.400000e-03   2.800000e-03  -2.300000e-03   1.900000e-03\n",
+        "  -1.600000e-03   1.400000e-03  -1.200000e-03   1.100000e-03  -9.500000e-04\n",
+        "   8.200000e-04  -7.100000e-04   6.300000e-04  -5.500000e-04   4.800000e-04\n",
+        "  -4.200000e-04   3.700000e-04  -3.200000e-04   2.800000e-04  -2.400000e-04\n",
+        "   2.100000e-04  -1.800000e-04   1.500000e-04  -1.300000e-04   1.100000e-04\n",
+        "  -9.000000e-05   7.500000e-05  -6.200000e-05   5.100000e-05  -4.200000e-05\n",
+        "   3.400000e-05  -2.800000e-05   2.200000e-05  -1.800000e-05   1.400000e-05\n",
+        "  -1.100000e-05   8.500000e-06  -6.500000e-06   5.000000e-06  -3.800000e-06\n",
+        "   2.900000e-06  -2.100000e-06   1.500000e-06  -1.100000e-06   8.000000e-07\n",
+        "  -5.500000e-07   3.800000e-07  -2.500000e-07   1.600000e-07  -9.000000e-08\n",
+        "   4.000000e-08  -2.000000e-08   1.000000e-08   0.000000e+00   0.000000e+00\n"
+    )
+}
+
+/// Computes the 5%-damped (or `damping_ratio`) linear elastic pseudo-acceleration response spectrum `Sa(T)` in `g`
+/// using unconditionally stable Newmark average acceleration (`beta = 0.25, gamma = 0.50`) with sub-stepping for stiff periods.
+pub fn compute_elastic_response_spectrum_5pct(
+    dt_s: f64,
+    accel_g: &[f64],
+    damping_ratio: f64,
+    periods_s: &[f64],
+) -> Vec<f64> {
+    if accel_g.is_empty() || dt_s <= 1e-6 {
+        return vec![0.0; periods_s.len()];
+    }
+    let g = 9.80665;
+    let zeta = damping_ratio.clamp(0.005, 0.25);
+    let beta = 0.25_f64;
+    let gamma = 0.50_f64;
+    let pga_g = accel_g.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+
+    periods_s
+        .iter()
+        .map(|&period| {
+            let t = period.max(0.01);
+            if t <= 0.025 {
+                return pga_g;
+            }
+            let sub = if dt_s > t * 0.1 {
+                ((dt_s / (t * 0.1)).ceil() as usize).clamp(1, 12)
+            } else {
+                1
+            };
+            let h = dt_s / (sub as f64);
+            let omega = 2.0 * std::f64::consts::PI / t;
+            let k = omega * omega;
+            let c = 2.0 * zeta * omega;
+
+            let a1 = 1.0 / (beta * h * h) + (gamma * c) / (beta * h);
+            let a2 = 1.0 / (beta * h) + (gamma / beta - 1.0) * c;
+            let a3 = (1.0 / (2.0 * beta) - 1.0) + h * (gamma / (2.0 * beta) - 1.0) * c;
+            let k_hat = k + a1;
+
+            let mut u = 0.0_f64;
+            let mut v = 0.0_f64;
+            let mut a = 0.0_f64;
+            let mut max_u = 0.0_f64;
+
+            for win in accel_g.windows(2) {
+                let ag0 = win[0] * g;
+                let ag1 = win[1] * g;
+                for s in 1..=sub {
+                    let frac = (s as f64) / (sub as f64);
+                    let ag_s = ag0 + (ag1 - ag0) * frac;
+                    let p_hat = -ag_s + a1 * u + a2 * v + a3 * a;
+                    let u_next = p_hat / k_hat;
+                    let a_next =
+                        (u_next - u) / (beta * h * h) - v / (beta * h) - (1.0 / (2.0 * beta) - 1.0) * a;
+                    let v_next = v + h * ((1.0 - gamma) * a + gamma * a_next);
+                    u = u_next;
+                    v = v_next;
+                    a = a_next;
+                    if u.abs() > max_u {
+                        max_u = u.abs();
+                    }
+                }
+            }
+            // Also track decaying free vibration tail for long periods
+            let free_steps = ((t * 0.5) / h).round() as usize;
+            for _ in 0..free_steps.min(200) {
+                let p_hat = a1 * u + a2 * v + a3 * a;
+                let u_next = p_hat / k_hat;
+                let a_next =
+                    (u_next - u) / (beta * h * h) - v / (beta * h) - (1.0 / (2.0 * beta) - 1.0) * a;
+                let v_next = v + h * ((1.0 - gamma) * a + gamma * a_next);
+                u = u_next;
+                v = v_next;
+                a = a_next;
+                if u.abs() > max_u {
+                    max_u = u.abs();
+                }
+            }
+
+            (omega * omega * max_u) / g
+        })
+        .collect()
+}
+
 /// Core computational engine for NL-THA.
 pub struct TimeHistoryEngine;
 
@@ -254,10 +688,43 @@ impl TimeHistoryEngine {
 
     /// Evaluates complete Nonlinear Dynamic Time-History Analysis per ASCE 7-22 Chapter 16.
     pub fn evaluate(input: &TimeHistoryInput) -> TimeHistoryReport {
+        let ground_accels = Self::generate_ground_acceleration_series(
+            input.ground_motion,
+            input.scale_factor,
+            input.time_step_dt_s,
+            input.simulation_duration_s,
+        );
+        Self::evaluate_series_internal(
+            input,
+            input.time_step_dt_s,
+            &ground_accels,
+            input.ground_motion.pga_g(),
+        )
+    }
+
+    /// Evaluates NL-THA directly against a custom `(time_s, ground_accel_m_s2)` record array.
+    pub fn evaluate_with_series(
+        input: &TimeHistoryInput,
+        dt_s: f64,
+        ground_accels: &[(f64, f64)],
+    ) -> TimeHistoryReport {
         let g = 9.80665;
-        let dt = input.time_step_dt_s;
-        let total_time = input.simulation_duration_s;
-        let ground_accels = Self::generate_ground_acceleration_series(input.ground_motion, input.scale_factor, dt, total_time);
+        let peak_m_s2 = ground_accels
+            .iter()
+            .map(|s| s.1.abs())
+            .fold(0.0_f64, f64::max);
+        let unscaled_pga = peak_m_s2 / (g * input.scale_factor.abs().max(0.05));
+        Self::evaluate_series_internal(input, dt_s, ground_accels, unscaled_pga)
+    }
+
+    fn evaluate_series_internal(
+        input: &TimeHistoryInput,
+        dt_in: f64,
+        ground_accels: &[(f64, f64)],
+        unscaled_pga_g: f64,
+    ) -> TimeHistoryReport {
+        let g = 9.80665;
+        let dt = dt_in.clamp(0.002, 0.05);
 
         // Multi-Story Structural Idealization (MDOF Generalized Coordinate Model)
         let total_mass = (input.total_seismic_weight_kn * 1000.0) / g; // kg
@@ -497,9 +964,9 @@ impl TimeHistoryEngine {
 
         TimeHistoryReport {
             ground_motion: input.ground_motion,
-            peak_ground_accel_g: input.ground_motion.pga_g(),
+            peak_ground_accel_g: unscaled_pga_g,
             scale_factor: input.scale_factor,
-            scaled_pga_g: input.ground_motion.pga_g() * input.scale_factor,
+            scaled_pga_g: unscaled_pga_g * input.scale_factor,
             peak_roof_disp_mm: peak_u * 1000.0,
             peak_roof_drift_ratio: peak_roof_drift,
             peak_base_shear_kn: actual_v_b,
@@ -686,5 +1153,42 @@ mod tests {
         assert!(!elements.is_empty());
         let link_count = elements.iter().filter(|e| e.3).count();
         assert_eq!(link_count, 8, "Should have 8 inelastic link elements across stories 1 to 8");
+    }
+
+    #[test]
+    fn phase75_peer_at2_csv_parser_and_5pct_spectrum() {
+        let at2 = parse_custom_accelerogram(sample_peer_at2_text(), "RSN1063_NORTHR_RRS228.AT2")
+            .expect("Built-in PEER .AT2 sample should parse cleanly");
+        assert_eq!(at2.format, AccelerogramFormat::PeerAt2);
+        assert!((at2.dt_s - 0.05).abs() < 1e-6);
+        assert!(at2.pga_x_g > 0.80 && at2.pga_x_g < 0.85);
+        assert!(looks_like_accelerogram_payload("my_record.at2", "anything"));
+        assert!(!looks_like_accelerogram_payload(
+            "terrain_survey.csv",
+            "500.0,1200.0,42.5\n510.0,1210.0,43.0\n"
+        ));
+
+        let csv_payload = "time_s,ax_g,ay_g,az_g\n".to_string()
+            + &(0..80)
+                .map(|i| {
+                    let t = i as f64 * 0.02;
+                    let ax = 0.45 * (8.0 * t).sin();
+                    let ay = 0.35 * (7.0 * t).cos();
+                    let az = 0.25 * (14.0 * t).sin();
+                    format!("{t:.3},{ax:.4},{ay:.4},{az:.4}")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+        assert!(looks_like_accelerogram_payload("tri_axis.csv", &csv_payload));
+        let tri = parse_custom_accelerogram(&csv_payload, "tri_axis.csv")
+            .expect("4-column CSV should parse");
+        assert_eq!(tri.format, AccelerogramFormat::CsvTriDirectional);
+        assert_eq!(tri.accel_x_g.len(), 80);
+        assert!(tri.pga_z_g > 0.20);
+
+        let periods = [0.02, 0.20, 0.50, 1.00, 2.00];
+        let spec = compute_elastic_response_spectrum_5pct(at2.dt_s, &at2.accel_x_g, 0.05, &periods);
+        assert_eq!(spec.len(), periods.len());
+        assert!(spec[1] > 0.20 && spec.iter().all(|v| v.is_finite() && *v >= 0.0));
     }
 }

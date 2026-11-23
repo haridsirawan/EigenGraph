@@ -637,7 +637,7 @@ pub(super) fn push_city_builder_scene_enu(
     }
 }
 
-/// Dynamic active 3D BIM + 6-DOF FEM + Modal + N-1 + Ground-Motion Replay input for unified WebGL2 Pass 2B.
+/// Dynamic active 3D BIM + 6-DOF FEM + Modal + N-1 + Tri-Directional Ground-Motion Replay input for unified WebGPU Pass 2.
 pub struct ActiveBimGpuInput<'a> {
     pub project: &'a BimProject,
     pub members: &'a [StructuralMember],
@@ -656,8 +656,8 @@ pub struct ActiveBimGpuInput<'a> {
     pub diff_modified_bim: &'a [(BimElementKind, usize)],
     pub diff_deleted_ghosts: &'a [([f64; 3], [f64; 3], String)],
     pub replay_story_elevs_m: &'a [f64],
-    pub replay_story_disp_xy_m: &'a [[f64; 2]],
-    pub replay_ground_shake_xy_m: [f64; 2],
+    pub replay_story_disp_xyz_m: &'a [[f64; 3]],
+    pub replay_ground_shake_xyz_m: [f64; 3],
     pub replay_hinge_states: &'a [(BimElementKind, usize, crate::core::nonlinear::PlasticHingeState)],
 }
 
@@ -673,7 +673,7 @@ pub(super) fn structural_dcr_color(dcr: f64) -> [f32; 4] {
     }
 }
 
-/// Builds the unified 3D WebGL2 mesh for the active editable `BimProject` inside the shared
+/// Builds the unified 3D Pure WebGPU mesh for the active editable `BimProject` inside the shared
 /// 24-bit hardware Z-buffered RTC scene:
 /// - Subsurface 3D pile caps + 4 deep foundation pile shafts beneath every `BimFooting`
 /// - Columns, beams/runs, walls, and floor/roof slabs colored by active structural lens
@@ -705,33 +705,44 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
     let rad = input.heading_deg.to_radians();
     let (sr, cr) = (rad.sin(), rad.cos());
 
-    let sample_replay_sway_xy = |z_m: f64| -> [f64; 2] {
-        if input.replay_story_elevs_m.is_empty() || input.replay_story_disp_xy_m.is_empty() {
-            return [0.0, 0.0];
+    let sample_replay_sway_xyz = |z_m: f64| -> [f64; 3] {
+        if input.replay_story_elevs_m.is_empty() || input.replay_story_disp_xyz_m.is_empty() {
+            return [0.0, 0.0, 0.0];
         }
         let vis = (input.deform_scale * 0.25).clamp(1.0, 28.0);
-        let shake_x = input.replay_ground_shake_xy_m[0] * vis * 0.35;
-        let shake_y = input.replay_ground_shake_xy_m[1] * vis * 0.35;
+        let shake_x = input.replay_ground_shake_xyz_m[0] * vis * 0.35;
+        let shake_y = input.replay_ground_shake_xyz_m[1] * vis * 0.35;
+        let shake_z = input.replay_ground_shake_xyz_m[2] * vis * 0.35;
         if z_m < 0.0 {
             let damp = (1.0 + z_m / 6.0).clamp(0.0, 1.0);
-            return [(shake_x * damp).clamp(-2.8, 2.8), (shake_y * damp).clamp(-2.8, 2.8)];
+            return [
+                (shake_x * damp).clamp(-2.8, 2.8),
+                (shake_y * damp).clamp(-2.8, 2.8),
+                (shake_z * damp).clamp(-0.65, 0.65),
+            ];
         }
-        let n = input.replay_story_elevs_m.len().min(input.replay_story_disp_xy_m.len());
-        let mut dx = input.replay_story_disp_xy_m[n - 1][0];
-        let mut dy = input.replay_story_disp_xy_m[n - 1][1];
+        let n = input
+            .replay_story_elevs_m
+            .len()
+            .min(input.replay_story_disp_xyz_m.len());
+        let mut dx = input.replay_story_disp_xyz_m[n - 1][0];
+        let mut dy = input.replay_story_disp_xyz_m[n - 1][1];
+        let mut dz = input.replay_story_disp_xyz_m[n - 1][2];
         if z_m <= input.replay_story_elevs_m[0] {
-            dx = input.replay_story_disp_xy_m[0][0];
-            dy = input.replay_story_disp_xy_m[0][1];
+            dx = input.replay_story_disp_xyz_m[0][0];
+            dy = input.replay_story_disp_xyz_m[0][1];
+            dz = input.replay_story_disp_xyz_m[0][2];
         } else {
             for k in 1..n {
                 let e0 = input.replay_story_elevs_m[k - 1];
                 let e1 = input.replay_story_elevs_m[k];
                 if z_m <= e1 {
                     let t = ((z_m - e0) / (e1 - e0).max(1e-4)).clamp(0.0, 1.0);
-                    let d0 = input.replay_story_disp_xy_m[k - 1];
-                    let d1 = input.replay_story_disp_xy_m[k];
+                    let d0 = input.replay_story_disp_xyz_m[k - 1];
+                    let d1 = input.replay_story_disp_xyz_m[k];
                     dx = d0[0] + (d1[0] - d0[0]) * t;
                     dy = d0[1] + (d1[1] - d0[1]) * t;
+                    dz = d0[2] + (d1[2] - d0[2]) * t;
                     break;
                 }
             }
@@ -739,6 +750,7 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         [
             (dx * vis + shake_x).clamp(-2.8, 2.8),
             (dy * vis + shake_y).clamp(-2.8, 2.8),
+            (dz * vis + shake_z).clamp(-0.85, 0.85),
         ]
     };
 
@@ -752,10 +764,9 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
     };
     let mode_idx = input.active_modal_mode % 3;
     let deform_offset = |x_m: f64, y_m: f64, z_m: f64| -> [f64; 3] {
-        if input.lens == EarthBimLens::TimeHistoryReplay && !input.replay_story_disp_xy_m.is_empty()
+        if input.lens == EarthBimLens::TimeHistoryReplay && !input.replay_story_disp_xyz_m.is_empty()
         {
-            let d = sample_replay_sway_xy(z_m);
-            return [d[0], d[1], 0.0];
+            return sample_replay_sway_xyz(z_m);
         }
         if anim_amp_m.abs() < 1e-6 || z_m <= 0.05 {
             return [0.0, 0.0, 0.0];
@@ -941,6 +952,8 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         let cx = c.pos.0 * 0.001;
         let cy = c.pos.1 * 0.001;
         let z_mid = 0.5 * (z0 + z1);
+        let dz_b = deform_offset(cx, cy, z0)[2];
+        let dz_t = deform_offset(cx, cy, z1)[2];
         let fp = [
             rot_xy(cx - hw, cy - hd, z_mid),
             rot_xy(cx + hw, cy - hd, z_mid),
@@ -953,7 +966,15 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             [0.35, 0.62, 0.74, 1.0]
         };
         let col = elem_color(BimElementKind::Column, c.id, default_col);
-        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0 as f32, z1 as f32, col, 3.0);
+        push_box_prism_enu(
+            &mut verts,
+            &mut idxs,
+            &fp,
+            (z0 + dz_b) as f32,
+            (z1 + dz_t).max(z0 + dz_b + 0.35) as f32,
+            col,
+            3.0,
+        );
     }
 
     // 3. Structural Beams & Inclined BRB Braces (`BimRun`)
@@ -981,10 +1002,12 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         let bx = r.end.0 * 0.001;
         let by = r.end.1 * 0.001;
         if is_inclined_brace {
-            let z0 = level_elev_m(r.level_id) + r.start_offset_mm * 0.001 - sag * 0.5;
-            let z1 = level_elev_m(r.level_id) + r.end_offset_mm * 0.001 - sag;
-            let p0_xy = rot_xy(ax, ay, z0);
-            let p1_xy = rot_xy(bx, by, z1);
+            let z0_raw = level_elev_m(r.level_id) + r.start_offset_mm * 0.001 - sag * 0.5;
+            let z1_raw = level_elev_m(r.level_id) + r.end_offset_mm * 0.001 - sag;
+            let z0 = z0_raw + deform_offset(ax, ay, z0_raw)[2];
+            let z1 = z1_raw + deform_offset(bx, by, z1_raw)[2];
+            let p0_xy = rot_xy(ax, ay, z0_raw);
+            let p1_xy = rot_xy(bx, by, z1_raw);
             push_inclined_3d_strut_enu(
                 &mut verts,
                 &mut idxs,
@@ -996,7 +1019,9 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             );
             continue;
         }
-        let z_top = (level_elev_m(r.level_id) + r.start_offset_mm * 0.001 - sag).max(0.15);
+        let z_top_raw = (level_elev_m(r.level_id) + r.start_offset_mm * 0.001 - sag).max(0.15);
+        let dz_r = deform_offset(0.5 * (ax + bx), 0.5 * (ay + by), z_top_raw)[2];
+        let z_top = z_top_raw + dz_r;
         let z_bot = z_top - (r.depth_mm * 0.001).max(0.2);
         let dx = bx - ax;
         let dy = by - ay;
@@ -1005,10 +1030,10 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         let nx = -dy / len * hw;
         let ny = dx / len * hw;
         let fp = [
-            rot_xy(ax - nx, ay - ny, z_top),
-            rot_xy(bx - nx, by - ny, z_top),
-            rot_xy(bx + nx, by + ny, z_top),
-            rot_xy(ax + nx, ay + ny, z_top),
+            rot_xy(ax - nx, ay - ny, z_top_raw),
+            rot_xy(bx - nx, by - ny, z_top_raw),
+            rot_xy(bx + nx, by + ny, z_top_raw),
+            rot_xy(ax + nx, ay + ny, z_top_raw),
         ];
         push_box_prism_enu(&mut verts, &mut idxs, &fp, z_bot as f32, z_top as f32, col, 3.0);
     }
@@ -1041,6 +1066,8 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         let nx = -dy / len * ht;
         let ny = dx / len * ht;
         let z_mid = 0.5 * (z0 + z1);
+        let dz_wb = deform_offset(ax, ay, z0)[2];
+        let dz_wt = deform_offset(bx, by, z1)[2];
         let fp = [
             rot_xy(ax - nx, ay - ny, z_mid),
             rot_xy(bx - nx, by - ny, z_mid),
@@ -1055,7 +1082,15 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             [0.80, 0.84, 0.88, 0.88]
         };
         let col = elem_color(BimElementKind::Wall, w.id, default_w);
-        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0 as f32, z1 as f32, col, 2.0);
+        push_box_prism_enu(
+            &mut verts,
+            &mut idxs,
+            &fp,
+            (z0 + dz_wb) as f32,
+            (z1 + dz_wt).max(z0 + dz_wb + 0.40) as f32,
+            col,
+            2.0,
+        );
     }
 
     // 5. Floor & Roof Slabs (`BimSlab`)
@@ -1068,7 +1103,12 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         }
         let z_lvl = level_elev_m(s.level_id);
         let th = (s.thickness_mm * 0.001).max(0.12) as f32;
-        let base_z = if s.is_roof { z_lvl as f32 } else { z_lvl as f32 - th };
+        let dz_slab = deform_offset(0.0, 0.0, z_lvl)[2] as f32;
+        let base_z = if s.is_roof {
+            z_lvl as f32 + dz_slab
+        } else {
+            z_lvl as f32 - th + dz_slab
+        };
         let fp: Vec<[f64; 2]> = s
             .boundary
             .iter()
@@ -1115,7 +1155,7 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
     }
 }
 
-/// 3D Subsurface Geotechnical Stratigraphy & Groundwater Table X-Ray input for WebGL2 Pass 2.
+/// 3D Subsurface Geotechnical Stratigraphy & Groundwater Table X-Ray input for WebGPU Pass 2.
 pub struct SubsurfaceSsiGpuInput<'a> {
     pub project: &'a BimProject,
     pub config: &'a SubsurfaceSsiConfig,
@@ -1242,7 +1282,7 @@ pub fn build_rtc_subsurface_ssi_mesh(input: &SubsurfaceSsiGpuInput<'_>) -> GpuMe
     }
 }
 
-/// District multi-hazard input bundle rendered in the shared 24-bit Z-buffered WebGL2 RTC pass.
+/// District multi-hazard input bundle rendered in the shared 24-bit Z-buffered WebGPU RTC pass.
 pub struct DistrictHazardGpuInput<'a> {
     pub config: &'a DistrictHazardConfig,
     pub report: &'a DistrictMultiHazardReport,
@@ -1754,7 +1794,7 @@ pub struct PortfolioGpuOverlayInput<'a> {
     pub origin_lat_lon: (f64, f64),
 }
 
-/// Builds hardware 3D WebGL2 translucent retrofit envelopes & glowing rooftop parity crowns across
+/// Builds hardware 3D Pure WebGPU translucent retrofit envelopes & glowing rooftop parity crowns across
 /// every multi-building parcel inside the active district Pareto frontier (`PortfolioParetoPoint`).
 pub fn build_rtc_portfolio_retrofit_mesh(input: &PortfolioGpuOverlayInput<'_>) -> GpuMeshPayload {
     let Some(pt) = input.report.active_frontier() else {
@@ -1879,21 +1919,25 @@ pub fn build_rtc_plastic_hinge_mesh(input: &PlasticHingeGpuInput<'_>) -> GpuMesh
     let (sr, cr) = (rad.sin(), rad.cos());
     let vis = (input.deform_scale * 0.25).clamp(1.0, 28.0);
     let shake_x = input.frame.ground_disp_m * vis * 0.35;
-    let shake_y = input.frame.ground_disp_m * 0.25 * vis * 0.35;
+    let shake_y = input.frame.ground_disp_y_m * vis * 0.35;
+    let shake_z = input.frame.ground_disp_z_m * vis * 0.35;
 
-    let sway_at_z = |z_m: f64| -> [f64; 2] {
+    let sway_at_z = |z_m: f64| -> [f64; 3] {
         let elevs = &input.frame.story_elevations_m;
         let dx_list = &input.frame.story_disp_x_m;
         let dy_list = &input.frame.story_disp_y_m;
+        let dz_list = &input.frame.story_disp_z_m;
         let n = elevs.len().min(dx_list.len()).min(dy_list.len());
         if n == 0 {
-            return [shake_x, shake_y];
+            return [shake_x, shake_y, shake_z];
         }
         let mut dx = dx_list[n - 1];
         let mut dy = dy_list[n - 1];
+        let mut dz = dz_list.get(n - 1).copied().unwrap_or(0.0);
         if z_m <= elevs[0] {
             dx = dx_list[0];
             dy = dy_list[0];
+            dz = dz_list.first().copied().unwrap_or(0.0);
         } else {
             for k in 1..n {
                 if z_m <= elevs[k] {
@@ -1901,6 +1945,9 @@ pub fn build_rtc_plastic_hinge_mesh(input: &PlasticHingeGpuInput<'_>) -> GpuMesh
                         .clamp(0.0, 1.0);
                     dx = dx_list[k - 1] + (dx_list[k] - dx_list[k - 1]) * t;
                     dy = dy_list[k - 1] + (dy_list[k] - dy_list[k - 1]) * t;
+                    let z0 = dz_list.get(k - 1).copied().unwrap_or(0.0);
+                    let z1 = dz_list.get(k).copied().unwrap_or(0.0);
+                    dz = z0 + (z1 - z0) * t;
                     break;
                 }
             }
@@ -1908,6 +1955,7 @@ pub fn build_rtc_plastic_hinge_mesh(input: &PlasticHingeGpuInput<'_>) -> GpuMesh
         [
             (dx * vis + shake_x).clamp(-2.8, 2.8),
             (dy * vis + shake_y).clamp(-2.8, 2.8),
+            (dz * vis + shake_z).clamp(-0.85, 0.85),
         ]
     };
 
@@ -1925,7 +1973,7 @@ pub fn build_rtc_plastic_hinge_mesh(input: &PlasticHingeGpuInput<'_>) -> GpuMesh
             let ly = h.local_pos_m[1] + d[1];
             let rx = (lx * cr - ly * sr) as f32;
             let ry = (lx * sr + ly * cr) as f32;
-            let rz = h.local_pos_m[2] as f32;
+            let rz = (h.local_pos_m[2] + d[2]) as f32;
             push_octahedron_beacon_enu(&mut verts, &mut idxs, [rx, ry, rz], radius, rgba, sev);
         }
     }
@@ -1969,6 +2017,62 @@ pub fn build_rtc_plastic_hinge_mesh(input: &PlasticHingeGpuInput<'_>) -> GpuMesh
     for i in 0..segs {
         let a = base_v + (i as u32) * 2;
         idxs.extend_from_slice(&[a, a + 1, a + 3, a, a + 3, a + 2]);
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
+/// Phase 75: Translucent per-story FEMA P-58 repair-loss halo bands (`material_kind = 7.0`).
+pub struct FragilityLossGpuInput<'a> {
+    pub project: &'a BimProject,
+    pub synthesis: &'a crate::core::fema_p58::ReplayFemaP58Synthesis,
+    pub visible: bool,
+    pub heading_deg: f64,
+}
+
+/// Builds 3D translucent perimeter halo bands along each BIM storey color-coded by FEMA P-58 repair loss ratio.
+pub fn build_rtc_fragility_loss_mesh(input: &FragilityLossGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible || input.synthesis.story_losses.is_empty() || input.project.is_empty() {
+        return GpuMeshPayload::default();
+    }
+    let (bmin, bmax) = input
+        .project
+        .plan_extents_mm()
+        .map(|(mn, mx)| (
+            [mn[0] * 0.001 - 0.85, mn[1] * 0.001 - 0.85],
+            [mx[0] * 0.001 + 0.85, mx[1] * 0.001 + 0.85],
+        ))
+        .unwrap_or(([-6.5, -5.5], [6.5, 5.5]));
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_pt = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+
+    let outer = [
+        rot_pt(bmin[0], bmin[1]),
+        rot_pt(bmax[0], bmin[1]),
+        rot_pt(bmax[0], bmax[1]),
+        rot_pt(bmin[0], bmax[1]),
+    ];
+    let mut verts = Vec::with_capacity(input.synthesis.story_losses.len() * 24);
+    let mut idxs = Vec::with_capacity(input.synthesis.story_losses.len() * 36);
+
+    for st in &input.synthesis.story_losses {
+        let lr = st.loss_ratio;
+        let rgba = if lr >= 0.15 {
+            [0.98, 0.24, 0.24, 0.44]
+        } else if lr >= 0.06 {
+            [0.98, 0.62, 0.12, 0.40]
+        } else if lr >= 0.02 {
+            [0.16, 0.78, 0.92, 0.36]
+        } else {
+            [0.12, 0.82, 0.56, 0.32]
+        };
+        let z0 = (st.elevation_m - 0.42).max(0.10) as f32;
+        let z1 = (st.elevation_m + 0.22) as f32;
+        push_box_prism_enu(&mut verts, &mut idxs, &outer, z0, z1, rgba, 7.0);
     }
 
     GpuMeshPayload {

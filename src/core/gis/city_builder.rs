@@ -543,7 +543,7 @@ impl IfcxCityScene {
         pad
     }
 
-    /// Deterministic FNV-1a revision hash for O(1) WebGL2 VBO cache invalidation.
+    /// Deterministic FNV-1a revision hash for O(1) WebGPU buffer cache invalidation.
     pub fn content_revision_hash(&self) -> u64 {
         let mut h: u64 = 0xcbf29ce484222325;
         let mix = |hash: &mut u64, v: u64| {

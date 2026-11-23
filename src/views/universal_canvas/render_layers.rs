@@ -319,19 +319,22 @@ impl UniversalCanvasState {
                     if let Some(ref rf) = replay_frame_opt {
                         let vis = (deform_scale * 0.25).clamp(1.0, 28.0);
                         let shake_x_mm = rf.ground_disp_m * vis * 0.35 * 1000.0;
-                        let shake_y_mm = rf.ground_disp_m * 0.25 * vis * 0.35 * 1000.0;
+                        let shake_y_mm = rf.ground_disp_y_m * vis * 0.35 * 1000.0;
+                        let shake_z_m = rf.ground_disp_z_m * vis * 0.22;
                         let n = rf
                             .story_elevations_m
                             .len()
                             .min(rf.story_disp_x_m.len())
                             .min(rf.story_disp_y_m.len());
-                        let (mut dx_m, mut dy_m) = (0.0, 0.0);
+                        let (mut dx_m, mut dy_m, mut dz_m) = (0.0, 0.0, 0.0);
                         if n > 0 {
                             dx_m = rf.story_disp_x_m[n - 1];
                             dy_m = rf.story_disp_y_m[n - 1];
+                            dz_m = rf.story_disp_z_m.get(n - 1).copied().unwrap_or(0.0);
                             if elev_m <= rf.story_elevations_m[0] {
                                 dx_m = rf.story_disp_x_m[0];
                                 dy_m = rf.story_disp_y_m[0];
+                                dz_m = rf.story_disp_z_m.first().copied().unwrap_or(0.0);
                             } else {
                                 for k in 1..n {
                                     if elev_m <= rf.story_elevations_m[k] {
@@ -343,6 +346,9 @@ impl UniversalCanvasState {
                                             + (rf.story_disp_x_m[k] - rf.story_disp_x_m[k - 1]) * t;
                                         dy_m = rf.story_disp_y_m[k - 1]
                                             + (rf.story_disp_y_m[k] - rf.story_disp_y_m[k - 1]) * t;
+                                        let z0 = rf.story_disp_z_m.get(k - 1).copied().unwrap_or(0.0);
+                                        let z1 = rf.story_disp_z_m.get(k).copied().unwrap_or(0.0);
+                                        dz_m = z0 + (z1 - z0) * t;
                                         break;
                                     }
                                 }
@@ -352,7 +358,7 @@ impl UniversalCanvasState {
                             xf,
                             x_mm + (dx_m * vis * 1000.0 + shake_x_mm).clamp(-2800.0, 2800.0),
                             y_mm + (dy_m * vis * 1000.0 + shake_y_mm).clamp(-2800.0, 2800.0),
-                            elev_m,
+                            elev_m + (dz_m * vis * 0.45 + shake_z_m).clamp(-1.8, 1.8),
                             lift_scale,
                         );
                     }
@@ -1144,14 +1150,16 @@ impl UniversalCanvasState {
                             }
                         } else if active_lens == EarthBimLens::TimeHistoryReplay {
                             if let Some(ref rf) = replay_frame_opt {
-                                let rec_lbl = crate::core::ground_motion_replay::GroundMotionReplayConfig::record_short_label(
-                                    self.ground_motion_replay_config.record,
-                                );
+                                let rec_lbl = self.ground_motion_replay_config.active_record_label();
+                                let mode_lbl = self
+                                    .ground_motion_replay_config
+                                    .tridirectional_mode
+                                    .short_label();
                                 clip_painter.text(
                                     apex_pt + Vec2::new(0.0, -14.0),
                                     Align2::CENTER_BOTTOM,
                                     format!(
-                                        "{rec_lbl} • t={:.1}s • Drift={:.2}% • Hinges={}",
+                                        "{rec_lbl} ({mode_lbl}) • t={:.1}s • Drift={:.2}% • Hinges={}",
                                         rf.time_s,
                                         rf.roof_drift_ratio * 100.0,
                                         rf.active_hinges.len()
@@ -1521,8 +1529,8 @@ impl UniversalCanvasState {
                 }
                 let is_hovered =
                     self.hovered_world_building_rel_path.as_deref() == Some(b.rel_path.as_str());
-                // When WebGL2 GPU Z-buffered extrusion is active at street scale, only paint hover highlight & badge on CPU
-                if self.webgl_earth.is_active() && self.world_map.zoom_level >= 14.5 && !is_hovered {
+                // When WebGPU (WGSL) GPU Z-buffered extrusion is active at street scale, only paint hover highlight & badge on CPU
+                if self.webgpu_earth.is_active() && self.world_map.zoom_level >= 14.5 && !is_hovered {
                     continue;
                 }
                 let hull_mm = b.rotated_footprint_world_mm();
@@ -1824,7 +1832,7 @@ impl UniversalCanvasState {
     }
 
     /// Pure-vector CPU fallback rendering for district seismic waves, Venturi wind streamlines,
-    /// and 3D flood plane when WebGL2 hardware acceleration is inactive (e.g. headless CI).
+    /// and 3D flood plane when WebGPU (WGSL) hardware acceleration is inactive (e.g. headless CI).
     pub(super) fn paint_cpu_district_hazard_fallback(
         &self,
         painter: &egui::Painter,
@@ -1917,7 +1925,7 @@ impl UniversalCanvasState {
     }
 
     /// Pure-CPU translucent 3D Subsurface Soil Horizons, Borehole Depth Column, and Groundwater
-    /// Phreatic Surface fallback when WebGL2 is inactive and X-Ray subsurface mode is enabled.
+    /// Phreatic Surface fallback when WebGPU is inactive and X-Ray subsurface mode is enabled.
     pub(super) fn paint_cpu_subsurface_ssi_fallback(
         &self,
         painter: &egui::Painter,
@@ -2036,7 +2044,7 @@ impl UniversalCanvasState {
     }
 
     /// Pure-CPU translucent crimson wireframe ghost fallback for deleted `.ifcx` nodes when
-    /// WebGL2 is inactive and Multi-Layer IFCX Visual Diff overlay is active.
+    /// WebGPU is inactive and Multi-Layer IFCX Visual Diff overlay is active.
     pub(super) fn paint_cpu_ifcx_diff_ghosts_fallback(
         &self,
         painter: &egui::Painter,
@@ -2091,7 +2099,7 @@ impl UniversalCanvasState {
         }
     }
 
-    /// Pure-CPU translucent district portfolio retrofit crown fallback when WebGL2 is inactive.
+    /// Pure-CPU translucent district portfolio retrofit crown fallback when WebGPU is inactive.
     pub(super) fn paint_cpu_portfolio_retrofit_fallback(
         &self,
         painter: &egui::Painter,
@@ -2160,7 +2168,7 @@ impl UniversalCanvasState {
     }
 
     /// Pure-vector CPU projection fallback for 3D ASCE 41-17 plastic hinge beacons and ground
-    /// seismic pulse ring when WebGL2 is inactive.
+    /// seismic pulse ring when WebGPU (WGSL) hardware acceleration is inactive.
     pub(super) fn paint_cpu_plastic_hinges_fallback(
         &self,
         painter: &egui::Painter,
@@ -2183,7 +2191,8 @@ impl UniversalCanvasState {
         let lift_scale = if self.world_map.zoom_level < 14.5 { 8.0 } else { 1.0 };
         let vis = (self.earth_bim_author.deform_scale * 0.25).clamp(1.0, 28.0);
         let shake_x_mm = frame.ground_disp_m * vis * 0.35 * 1000.0;
-        let shake_y_mm = frame.ground_disp_m * 0.25 * vis * 0.35 * 1000.0;
+        let shake_y_mm = frame.ground_disp_y_m * vis * 0.35 * 1000.0;
+        let shake_z_m = frame.ground_disp_z_m * vis * 0.22;
 
         // Ground pulse ring around building centroid
         if let Some((bmin, bmax)) = bim_project.plan_extents_mm() {
@@ -2196,7 +2205,7 @@ impl UniversalCanvasState {
                 let th = (i as f64 / 24.0) * std::f64::consts::TAU;
                 let px_mm = cx + r_m * 1000.0 * th.cos();
                 let py_mm = cy + r_m * 1000.0 * th.sin();
-                if let Some(sp) = self.project_active_bim_mm(xform, px_mm, py_mm, 0.14, lift_scale) {
+                if let Some(sp) = self.project_active_bim_mm(xform, px_mm, py_mm, 0.14 + shake_z_m * 0.2, lift_scale) {
                     ring_pts.push(sp);
                 }
             }
@@ -2227,13 +2236,15 @@ impl UniversalCanvasState {
                 PlasticHingeState::Mechanism => (Color32::from_rgb(191, 90, 242), 8.8_f32),
             };
             let z_m = h.local_pos_m[2];
-            let (mut dx_m, mut dy_m) = (0.0, 0.0);
+            let (mut dx_m, mut dy_m, mut dz_m) = (0.0, 0.0, 0.0);
             if n > 0 {
                 dx_m = frame.story_disp_x_m[n - 1];
                 dy_m = frame.story_disp_y_m[n - 1];
+                dz_m = frame.story_disp_z_m.get(n - 1).copied().unwrap_or(0.0);
                 if z_m <= frame.story_elevations_m[0] {
                     dx_m = frame.story_disp_x_m[0];
                     dy_m = frame.story_disp_y_m[0];
+                    dz_m = frame.story_disp_z_m.first().copied().unwrap_or(0.0);
                 } else {
                     for k in 1..n {
                         if z_m <= frame.story_elevations_m[k] {
@@ -2245,6 +2256,9 @@ impl UniversalCanvasState {
                                 + (frame.story_disp_x_m[k] - frame.story_disp_x_m[k - 1]) * t;
                             dy_m = frame.story_disp_y_m[k - 1]
                                 + (frame.story_disp_y_m[k] - frame.story_disp_y_m[k - 1]) * t;
+                            let z0 = frame.story_disp_z_m.get(k - 1).copied().unwrap_or(0.0);
+                            let z1 = frame.story_disp_z_m.get(k).copied().unwrap_or(0.0);
+                            dz_m = z0 + (z1 - z0) * t;
                             break;
                         }
                     }
@@ -2252,9 +2266,71 @@ impl UniversalCanvasState {
             }
             let x_mm = h.local_pos_m[0] * 1000.0 + (dx_m * vis * 1000.0 + shake_x_mm).clamp(-2800.0, 2800.0);
             let y_mm = h.local_pos_m[1] * 1000.0 + (dy_m * vis * 1000.0 + shake_y_mm).clamp(-2800.0, 2800.0);
-            if let Some(sp) = self.project_active_bim_mm(xform, x_mm, y_mm, z_m, lift_scale) {
+            let z_def_m = z_m + (dz_m * vis * 0.45 + shake_z_m).clamp(-1.8, 1.8);
+            if let Some(sp) = self.project_active_bim_mm(xform, x_mm, y_mm, z_def_m, lift_scale) {
                 clip.circle_filled(sp, rad, col.gamma_multiply(0.85));
                 clip.circle_stroke(sp, rad + 1.5, Stroke::new(1.2, Color32::WHITE.gamma_multiply(0.7)));
+            }
+        }
+    }
+
+    /// Pure-vector CPU fallback rendering translucent FEMA P-58 per-story loss bands when WebGPU is inactive.
+    pub(super) fn paint_cpu_fragility_loss_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        theme: &MacTheme,
+        xform: &crate::core::gis::GlobeScreenTransform,
+        bim_project: &BimProject,
+    ) {
+        if !self.ground_motion_replay_config.show_fragility_loss_overlay
+            || self.world_map.zoom_level < 14.0
+        {
+            return;
+        }
+        let Some(ref rep) = self.last_ground_motion_replay_report else {
+            return;
+        };
+        if rep.fragility_loss.story_losses.is_empty() || bim_project.is_empty() {
+            return;
+        }
+        let (bmin, bmax) = bim_project
+            .plan_extents_mm()
+            .unwrap_or(([-6500.0, -5500.0], [6500.0, 5500.0]));
+        let clip = painter.with_clip_rect(rect);
+        let lift_scale = if self.world_map.zoom_level < 14.5 { 8.0 } else { 1.0 };
+        let pad_mm = 750.0;
+        let corners_mm = [
+            [bmin[0] - pad_mm, bmin[1] - pad_mm],
+            [bmax[0] + pad_mm, bmin[1] - pad_mm],
+            [bmax[0] + pad_mm, bmax[1] + pad_mm],
+            [bmin[0] - pad_mm, bmax[1] + pad_mm],
+        ];
+        for st in &rep.fragility_loss.story_losses {
+            let stroke_col = if st.loss_ratio >= 0.15 {
+                theme.accent_red
+            } else if st.loss_ratio >= 0.05 {
+                theme.accent_orange
+            } else if st.loss_ratio >= 0.015 {
+                Color32::from_rgb(245, 200, 62)
+            } else {
+                theme.accent_green
+            };
+            let fill_col = stroke_col.gamma_multiply(0.22);
+            let mut poly = Vec::with_capacity(4);
+            for [x_mm, y_mm] in corners_mm {
+                if let Some(sp) =
+                    self.project_active_bim_mm(xform, x_mm, y_mm, st.elevation_m, lift_scale)
+                {
+                    poly.push(sp);
+                }
+            }
+            if poly.len() == 4 {
+                clip.add(egui::Shape::convex_polygon(
+                    poly,
+                    fill_col,
+                    Stroke::new(1.5, stroke_col.gamma_multiply(0.85)),
+                ));
             }
         }
     }

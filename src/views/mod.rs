@@ -18,7 +18,7 @@ pub mod industrialized;
 pub mod prediction;
 pub mod results;
 pub mod spatial_workspace;
-pub mod webgl_earth;
+pub mod webgpu_earth;
 
 pub use my_project::MyProjectView;
 pub use ai_firm::AiFirmView;

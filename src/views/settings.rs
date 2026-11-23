@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (WebGL2 24-Bit Z-Buffer, f64 RTC, Multi-Layer Composition, City-Builder Authoring, 6-DOF FEM & ARI)",
+                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL 24-Bit Z-Buffer, f64 RTC, Multi-Layer Composition, City-Builder Authoring, 6-DOF FEM & ARI)",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)
@@ -702,7 +702,7 @@ impl SettingsView {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("Runtime:").strong().size(12.0).color(theme.text_primary));
                 let runtime = if cfg!(target_arch = "wasm32") {
-                    "Browser (WebGL2) • WebAssembly (wasm32)"
+                    "Browser (Pure WebGPU / WGSL) • WebAssembly (wasm32)"
                 } else {
                     "EigenGraph Native & Web Engine"
                 };
