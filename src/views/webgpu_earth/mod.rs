@@ -412,7 +412,7 @@ struct VertexIn {
     @location(0) pos: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) color: vec4<f32>,
-    @location(3) meta: vec4<f32>,
+    @location(3) v_meta: vec4<f32>,
 };
 
 struct VertexOut {
@@ -420,35 +420,35 @@ struct VertexOut {
     @location(0) world_pos: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) color: vec4<f32>,
-    @location(3) meta: vec4<f32>,
+    @location(3) v_meta: vec4<f32>,
     @location(4) cam_dist: f32,
 };
 
 @vertex
-fn vs_main(in: VertexIn) -> VertexOut {
-    var out: VertexOut;
-    let clip = u.mvp * vec4<f32>(in.pos, 1.0);
-    out.clip_pos = clip;
-    out.world_pos = in.pos;
-    out.normal = in.normal;
-    out.color = in.color;
-    out.meta = in.meta;
-    out.cam_dist = max(clip.w, 0.0);
-    return out;
+fn vs_main(v_in: VertexIn) -> VertexOut {
+    var v_out: VertexOut;
+    let clip = u.mvp * vec4<f32>(v_in.pos, 1.0);
+    v_out.clip_pos = clip;
+    v_out.world_pos = v_in.pos;
+    v_out.normal = v_in.normal;
+    v_out.color = v_in.color;
+    v_out.v_meta = v_in.v_meta;
+    v_out.cam_dist = max(clip.w, 0.0);
+    return v_out;
 }
 
 @fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    var n = select(vec3<f32>(0.0, 0.0, 1.0), normalize(in.normal), dot(in.normal, in.normal) > 1e-8);
+fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
+    var n = select(vec3<f32>(0.0, 0.0, 1.0), normalize(f_in.normal), dot(f_in.normal, f_in.normal) > 1e-8);
     let sun_raw = u.sun_and_lit.xyz;
     let l = select(vec3<f32>(0.0, 0.0, 1.0), normalize(sun_raw), dot(sun_raw, sun_raw) > 1e-8);
-    let view_raw = u.eye_and_fog_d.xyz - in.world_pos;
+    let view_raw = u.eye_and_fog_d.xyz - f_in.world_pos;
     let v = select(vec3<f32>(0.0, 0.0, 1.0), normalize(view_raw), dot(view_raw, view_raw) > 1e-8);
 
-    let kind = in.meta.x;
-    let height_m = in.meta.y;
-    let ao = in.meta.z;
-    let phase = in.meta.w;
+    let kind = f_in.v_meta.x;
+    let height_m = f_in.v_meta.y;
+    let ao = f_in.v_meta.z;
+    let phase = f_in.v_meta.w;
     let u_time = u.fog_and_time.w;
     let u_night = u.atmo_and_night.w;
     let u_gold = u.golden_pad.x;
@@ -458,8 +458,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let u_atmo = u.atmo_and_night.xyz;
 
     if (kind < 0.5) {
-        let w1 = sin(in.world_pos.x * 58.0 + u_time * 1.15) * cos(in.world_pos.z * 54.0 - u_time * 0.85);
-        let w2 = sin((in.world_pos.y * 74.0 + in.world_pos.x * 42.0) - u_time * 1.45);
+        let w1 = sin(f_in.world_pos.x * 58.0 + u_time * 1.15) * cos(f_in.world_pos.z * 54.0 - u_time * 0.85);
+        let w2 = sin((f_in.world_pos.y * 74.0 + f_in.world_pos.x * 42.0) - u_time * 1.45);
         let ripple = n + vec3<f32>(w1 * 0.028, w2 * 0.022, (w1 - w2) * 0.022);
         n = normalize(ripple);
     }
@@ -469,12 +469,13 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let lit = mix(1.0, mix(0.24, 1.0, day_diffuse), u_lit);
     let hemi = 0.84 + 0.16 * clamp(n.z * 0.5 + 0.5, 0.0, 1.0);
     let sun_tint = mix(vec3<f32>(1.0, 0.99, 0.96), vec3<f32>(1.0, 0.72, 0.44), u_gold * 0.75);
-    var col = in.color.rgb * sun_tint * lit * hemi * ao;
+    var col = f_in.color.rgb * sun_tint * lit * hemi * ao;
 
     if (kind < 0.5) {
-        let h = normalize(l + v);
+        let hv = l + v;
+        let h = select(n, normalize(hv), dot(hv, hv) > 1e-8);
         let spec = pow(max(dot(n, h), 0.0), 42.0) * max(ndotl, 0.0) * 0.42;
-        let fresnel = pow(1.0 - max(dot(n, v), 0.0), 2.8);
+        let fresnel = pow(max(1.0 - max(dot(n, v), 0.0), 0.0), 2.8);
         col += sun_tint * spec + u_atmo * (fresnel * 0.58);
     } else if (kind > 1.5 && kind < 2.5) {
         let is_wall = 1.0 - step(0.85, abs(n.z));
@@ -491,29 +492,54 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
     } else if (kind >= 6.5) {
         // FEMA P-58 Per-Story Loss Halo Bands
-        let band_pulse = 0.78 + 0.22 * sin(u_time * 2.4 + in.world_pos.z * 0.6);
-        col = mix(col, in.color.rgb * 1.15, 0.45) * band_pulse;
+        let band_pulse = 0.78 + 0.22 * sin(u_time * 2.4 + f_in.world_pos.z * 0.6);
+        col = mix(col, f_in.color.rgb * 1.15, 0.45) * band_pulse;
     } else if (kind >= 5.5) {
         // Pulsing 3D Plastic Hinge Beacons & Ground-Motion Pulse Ring
         let pulse = 0.68 + 0.32 * sin(u_time * (3.2 + phase * 6.0));
-        col = mix(col, in.color.rgb * 1.18, 0.55) * pulse;
+        col = mix(col, f_in.color.rgb * 1.18, 0.55) * pulse;
     } else if (kind >= 4.5) {
-        let wave = 0.5 + 0.5 * sin(in.world_pos.x * 1.8 + u_time * 1.6) * cos(in.world_pos.y * 1.6 - u_time * 1.2);
+        let wave = 0.5 + 0.5 * sin(f_in.world_pos.x * 1.8 + u_time * 1.6) * cos(f_in.world_pos.y * 1.6 - u_time * 1.2);
         col += vec3<f32>(0.08, 0.24, 0.32) * wave;
     } else if (kind >= 3.5 && kind < 4.5) {
-        let bed = 0.88 + 0.12 * sin(in.world_pos.z * 7.5 + sin(in.world_pos.x * 0.45 + in.world_pos.y * 0.35) * 1.4);
+        let bed = 0.88 + 0.12 * sin(f_in.world_pos.z * 7.5 + sin(f_in.world_pos.x * 0.45 + f_in.world_pos.y * 0.35) * 1.4);
         col *= bed;
     } else if (kind < 1.5) {
-        let fresnel = pow(1.0 - max(dot(n, v), 0.0), 3.2);
+        let fresnel = pow(max(1.0 - max(dot(n, v), 0.0), 0.0), 3.2);
         col += u_atmo * (fresnel * 0.16);
     }
 
     if (u_fog_d > 0.0) {
-        let fog_f = 1.0 - exp(-in.cam_dist * u_fog_d);
+        let fog_f = 1.0 - exp(-f_in.cam_dist * u_fog_d);
         col = mix(col, u_fog_c, clamp(fog_f, 0.0, 0.82));
     }
 
-    return vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), in.color.a);
+    return vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), f_in.color.a);
+}
+"#;
+
+const COMPOSITE_WGSL: &str = r#"
+@group(0) @binding(0) var earth_color_tex: texture_2d<f32>;
+@group(0) @binding(1) var earth_sampler: sampler;
+
+struct CompositeOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_composite(@builtin(vertex_index) vid: u32) -> CompositeOut {
+    let x = f32((vid & 1u) << 2u) - 1.0;
+    let y = f32((vid & 2u) << 1u) - 1.0;
+    var c_out: CompositeOut;
+    c_out.pos = vec4<f32>(x, y, 0.0, 1.0);
+    c_out.uv = vec2<f32>((x + 1.0) * 0.5, (1.0 - y) * 0.5);
+    return c_out;
+}
+
+@fragment
+fn fs_composite(c_in: CompositeOut) -> @location(0) vec4<f32> {
+    return textureSample(earth_color_tex, earth_sampler, c_in.uv);
 }
 "#;
 
@@ -599,10 +625,26 @@ impl GpuMeshSlot {
     }
 }
 
-/// GPU pipelines, uniform bind groups, and reusable vertex/index buffers stored inside `egui_wgpu::CallbackResources`.
+struct OffscreenEarthTargets {
+    size: [u32; 2],
+    _color_tex: wgpu::Texture,
+    color_view: wgpu::TextureView,
+    _depth_tex: wgpu::Texture,
+    depth_view: wgpu::TextureView,
+    composite_bg: wgpu::BindGroup,
+}
+
+/// GPU pipelines, uniform bind groups, offscreen depth/color targets, and reusable vertex/index buffers
+/// stored inside `egui_wgpu::CallbackResources`.
 pub struct WebGpuEarthResources {
+    target_format: wgpu::TextureFormat,
     opaque_pipeline: wgpu::RenderPipeline,
     translucent_pipeline: wgpu::RenderPipeline,
+    composite_pipeline: wgpu::RenderPipeline,
+    composite_bgl: wgpu::BindGroupLayout,
+    composite_sampler: wgpu::Sampler,
+    targets: Option<OffscreenEarthTargets>,
+    rendered_this_frame: bool,
     planet_uniform_buf: wgpu::Buffer,
     site_uniform_buf: wgpu::Buffer,
     planet_bind_group: wgpu::BindGroup,
@@ -619,7 +661,7 @@ pub struct WebGpuEarthResources {
 }
 
 impl WebGpuEarthResources {
-    fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
+    pub(crate) fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("eigengraph_webgpu_earth_wgsl"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(EARTH_WGSL)),
@@ -656,7 +698,9 @@ impl WebGpuEarthResources {
             ],
         };
 
-        let depth_format = egui_wgpu::depth_format_from_bits(24, 0);
+        // Always use Depth24PlusStencil8 with explicit depth_ops & stencil_ops on our offscreen pass
+        // so wgpu 30's WebGPU backend emits `stencilReadOnly: false` (valid under W3C WebGPU spec).
+        let depth_format = wgpu::TextureFormat::Depth24PlusStencil8;
         let build_pipeline = |label: &str, depth_write: bool| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
@@ -682,8 +726,8 @@ impl WebGpuEarthResources {
                     cull_mode: None,
                     ..Default::default()
                 },
-                depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
-                    format,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: depth_format,
                     depth_write_enabled: Some(depth_write),
                     depth_compare: Some(wgpu::CompareFunction::LessEqual),
                     stencil: wgpu::StencilState::default(),
@@ -701,6 +745,76 @@ impl WebGpuEarthResources {
 
         let opaque_pipeline = build_pipeline("eigengraph_earth_opaque", true);
         let translucent_pipeline = build_pipeline("eigengraph_earth_translucent", false);
+
+        let composite_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("eigengraph_earth_composite_wgsl"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(COMPOSITE_WGSL)),
+        });
+        let composite_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("eigengraph_earth_composite_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let composite_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("eigengraph_earth_composite_layout"),
+            bind_group_layouts: &[Some(&composite_bgl)],
+            immediate_size: 0,
+        });
+        let composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("eigengraph_earth_composite_pipeline"),
+            layout: Some(&composite_layout),
+            vertex: wgpu::VertexState {
+                module: &composite_module,
+                entry_point: Some("vs_composite"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &composite_module,
+                entry_point: Some("fs_composite"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+        let composite_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("eigengraph_earth_composite_sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
 
         let u_size = std::mem::size_of::<EarthPassUniforms>() as wgpu::BufferAddress;
         let planet_uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -730,8 +844,14 @@ impl WebGpuEarthResources {
         let site_bind_group = make_bg("eigengraph_site_bg", &site_uniform_buf);
 
         Self {
+            target_format,
             opaque_pipeline,
             translucent_pipeline,
+            composite_pipeline,
+            composite_bgl,
+            composite_sampler,
+            targets: None,
+            rendered_this_frame: false,
             planet_uniform_buf,
             site_uniform_buf,
             planet_bind_group,
@@ -747,9 +867,165 @@ impl WebGpuEarthResources {
             fragility_loss: GpuMeshSlot::default(),
         }
     }
+
+    pub(crate) fn ensure_targets(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+        let max_dim = device.limits().max_texture_dimension_2d.max(64);
+        let w = width.clamp(1, max_dim);
+        let h = height.clamp(1, max_dim);
+        if self.targets.as_ref().is_some_and(|t| t.size == [w, h]) {
+            return;
+        }
+        let color_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("eigengraph_earth_color_target"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.target_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let color_view = color_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("eigengraph_earth_depth_stencil_target"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth24PlusStencil8,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let composite_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("eigengraph_earth_composite_bg"),
+            layout: &self.composite_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.composite_sampler),
+                },
+            ],
+        });
+        self.targets = Some(OffscreenEarthTargets {
+            size: [w, h],
+            _color_tex: color_tex,
+            color_view,
+            _depth_tex: depth_tex,
+            depth_view,
+            composite_bg,
+        });
+    }
+
+    pub(crate) fn render_offscreen_passes(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        render_site_pass: bool,
+    ) {
+        let Some(ref target) = self.targets else {
+            return;
+        };
+
+        // Pass 1: Planetary Vector Globe in dedicated full [0.0, 1.0] Depth24PlusStencil8 pass
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("eigengraph_earth_planet_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target.color_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &target.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            if self.planet.index_count > 0 {
+                pass.set_pipeline(&self.opaque_pipeline);
+                pass.set_bind_group(0, &self.planet_bind_group, &[]);
+                self.planet.draw(&mut pass);
+            }
+        }
+
+        // Pass 2: Floating-Origin RTC Local Site Scene with fresh [0.0, 1.0] 24-bit depth
+        let has_site = self.site.index_count > 0
+            || self.bim.index_count > 0
+            || self.hinges.index_count > 0
+            || self.subsurface.index_count > 0
+            || self.portfolio.index_count > 0
+            || self.hazard.index_count > 0
+            || self.fragility_loss.index_count > 0;
+        if render_site_pass && has_site {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("eigengraph_earth_site_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target.color_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &target.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.opaque_pipeline);
+            pass.set_bind_group(0, &self.site_bind_group, &[]);
+            self.site.draw(&mut pass);
+            self.bim.draw(&mut pass);
+
+            pass.set_pipeline(&self.translucent_pipeline);
+            pass.set_bind_group(0, &self.site_bind_group, &[]);
+            self.hinges.draw(&mut pass);
+            self.subsurface.draw(&mut pass);
+            self.portfolio.draw(&mut pass);
+            self.hazard.draw(&mut pass);
+            self.fragility_loss.draw(&mut pass);
+        }
+    }
 }
 
 struct WebGpuEarthPaintCallback {
+    viewport_rect: Rect,
     uniforms: RtcCameraUniforms,
     pending_planet: Option<(VectorEarthTheme, GpuMeshPayload)>,
     pending_site: Option<(u64, GpuMeshPayload)>,
@@ -766,8 +1042,8 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
-        _egui_encoder: &mut wgpu::CommandEncoder,
+        screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let Some(res) = callback_resources.get_mut::<WebGpuEarthResources>() else {
@@ -820,6 +1096,19 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
         let su = self.uniforms.to_site_pass_uniforms();
         queue.write_buffer(&res.planet_uniform_buf, 0, struct_as_u8_slice(&pu));
         queue.write_buffer(&res.site_uniform_buf, 0, struct_as_u8_slice(&su));
+
+        let vp = egui::epaint::ViewportInPixels::from_points(
+            &self.viewport_rect,
+            screen_descriptor.pixels_per_point,
+            screen_descriptor.size_in_pixels,
+        );
+        if vp.width_px <= 0 || vp.height_px <= 0 {
+            res.rendered_this_frame = false;
+            return Vec::new();
+        }
+        res.ensure_targets(device, vp.width_px as u32, vp.height_px as u32);
+        res.render_offscreen_passes(egui_encoder, self.uniforms.render_site_pass);
+        res.rendered_this_frame = true;
         Vec::new()
     }
 
@@ -832,63 +1121,36 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
         let Some(res) = callback_resources.get::<WebGpuEarthResources>() else {
             return;
         };
-        let vp = info.viewport_in_pixels();
-        if vp.width_px <= 0 || vp.height_px <= 0 {
+        if !res.rendered_this_frame {
             return;
         }
-        let max_w = info.screen_size_px[0].max(1);
-        let max_h = info.screen_size_px[1].max(1);
+        let Some(ref target) = res.targets else {
+            return;
+        };
+        let vp = info.viewport_in_pixels();
+        let cp = info.clip_rect_in_pixels();
+        let max_w = info.screen_size_px[0];
+        let max_h = info.screen_size_px[1];
+        if max_w == 0 || max_h == 0 || vp.width_px <= 0 || vp.height_px <= 0 || cp.width_px <= 0 || cp.height_px <= 0 {
+            return;
+        }
         let sx = (vp.left_px.max(0) as u32).min(max_w.saturating_sub(1));
         let sy = (vp.top_px.max(0) as u32).min(max_h.saturating_sub(1));
-        let sw = (vp.width_px.max(1) as u32).min(max_w - sx).max(1);
-        let sh = (vp.height_px.max(1) as u32).min(max_h - sy).max(1);
-        render_pass.set_scissor_rect(sx, sy, sw, sh);
+        let sw = (vp.width_px as u32).min(max_w.saturating_sub(sx));
+        let sh = (vp.height_px as u32).min(max_h.saturating_sub(sy));
 
-        // Pass 1: Planetary Vector Globe in far depth band [0.50, 1.00]
-        if res.planet.index_count > 0 {
-            render_pass.set_viewport(
-                vp.left_px as f32,
-                vp.top_px as f32,
-                vp.width_px as f32,
-                vp.height_px as f32,
-                0.50,
-                1.00,
-            );
-            render_pass.set_pipeline(&res.opaque_pipeline);
-            render_pass.set_bind_group(0, &res.planet_bind_group, &[]);
-            res.planet.draw(render_pass);
+        let cx = (cp.left_px.max(0) as u32).min(max_w.saturating_sub(1));
+        let cy = (cp.top_px.max(0) as u32).min(max_h.saturating_sub(1));
+        let cw = (cp.width_px as u32).min(max_w.saturating_sub(cx));
+        let ch = (cp.height_px as u32).min(max_h.saturating_sub(cy));
+        if sw == 0 || sh == 0 || cw == 0 || ch == 0 {
+            return;
         }
-
-        // Pass 2: Floating-Origin RTC Local Site Scene in foreground depth band [0.00, 0.499]
-        let has_site = res.site.index_count > 0
-            || res.bim.index_count > 0
-            || res.hinges.index_count > 0
-            || res.subsurface.index_count > 0
-            || res.portfolio.index_count > 0
-            || res.hazard.index_count > 0
-            || res.fragility_loss.index_count > 0;
-        if self.uniforms.render_site_pass && has_site {
-            render_pass.set_viewport(
-                vp.left_px as f32,
-                vp.top_px as f32,
-                vp.width_px as f32,
-                vp.height_px as f32,
-                0.00,
-                0.499,
-            );
-            render_pass.set_pipeline(&res.opaque_pipeline);
-            render_pass.set_bind_group(0, &res.site_bind_group, &[]);
-            res.site.draw(render_pass);
-            res.bim.draw(render_pass);
-
-            render_pass.set_pipeline(&res.translucent_pipeline);
-            render_pass.set_bind_group(0, &res.site_bind_group, &[]);
-            res.hinges.draw(render_pass);
-            res.subsurface.draw(render_pass);
-            res.portfolio.draw(render_pass);
-            res.hazard.draw(render_pass);
-            res.fragility_loss.draw(render_pass);
-        }
+        render_pass.set_viewport(sx as f32, sy as f32, sw as f32, sh as f32, 0.0, 1.0);
+        render_pass.set_scissor_rect(cx, cy, cw, ch);
+        render_pass.set_pipeline(&res.composite_pipeline);
+        render_pass.set_bind_group(0, &target.composite_bg, &[]);
+        render_pass.draw(0..3, 0..1);
     }
 }
 
@@ -940,6 +1202,14 @@ impl WebGpuEarthState {
             wgpu::Backend::Dx12 => "WebGPU (DX12)",
             _ => "WebGPU",
         };
+        render_state
+            .device
+            .on_uncaptured_error(std::sync::Arc::new(|err| {
+                #[cfg(target_arch = "wasm32")]
+                log::error!("WebGPU uncaptured device error: {err}");
+                #[cfg(not(target_arch = "wasm32"))]
+                eprintln!("WebGPU uncaptured device error: {err}");
+            }));
         let resources = WebGpuEarthResources::new(&render_state.device, render_state.target_format);
         render_state
             .renderer
@@ -1372,6 +1642,7 @@ impl WebGpuEarthState {
         painter.add(egui_wgpu::Callback::new_paint_callback(
             rect,
             WebGpuEarthPaintCallback {
+                viewport_rect: rect,
                 uniforms,
                 pending_planet,
                 pending_site,

@@ -770,3 +770,164 @@ use crate::core::ifcx::IfcxDocument;
         });
         assert!(hidden_frag.vertices.is_empty() && hidden_frag.indices.is_empty());
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_phase75_real_wgpu_pipelines_wgsl_and_non_black_render() {
+        use std::sync::{Arc, Mutex};
+
+        fn block_on_local<F: std::future::Future>(fut: F) -> F::Output {
+            use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+            fn no_op(_: *const ()) {}
+            fn clone_w(p: *const ()) -> RawWaker {
+                RawWaker::new(p, &VTABLE)
+            }
+            const VTABLE: RawWakerVTable = RawWakerVTable::new(clone_w, no_op, no_op, no_op);
+            let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
+            let mut cx = Context::from_waker(&waker);
+            let mut fut = std::pin::pin!(fut);
+            loop {
+                match fut.as_mut().poll(&mut cx) {
+                    Poll::Ready(val) => return val,
+                    Poll::Pending => std::thread::yield_now(),
+                }
+            }
+        }
+
+        let instance = wgpu::Instance::default();
+        let Ok(adapter) = block_on_local(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+            apply_limit_buckets: false,
+        })) else {
+            // Headless CI without a GPU adapter skips cleanly while compile/linking still verifies.
+            return;
+        };
+        let Ok((device, queue)) =
+            block_on_local(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        let planet_mesh = build_planetary_vector_globe_mesh(VectorEarthTheme::CoastalBlueprint);
+        res.planet.upload(&device, &queue, "test_planet", 1, &planet_mesh);
+
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(64.0, 64.0));
+        let cam = GlobeCamera::default();
+        let xform = GlobeScreenTransform::from_view(rect, -2.0, 112.0, 3.0, &cam);
+        let uniforms = RtcCameraUniforms::from_globe_xform(
+            &xform,
+            VectorEarthTheme::CoastalBlueprint,
+            &cam,
+            (-2.0, 112.0),
+            1.25,
+            false,
+        );
+        let pu = uniforms.to_planet_pass_uniforms();
+        queue.write_buffer(&res.planet_uniform_buf, 0, struct_as_u8_slice(&pu));
+        res.ensure_targets(&device, 64, 64);
+
+        let out_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("test_composite_out"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: fmt,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let out_view = out_tex.create_view(&Default::default());
+        let read_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("test_readback"),
+            size: (64 * 64 * 4) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = device.create_command_encoder(&Default::default());
+        res.render_offscreen_passes(&mut encoder, false);
+        {
+            let target = res.targets.as_ref().expect("Offscreen targets allocated");
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("test_composite_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &out_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_viewport(0.0, 0.0, 64.0, 64.0, 0.0, 1.0);
+            pass.set_scissor_rect(0, 0, 64, 64);
+            pass.set_pipeline(&res.composite_pipeline);
+            pass.set_bind_group(0, &target.composite_bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        encoder.copy_texture_to_buffer(
+            out_tex.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &read_buf,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(64 * 4),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit([encoder.finish()]);
+
+        let map_res: Arc<Mutex<Option<Result<(), wgpu::BufferAsyncError>>>> =
+            Arc::new(Mutex::new(None));
+        let map_res_cb = Arc::clone(&map_res);
+        read_buf
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |r| {
+                *map_res_cb.lock().unwrap() = Some(r);
+            });
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let val_err = block_on_local(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "WebGPU pipeline triggered GPU validation error: {val_err:?}"
+        );
+        assert!(
+            matches!(*map_res.lock().unwrap(), Some(Ok(()))),
+            "Readback buffer failed to map"
+        );
+
+        let bytes = read_buf
+            .slice(..)
+            .get_mapped_range()
+            .expect("Mapped range");
+        let non_black_pixels = bytes
+            .chunks_exact(4)
+            .filter(|px| (px[0] > 0 || px[1] > 0 || px[2] > 0) && px[3] > 0)
+            .count();
+        drop(bytes);
+        read_buf.unmap();
+        assert!(
+            non_black_pixels > 500,
+            "Expected curved Vector Earth globe to render non-black opaque pixels (got {non_black_pixels}/4096)"
+        );
+    }

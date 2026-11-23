@@ -8,8 +8,9 @@ fn main() -> eframe::Result {
     use egui::Vec2;
 
     let mut native_options = NativeOptions::default();
-    // Request 24-bit hardware Z-buffer for Pure WebGPU / Metal / Vulkan / DX12 3D Vector Earth rendering
-    native_options.depth_buffer = 24;
+    // Main egui render pass uses depth_buffer = 0 (3D Vector Earth owns an offscreen Depth24PlusStencil8 pass
+    // so wgpu 30 never emits an invalid `stencilReadOnly: true` flag on depth-only Depth24Plus attachments).
+    native_options.depth_buffer = 0;
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(ref mut create_new) =
         native_options.wgpu_options.wgpu_setup
     {
@@ -55,11 +56,24 @@ fn main() {
     eframe::WebLogger::init(log::LevelFilter::Info).ok();
 
     let mut web_options = eframe::WebOptions::default();
-    web_options.depth_buffer = 24;
+    // Main egui render pass uses depth_buffer = 0 (3D Vector Earth owns an offscreen Depth24PlusStencil8 pass
+    // so wgpu 30 never emits an invalid `stencilReadOnly: true` flag on depth-only Depth24Plus attachments).
+    web_options.depth_buffer = 0;
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(ref mut create_new) =
         web_options.wgpu_options.wgpu_setup
     {
         create_new.instance_descriptor.backends = eframe::wgpu::Backends::BROWSER_WEBGPU;
+        create_new.device_descriptor = std::sync::Arc::new(|adapter| {
+            let limits = adapter.limits();
+            eframe::wgpu::DeviceDescriptor {
+                label: Some("eigengraph_webgpu_device"),
+                required_limits: eframe::wgpu::Limits {
+                    max_texture_dimension_2d: limits.max_texture_dimension_2d.min(8192),
+                    ..eframe::wgpu::Limits::downlevel_defaults()
+                },
+                ..Default::default()
+            }
+        });
     }
 
     wasm_bindgen_futures::spawn_local(async {
