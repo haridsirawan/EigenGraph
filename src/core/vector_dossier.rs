@@ -32,6 +32,7 @@ pub struct VectorDossierInput<'a> {
     pub diff_report: Option<&'a IfcxVisualDiffReport>,
     pub portfolio_report: Option<&'a crate::core::portfolio_retrofit::DistrictPortfolioRetrofitReport>,
     pub replay_report: Option<&'a crate::core::ground_motion_replay::GroundMotionReplayReport>,
+    pub shm_report: Option<&'a crate::core::shm_twin::ShmDigitalTwinReport>,
     pub sheet_code: &'a str,
     pub revision: &'a str,
 }
@@ -612,7 +613,20 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
         "Baseline Intact (No retrofit delta active)".to_string()
     };
 
-    let haz_line = if let Some(rep) = input.replay_report {
+    let haz_line = if let Some(shm) = input.shm_report {
+        format!(
+            "SHM {} | f1 {:.2}->{:.2}Hz ({:+.1}%) | MAC {:.2} | K_ret {:.0}% | {}G/{}Y/{}R",
+            shm.atc20_placard.short_label(),
+            shm.baseline_freq_1_hz,
+            shm.observed_freq_1_hz,
+            shm.freq_shift_pct,
+            shm.mac_mode_1,
+            shm.global_stiffness_retention_pct,
+            shm.green_count,
+            shm.yellow_count,
+            shm.red_count,
+        )
+    } else if let Some(rep) = input.replay_report {
         format!(
             "NL-THA {} ({}, {:.2}g) | Drift {:.2}% | Hinges {}IO/{}LS/{}CP/{}M | Fragility ${:.0}k ({:.0}d {:?})",
             rep.config.active_record_label(),
@@ -636,7 +650,9 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
         "Nominal Ambient Site Conditions".to_string()
     };
 
-    let sixth_label = if input.replay_report.is_some() {
+    let sixth_label = if input.shm_report.is_some() {
+        "Live SHM Digital Twin & ATC-20 Placard"
+    } else if input.replay_report.is_some() {
         "NL-THA Ground-Motion & Hinges"
     } else {
         "District Multi-Hazard"
@@ -975,6 +991,7 @@ mod tests {
             diff_report: Some(&diff),
             portfolio_report: None,
             replay_report: Some(&replay_rep),
+            shm_report: None,
             sheet_code: "S-101",
             revision: "REV 01",
         });
@@ -993,5 +1010,35 @@ mod tests {
         assert_eq!(export.sha256_seal.len(), 64);
         assert!(export.sha256_seal.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(export.svg_content.contains(&export.sha256_seal));
+
+        let shm_rep = crate::core::shm_twin::evaluate_shm_digital_twin_for_bim(
+            &proj,
+            &site,
+            None,
+            Some(&ssi_rep),
+            Some(&replay_rep),
+            None,
+            &crate::core::shm_twin::ShmDigitalTwinConfig::default(),
+            (-6.2088, 106.8456),
+        )
+        .expect("SHM report");
+        let shm_export = build_pure_vector_engineering_dossier_svg(&VectorDossierInput {
+            project: &proj,
+            members: &members,
+            site: &site,
+            lat_lon: (-6.2088, 106.8456),
+            retrofit_report: None,
+            crc_report: None,
+            ssi_report: Some(&ssi_rep),
+            hazard_report: None,
+            diff_report: Some(&diff),
+            portfolio_report: None,
+            replay_report: Some(&replay_rep),
+            shm_report: Some(&shm_rep),
+            sheet_code: "S-102",
+            revision: "REV 02",
+        });
+        assert!(shm_export.svg_content.contains("Live SHM Digital Twin &amp; ATC-20 Placard"));
+        assert!(shm_export.svg_content.contains("SHM "));
     }
 }

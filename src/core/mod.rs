@@ -43,6 +43,7 @@ pub mod gis;
 pub mod lifecycle_ops;
 pub mod portfolio_retrofit;
 pub mod ground_motion_replay;
+pub mod shm_twin;
 pub mod web_bridge;
 pub mod vector_dossier;
 
@@ -223,6 +224,13 @@ pub use ground_motion_replay::{
     AsyncReplayJobPhase, GroundMotionReplayConfig, GroundMotionReplayFrame,
     GroundMotionReplayReport, PlasticHingeJointSnapshot, TriDirectionalMode,
     NS_EG_FRAGILITY_LOSS, NS_EG_TIME_HISTORY_REPLAY,
+};
+pub use shm_twin::{
+    evaluate_shm_digital_twin_for_bim, looks_like_shm_telemetry_payload, parse_shm_telemetry_log,
+    sample_shm_telemetry_csv, Atc20ChecklistCriterion, Atc20Placard, CustomShmTelemetryLog,
+    DistrictBuildingPlacard, ShmDigitalTwinConfig, ShmDigitalTwinReport, ShmFaultScenario,
+    ShmPsdPoint, ShmSensorKind, ShmSensorNodeSnapshot, ShmTelemetryRecord, StoryShmHealth,
+    NS_EG_ATC20_PLACARD, NS_EG_SHM_DIGITAL_TWIN,
 };
 
 

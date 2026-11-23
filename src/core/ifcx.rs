@@ -70,6 +70,8 @@ pub mod ns {
     pub const EG_PORTFOLIO_RETROFIT: &str = "eigengraph::portfolio::retrofit_plan";
     pub const EG_TIME_HISTORY_REPLAY: &str = "eigengraph::analysis::time_history_replay";
     pub const EG_FRAGILITY_LOSS: &str = "eigengraph::analysis::fema_p58_fragility";
+    pub const EG_SHM_DIGITAL_TWIN: &str = "eigengraph::analysis::shm_digital_twin";
+    pub const EG_ATC20_PLACARD: &str = "eigengraph::analysis::atc20_placard";
 }
 
 fn default_ifcx_version() -> String {
@@ -1340,10 +1342,24 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), replay.fragility_overlay_ifcx.clone()]);
         stage.to_composed_document(&format!("{}_fema_p58_fragility", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Live SHM Digital Twin & Post-Earthquake
+    /// ATC-20 Placard overlay (`eigengraph::analysis::shm_digital_twin`, `eigengraph::analysis::atc20_placard`).
+    pub fn compose_with_shm_atc20_overlay(
+        base_doc: &IfcxDocument,
+        shm: &crate::core::shm_twin::ShmDigitalTwinReport,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[base_doc.clone(), shm.shm_overlay_ifcx.clone()]);
+        stage.to_composed_document(&format!("{}_shm_atc20_triage", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_FRAGILITY_LOSS) {
+    if node.attributes.contains_key(ns::EG_SHM_DIGITAL_TWIN)
+        || node.attributes.contains_key(ns::EG_ATC20_PLACARD)
+    {
+        "SHM & ATC-20".to_string()
+    } else if node.attributes.contains_key(ns::EG_FRAGILITY_LOSS) {
         "FEMA P-58 Fragility".to_string()
     } else if node.attributes.contains_key(ns::EG_TIME_HISTORY_REPLAY) {
         "Time-History Replay".to_string()

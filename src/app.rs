@@ -1082,7 +1082,8 @@ impl EigenGraphApp {
             | SpatialLens::BendingMoment
             | SpatialLens::DeformedShape
             | SpatialLens::ModalVibration
-            | SpatialLens::TimeHistoryReplay => NavigationPillar::AnalysisSimulation,
+            | SpatialLens::TimeHistoryReplay
+            | SpatialLens::ShmDigitalTwin => NavigationPillar::AnalysisSimulation,
             SpatialLens::Erection4D => NavigationPillar::TimeScheduling,
         };
 
@@ -2355,6 +2356,7 @@ impl EigenGraphApp {
                     diff_report: self.universal_canvas.last_ifcx_visual_diff.as_ref(),
                     portfolio_report: self.universal_canvas.last_portfolio_retrofit_report.as_ref(),
                     replay_report: self.universal_canvas.last_ground_motion_replay_report.as_ref(),
+                    shm_report: self.universal_canvas.last_shm_twin_report.as_ref(),
                     sheet_code: "S-101",
                     revision: "REV 01",
                 },
@@ -2582,6 +2584,81 @@ impl EigenGraphApp {
             } else {
                 self.spatial_workspace
                     .push_trace("No FEMA P-58 Fragility synthesis available.", false);
+            }
+        }
+        if hud_actions.open_shm_telemetry_picker {
+            crate::core::web_bridge::trigger_file_picker(".csv,.json,.txt");
+            self.spatial_workspace.push_trace(
+                "Select an SHM sensor telemetry CSV or JSON log...",
+                true,
+            );
+        }
+        if hud_actions.run_shm_digital_twin {
+            if self.build_view.bim_bus.project.is_empty() {
+                if let Ok(msg) = self
+                    .build_view
+                    .bim_bus
+                    .execute_natural_language("portal 3x2 @6m 2floors")
+                {
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.spatial_workspace.push_trace(msg, true);
+                    self.sync_bim_to_fem();
+                }
+            }
+            match self
+                .universal_canvas
+                .run_shm_digital_twin(&self.build_view.bim_bus.project)
+            {
+                Ok(summary) => {
+                    self.spatial_workspace.push_trace(summary.clone(), true);
+                    self.ai_assistant_view.chat_history.push(crate::models::ChatMessage {
+                        is_user: false,
+                        message: format!("[EigenAI Live SHM Digital Twin & ATC-20]: {summary}"),
+                        time: crate::core::web_bridge::unix_timestamp_label(),
+                    });
+                }
+                Err(err) => {
+                    self.spatial_workspace.push_trace(err, false);
+                }
+            }
+        }
+        if hud_actions.export_shm_atc20_ifcx {
+            if self.universal_canvas.last_shm_twin_report.is_none()
+                && !self.build_view.bim_bus.project.is_empty()
+            {
+                let _ = self
+                    .universal_canvas
+                    .run_shm_digital_twin(&self.build_view.bim_bus.project);
+            }
+            if let Some(ref shm) = self.universal_canvas.last_shm_twin_report {
+                let raw_name =
+                    Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+                let fname = format!("{raw_name}_shm_atc20.ifcx");
+                let layered = self
+                    .universal_canvas
+                    .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+                let composed =
+                    crate::core::IfcxStage::compose_with_shm_atc20_overlay(&layered, shm);
+                let json = composed.to_json_pretty();
+                match crate::core::web_bridge::save_text_file(
+                    &fname,
+                    &json,
+                    "application/json;charset=utf-8",
+                ) {
+                    Ok(_) => {
+                        self.spatial_workspace.push_trace(
+                            format!(
+                                "Exported SHM & ATC-20 IFCX ({fname}, {} nodes)",
+                                composed.data.len()
+                            ),
+                            true,
+                        );
+                    }
+                    Err(err) => self.spatial_workspace.push_trace(err, false),
+                }
+            } else {
+                self.spatial_workspace
+                    .push_trace("No Live SHM Digital Twin report available.", false);
             }
         }
     }
@@ -4124,6 +4201,56 @@ impl EigenGraphApp {
                 }
             }
             return;
+        }
+
+        if crate::core::looks_like_shm_telemetry_payload(trimmed) {
+            match crate::core::parse_shm_telemetry_log(trimmed, &payload.filename) {
+                Ok(log) => {
+                    let ch = log.story_channels;
+                    let cnt = log.records.len();
+                    let fs_hz = log.sampling_rate_hz;
+                    self.universal_canvas.shm_twin_config.custom_telemetry = Some(log);
+                    self.universal_canvas.shm_twin_config.fault_scenario =
+                        crate::core::ShmFaultScenario::CustomTelemetryStream;
+                    if self.build_view.bim_bus.project.is_empty() {
+                        if let Ok(msg) = self
+                            .build_view
+                            .bim_bus
+                            .execute_natural_language("portal 3x2 @6m 2floors")
+                        {
+                            self.universal_canvas.ground_origin_anchored = true;
+                            self.spatial_workspace.push_trace(msg, true);
+                            self.sync_bim_to_fem();
+                        }
+                    }
+                    self.spatial_workspace.apply_lens_to_views(
+                        crate::views::spatial_workspace::SpatialLens::ShmDigitalTwin,
+                        &mut self.build_view,
+                        &mut self.universal_canvas,
+                    );
+                    self.spatial_workspace.open_shm_drawer();
+                    match self
+                        .universal_canvas
+                        .run_shm_digital_twin(&self.build_view.bim_bus.project)
+                    {
+                        Ok(summary) => {
+                            self.spatial_workspace.push_trace(
+                                format!(
+                                    "Ingested SHM telemetry '{}' ({cnt} pts, {ch} stories @ {fs_hz:.0}Hz): {summary}",
+                                    payload.filename
+                                ),
+                                true,
+                            );
+                        }
+                        Err(err) => self.spatial_workspace.push_trace(err, false),
+                    }
+                    return;
+                }
+                Err(err) => {
+                    self.spatial_workspace.push_trace(err, false);
+                    return;
+                }
+            }
         }
 
         if crate::core::looks_like_accelerogram_payload(&payload.filename, trimmed) {

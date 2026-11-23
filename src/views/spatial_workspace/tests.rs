@@ -3713,3 +3713,151 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn test_phase76_shm_digital_twin_atc20_slash_commands_and_zero_hud_overflow() {
+        for cmd in ["/shm", "/sensors", "/placard", "/shm-fault", "/shm-ifcx"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|c| c.cmd == cmd),
+                "Missing Phase 76 slash command {cmd} in SLASH_COMMANDS"
+            );
+        }
+
+        let raw_ai = "Soft-story detected [[OPEN_SHM_TWIN]] [[INJECT_SHM_FAULT:soft_story:85:1]] [[RUN_ATC20_TRIAGE]]";
+        let (clean, directives) = parse_gemini_action_directives(raw_ai);
+        assert_eq!(clean, "Soft-story detected");
+        assert_eq!(directives.len(), 3);
+        assert!(matches!(directives[0], GeminiDirective::OpenShmDigitalTwin));
+        assert!(matches!(
+            directives[1],
+            GeminiDirective::InjectShmFault {
+                ref scenario,
+                severity_pct,
+                story
+            } if scenario == "soft_story" && (severity_pct - 85.0).abs() < 1e-6 && story == 1
+        ));
+        assert!(matches!(directives[2], GeminiDirective::RunAtc20Triage));
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let members: Vec<StructuralMember> = Vec::new();
+        let projects: Vec<crate::models::ProjectItem> = Vec::new();
+        let mut db_components: Vec<crate::models::DatabaseComponent> = Vec::new();
+
+        build.bim_bus.project = BimProject::sample_bimcraft_building();
+
+        let act_shm = spatial.execute_spatial_input(
+            "/shm",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_shm.run_shm_digital_twin);
+        assert!(spatial.shm_drawer_open);
+        assert_eq!(spatial.shm_drawer_tab, 0);
+        assert_eq!(spatial.active_lens, SpatialLens::ShmDigitalTwin);
+
+        // Idempotent open_shm_drawer on repeated /placard command must NOT collapse drawer
+        let act_placard = spatial.execute_spatial_input(
+            "/placard",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_placard.run_shm_digital_twin);
+        assert!(spatial.shm_drawer_open);
+        assert_eq!(spatial.shm_drawer_tab, 1);
+
+        // Exclusive drawer switching: opening ground_motion closes shm_drawer_open
+        spatial.toggle_exclusive_drawer("ground_motion");
+        assert!(!spatial.shm_drawer_open);
+        spatial.open_shm_drawer();
+        assert!(spatial.shm_drawer_open);
+        assert!(!spatial.ground_motion_drawer_open);
+
+        let act_fault = spatial.execute_spatial_input(
+            "/shm-fault soft_story 88 1",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_fault.run_shm_digital_twin);
+        assert_eq!(
+            canvas.shm_twin_config.fault_scenario,
+            crate::core::ShmFaultScenario::SoftStoryFirstFloor
+        );
+        assert!((canvas.shm_twin_config.severity_pct - 88.0).abs() < 1e-6);
+
+        let act_sample = spatial.execute_spatial_input(
+            "/sensors sample",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_sample.run_shm_digital_twin);
+        assert!(canvas.shm_twin_config.custom_telemetry.is_some());
+
+        let act_ifcx = spatial.execute_spatial_input(
+            "/shm-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_ifcx.export_shm_atc20_ifcx);
+
+        canvas
+            .run_shm_digital_twin(&build.bim_bus.project)
+            .expect("SHM evaluation succeeds");
+
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0usize, 1usize] {
+            spatial.shm_drawer_tab = tab_idx;
+            spatial.open_shm_drawer();
+            for win_w in [1280.0_f32, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 800.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 76 tab={tab_idx} Dynamic Island overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

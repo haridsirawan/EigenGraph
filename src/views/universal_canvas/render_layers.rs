@@ -478,6 +478,22 @@ impl UniversalCanvasState {
                                 _ => Color32::from_rgb(91, 146, 165),
                             }
                         }
+                        EarthBimLens::ShmDigitalTwin => {
+                            if let Some(ref shm) = self.last_shm_twin_report {
+                                let sh_opt = shm.story_health.get(level_idx.min(shm.story_health.len().saturating_sub(1)));
+                                match sh_opt.map(|s| s.story_placard) {
+                                    Some(crate::core::Atc20Placard::UnsafeRed) => {
+                                        Color32::from_rgb(239, 68, 68)
+                                    }
+                                    Some(crate::core::Atc20Placard::RestrictedYellow) => {
+                                        Color32::from_rgb(245, 158, 11)
+                                    }
+                                    _ => Color32::from_rgb(34, 197, 94),
+                                }
+                            } else {
+                                Color32::from_rgb(34, 197, 94)
+                            }
+                        }
                         EarthBimLens::Erection4D => {
                             if level_idx == 0 {
                                 Color32::from_rgb(16, 185, 129)
@@ -1148,6 +1164,24 @@ impl UniversalCanvasState {
                                     Color32::from_rgb(208, 235, 225),
                                 );
                             }
+                        } else if active_lens == EarthBimLens::ShmDigitalTwin {
+                            if let Some(ref shm) = self.last_shm_twin_report {
+                                let [pr, pg, pb] = shm.atc20_placard.badge_color_rgb();
+                                clip_painter.text(
+                                    apex_pt + Vec2::new(0.0, -14.0),
+                                    Align2::CENTER_BOTTOM,
+                                    format!(
+                                        "ATC-20 {} • f1={:.2}Hz ({:+.1}%) • MAC={:.2} • K_ret={:.0}%",
+                                        shm.atc20_placard.short_label(),
+                                        shm.observed_freq_1_hz,
+                                        shm.freq_shift_pct,
+                                        shm.mac_mode_1,
+                                        shm.global_stiffness_retention_pct
+                                    ),
+                                    egui::FontId::monospace(10.0),
+                                    Color32::from_rgb(pr, pg, pb),
+                                );
+                            }
                         } else if active_lens == EarthBimLens::TimeHistoryReplay {
                             if let Some(ref rf) = replay_frame_opt {
                                 let rec_lbl = self.ground_motion_replay_config.active_record_label();
@@ -1592,6 +1626,22 @@ impl UniversalCanvasState {
                         EarthBimLens::DeformedShape => Color32::from_rgb(245, 158, 11),
                         EarthBimLens::ModalVibration => Color32::from_rgb(91, 146, 165),
                         EarthBimLens::TimeHistoryReplay => Color32::from_rgb(245, 158, 11),
+                        EarthBimLens::ShmDigitalTwin => {
+                            if let Some(ref shm) = self.last_shm_twin_report {
+                                if let Some(dp) = shm
+                                    .district_placards
+                                    .iter()
+                                    .find(|d| d.rel_path == b.rel_path)
+                                {
+                                    let [r, g, bl] = dp.placard.badge_color_rgb();
+                                    Color32::from_rgb(r, g, bl)
+                                } else {
+                                    Color32::from_rgb(34, 197, 94)
+                                }
+                            } else {
+                                Color32::from_rgb(34, 197, 94)
+                            }
+                        }
                         EarthBimLens::Erection4D => Color32::from_rgb(56, 189, 248),
                     }
                 };
@@ -2332,6 +2382,63 @@ impl UniversalCanvasState {
                     Stroke::new(1.5, stroke_col.gamma_multiply(0.85)),
                 ));
             }
+        }
+    }
+
+    /// Pure-vector CPU fallback rendering SHM sensors & rooftop ATC-20 placard shield when WebGPU is inactive.
+    pub(super) fn paint_cpu_shm_triage_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+        bim_project: &BimProject,
+    ) {
+        if self.earth_bim_author.active_lens != EarthBimLens::ShmDigitalTwin
+            || self.world_map.zoom_level < 14.0
+            || bim_project.is_empty()
+        {
+            return;
+        }
+        let Some(ref shm) = self.last_shm_twin_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let lift_scale = if self.world_map.zoom_level < 14.5 { 8.0 } else { 1.0 };
+        for s in &shm.sensors {
+            let [ex, ny, ez] = s.position_local_m;
+            if let Some(sp) =
+                self.project_active_bim_mm(xform, ex * 1000.0, ny * 1000.0, ez, lift_scale)
+            {
+                let col = if s.health_index < 0.72 {
+                    Color32::from_rgb(239, 68, 68)
+                } else if s.is_triggered || s.health_index < 0.88 {
+                    Color32::from_rgb(245, 158, 11)
+                } else {
+                    Color32::from_rgb(34, 197, 94)
+                };
+                clip.circle_filled(sp, if s.is_triggered { 5.5 } else { 4.2 }, col);
+                clip.circle_stroke(sp, 7.5, Stroke::new(1.2, col.gamma_multiply(0.75)));
+            }
+        }
+        if let Some(sp) = self.project_active_bim_mm(
+            xform,
+            0.0,
+            0.0,
+            shm.building_height_m + 2.2,
+            lift_scale,
+        ) {
+            let [r, g, b] = shm.atc20_placard.badge_color_rgb();
+            let badge_col = Color32::from_rgb(r, g, b);
+            let box_rect = Rect::from_center_size(sp, egui::Vec2::new(82.0, 20.0));
+            clip.rect_filled(box_rect, 4.0, badge_col.gamma_multiply(0.92));
+            clip.rect_stroke(box_rect, 4.0, Stroke::new(1.2, Color32::WHITE), egui::StrokeKind::Inside);
+            clip.text(
+                sp,
+                Align2::CENTER_CENTER,
+                format!("ATC-20: {}", shm.atc20_placard.short_label()),
+                egui::FontId::monospace(10.0),
+                Color32::WHITE,
+            );
         }
     }
 

@@ -148,6 +148,9 @@ pub struct UniversalCanvasState {
     pub replay_async_manager: crate::core::ground_motion_replay::AsyncReplayJobManager,
     pub replay_anim_playing: bool,
     pub replay_cursor_time_s: f64,
+    // Phase 76: Live SHM Digital Twin & Automated Post-Earthquake ATC-20 Placard Triage
+    pub shm_twin_config: crate::core::shm_twin::ShmDigitalTwinConfig,
+    pub last_shm_twin_report: Option<crate::core::shm_twin::ShmDigitalTwinReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -266,6 +269,8 @@ impl Default for UniversalCanvasState {
             replay_async_manager: crate::core::ground_motion_replay::AsyncReplayJobManager::default(),
             replay_anim_playing: true,
             replay_cursor_time_s: 0.0,
+            shm_twin_config: crate::core::shm_twin::ShmDigitalTwinConfig::default(),
+            last_shm_twin_report: None,
         }
     }
 }
@@ -426,6 +431,9 @@ impl UniversalCanvasState {
                 replay,
             );
         }
+        if let Some(ref shm) = self.last_shm_twin_report {
+            doc = crate::core::ifcx::IfcxStage::compose_with_shm_atc20_overlay(&doc, shm);
+        }
         doc
     }
 
@@ -508,6 +516,29 @@ impl UniversalCanvasState {
         );
         self.portfolio_retrofit_config.active_frontier_index = rep.selected_frontier_idx;
         self.last_portfolio_retrofit_report = Some(rep);
+    }
+
+    /// Runs Phase 76 Live SHM Digital Twin, Modal Fingerprint Identification & Automated ATC-20 Placard Triage.
+    pub fn run_shm_digital_twin(&mut self, bim_project: &BimProject) -> Result<String, String> {
+        let site = self.active_site_coupling();
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let report = crate::core::shm_twin::evaluate_shm_digital_twin_for_bim(
+            bim_project,
+            &site,
+            Some(&self.subsurface_ssi),
+            self.last_subsurface_ssi_report.as_ref(),
+            self.last_ground_motion_replay_report.as_ref(),
+            Some(&self.world_index),
+            &self.shm_twin_config,
+            origin,
+        )?;
+        let summary = report.summary.clone();
+        self.last_shm_twin_report = Some(report);
+        Ok(summary)
     }
 
     /// Launches a non-blocking background Ground-Motion Replay & Async `StructGNN-CRC` worker job.
@@ -692,6 +723,7 @@ impl UniversalCanvasState {
             subsurface_ssi: self.subsurface_ssi.clone(),
             portfolio_retrofit: self.portfolio_retrofit_config.clone(),
             ground_motion_replay: self.ground_motion_replay_config.clone(),
+            shm_digital_twin: self.shm_twin_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -796,6 +828,8 @@ impl UniversalCanvasState {
             self.last_portfolio_retrofit_report = None;
         }
         self.ground_motion_replay_config = archive.ground_motion_replay;
+        self.shm_twin_config = archive.shm_digital_twin;
+        self.last_shm_twin_report = None;
         self.status_message = Some(format!(
             "Imported verified 1-file workspace '{}' ({} canvas objects)",
             archive.project_name,
@@ -1218,6 +1252,15 @@ impl UniversalCanvasState {
             } else {
                 Vec::new()
             };
+            let shm_story_retention: Vec<(f64, f64)> =
+                if self.earth_bim_author.active_lens == EarthBimLens::ShmDigitalTwin {
+                    self.last_shm_twin_report
+                        .as_ref()
+                        .map(|r| r.story_retention_pairs())
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
             let active_bim_gpu = if !bim_project.is_empty() {
                 Some(crate::views::webgpu_earth::ActiveBimGpuInput {
                     project: bim_project,
@@ -1240,6 +1283,7 @@ impl UniversalCanvasState {
                     replay_story_disp_xyz_m: &replay_disp_triples,
                     replay_ground_shake_xyz_m: replay_ground_shake,
                     replay_hinge_states: &replay_hinge_states,
+                    shm_story_retention: &shm_story_retention,
                 })
             } else {
                 None
@@ -1266,6 +1310,26 @@ impl UniversalCanvasState {
                         synthesis: &rep.fragility_loss,
                         visible: true,
                         heading_deg: active_heading_deg,
+                    }
+                })
+            } else {
+                None
+            };
+            let shm_origin = if self.ground_origin_anchored {
+                self.ground_origin_lat_lon
+            } else {
+                self.world_map.center_lat_lon
+            };
+            let shm_gpu_input = if !bim_project.is_empty()
+                && self.earth_bim_author.active_lens == EarthBimLens::ShmDigitalTwin
+            {
+                self.last_shm_twin_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::ShmTriageGpuInput {
+                        project: bim_project,
+                        report: rep,
+                        visible: true,
+                        heading_deg: active_heading_deg,
+                        site_origin: shm_origin,
                     }
                 })
             } else {
@@ -1316,6 +1380,7 @@ impl UniversalCanvasState {
                 portfolio_gpu_input,
                 hinge_gpu_input,
                 fragility_gpu_input,
+                shm_gpu_input,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
                 ui,
@@ -1355,6 +1420,11 @@ impl UniversalCanvasState {
                 && self.last_ground_motion_replay_report.is_some()
             {
                 self.paint_cpu_fragility_loss_fallback(&painter, rect, theme, &xform, bim_project);
+            }
+            if !gpu_globe_active
+                && self.earth_bim_author.active_lens == EarthBimLens::ShmDigitalTwin
+            {
+                self.paint_cpu_shm_triage_fallback(&painter, rect, &xform, bim_project);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

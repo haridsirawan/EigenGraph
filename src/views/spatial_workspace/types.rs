@@ -42,6 +42,7 @@ pub enum SpatialLens {
     DeformedShape,
     ModalVibration,
     TimeHistoryReplay,
+    ShmDigitalTwin,
     Erection4D,
 }
 
@@ -57,6 +58,7 @@ impl SpatialLens {
             Self::DeformedShape => "Deformed 6-DOF",
             Self::ModalVibration => "Modal Eigenmode",
             Self::TimeHistoryReplay => "EQ Time-History",
+            Self::ShmDigitalTwin => "SHM Digital Twin",
             Self::Erection4D => "4D Erection",
         }
     }
@@ -415,6 +417,14 @@ pub enum PlannedProposalAction {
     ToggleTriDirectional(Option<crate::core::ground_motion_replay::TriDirectionalMode>),
     ToggleAutoMatchSa,
     OpenFragilityTab,
+    // Phase 76: Live SHM Digital Twin & Automated Post-Earthquake ATC-20 Placard Triage
+    OpenShmDigitalTwin,
+    InjectShmFault {
+        scenario: String,
+        severity_pct: f64,
+        story: usize,
+    },
+    RunAtc20Triage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -474,6 +484,14 @@ pub enum GeminiDirective {
     ToggleTriDirectional(Option<crate::core::ground_motion_replay::TriDirectionalMode>),
     ToggleAutoMatchSa,
     OpenFragilityTab,
+    // Phase 76: Live SHM Digital Twin & Automated Post-Earthquake ATC-20 Placard Triage
+    OpenShmDigitalTwin,
+    InjectShmFault {
+        scenario: String,
+        severity_pct: f64,
+        story: usize,
+    },
+    RunAtc20Triage,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -656,6 +674,28 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleAutoMatchSa);
             } else if upper == "OPEN_FRAGILITY" {
                 directives.push(GeminiDirective::OpenFragilityTab);
+            } else if upper == "OPEN_SHM_TWIN" {
+                directives.push(GeminiDirective::OpenShmDigitalTwin);
+            } else if upper == "RUN_ATC20_TRIAGE" {
+                directives.push(GeminiDirective::RunAtc20Triage);
+            } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
+                let mut sp = rest.split(':').map(|s| s.trim());
+                let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
+                let severity_pct = sp
+                    .next()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(75.0)
+                    .clamp(0.0, 100.0);
+                let story = sp
+                    .next()
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(1)
+                    .max(1);
+                directives.push(GeminiDirective::InjectShmFault {
+                    scenario,
+                    severity_pct,
+                    story,
+                });
             }
             cursor = &after_start[end + 2..];
         } else {
@@ -1267,6 +1307,36 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export non-destructive eigengraph::analysis::fema_p58_fragility .ifcx overlay",
         icon: AppIcon::Cube3D,
     },
+    SlashCommandSpec {
+        cmd: "/shm",
+        category: "AI",
+        description: "Open Live SHM Digital Twin & Modal Fingerprint Identification (PSD + MAC)",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/sensors",
+        category: "AI",
+        description: "Ingest streamed or sample SHM CSV/JSON sensor logs (/sensors sample | upload | clear)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/placard",
+        category: "Safety",
+        description: "Run automated ATC-20 post-earthquake Green/Yellow/Red placard & district triage",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/shm-fault",
+        category: "AI",
+        description: "Inject calibrated structural fault (/shm-fault soft_story 80 1 | column_loss | liquefaction)",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/shm-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::shm_digital_twin + atc20_placard .ifcx",
+        icon: AppIcon::Cube3D,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1318,6 +1388,9 @@ pub struct SpatialHudActions {
     pub export_ground_motion_replay_ifcx: bool,
     pub open_accelerogram_file_picker: bool,
     pub export_fragility_loss_ifcx: bool,
+    pub run_shm_digital_twin: bool,
+    pub open_shm_telemetry_picker: bool,
+    pub export_shm_atc20_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -1673,5 +1746,8 @@ impl SpatialHudActions {
         self.export_ground_motion_replay_ifcx |= other.export_ground_motion_replay_ifcx;
         self.open_accelerogram_file_picker |= other.open_accelerogram_file_picker;
         self.export_fragility_loss_ifcx |= other.export_fragility_loss_ifcx;
+        self.run_shm_digital_twin |= other.run_shm_digital_twin;
+        self.open_shm_telemetry_picker |= other.open_shm_telemetry_picker;
+        self.export_shm_atc20_ifcx |= other.export_shm_atc20_ifcx;
     }
 }

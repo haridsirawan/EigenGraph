@@ -7,6 +7,20 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.7.6] - 2026-11-23 — Live SHM Digital Twin, Modal Fingerprint Identification & Automated Post-Earthquake ATC-20 Placard Triage
+
+### Added & Changed
+- **Live Structural Health Monitoring (SHM) Digital Twin & Modal Fingerprint Engine (`src/core/shm_twin.rs`, `src/core/ifcx.rs`, `src/core/vector_dossier.rs`)**:
+  - Coupled live/streamed CSV & JSON triaxial MEMS accelerometer, interstory inclinometer, and base fiber-Bragg strain telemetry (`parse_shm_telemetry_log`, `looks_like_shm_telemetry_payload`, `sample_shm_telemetry_csv`) to the active 3D BIM 6-DOF FEM stiffness/mass model (`FemSolver`, `ModalEngine::analyze_for_earth_3d`, `AriEngine::evaluate_redundancy_fast`) and condensed MDOF generalized eigensolver for large IFC frames.
+  - Computes baseline vs. observed natural frequencies ($f_1..f_3$, frequency shift $\Delta f_1/f_1$), Modal Assurance Criterion ($\text{MAC}_1..\text{MAC}_3$), 64-bin Welch-style baseline vs. observed Power Spectral Density (PSD), per-story stiffness retention & anomaly Z-scores, and residual system redundancy ($\text{ARI}_{res}$).
+  - Implements calibrated fault-injection and post-quake scenarios (`NominalIntact`, `SoftStoryFirstFloor`, `ColumnLossFault`, `SoilLiquefactionShift`, `SeismicDamageFromReplay`, `CustomTelemetryStream`), automated 6-rule ATC-20 / ASCE 41 / FEMA P-58 safety posting (`INSPECTED (GREEN)`, `RESTRICTED USE (YELLOW)`, `UNSAFE (RED)`), district-wide `WorldSpatialIndex` triage (`Green`/`Yellow`/`Red` counts), pure-vector A3 SVG dossier telemetry integration (`VectorDossierInput::shm_report`), and non-destructive IFCX overlay composition (`eigengraph::analysis::shm_digital_twin`, `eigengraph::analysis::atc20_placard`, `IfcSensor`).
+- **Pure WebGPU (`wgpu` + WGSL) 3D SHM Beacons, Story Stiffness Heatmap & Rooftop ATC-20 Shields (`src/views/webgpu_earth/`, `src/views/universal_canvas/`)**:
+  - Added `EarthBimLens::ShmDigitalTwin` encoding per-story residual stiffness retention directly onto 3D BIM structural members (`ActiveBimGpuInput::shm_story_retention`) plus `build_rtc_shm_triage_mesh` (`ShmTriageGpuInput`, `material_kind = 8.0`) rendering BIM-anchored ENU octahedral sensor beacons, glowing rooftop ATC-20 placard shields & perimeter collars, and nearby district ATC-20 building crowns inside the hardware 24-bit `Depth24PlusStencil8` offscreen WebGPU pass (`EARTH_WGSL` + `COMPOSITE_WGSL`, 0% WebGL, 0% external raster images) with full CPU vector fallback.
+- **Unified Single-Capsule Dynamic Island SHM Drawer, Slash Commands & Gemini Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added `SpatialLens::ShmDigitalTwin`, Dynamic Island `SHM` chip & status strip, exclusive 2-tab SHM Digital Twin drawer (`Live Sensors & Modal Shift` with pure-vector Welch PSD & per-story stiffness retention charts + `ATC-20 Placard Triage` with 6-rule checklist & Green/Yellow/Red district counts), idempotent `open_shm_drawer()`, `/shm`, `/sensors`, `/placard`, `/shm-fault`, `/shm-ifcx` commands, `.csv`/`.json` telemetry drop/picker ingestion, and Gemini `[[OPEN_SHM_TWIN]]`, `[[INJECT_SHM_FAULT:...]]`, `[[RUN_ATC20_TRIAGE]]` directives.
+- **Verification**:
+  - Verified clean native test suite (`cargo test --lib` — all 269 unit tests passing with 0 warnings, including `phase76_shm_digital_twin_frequency_shift_mac_and_atc20_placard_escalation`, `phase76_shm_telemetry_csv_and_json_parser`, real Metal GPU `test_phase76_webgpu_shm_sensor_beacons_atc20_placard_and_real_gpu_render`, and responsive Dynamic Island `1280px`/`768px`/`390px` zero-overflow test `test_phase76_shm_digital_twin_atc20_slash_commands_and_zero_hud_overflow`), `wasm32-unknown-unknown` check & release build, zero WebGL/glow/glutin crates, and zero external raster tokens.
+
 ## [v0.7.5] - 2026-11-23 — 100% Pure WebGPU (WGSL) Renderer, PEER `.at2`/`.csv` Tri-Directional Coupling & Real-Time FEMA P-58 Fragility
 
 ### Added & Changed

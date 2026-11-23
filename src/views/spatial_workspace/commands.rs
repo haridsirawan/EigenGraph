@@ -365,6 +365,56 @@ impl SpatialWorkspaceState {
                         true,
                     );
                 }
+                PlannedProposalAction::OpenShmDigitalTwin => {
+                    self.shm_drawer_tab = 0;
+                    self.open_shm_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::ShmDigitalTwin,
+                        build_view,
+                        universal_canvas,
+                    );
+                    out.run_shm_digital_twin = true;
+                    self.push_trace("Opened Live SHM Digital Twin & Modal Identification", true);
+                }
+                PlannedProposalAction::RunAtc20Triage => {
+                    self.shm_drawer_tab = 1;
+                    self.open_shm_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::ShmDigitalTwin,
+                        build_view,
+                        universal_canvas,
+                    );
+                    out.run_shm_digital_twin = true;
+                    self.push_trace("Executed Automated ATC-20 Post-Earthquake Placard Triage", true);
+                }
+                PlannedProposalAction::InjectShmFault {
+                    scenario,
+                    severity_pct,
+                    story,
+                } => {
+                    let parsed = crate::core::ShmFaultScenario::from_keyword(scenario)
+                        .unwrap_or(crate::core::ShmFaultScenario::SoftStoryFirstFloor);
+                    universal_canvas.shm_twin_config.fault_scenario = parsed;
+                    universal_canvas.shm_twin_config.severity_pct = severity_pct.clamp(0.0, 100.0);
+                    universal_canvas.shm_twin_config.target_story = (*story).max(1);
+                    self.shm_drawer_tab = 0;
+                    self.open_shm_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::ShmDigitalTwin,
+                        build_view,
+                        universal_canvas,
+                    );
+                    out.run_shm_digital_twin = true;
+                    self.push_trace(
+                        format!(
+                            "Injected SHM Fault '{}' ({:.0}% @ L{})",
+                            parsed.short_label(),
+                            universal_canvas.shm_twin_config.severity_pct,
+                            universal_canvas.shm_twin_config.target_story
+                        ),
+                        true,
+                    );
+                }
                 PlannedProposalAction::OpenFragilityTab => {
                     universal_canvas.ground_motion_replay_config.show_fragility_loss_overlay = true;
                     self.ground_motion_drawer_tab = 1;
@@ -534,6 +584,21 @@ impl SpatialWorkspaceState {
                             GeminiDirective::OpenFragilityTab => {
                                 PlannedProposalAction::OpenFragilityTab
                             }
+                            GeminiDirective::OpenShmDigitalTwin => {
+                                PlannedProposalAction::OpenShmDigitalTwin
+                            }
+                            GeminiDirective::RunAtc20Triage => {
+                                PlannedProposalAction::RunAtc20Triage
+                            }
+                            GeminiDirective::InjectShmFault {
+                                scenario,
+                                severity_pct,
+                                story,
+                            } => PlannedProposalAction::InjectShmFault {
+                                scenario: scenario.clone(),
+                                severity_pct: *severity_pct,
+                                story: *story,
+                            },
                         })
                         .collect();
                     let preview: String = directives
@@ -581,6 +646,13 @@ impl SpatialWorkspaceState {
                             }
                             GeminiDirective::ToggleAutoMatchSa => "MatchSaT1".to_string(),
                             GeminiDirective::OpenFragilityTab => "OpenFemaP58".to_string(),
+                            GeminiDirective::OpenShmDigitalTwin => "OpenShmTwin".to_string(),
+                            GeminiDirective::RunAtc20Triage => "Atc20Triage".to_string(),
+                            GeminiDirective::InjectShmFault {
+                                scenario,
+                                severity_pct,
+                                story,
+                            } => format!("ShmFault({scenario}:{severity_pct:.0}%@L{story})"),
                         })
                         .collect::<Vec<_>>()
                         .join(" + ");
@@ -873,6 +945,12 @@ impl SpatialWorkspaceState {
                 universal_canvas.show_domain_overlay = true;
                 universal_canvas.earth_bim_author.active_lens = EarthBimLens::TimeHistoryReplay;
             }
+            SpatialLens::ShmDigitalTwin => {
+                build_view.render_mode = Render3DMode::SolidShaded;
+                build_view.highlight_4d_erection = false;
+                universal_canvas.show_domain_overlay = true;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::ShmDigitalTwin;
+            }
             SpatialLens::Erection4D => {
                 build_view.render_mode = Render3DMode::CsgSolidBrep;
                 build_view.highlight_4d_erection = true;
@@ -1010,6 +1088,12 @@ impl SpatialWorkspaceState {
                         SpatialLens::ModalVibration
                     } else if arg_l.contains("eq") || arg_l.contains("rep") || arg_l.contains("tha") {
                         SpatialLens::TimeHistoryReplay
+                    } else if arg_l.contains("shm")
+                        || arg_l.contains("atc")
+                        || arg_l.contains("placard")
+                        || arg_l.contains("sensor")
+                    {
+                        SpatialLens::ShmDigitalTwin
                     } else if arg_l.contains("4d") || arg_l.contains("time") {
                         SpatialLens::Erection4D
                     } else {
@@ -1708,6 +1792,107 @@ impl SpatialWorkspaceState {
                 "/fragility-ifcx" => {
                     actions.export_fragility_loss_ifcx = true;
                 }
+                "/shm" => {
+                    self.shm_drawer_tab = 0;
+                    self.open_shm_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::ShmDigitalTwin,
+                        build_view,
+                        universal_canvas,
+                    );
+                    actions.run_shm_digital_twin = true;
+                }
+                "/sensors" => {
+                    let sub = arg.trim().to_ascii_lowercase();
+                    if sub.contains("sample") {
+                        let csv = crate::core::sample_shm_telemetry_csv();
+                        if let Ok(log) = crate::core::parse_shm_telemetry_log(&csv, "sample_shm.csv") {
+                            universal_canvas.shm_twin_config.custom_telemetry = Some(log);
+                            universal_canvas.shm_twin_config.fault_scenario =
+                                crate::core::ShmFaultScenario::CustomTelemetryStream;
+                            self.shm_drawer_tab = 0;
+                            self.open_shm_drawer();
+                            self.apply_lens_to_views(
+                                SpatialLens::ShmDigitalTwin,
+                                build_view,
+                                universal_canvas,
+                            );
+                            actions.run_shm_digital_twin = true;
+                            self.push_trace("Loaded sample 3-story SHM sensor stream (CSV)", true);
+                        }
+                    } else if sub == "clear" || sub == "reset" {
+                        universal_canvas.shm_twin_config.custom_telemetry = None;
+                        universal_canvas.shm_twin_config.fault_scenario =
+                            crate::core::ShmFaultScenario::NominalIntact;
+                        self.shm_drawer_tab = 0;
+                        self.open_shm_drawer();
+                        self.apply_lens_to_views(
+                            SpatialLens::ShmDigitalTwin,
+                            build_view,
+                            universal_canvas,
+                        );
+                        actions.run_shm_digital_twin = true;
+                        self.push_trace("Cleared custom SHM telemetry stream; reset to Nominal Intact", true);
+                    } else if sub.contains("upload") || sub.contains("import") {
+                        self.shm_drawer_tab = 0;
+                        self.open_shm_drawer();
+                        actions.open_shm_telemetry_picker = true;
+                    } else {
+                        self.shm_drawer_tab = 0;
+                        self.open_shm_drawer();
+                        self.apply_lens_to_views(
+                            SpatialLens::ShmDigitalTwin,
+                            build_view,
+                            universal_canvas,
+                        );
+                        actions.run_shm_digital_twin = true;
+                    }
+                }
+                "/placard" | "/atc20" => {
+                    self.shm_drawer_tab = 1;
+                    self.open_shm_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::ShmDigitalTwin,
+                        build_view,
+                        universal_canvas,
+                    );
+                    actions.run_shm_digital_twin = true;
+                }
+                "/shm-fault" => {
+                    let parts: Vec<&str> = arg.split_whitespace().collect();
+                    let scen = parts
+                        .first()
+                        .and_then(|s| crate::core::ShmFaultScenario::from_keyword(s))
+                        .unwrap_or(crate::core::ShmFaultScenario::SoftStoryFirstFloor);
+                    let sev = parts
+                        .get(1)
+                        .and_then(|s| s.trim_end_matches('%').parse::<f64>().ok())
+                        .unwrap_or(75.0)
+                        .clamp(0.0, 100.0);
+                    let story = parts
+                        .get(2)
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .unwrap_or(1)
+                        .max(1);
+                    universal_canvas.shm_twin_config.fault_scenario = scen;
+                    universal_canvas.shm_twin_config.severity_pct = sev;
+                    universal_canvas.shm_twin_config.target_story = story;
+                    self.shm_drawer_tab = 0;
+                    self.open_shm_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::ShmDigitalTwin,
+                        build_view,
+                        universal_canvas,
+                    );
+                    actions.run_shm_digital_twin = true;
+                    self.push_trace(
+                        format!("SHM Fault: {} ({sev:.0}% @ L{story})", scen.short_label()),
+                        true,
+                    );
+                }
+                "/shm-ifcx" => {
+                    actions.export_shm_atc20_ifcx = true;
+                }
                 "/section" | "/cut" => {
                     let elev_opt = arg
                         .trim_end_matches('m')
@@ -1853,7 +2038,7 @@ impl SpatialWorkspaceState {
                 "/sustainability" | "/carbon" => {
                     self.open_module_overlay(NavigationPillar::SustainabilityEnergy)
                 }
-                "/facility" | "/shm" => self.open_module_overlay(NavigationPillar::FacilityManagement),
+                "/facility" => self.open_module_overlay(NavigationPillar::FacilityManagement),
                 "/safety" => self.open_module_overlay(NavigationPillar::SafetyHealth),
                 "/construction" | "/lean" | "/qaqc" => {
                     self.open_module_overlay(NavigationPillar::LeanConstruction)

@@ -659,6 +659,7 @@ pub struct ActiveBimGpuInput<'a> {
     pub replay_story_disp_xyz_m: &'a [[f64; 3]],
     pub replay_ground_shake_xyz_m: [f64; 3],
     pub replay_hinge_states: &'a [(BimElementKind, usize, crate::core::nonlinear::PlasticHingeState)],
+    pub shm_story_retention: &'a [(f64, f64)],
 }
 
 pub(super) fn structural_dcr_color(dcr: f64) -> [f32; 4] {
@@ -815,7 +816,7 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         0.92
     };
 
-    let elem_color = |kind: BimElementKind, bim_id: usize, default_col: [f32; 4]| -> [f32; 4] {
+    let elem_color = |kind: BimElementKind, bim_id: usize, z_mid: f64, default_col: [f32; 4]| -> [f32; 4] {
         if input.cascade_failed_bim.contains(&(kind, bim_id)) {
             return [0.98, 0.22, 0.18, 0.36]; // Translucent crimson-orange progressive collapse ghost
         }
@@ -869,6 +870,26 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
                     [0.24, 0.64, 0.74, 0.90]
                 }
             }
+            EarthBimLens::ShmDigitalTwin => {
+                if input.shm_story_retention.is_empty() {
+                    [0.16, 0.84, 0.56, 1.0]
+                } else {
+                    let retention = input
+                        .shm_story_retention
+                        .iter()
+                        .find(|&&(elev, _)| z_mid <= elev + 0.35)
+                        .or_else(|| input.shm_story_retention.last())
+                        .map(|&(_, ret)| ret)
+                        .unwrap_or(1.0);
+                    if retention < 0.72 {
+                        [0.96, 0.22, 0.22, 1.0] // Severe stiffness loss (<72% retained)
+                    } else if retention < 0.88 {
+                        [0.98, 0.68, 0.14, 1.0] // Moderate stiffness loss (72%..88% retained)
+                    } else {
+                        [0.16, 0.84, 0.56, 1.0] // Nominal intact stiffness (>=88% retained)
+                    }
+                }
+            }
         }
     };
 
@@ -889,7 +910,12 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             rot_xy(cx + hw, cy + hl, 0.0),
             rot_xy(cx - hw, cy + hl, 0.0),
         ];
-        let col = elem_color(BimElementKind::Footing, ftg.id, [0.48, 0.54, 0.60, 1.0]);
+        let col = elem_color(
+            BimElementKind::Footing,
+            ftg.id,
+            0.5 * (z_bot + z_top) as f64,
+            [0.48, 0.54, 0.60, 1.0],
+        );
         push_box_prism_enu(&mut verts, &mut idxs, &fp, z_bot, z_top, col, 3.0);
 
         // 4 subsurface concrete pile shafts seated dynamically into the bearing stratum
@@ -965,7 +991,7 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         } else {
             [0.35, 0.62, 0.74, 1.0]
         };
-        let col = elem_color(BimElementKind::Column, c.id, default_col);
+        let col = elem_color(BimElementKind::Column, c.id, z_mid, default_col);
         push_box_prism_enu(
             &mut verts,
             &mut idxs,
@@ -996,7 +1022,8 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         } else {
             [0.46, 0.72, 0.80, 1.0]
         };
-        let col = elem_color(BimElementKind::Run, r.id, default_col);
+        let run_z_mid = level_elev_m(r.level_id) + 0.5 * (r.start_offset_mm + r.end_offset_mm) * 0.001;
+        let col = elem_color(BimElementKind::Run, r.id, run_z_mid, default_col);
         let ax = r.start.0 * 0.001;
         let ay = r.start.1 * 0.001;
         let bx = r.end.0 * 0.001;
@@ -1081,7 +1108,7 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         } else {
             [0.80, 0.84, 0.88, 0.88]
         };
-        let col = elem_color(BimElementKind::Wall, w.id, default_w);
+        let col = elem_color(BimElementKind::Wall, w.id, z_mid, default_w);
         push_box_prism_enu(
             &mut verts,
             &mut idxs,
@@ -1117,6 +1144,7 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         let col = elem_color(
             BimElementKind::Slab,
             s.id,
+            z_lvl,
             if s.is_roof {
                 [0.54, 0.68, 0.76, 0.88]
             } else {
@@ -1867,6 +1895,7 @@ fn push_octahedron_beacon_enu(
     radius: f32,
     rgba: [f32; 4],
     severity_phase: f32,
+    material_kind: f32,
 ) {
     let px = [c[0] + radius, c[1], c[2]];
     let nx = [c[0] - radius, c[1], c[2]];
@@ -1900,7 +1929,7 @@ fn push_octahedron_beacon_enu(
                 pos: pt,
                 normal: norm,
                 color: rgba,
-                meta: [6.0, c[2], 1.0, severity_phase],
+                meta: [material_kind, c[2], 1.0, severity_phase],
             });
         }
         idxs.extend_from_slice(&[base, base + 1, base + 2]);
@@ -1974,7 +2003,7 @@ pub fn build_rtc_plastic_hinge_mesh(input: &PlasticHingeGpuInput<'_>) -> GpuMesh
             let rx = (lx * cr - ly * sr) as f32;
             let ry = (lx * sr + ly * cr) as f32;
             let rz = (h.local_pos_m[2] + d[2]) as f32;
-            push_octahedron_beacon_enu(&mut verts, &mut idxs, [rx, ry, rz], radius, rgba, sev);
+            push_octahedron_beacon_enu(&mut verts, &mut idxs, [rx, ry, rz], radius, rgba, sev, 6.0);
         }
     }
 
@@ -2073,6 +2102,149 @@ pub fn build_rtc_fragility_loss_mesh(input: &FragilityLossGpuInput<'_>) -> GpuMe
         let z0 = (st.elevation_m - 0.42).max(0.10) as f32;
         let z1 = (st.elevation_m + 0.22) as f32;
         push_box_prism_enu(&mut verts, &mut idxs, &outer, z0, z1, rgba, 7.0);
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
+/// Phase 76: 3D Live SHM Sensor Beacons, Rooftop ATC-20 Placard Shield & District Triage Crowns (`material_kind = 8.0`).
+pub struct ShmTriageGpuInput<'a> {
+    pub project: &'a BimProject,
+    pub report: &'a crate::core::shm_twin::ShmDigitalTwinReport,
+    pub visible: bool,
+    pub heading_deg: f64,
+    pub site_origin: (f64, f64),
+}
+
+/// Builds 3D Pure WebGPU SHM sensor beacons, active rooftop ATC-20 safety placard shields, and nearby
+/// district ATC-20 building crowns encoded with `material_kind = 8.0` for pulsing emissive + Fresnel shading.
+pub fn build_rtc_shm_triage_mesh(input: &ShmTriageGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible || input.project.is_empty() {
+        return GpuMeshPayload::default();
+    }
+
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+
+    let mut verts = Vec::with_capacity(input.report.sensors.len() * 24 + 256);
+    let mut idxs = Vec::with_capacity(input.report.sensors.len() * 24 + 256);
+
+    // 1. Live SHM Triaxial Sensors / Inclinometers / Strain Gauges mounted on BIM skeleton
+    for s in &input.report.sensors {
+        let [lx, ly, lz] = s.position_local_m;
+        let rx = (lx * cr - ly * sr) as f32;
+        let ry = (lx * sr + ly * cr) as f32;
+        let rz = lz as f32;
+        let col = if s.health_index < 0.72 {
+            [0.98, 0.24, 0.24, 0.98]
+        } else if s.is_triggered || s.health_index < 0.88 {
+            [0.98, 0.64, 0.12, 0.96]
+        } else {
+            [0.13, 0.85, 0.56, 0.94]
+        };
+        let radius = if s.is_triggered { 0.56_f32 } else { 0.42_f32 };
+        let sev_phase = if s.is_triggered { 1.0_f32 } else { 0.35_f32 };
+        push_octahedron_beacon_enu(&mut verts, &mut idxs, [rx, ry, rz], radius, col, sev_phase, 8.0);
+    }
+
+    // 2. Active Building Rooftop ATC-20 Placard Shield Prism & Crown Collar
+    let (bmin, bmax) = input
+        .project
+        .plan_extents_mm()
+        .map(|(mn, mx)| ([mn[0] * 0.001, mn[1] * 0.001], [mx[0] * 0.001, mx[1] * 0.001]))
+        .unwrap_or(([-6.0, -5.0], [6.0, 5.0]));
+    let cx = 0.5 * (bmin[0] + bmax[0]);
+    let cy = 0.5 * (bmin[1] + bmax[1]);
+    let hx = ((bmax[0] - bmin[0]) * 0.28).clamp(1.2, 4.5);
+    let hy = ((bmax[1] - bmin[1]) * 0.28).clamp(1.2, 4.5);
+
+    let rot_pt = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+    let shield_fp = [
+        rot_pt(cx - hx, cy - hy),
+        rot_pt(cx + hx, cy - hy),
+        rot_pt(cx + hx, cy + hy),
+        rot_pt(cx - hx, cy + hy),
+    ];
+    let [pr, pg, pb] = input.report.atc20_placard.normalized_rgb();
+    let shield_z0 = input.report.building_height_m as f32 + 1.4;
+    let shield_z1 = shield_z0 + 1.5;
+    let placard_sev = (0.25 + 0.35 * input.report.atc20_placard.gpu_code()).clamp(0.1, 1.0);
+    let v_start = verts.len();
+    push_box_prism_enu(
+        &mut verts,
+        &mut idxs,
+        &shield_fp,
+        shield_z0,
+        shield_z1,
+        [pr, pg, pb, 0.92],
+        8.0,
+    );
+    for v in &mut verts[v_start..] {
+        v.meta[3] = placard_sev;
+    }
+
+    // Rooftop perimeter collar
+    let collar_fp = [
+        rot_pt(bmin[0] - 0.5, bmin[1] - 0.5),
+        rot_pt(bmax[0] + 0.5, bmin[1] - 0.5),
+        rot_pt(bmax[0] + 0.5, bmax[1] + 0.5),
+        rot_pt(bmin[0] - 0.5, bmax[1] + 0.5),
+    ];
+    let collar_z0 = (input.report.building_height_m as f32 - 0.15).max(0.5);
+    let v_collar = verts.len();
+    push_box_prism_enu(
+        &mut verts,
+        &mut idxs,
+        &collar_fp,
+        collar_z0,
+        collar_z0 + 0.45,
+        [pr, pg, pb, 0.52],
+        8.0,
+    );
+    for v in &mut verts[v_collar..] {
+        v.meta[3] = placard_sev * 0.85;
+    }
+
+    // 3. Nearby District Portfolio Buildings ATC-20 Placard Shields (within 3500 m)
+    for b in &input.report.district_placards {
+        let dlat = (b.lat - input.site_origin.0).abs();
+        let dlon = (b.lon - input.site_origin.1).abs();
+        if dlat < 1e-5 && dlon < 1e-5 {
+            continue;
+        }
+        let off_mm = SlippyMapState::lat_lon_to_world_mm(input.site_origin, b.lat, b.lon);
+        let bx_m = off_mm[0] * 0.001;
+        let by_m = off_mm[1] * 0.001;
+        if bx_m.hypot(by_m) > 3500.0 {
+            continue;
+        }
+        let brad = b.heading_deg.to_radians();
+        let (bsr, bcr) = (brad.sin(), brad.cos());
+        let d_fp = [
+            [bx_m + (-2.0 * bcr - -2.0 * bsr), by_m + (-2.0 * bsr + -2.0 * bcr)],
+            [bx_m + (2.0 * bcr - -2.0 * bsr), by_m + (2.0 * bsr + -2.0 * bcr)],
+            [bx_m + (2.0 * bcr - 2.0 * bsr), by_m + (2.0 * bsr + 2.0 * bcr)],
+            [bx_m + (-2.0 * bcr - 2.0 * bsr), by_m + (-2.0 * bsr + 2.0 * bcr)],
+        ];
+        let [dr, dg, db] = b.placard.normalized_rgb();
+        let dz0 = b.total_height_m.max(3.5) as f32 + 1.0;
+        let dv_start = verts.len();
+        push_box_prism_enu(
+            &mut verts,
+            &mut idxs,
+            &d_fp,
+            dz0,
+            dz0 + 1.4,
+            [dr, dg, db, 0.86],
+            8.0,
+        );
+        let dsev = (0.25 + 0.35 * b.placard.gpu_code()).clamp(0.1, 1.0);
+        for v in &mut verts[dv_start..] {
+            v.meta[3] = dsev;
+        }
     }
 
     GpuMeshPayload {

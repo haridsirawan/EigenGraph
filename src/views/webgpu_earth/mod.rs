@@ -490,6 +490,13 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 7.5) {
+        // Phase 76: Live SHM Sensor Beacons & Post-Earthquake ATC-20 Placard Shields
+        let alarm_rate = 2.6 + f_in.v_meta.w * 5.2;
+        let pulse = 0.72 + 0.28 * sin(u_time * alarm_rate + f_in.world_pos.z * 0.8);
+        let ndotv = max(abs(dot(n, v)), 0.08);
+        let rim = pow(1.0 - ndotv, 1.8) * 0.55;
+        col = f_in.color.rgb * (0.95 + 0.45 * pulse + rim);
     } else if (kind >= 6.5) {
         // FEMA P-58 Per-Story Loss Halo Bands
         let band_pulse = 0.78 + 0.22 * sin(u_time * 2.4 + f_in.world_pos.z * 0.6);
@@ -658,6 +665,7 @@ pub struct WebGpuEarthResources {
     portfolio: GpuMeshSlot,
     hazard: GpuMeshSlot,
     fragility_loss: GpuMeshSlot,
+    shm_triage: GpuMeshSlot,
 }
 
 impl WebGpuEarthResources {
@@ -865,6 +873,7 @@ impl WebGpuEarthResources {
             portfolio: GpuMeshSlot::default(),
             hazard: GpuMeshSlot::default(),
             fragility_loss: GpuMeshSlot::default(),
+            shm_triage: GpuMeshSlot::default(),
         }
     }
 
@@ -980,7 +989,8 @@ impl WebGpuEarthResources {
             || self.subsurface.index_count > 0
             || self.portfolio.index_count > 0
             || self.hazard.index_count > 0
-            || self.fragility_loss.index_count > 0;
+            || self.fragility_loss.index_count > 0
+            || self.shm_triage.index_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("eigengraph_earth_site_pass"),
@@ -1020,6 +1030,7 @@ impl WebGpuEarthResources {
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
             self.fragility_loss.draw(&mut pass);
+            self.shm_triage.draw(&mut pass);
         }
     }
 }
@@ -1035,6 +1046,7 @@ struct WebGpuEarthPaintCallback {
     pending_portfolio: Option<(u64, GpuMeshPayload)>,
     pending_hinges: Option<(u64, GpuMeshPayload)>,
     pending_fragility: Option<(u64, GpuMeshPayload)>,
+    pending_shm: Option<(u64, GpuMeshPayload)>,
 }
 
 impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
@@ -1089,6 +1101,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
             if res.fragility_loss.revision_uploaded != rev {
                 res.fragility_loss
                     .upload(device, queue, "fragility_loss_mesh", rev, mesh);
+            }
+        }
+        if let Some((rev, ref mesh)) = self.pending_shm {
+            if res.shm_triage.revision_uploaded != rev {
+                res.shm_triage
+                    .upload(device, queue, "shm_triage_mesh", rev, mesh);
             }
         }
 
@@ -1169,6 +1187,7 @@ pub struct WebGpuEarthState {
     cached_portfolio_hash: u64,
     cached_hinge_hash: u64,
     cached_fragility_hash: u64,
+    cached_shm_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1177,6 +1196,7 @@ pub struct WebGpuEarthState {
     pub last_portfolio_tris: usize,
     pub last_hinge_tris: usize,
     pub last_fragility_tris: usize,
+    pub last_shm_tris: usize,
 }
 
 impl std::fmt::Debug for WebGpuEarthState {
@@ -1353,6 +1373,12 @@ impl WebGpuEarthState {
                 mix(&mut h, (k as u64 + 1) * 1_000_003 ^ id as u64 ^ (st as u64 * 97));
             }
         }
+        if input.lens == EarthBimLens::ShmDigitalTwin {
+            for &(elev, ret) in input.shm_story_retention {
+                mix(&mut h, ((elev * 100.0).round() as i64) as u64);
+                mix(&mut h, ((ret * 1000.0).round() as i64) as u64);
+            }
+        }
         h
     }
 
@@ -1405,6 +1431,7 @@ impl WebGpuEarthState {
         portfolio_input: Option<PortfolioGpuOverlayInput<'_>>,
         hinge_input: Option<PlasticHingeGpuInput<'_>>,
         fragility_input: Option<FragilityLossGpuInput<'_>>,
+        shm_input: Option<ShmTriageGpuInput<'_>>,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
             return false;
@@ -1639,6 +1666,33 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_shm = if render_site_pass {
+            if let Some(ref sh_in) = shm_input {
+                let rev = sh_in.report.bim_revision_hash
+                    ^ ((sh_in.report.sensors.len() as u64 + 1).wrapping_mul(1_000_003))
+                    ^ ((sh_in.report.atc20_placard as u64 + 1).wrapping_mul(2_654_435_761))
+                    ^ ((sh_in.report.district_placards.len() as u64).wrapping_mul(97))
+                    ^ u64::from(sh_in.visible).wrapping_mul(73)
+                    ^ ((sh_in.heading_deg * 100.0).round() as i64 as u64);
+                if rev != self.cached_shm_hash {
+                    let mesh = build_rtc_shm_triage_mesh(sh_in);
+                    self.last_shm_tris = mesh.indices.len() / 3;
+                    self.cached_shm_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_shm_hash != 0 {
+                self.cached_shm_hash = 0;
+                self.last_shm_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         painter.add(egui_wgpu::Callback::new_paint_callback(
             rect,
             WebGpuEarthPaintCallback {
@@ -1652,6 +1706,7 @@ impl WebGpuEarthState {
                 pending_portfolio,
                 pending_hinges,
                 pending_fragility,
+                pending_shm,
             },
         ));
 
@@ -1666,9 +1721,14 @@ impl WebGpuEarthState {
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::TimeHistoryReplay);
+        let shm_animated = shm_input.as_ref().is_some_and(|s| s.visible)
+            || active_bim
+                .as_ref()
+                .is_some_and(|b| b.lens == EarthBimLens::ShmDigitalTwin);
         let frame_ms = if hazard_animated
             || subsurface_animated
             || replay_animated
+            || shm_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

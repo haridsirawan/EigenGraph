@@ -260,6 +260,8 @@ pub struct UnifiedWorkspaceArchive {
     pub portfolio_retrofit: crate::core::portfolio_retrofit::PortfolioRetrofitConfig,
     #[serde(default)]
     pub ground_motion_replay: crate::core::ground_motion_replay::GroundMotionReplayConfig,
+    #[serde(default)]
+    pub shm_digital_twin: crate::core::shm_twin::ShmDigitalTwinConfig,
     pub sha256_seal: String,
 }
 
@@ -379,6 +381,7 @@ pub enum EarthBimLens {
     DeformedShape,
     ModalVibration,
     TimeHistoryReplay,
+    ShmDigitalTwin,
     Erection4D,
 }
 

@@ -2581,6 +2581,21 @@ impl SpatialWorkspaceState {
                                 ui.colored_label(col, RichText::new(format!("■ {lbl}")).size(9.2));
                             }
                         }
+                        SpatialLens::ShmDigitalTwin => {
+                            ui.label(
+                                RichText::new("SHM Stiffness Retention:")
+                                    .size(9.3)
+                                    .strong()
+                                    .color(theme.text_secondary),
+                            );
+                            for (lbl, col) in [
+                                ("Intact >=88%", Color32::from_rgb(34, 197, 94)),
+                                ("Warning 72-88%", Color32::from_rgb(245, 158, 11)),
+                                ("Severe <72%", Color32::from_rgb(239, 68, 68)),
+                            ] {
+                                ui.colored_label(col, RichText::new(format!("■ {lbl}")).size(9.2));
+                            }
+                        }
                         SpatialLens::Erection4D => {
                             ui.label(
                                 RichText::new("4D Erection:")

@@ -123,6 +123,9 @@ pub struct SpatialWorkspaceState {
     pub ground_motion_drawer_open: bool,
     // Phase 75: Replay Drawer Sub-Tab (0 = Time-History, 1 = Response Spectrum & FEMA P-58 Fragility)
     pub ground_motion_drawer_tab: usize,
+    // Phase 76: Live SHM Digital Twin & Automated Post-Earthquake ATC-20 Placard Triage Drawer
+    pub shm_drawer_open: bool,
+    pub shm_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -218,6 +221,8 @@ impl Default for SpatialWorkspaceState {
             portfolio_drawer_open: false,
             ground_motion_drawer_open: false,
             ground_motion_drawer_tab: 0,
+            shm_drawer_open: false,
+            shm_drawer_tab: 0,
         }
     }
 }
@@ -242,6 +247,7 @@ impl SpatialWorkspaceState {
             || self.ifcx_diff_drawer_open
             || self.portfolio_drawer_open
             || self.ground_motion_drawer_open
+            || self.shm_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -260,6 +266,7 @@ impl SpatialWorkspaceState {
         self.ifcx_diff_drawer_open = false;
         self.portfolio_drawer_open = false;
         self.ground_motion_drawer_open = false;
+        self.shm_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -281,6 +288,7 @@ impl SpatialWorkspaceState {
                     self.ifcx_diff_drawer_open = false;
                     self.portfolio_drawer_open = false;
                     self.ground_motion_drawer_open = false;
+                    self.shm_drawer_open = false;
                 } else {
                     self.vault_path_popover_open = false;
                 }
@@ -296,6 +304,7 @@ impl SpatialWorkspaceState {
                     self.ifcx_diff_drawer_open = false;
                     self.portfolio_drawer_open = false;
                     self.ground_motion_drawer_open = false;
+                    self.shm_drawer_open = false;
                 }
             }
             "history" => {
@@ -309,6 +318,7 @@ impl SpatialWorkspaceState {
                     self.ifcx_diff_drawer_open = false;
                     self.portfolio_drawer_open = false;
                     self.ground_motion_drawer_open = false;
+                    self.shm_drawer_open = false;
                 }
             }
             "api_key" => {
@@ -322,6 +332,7 @@ impl SpatialWorkspaceState {
                     self.ifcx_diff_drawer_open = false;
                     self.portfolio_drawer_open = false;
                     self.ground_motion_drawer_open = false;
+                    self.shm_drawer_open = false;
                 }
             }
             "ifcx_diff" => {
@@ -335,6 +346,7 @@ impl SpatialWorkspaceState {
                     self.api_key_popover_open = false;
                     self.portfolio_drawer_open = false;
                     self.ground_motion_drawer_open = false;
+                    self.shm_drawer_open = false;
                 }
             }
             "portfolio" => {
@@ -348,6 +360,7 @@ impl SpatialWorkspaceState {
                     self.api_key_popover_open = false;
                     self.ifcx_diff_drawer_open = false;
                     self.ground_motion_drawer_open = false;
+                    self.shm_drawer_open = false;
                 }
             }
             "ground_motion" => {
@@ -361,6 +374,21 @@ impl SpatialWorkspaceState {
                     self.api_key_popover_open = false;
                     self.ifcx_diff_drawer_open = false;
                     self.portfolio_drawer_open = false;
+                    self.shm_drawer_open = false;
+                }
+            }
+            "shm" => {
+                let next = !self.shm_drawer_open;
+                self.shm_drawer_open = next;
+                if next {
+                    self.vault_drawer_open = false;
+                    self.vault_path_popover_open = false;
+                    self.context_picker_open = false;
+                    self.history_popover_open = false;
+                    self.api_key_popover_open = false;
+                    self.ifcx_diff_drawer_open = false;
+                    self.portfolio_drawer_open = false;
+                    self.ground_motion_drawer_open = false;
                 }
             }
             _ => {}
@@ -377,7 +405,22 @@ impl SpatialWorkspaceState {
         self.api_key_popover_open = false;
         self.ifcx_diff_drawer_open = false;
         self.portfolio_drawer_open = false;
+        self.shm_drawer_open = false;
         self.ground_motion_drawer_open = true;
+    }
+
+    /// Idempotently opens the Live SHM Digital Twin & Post-Earthquake ATC-20 Placard drawer
+    /// inside the Dynamic Island, closing competing drawers without toggling closed if already open.
+    pub fn open_shm_drawer(&mut self) {
+        self.vault_drawer_open = false;
+        self.vault_path_popover_open = false;
+        self.context_picker_open = false;
+        self.history_popover_open = false;
+        self.api_key_popover_open = false;
+        self.ifcx_diff_drawer_open = false;
+        self.portfolio_drawer_open = false;
+        self.ground_motion_drawer_open = false;
+        self.shm_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

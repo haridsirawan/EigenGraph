@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.5` Delivered** (`v0.7.6` Planned)  
-> **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% Raster Pixels**  
-> **Current Platform**: EigenGraph `v0.7.5` (100% Pure WebGPU/WGSL Renderer, PEER `.at2`/`.csv` Tri-Directional Coupling & Real-Time FEMA P-58 Fragility)  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.6` Delivered** (`v0.7.7` Planned)  
+> **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% External Raster**  
+> **Current Platform**: EigenGraph `v0.7.6` (Live SHM Digital Twin, Modal Fingerprint Identification & Automated Post-Earthquake ATC-20 Placard Triage on Pure WebGPU/WGSL)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -114,7 +114,7 @@ Because 100% of Earth and buildings live in analytical vector `.ifcx` nodes, cri
 
 ---
 
-## 6. Phased Implementation Roadmap (`v0.6.4 – v0.7.5`)
+## 6. Phased Implementation Roadmap (`v0.6.4 – v0.7.6`)
 
 Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.md` — advancing one patch digit per phase):
 
@@ -191,5 +191,11 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 - **Custom PEER `.at2`/`.csv` Ingestion, Tri-Directional Coupling & Real-Time FEMA P-58 Fragility (`src/core/{time_history.rs, fema_p58.rs, ifcx.rs, ground_motion_replay.rs, vector_dossier.rs}`, `index.html`, `src/views/spatial_workspace/`)**:
   - Added PEER NGA `.at2` and `.csv` accelerogram parsing, 5%-damped elastic response spectrum with SNI 1726 `Match Sa(T1)` auto-scaling, Tri-Directional `1D X` / `2D XY` / `3D XYZ` ground-motion excitation with vertical $a_z$ axial hinge modulation and 3D WebGPU story sway, real-time BIM+NL-THA FEMA P-58 fragility & per-story repair loss synthesis (`eigengraph::analysis::fema_p58_fragility`, 3D translucent story-loss halos at `material_kind = 7.0`), the `Spectrum & Fragility` Dynamic Island sub-tab with pure-vector charts, and `/at2`, `/tridir`, `/match-sa`, `/fragility`, `/fragility-ifcx` commands.
 
-### Planned Next Phases (`v0.7.6`)
-- **Phase 76 (`v0.7.6`) — Live SHM Digital Twin & ATC-20 Post-Earthquake Placard Triage**: Streaming real-time accelerometer/strain-gauge structural health monitoring telemetry against modal baseline fingerprints for automated ATC-20 Green/Yellow/Red placard safety triage directly on Pure WebGPU IFCX Earth.
+### Phase 76 (`v0.7.6`) — Live SHM Digital Twin, Modal Fingerprint Identification & Automated Post-Earthquake ATC-20 Placard Triage *(Implemented)*
+- **Coupled SHM Telemetry & 6-DOF/MDOF Modal Shift Engine (`src/core/shm_twin.rs`, `src/core/ifcx.rs`, `src/core/vector_dossier.rs`)**:
+  - Parses CSV and JSON triaxial MEMS accelerometer, inclinometer, and fiber-Bragg strain streams, couples them to active 3D BIM 6-DOF FEM stiffness & mass matrices (plus condensed MDOF inverse-iteration modes for tall/large IFC frames), evaluates frequency shifts ($f_1..f_3$), Modal Assurance Criterion ($\text{MAC}_1..\text{MAC}_3$), 64-bin Welch PSD curves, 6-rule ATC-20 Green/Yellow/Red placard triage, district portfolio posting counts, and composable `eigengraph::analysis::shm_digital_twin` + `eigengraph::analysis::atc20_placard` IFCX overlays with `IfcSensor` nodes.
+- **3D Pure WebGPU SHM Beacons, Stiffness Heatmap & Rooftop ATC-20 Placard Shields (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`)**:
+  - Adds `EarthBimLens::ShmDigitalTwin`, WGSL `kind >= 7.5` pulsing Fresnel emissive SHM sensor octahedra & ATC-20 rooftop placard shields (`shm_triage` GPU slot in hardware 24-bit `Depth24PlusStencil8` offscreen pass), Dynamic Island 2-tab SHM/ATC-20 drawer with pure-vector Welch PSD & story-retention charts, `/shm`, `/sensors`, `/placard`, `/shm-fault`, `/shm-ifcx` commands, and Gemini `[[OPEN_SHM_TWIN]]`, `[[INJECT_SHM_FAULT:...]]`, `[[RUN_ATC20_TRIAGE]]` directives.
+
+### Planned Next Phases (`v0.7.7`)
+- **Phase 77 (`v0.7.7`) — Autonomous Multi-Hazard Evacuation Routing, Emergency Lifelines & Post-Disaster Road Network Connectivity**: Integrating ATC-20 Green/Yellow/Red building cordons and seismic debris footprints onto the IFCX City-Builder road graph (`IfcRoad`/`IfcBridge`) for real-time A* shortest safe-path evacuation routing and emergency responder accessibility scoring directly in Pure WebGPU IFCX Earth.

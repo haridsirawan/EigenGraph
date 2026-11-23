@@ -752,6 +752,36 @@ impl SpatialWorkspaceState {
                     {
                         self.toggle_exclusive_drawer("ground_motion");
                     }
+                } else if self.active_lens == SpatialLens::ShmDigitalTwin {
+                    if let Some(ref shm) = universal_canvas.last_shm_twin_report {
+                        let [pr, pg, pb] = shm.atc20_placard.badge_color_rgb();
+                        ui.label(
+                            RichText::new(format!(
+                                "ATC-20 {} • f1 {:.2}Hz ({:+.1}%) • MAC {:.2} • K_ret {:.0}%",
+                                shm.atc20_placard.short_label(),
+                                shm.observed_freq_1_hz,
+                                shm.freq_shift_pct,
+                                shm.mac_mode_1,
+                                shm.global_stiffness_retention_pct
+                            ))
+                            .size(9.2)
+                            .monospace()
+                            .color(Color32::from_rgb(pr, pg, pb)),
+                        );
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "SHM UI",
+                        self.shm_drawer_open,
+                        theme.accent_green,
+                        "Open Live SHM Digital Twin & ATC-20 Placard drawer",
+                    )
+                    .clicked()
+                    {
+                        self.toggle_exclusive_drawer("shm");
+                    }
                 }
             }
             if let crate::core::ground_motion_replay::AsyncReplayJobPhase::Running {
@@ -1613,6 +1643,8 @@ impl SpatialWorkspaceState {
                 universal_canvas.last_ground_motion_replay_report = None;
                 universal_canvas.replay_cursor_time_s = 0.0;
                 self.ground_motion_drawer_open = false;
+                universal_canvas.last_shm_twin_report = None;
+                self.shm_drawer_open = false;
                 actions.sync_fem_and_earth = true;
             }
         });
@@ -1655,7 +1687,8 @@ impl SpatialWorkspaceState {
                 || has_smart_inspector
                 || self.ifcx_diff_drawer_open
                 || self.portfolio_drawer_open
-                || self.ground_motion_drawer_open,
+                || self.ground_motion_drawer_open
+                || self.shm_drawer_open,
         );
 
         let compact_w = if is_mobile {
@@ -2619,6 +2652,19 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.shm_drawer_open {
+                        self.render_shm_digital_twin_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            build_view,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -3331,6 +3377,7 @@ impl SpatialWorkspaceState {
                                                 (SpatialLens::DeformedShape, "Deform"),
                                                 (SpatialLens::ModalVibration, "Modal"),
                                                 (SpatialLens::TimeHistoryReplay, "EQ Replay"),
+                                                (SpatialLens::ShmDigitalTwin, "SHM Twin"),
                                                 (SpatialLens::Erection4D, "4D"),
                                             ] {
                                                 if Self::glass_pill_button(
@@ -3568,6 +3615,27 @@ impl SpatialWorkspaceState {
                                             .clicked()
                                             {
                                                 actions.export_ground_motion_replay_ifcx = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Shield),
+                                                "SHM UI",
+                                                self.shm_drawer_open,
+                                                theme.accent_green,
+                                                "Open Live SHM Digital Twin & Automated ATC-20 Placard drawer",
+                                            )
+                                            .clicked()
+                                            {
+                                                self.toggle_exclusive_drawer("shm");
+                                                self.apply_lens_to_views(
+                                                    SpatialLens::ShmDigitalTwin,
+                                                    build_view,
+                                                    universal_canvas,
+                                                );
+                                                if universal_canvas.last_shm_twin_report.is_none() {
+                                                    actions.run_shm_digital_twin = true;
+                                                }
                                             }
                                         },
                                     );
@@ -6218,5 +6286,430 @@ impl SpatialWorkspaceState {
                 theme.accent_blue,
             );
         });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_shm_digital_twin_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        let avail_w = ui.available_width().min(cap_w - 16.0).max(180.0);
+        let max_story = build_view.bim_bus.project.levels.len().saturating_sub(1).max(1);
+        let mut config_changed = false;
+
+        ui.horizontal_wrapped(|ui| {
+            icons::pill_badge(
+                ui,
+                AppIcon::Shield,
+                "Phase 76 SHM Digital Twin & ATC-20",
+                theme.accent_green,
+            );
+            if let Some(ref rep) = universal_canvas.last_shm_twin_report {
+                let [r, g, b] = rep.atc20_placard.badge_color_rgb();
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Target,
+                    rep.atc20_placard.label(),
+                    Color32::from_rgb(r, g, b),
+                );
+            }
+            for (idx, lbl) in [(0usize, "Live Sensors & Modal Shift"), (1usize, "ATC-20 Placard Triage")] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.shm_drawer_tab == idx,
+                    theme.accent_blue,
+                    "Switch SHM Digital Twin view",
+                )
+                .clicked()
+                {
+                    self.shm_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close SHM & ATC-20 drawer",
+            )
+            .clicked()
+            {
+                self.shm_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+
+        if self.shm_drawer_tab == 0 {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Fault Scenario:").size(9.5).strong().color(theme.text_secondary));
+                for &scen in crate::core::ShmFaultScenario::all() {
+                    let active = universal_canvas.shm_twin_config.fault_scenario == scen;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        scen.short_label(),
+                        active,
+                        if scen == crate::core::ShmFaultScenario::NominalIntact {
+                            theme.accent_green
+                        } else {
+                            theme.accent_orange
+                        },
+                        scen.description(),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.shm_twin_config.fault_scenario = scen;
+                        config_changed = true;
+                    }
+                }
+            });
+
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                let mut sev = universal_canvas.shm_twin_config.severity_pct as f32;
+                ui.label(RichText::new("Severity %:").size(9.2).color(theme.text_muted));
+                ui.spacing_mut().slider_width = if is_mobile { 90.0 } else { 135.0 };
+                let resp = ui.add(
+                    egui::Slider::new(&mut sev, 0.0..=100.0)
+                        .fixed_decimals(0)
+                        .suffix("%"),
+                );
+                if resp.changed() {
+                    universal_canvas.shm_twin_config.severity_pct = sev as f64;
+                }
+                if resp.drag_stopped() {
+                    config_changed = true;
+                }
+
+                ui.label(
+                    RichText::new(format!("Target Story: L{}", universal_canvas.shm_twin_config.target_story))
+                        .size(9.2)
+                        .color(theme.text_muted),
+                );
+                if Self::glass_pill_button(ui, theme, None, "-L", false, theme.accent_blue, "Lower target floor").clicked()
+                    && universal_canvas.shm_twin_config.target_story > 1
+                {
+                    universal_canvas.shm_twin_config.target_story -= 1;
+                    config_changed = true;
+                }
+                if Self::glass_pill_button(ui, theme, None, "+L", false, theme.accent_blue, "Raise target floor").clicked()
+                    && universal_canvas.shm_twin_config.target_story < max_story
+                {
+                    universal_canvas.shm_twin_config.target_story += 1;
+                    config_changed = true;
+                }
+            });
+
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Bolt),
+                    "Evaluate SHM",
+                    false,
+                    theme.accent_green,
+                    "Run 6-DOF modal identification & ATC-20 evaluation",
+                )
+                .clicked()
+                {
+                    config_changed = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "Sample CSV",
+                    false,
+                    theme.accent_blue,
+                    "Load deterministic 3-story triaxial SHM sensor stream",
+                )
+                .clicked()
+                {
+                    let csv = crate::core::sample_shm_telemetry_csv();
+                    if let Ok(log) = crate::core::parse_shm_telemetry_log(&csv, "sample_shm.csv") {
+                        universal_canvas.shm_twin_config.custom_telemetry = Some(log);
+                        universal_canvas.shm_twin_config.fault_scenario =
+                            crate::core::ShmFaultScenario::CustomTelemetryStream;
+                        config_changed = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::UploadImport),
+                    "Upload CSV/JSON",
+                    false,
+                    theme.accent_orange,
+                    "Upload recorded accelerometer/inclinometer telemetry log",
+                )
+                .clicked()
+                {
+                    actions.open_shm_telemetry_picker = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    "Export .ifcx",
+                    false,
+                    theme.accent_green,
+                    "Export non-destructive SHM & ATC-20 IFCX schema overlay",
+                )
+                .clicked()
+                {
+                    actions.export_shm_atc20_ifcx = true;
+                }
+            });
+
+            if config_changed {
+                self.apply_lens_to_views(SpatialLens::ShmDigitalTwin, build_view, universal_canvas);
+                actions.run_shm_digital_twin = true;
+            }
+
+            ui.add_space(4.0);
+            if let Some(ref rep) = universal_canvas.last_shm_twin_report {
+                ui.horizontal_wrapped(|ui| {
+                    icons::pill_badge(
+                        ui,
+                        AppIcon::ChartLine,
+                        format!(
+                            "f1 {:.2}->{:.2}Hz ({:+.1}%)",
+                            rep.baseline_freq_1_hz, rep.observed_freq_1_hz, rep.freq_shift_pct
+                        ),
+                        if rep.freq_shift_pct.abs() < 5.0 {
+                            theme.accent_green
+                        } else if rep.freq_shift_pct.abs() < 15.0 {
+                            theme.accent_orange
+                        } else {
+                            theme.accent_red
+                        },
+                    );
+                    icons::pill_badge(
+                        ui,
+                        AppIcon::Target,
+                        format!("MAC1 {:.3} • K_ret {:.0}%", rep.mac_mode_1, rep.global_stiffness_retention_pct),
+                        if rep.mac_mode_1 >= 0.90 {
+                            theme.accent_green
+                        } else if rep.mac_mode_1 >= 0.78 {
+                            theme.accent_orange
+                        } else {
+                            theme.accent_red
+                        },
+                    );
+                    icons::pill_badge(
+                        ui,
+                        AppIcon::Shield,
+                        format!(
+                            "Max Drift {:.2}% • Res ARI {:.2}",
+                            rep.max_transient_drift_pct, rep.residual_ari
+                        ),
+                        theme.accent_blue,
+                    );
+                });
+
+                ui.add_space(4.0);
+                let two_col = !is_mobile && avail_w >= 460.0;
+                let chart_w = if two_col {
+                    ((avail_w - 8.0) * 0.5).max(160.0)
+                } else {
+                    (avail_w - 4.0).clamp(160.0, cap_w - 24.0)
+                };
+
+                let draw_psd = |ui: &mut Ui| {
+                    let (resp, p) =
+                        ui.allocate_painter(Vec2::new(chart_w, 96.0), egui::Sense::hover());
+                    let r = resp.rect;
+                    p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+                    p.text(
+                        egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                        Align2::LEFT_TOP,
+                        "Welch PSD (Dashed=Baseline, Solid=Observed)",
+                        egui::FontId::proportional(8.6),
+                        theme.text_muted,
+                    );
+                    let f_max = rep
+                        .psd_spectrum
+                        .last()
+                        .map(|s| s.freq_hz)
+                        .unwrap_or(10.0)
+                        .max(1.0);
+                    let psd_max = rep
+                        .psd_spectrum
+                        .iter()
+                        .map(|s| s.baseline_psd_g2_hz.max(s.observed_psd_g2_hz))
+                        .fold(1e-4_f64, f64::max);
+                    let pad_t = 18.0_f32;
+                    let pad_b = 6.0_f32;
+                    let w = (r.width() - 12.0).max(24.0);
+                    let h = (r.height() - pad_t - pad_b).max(18.0);
+                    let to_pt = |f: f64, val: f64| -> egui::Pos2 {
+                        egui::Pos2::new(
+                            r.left() + 6.0 + (f / f_max).clamp(0.0, 1.0) as f32 * w,
+                            r.bottom() - pad_b - (val / psd_max).sqrt().clamp(0.0, 1.0) as f32 * h,
+                        )
+                    };
+                    let base_pts: Vec<_> = rep
+                        .psd_spectrum
+                        .iter()
+                        .map(|pt| to_pt(pt.freq_hz, pt.baseline_psd_g2_hz))
+                        .collect();
+                    let obs_pts: Vec<_> = rep
+                        .psd_spectrum
+                        .iter()
+                        .map(|pt| to_pt(pt.freq_hz, pt.observed_psd_g2_hz))
+                        .collect();
+                    for (idx, win) in base_pts.windows(2).enumerate() {
+                        if idx % 2 == 0 {
+                            p.line_segment([win[0], win[1]], Stroke::new(1.2, theme.accent_blue.gamma_multiply(0.8)));
+                        }
+                    }
+                    let [cr, cg, cb] = rep.atc20_placard.badge_color_rgb();
+                    let obs_col = Color32::from_rgb(cr, cg, cb);
+                    for win in obs_pts.windows(2) {
+                        p.line_segment([win[0], win[1]], Stroke::new(1.8, obs_col));
+                    }
+                };
+
+                let draw_story_bars = |ui: &mut Ui| {
+                    let n_rows = rep.story_health.len().clamp(1, 6);
+                    let bh = 96.0_f32.max(22.0 + (n_rows as f32) * 12.0);
+                    let (resp, p) = ui.allocate_painter(Vec2::new(chart_w, bh), egui::Sense::hover());
+                    let r = resp.rect;
+                    p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+                    p.text(
+                        egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                        Align2::LEFT_TOP,
+                        format!("Per-Story Stiffness Retention ({} sensors)", rep.sensors.len()),
+                        egui::FontId::proportional(8.6),
+                        theme.text_muted,
+                    );
+                    let bar_x0 = r.left() + 34.0;
+                    let bar_max_w = (r.width() - 96.0).max(28.0);
+                    for (i, st) in rep.story_health.iter().take(6).enumerate() {
+                        let y = r.top() + 20.0 + (i as f32) * 12.0;
+                        let frac = (st.observed_stiffness_pct / 100.0).clamp(0.05, 1.0) as f32;
+                        let [sr, sg, sb] = st.story_placard.badge_color_rgb();
+                        p.text(
+                            egui::Pos2::new(r.left() + 6.0, y + 4.0),
+                            Align2::LEFT_CENTER,
+                            format!("L{:02}", st.story_number),
+                            egui::FontId::monospace(8.4),
+                            theme.text_secondary,
+                        );
+                        p.rect_filled(
+                            Rect::from_min_size(
+                                egui::Pos2::new(bar_x0, y),
+                                Vec2::new(bar_max_w * frac, 7.5),
+                            ),
+                            CornerRadius::same(2),
+                            Color32::from_rgb(sr, sg, sb),
+                        );
+                        p.text(
+                            egui::Pos2::new(bar_x0 + bar_max_w + 4.0, y + 4.0),
+                            Align2::LEFT_CENTER,
+                            format!("{:.0}% | {:.1}%", st.observed_stiffness_pct, st.peak_transient_drift_pct),
+                            egui::FontId::monospace(8.0),
+                            theme.text_muted,
+                        );
+                    }
+                };
+
+                if two_col {
+                    ui.horizontal(|ui| {
+                        draw_psd(ui);
+                        draw_story_bars(ui);
+                    });
+                } else {
+                    ui.vertical(|ui| {
+                        draw_psd(ui);
+                        ui.add_space(4.0);
+                        draw_story_bars(ui);
+                    });
+                }
+            } else {
+                ui.label(
+                    RichText::new("Click Evaluate SHM or run /shm to synthesize live 6-DOF modal fingerprints & sensors.")
+                        .size(9.5)
+                        .color(theme.text_muted),
+                );
+            }
+        } else if let Some(ref rep) = universal_canvas.last_shm_twin_report {
+            let [pr, pg, pb] = rep.atc20_placard.badge_color_rgb();
+            let placard_col = Color32::from_rgb(pr, pg, pb);
+            Frame::new()
+                .fill(placard_col.gamma_multiply(0.14))
+                .stroke(Stroke::new(1.2, placard_col))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::same(6))
+                .show(ui, |ui| {
+                    ui.set_max_width(avail_w);
+                    ui.label(
+                        RichText::new(format!("ATC-20 POSTING: {}", rep.atc20_placard.label()))
+                            .size(10.5)
+                            .strong()
+                            .color(placard_col),
+                    );
+                    ui.label(
+                        RichText::new(rep.atc20_placard.guidance())
+                            .size(9.0)
+                            .color(theme.text_secondary),
+                    );
+                });
+            ui.add_space(4.0);
+            for item in &rep.atc20_checklist {
+                let [cr, cg, cb] = item.outcome.badge_color_rgb();
+                ui.horizontal_wrapped(|ui| {
+                    ui.colored_label(
+                        Color32::from_rgb(cr, cg, cb),
+                        RichText::new(format!("[{}] {}", item.outcome.short_label(), item.code)).size(8.8).strong(),
+                    );
+                    ui.label(
+                        RichText::new(format!("{} = {} ({})", item.criterion, item.observed_value, item.threshold_value))
+                            .size(8.8)
+                            .color(theme.text_secondary),
+                    );
+                });
+            }
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                icons::pill_badge(ui, AppIcon::CheckCircle, format!("GREEN {}", rep.green_count), Color32::from_rgb(34, 197, 94));
+                icons::pill_badge(ui, AppIcon::Bolt, format!("YELLOW {}", rep.yellow_count), Color32::from_rgb(245, 158, 11));
+                icons::pill_badge(ui, AppIcon::Shield, format!("RED {}", rep.red_count), Color32::from_rgb(239, 68, 68));
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    "Export SHM + ATC-20 .ifcx",
+                    false,
+                    theme.accent_green,
+                    "Export composed IFCX dossier with SHM sensors & ATC-20 posting",
+                )
+                .clicked()
+                {
+                    actions.export_shm_atc20_ifcx = true;
+                }
+            });
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Run ATC-20 Triage to classify active BIM & district portfolio.").size(9.5).color(theme.text_muted));
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Shield), "Run ATC-20 Triage", false, theme.accent_green, "Evaluate ATC-20 safety posting").clicked() {
+                    actions.run_shm_digital_twin = true;
+                }
+            });
+        }
     }
 }
