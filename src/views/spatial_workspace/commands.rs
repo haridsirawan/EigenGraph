@@ -486,6 +486,24 @@ impl SpatialWorkspaceState {
                         out.refresh_district_risk_field = true;
                     }
                 }
+                PlannedProposalAction::RunTradeStudy(obj_opt) => {
+                    let obj = obj_opt.unwrap_or(universal_canvas.trade_study_config.objective);
+                    universal_canvas.trade_study_config.objective = obj;
+                    self.open_collab_drawer(2);
+                    out.run_trade_study = Some(obj);
+                    out.run_permit_compliance = true;
+                }
+                PlannedProposalAction::ExportPermitAnnex => {
+                    self.open_collab_drawer(2);
+                    out.export_permit_annex_svg = true;
+                }
+                PlannedProposalAction::SyncPeerRelay(url_opt) => {
+                    self.open_collab_drawer(0);
+                    if let Some(u) = url_opt {
+                        out.connect_collab_relay = Some(u.clone());
+                    }
+                    out.sync_peer_relay_delta = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -721,6 +739,15 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ToggleRiskHeatmap(m) => {
                                 PlannedProposalAction::ToggleRiskHeatmap(*m)
                             }
+                            GeminiDirective::RunTradeStudy(obj) => {
+                                PlannedProposalAction::RunTradeStudy(*obj)
+                            }
+                            GeminiDirective::ExportPermitAnnex => {
+                                PlannedProposalAction::ExportPermitAnnex
+                            }
+                            GeminiDirective::SyncPeerRelay(url) => {
+                                PlannedProposalAction::SyncPeerRelay(url.clone())
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -795,6 +822,15 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ToggleRiskHeatmap(m) => format!(
                                 "RiskHeatmap({})",
                                 m.map(|v| v.short_label()).unwrap_or("Toggle")
+                            ),
+                            GeminiDirective::RunTradeStudy(obj) => format!(
+                                "TradeStudy({})",
+                                obj.map(|v| v.short_label()).unwrap_or("Balanced")
+                            ),
+                            GeminiDirective::ExportPermitAnnex => "ExportPermitAnnex(S-102)".to_string(),
+                            GeminiDirective::SyncPeerRelay(url) => format!(
+                                "SyncPeerRelay({})",
+                                url.as_deref().unwrap_or("Active")
                             ),
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -2231,6 +2267,59 @@ impl SpatialWorkspaceState {
                 "/collab-ifcx" => {
                     self.open_collab_drawer(0);
                     actions.export_collab_bundle_ifcx = true;
+                }
+                "/trade-study" => {
+                    let low = arg.trim().to_ascii_lowercase();
+                    let obj = if low.contains("safe") || low.contains("ari") {
+                        crate::core::trade_study::TradeStudyObjective::MaxSafetyAri
+                    } else if low.contains("cost") {
+                        crate::core::trade_study::TradeStudyObjective::MinCost
+                    } else if low.contains("carb") || low.contains("co2") {
+                        crate::core::trade_study::TradeStudyObjective::MinCarbon
+                    } else if low.contains("bal") {
+                        crate::core::trade_study::TradeStudyObjective::Balanced
+                    } else {
+                        universal_canvas.trade_study_config.objective
+                    };
+                    universal_canvas.trade_study_config.objective = obj;
+                    self.open_collab_drawer(2);
+                    actions.run_trade_study = Some(obj);
+                    actions.run_permit_compliance = true;
+                    self.push_trace(
+                        format!("Running 6-scenario Trade-Study ({})...", obj.short_label()),
+                        true,
+                    );
+                }
+                "/permit-check" => {
+                    self.open_collab_drawer(2);
+                    actions.run_permit_compliance = true;
+                    self.push_trace("Auditing 10-clause SNI/ASCE/UFC Permit Matrix...", true);
+                }
+                "/permit-svg" => {
+                    self.open_collab_drawer(2);
+                    actions.export_permit_annex_svg = true;
+                }
+                "/relay" => {
+                    let trimmed_arg = arg.trim();
+                    self.open_collab_drawer(0);
+                    if trimmed_arg.eq_ignore_ascii_case("off")
+                        || trimmed_arg.eq_ignore_ascii_case("stop")
+                    {
+                        actions.disconnect_collab_relay = true;
+                    } else {
+                        let url = if trimmed_arg.is_empty() {
+                            universal_canvas.collab_state.relay_url_draft.clone()
+                        } else {
+                            universal_canvas.collab_state.relay_url_draft = trimmed_arg.to_string();
+                            trimmed_arg.to_string()
+                        };
+                        actions.connect_collab_relay = Some(url);
+                    }
+                }
+                "/sync-peer" => {
+                    self.open_collab_drawer(0);
+                    actions.sync_peer_relay_delta = true;
+                    self.push_trace("Syncing peer IFCX delta via Relay + 3-Way Merge...", true);
                 }
                 "/section" | "/cut" => {
                     let elev_opt = arg

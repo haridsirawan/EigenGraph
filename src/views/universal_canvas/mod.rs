@@ -162,6 +162,10 @@ pub struct UniversalCanvasState {
     // Phase 80: Collaborative Multi-Layer IFCX Governance, Signed Checkpoints & 3D Risk Field
     pub collab_state: crate::core::ifcx_collab::IfcxCollabState,
     pub last_risk_field_report: Option<crate::core::ifcx_collab::DistrictRiskFieldReport>,
+    // Phase 81: Parametric Trade-Study Matrix & Automated SNI/ASCE Permit Compliance Annex
+    pub trade_study_config: crate::core::trade_study::TradeStudyConfig,
+    pub last_trade_study_report: Option<crate::core::trade_study::TradeStudyReport>,
+    pub last_permit_report: Option<crate::core::trade_study::PermitComplianceReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -289,6 +293,9 @@ impl Default for UniversalCanvasState {
             last_monte_carlo_report: None,
             collab_state: crate::core::ifcx_collab::IfcxCollabState::default(),
             last_risk_field_report: None,
+            trade_study_config: crate::core::trade_study::TradeStudyConfig::default(),
+            last_trade_study_report: None,
+            last_permit_report: None,
         }
     }
 }
@@ -476,6 +483,10 @@ impl UniversalCanvasState {
                 &doc,
                 &gov_overlay,
             );
+        }
+        if let Some(ref ts_rep) = self.last_trade_study_report {
+            let ts_overlay = ts_rep.build_ifcx_overlay(bim_project);
+            doc = crate::core::ifcx::IfcxStage::compose_with_trade_study_overlay(&doc, &ts_overlay);
         }
         doc
     }
@@ -810,6 +821,100 @@ impl UniversalCanvasState {
         msg
     }
 
+    /// Evaluates the 6-scenario Parametric Trade-Study Matrix (`ARI v2`, DCR%, Drift, Cost, CO2, PML-90).
+    pub fn run_trade_study_analysis(
+        &mut self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+    ) -> crate::core::trade_study::TradeStudyReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::trade_study::run_parametric_trade_study(
+            bim_project,
+            members,
+            &site,
+            self.last_subsurface_ssi_report.as_ref(),
+            self.last_monte_carlo_report.as_ref(),
+            &self.trade_study_config,
+        );
+        self.last_trade_study_report = Some(rep.clone());
+        rep
+    }
+
+    /// Evaluates the 10-clause SNI 1726 / SNI 2847 / ASCE 7 / UFC 4-023-03 Permit Compliance Matrix.
+    pub fn refresh_permit_compliance(
+        &mut self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+    ) -> crate::core::trade_study::PermitComplianceReport {
+        let site = self.active_site_coupling();
+        let haz_opt = self
+            .district_hazard
+            .any_active()
+            .then_some(&self.district_hazard_report);
+        let rep = crate::core::trade_study::evaluate_permit_compliance_matrix(
+            bim_project,
+            members,
+            &site,
+            self.last_subsurface_ssi_report.as_ref(),
+            haz_opt,
+            self.last_shm_twin_report.as_ref(),
+            self.last_evacuation_report.as_ref(),
+            self.last_monte_carlo_report.as_ref(),
+            Some(&self.collab_state),
+        );
+        self.last_permit_report = Some(rep.clone());
+        rep
+    }
+
+    /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
+    /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
+    pub fn simulate_peer_relay_sync(
+        &mut self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+    ) -> String {
+        let local_doc = self.build_active_layered_ifcx(bim_project, members);
+        if self.collab_state.checkpoints.is_empty() {
+            let _ = self.create_signed_ifcx_checkpoint(bim_project, members, "Relay Sync Base");
+        }
+        let base_doc = self
+            .collab_state
+            .checkpoints
+            .first()
+            .map(|c| c.snapshot.clone())
+            .unwrap_or_else(|| local_doc.clone());
+
+        let mut events = crate::core::web_bridge::collab_relay_poll_events();
+        if events.is_empty() {
+            let peer_doc = crate::core::ifcx_collab::synthesize_peer_branch_doc(
+                &base_doc,
+                self.collab_state.peer_discipline,
+            );
+            crate::core::web_bridge::collab_relay_inject_event(
+                crate::core::web_bridge::CollabRelayEvent {
+                    peer_author: self.collab_state.peer_branch_label.clone(),
+                    discipline: self.collab_state.peer_discipline.short_label().to_string(),
+                    checkpoint_id: "RELAY-SYNC".to_string(),
+                    payload_json: peer_doc.to_json_pretty(),
+                },
+            );
+            events = crate::core::web_bridge::collab_relay_poll_events();
+        }
+        let mut last_msg = "No incoming relay deltas.".to_string();
+        for ev in events {
+            if let Ok(incoming) = crate::core::ifcx::IfcxDocument::parse(&ev.payload_json) {
+                last_msg = self.collab_state.ingest_relay_peer_doc(
+                    &base_doc,
+                    &local_doc,
+                    &ev.peer_author,
+                    self.collab_state.peer_discipline,
+                    &incoming,
+                );
+            }
+        }
+        last_msg
+    }
+
     /// Builds frame parameters for the Pure WebGPU `@compute` 60 FPS multi-hazard particle pass.
     pub fn build_hazard_compute_input(
         &self,
@@ -1086,6 +1191,7 @@ impl UniversalCanvasState {
             shm_watchdog: self.shm_watchdog.config.clone(),
             monte_carlo_config: self.monte_carlo_config.clone(),
             collab_config: self.collab_state.config.clone(),
+            trade_study_config: self.trade_study_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1201,6 +1307,9 @@ impl UniversalCanvasState {
         self.monte_carlo_config = archive.monte_carlo_config;
         self.last_monte_carlo_report = None;
         self.collab_state.config = archive.collab_config;
+        self.trade_study_config = archive.trade_study_config;
+        self.last_trade_study_report = None;
+        self.last_permit_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {

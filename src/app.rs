@@ -714,6 +714,33 @@ impl App for EigenGraphApp {
             }
         }
 
+        // Phase 81: Poll asynchronous WebSocket Collab IFCX Delta Sync Relay events
+        let relay_events = crate::core::web_bridge::collab_relay_poll_events();
+        if !relay_events.is_empty() {
+            let local_doc = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let base_doc = self
+                .universal_canvas
+                .collab_state
+                .checkpoints
+                .first()
+                .map(|c| c.snapshot.clone())
+                .unwrap_or_else(|| local_doc.clone());
+            for ev in relay_events {
+                if let Ok(incoming) = crate::core::ifcx::IfcxDocument::parse(&ev.payload_json) {
+                    let msg = self.universal_canvas.collab_state.ingest_relay_peer_doc(
+                        &base_doc,
+                        &local_doc,
+                        &ev.peer_author,
+                        self.universal_canvas.collab_state.peer_discipline,
+                        &incoming,
+                    );
+                    self.spatial_workspace.push_trace(msg, true);
+                }
+            }
+        }
+
         // Poll asynchronous chunked binary streaming for arbitrary-size (>4 MB) Vault/Picker files in Browser WASM
         match crate::core::web_bridge::poll_file_stream_event() {
             crate::core::web_bridge::FileStreamPollResult::Idle => {}
@@ -2949,6 +2976,128 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if let Some(obj) = hud_actions.run_trade_study {
+            self.universal_canvas.trade_study_config.objective = obj;
+            let rep = self
+                .universal_canvas
+                .run_trade_study_analysis(&self.build_view.bim_bus.project, &self.members);
+            self.spatial_workspace.push_trace(rep.summary, true);
+        }
+        if let Some(arch) = hud_actions.adopt_trade_study_scenario {
+            let adopt_msg = crate::core::trade_study::apply_trade_study_scenario_to_bim(
+                &mut self.build_view.bim_bus.project,
+                arch,
+            );
+            self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
+            self.sync_bim_to_fem();
+            let cp_msg = self.universal_canvas.create_signed_ifcx_checkpoint(
+                &self.build_view.bim_bus.project,
+                &self.members,
+                &format!("Adopted {}", arch.short_label()),
+            );
+            let _ = self
+                .universal_canvas
+                .run_trade_study_analysis(&self.build_view.bim_bus.project, &self.members);
+            let _ = self
+                .universal_canvas
+                .refresh_permit_compliance(&self.build_view.bim_bus.project, &self.members);
+            self.spatial_workspace
+                .push_trace(format!("{adopt_msg} • {cp_msg}"), true);
+        }
+        if hud_actions.export_trade_study_ifcx {
+            let ts = self
+                .universal_canvas
+                .run_trade_study_analysis(&self.build_view.bim_bus.project, &self.members);
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_trade_study_matrix.ifcx");
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let ts_overlay = ts.build_ifcx_overlay(&self.build_view.bim_bus.project);
+            let composed =
+                crate::core::IfcxStage::compose_with_trade_study_overlay(&layered, &ts_overlay);
+            let json = composed.to_json_pretty();
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &json,
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported Trade-Study IFCX ({fname}, {} nodes)", composed.data.len()),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.run_permit_compliance {
+            let rep = self
+                .universal_canvas
+                .refresh_permit_compliance(&self.build_view.bim_bus.project, &self.members);
+            self.spatial_workspace.push_trace(rep.summary, rep.fail_count == 0);
+        }
+        if hud_actions.export_permit_annex_svg {
+            let permit = self
+                .universal_canvas
+                .refresh_permit_compliance(&self.build_view.bim_bus.project, &self.members);
+            let ts = self
+                .universal_canvas
+                .run_trade_study_analysis(&self.build_view.bim_bus.project, &self.members);
+            let annex = crate::core::build_permit_compliance_annex_svg(
+                &self.build_view.bim_bus.project,
+                &permit,
+                Some(&ts),
+                Some(&self.universal_canvas.collab_state),
+                "S-102",
+                "REV 01",
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_permit_compliance_annex_S102.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &annex.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(annex.sha256_seal);
+                    self.spatial_workspace.push_trace(annex.summary, true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.open_collab_bundle_picker {
+            crate::core::web_bridge::trigger_file_picker(".json");
+            self.spatial_workspace
+                .push_trace("Select a signed .ifcx-bundle.json handover package...", true);
+        }
+        if let Some(url) = hud_actions.connect_collab_relay {
+            match crate::core::web_bridge::collab_relay_connect(&url) {
+                Ok(msg) => {
+                    self.universal_canvas.collab_state.relay_connected = true;
+                    self.universal_canvas.collab_state.relay_status = msg.clone();
+                    self.spatial_workspace.push_trace(msg, true);
+                }
+                Err(err) => {
+                    self.universal_canvas.collab_state.relay_connected = false;
+                    self.universal_canvas.collab_state.relay_status = err.clone();
+                    self.spatial_workspace.push_trace(err, false);
+                }
+            }
+        }
+        if hud_actions.disconnect_collab_relay {
+            crate::core::web_bridge::collab_relay_disconnect();
+            self.universal_canvas.collab_state.relay_connected = false;
+            self.universal_canvas.collab_state.relay_status = "Disconnected".to_string();
+            self.spatial_workspace
+                .push_trace("Disconnected Collaborative IFCX Relay.", true);
+        }
+        if hud_actions.sync_peer_relay_delta {
+            let msg = self
+                .universal_canvas
+                .simulate_peer_relay_sync(&self.build_view.bim_bus.project, &self.members);
+            self.spatial_workspace.push_trace(msg, true);
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {
@@ -4469,6 +4618,24 @@ impl EigenGraphApp {
     fn handle_imported_file(&mut self, payload: crate::core::web_bridge::ImportedFilePayload) {
         let lower = payload.filename.to_lowercase();
         let trimmed = payload.content.trim_start_matches('\u{FEFF}').trim_start();
+        if lower.ends_with(".ifcx-bundle.json")
+            || trimmed.contains("\"EIGEN-IFCX-COLLAB-1.0\"")
+        {
+            match self.universal_canvas.collab_state.import_bundle_json(trimmed) {
+                Ok(cnt) => {
+                    self.spatial_workspace.open_collab_drawer(0);
+                    self.spatial_workspace.push_trace(
+                        format!(
+                            "Imported & SHA-256 verified '{}' ({cnt} IFCX checkpoints)",
+                            payload.filename
+                        ),
+                        true,
+                    );
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+            return;
+        }
         if lower.ends_with(".ifcx") || crate::core::ifcx::IfcxDocument::looks_like_ifcx(trimmed) {
             let clean_raw = payload.content.trim_start_matches('\u{FEFF}');
             if self.spatial_workspace.spatial_mode_enabled {

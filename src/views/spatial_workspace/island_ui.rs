@@ -5288,6 +5288,22 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_collab_drawer(0);
                                                     }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::ChartLine),
+                                                        "Trade / Permit",
+                                                        self.collab_drawer_open && self.collab_drawer_tab == 2,
+                                                        theme.accent_green,
+                                                        "Open 6-Scenario Trade-Study Matrix & 10-Clause Permit Compliance Annex",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_collab_drawer(2);
+                                                        actions.run_trade_study =
+                                                            Some(universal_canvas.trade_study_config.objective);
+                                                        actions.run_permit_compliance = true;
+                                                    }
                                                 },
                                             );
                                         }

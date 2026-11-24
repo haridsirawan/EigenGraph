@@ -40,6 +40,7 @@ pub mod ifcx_collab;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
+pub mod trade_study;
 pub mod retrofit;
 pub mod gis;
 pub mod lifecycle_ops;
@@ -216,7 +217,8 @@ pub use lifecycle_ops::{
     VariationOrderRow,
 };
 pub use vector_dossier::{
-    build_pure_vector_engineering_dossier_svg, VectorDossierExport, VectorDossierInput,
+    build_permit_compliance_annex_svg, build_pure_vector_engineering_dossier_svg,
+    VectorDossierExport, VectorDossierInput,
 };
 pub use portfolio_retrofit::{
     optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,
@@ -257,6 +259,12 @@ pub use ifcx_collab::{
     DistrictRiskMetric, IfcxCheckpointKpi, IfcxCheckpointRecord, IfcxCollabBundle,
     IfcxCollabConfig, IfcxCollabState, IfcxMergeConflict, IfcxThreeWayMergeResult,
     NS_EG_GOVERNANCE_SEAL,
+};
+pub use trade_study::{
+    apply_trade_study_scenario_to_bim, evaluate_permit_compliance_matrix,
+    run_parametric_trade_study, PermitClauseStatus, PermitComplianceClause,
+    PermitComplianceReport, TradeScenarioArchetype, TradeStudyConfig, TradeStudyObjective,
+    TradeStudyReport, TradeStudyScenarioResult, NS_EG_TRADE_STUDY_MATRIX,
 };
 
 

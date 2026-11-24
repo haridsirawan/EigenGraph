@@ -553,6 +553,18 @@ pub struct IfcxCollabState {
     pub peer_branch_label: String,
     pub peer_discipline: CollabDiscipline,
     pub checkpoint_label_draft: String,
+    #[serde(default = "default_relay_url")]
+    pub relay_url_draft: String,
+    #[serde(default)]
+    pub relay_connected: bool,
+    #[serde(default)]
+    pub relay_status: String,
+    #[serde(default)]
+    pub relay_synced_count: usize,
+}
+
+fn default_relay_url() -> String {
+    "wss://relay.eigengraph.net/ifcx-room".to_string()
 }
 
 impl Default for IfcxCollabState {
@@ -565,6 +577,10 @@ impl Default for IfcxCollabState {
             peer_branch_label: "Geotech & Peer Branch".to_string(),
             peer_discipline: CollabDiscipline::PeerReview,
             checkpoint_label_draft: "Design Milestone".to_string(),
+            relay_url_draft: default_relay_url(),
+            relay_connected: false,
+            relay_status: "Offline (Ready)".to_string(),
+            relay_synced_count: 0,
         }
     }
 }
@@ -712,6 +728,31 @@ impl IfcxCollabState {
         self.checkpoints = bundle.checkpoints;
         self.active_checkpoint_idx = count.checked_sub(1);
         Ok(count)
+    }
+
+    /// Reconciles an incoming peer `.ifcx` delta received from the Collaborative Sync Relay
+    /// via deterministic 3-Way Merge against `base_doc` and `local_doc`.
+    pub fn ingest_relay_peer_doc(
+        &mut self,
+        base_doc: &IfcxDocument,
+        local_doc: &IfcxDocument,
+        peer_author: &str,
+        peer_disc: CollabDiscipline,
+        incoming_doc: &IfcxDocument,
+    ) -> String {
+        let merge = three_way_merge_ifcx(
+            base_doc,
+            local_doc,
+            incoming_doc,
+            "Base",
+            "Local",
+            &format!("{peer_author} ({})", peer_disc.short_label()),
+        );
+        let msg = merge.summary.clone();
+        self.last_merge = Some(merge);
+        self.relay_synced_count += 1;
+        self.relay_status = format!("Synced #{} from {}", self.relay_synced_count, peer_author);
+        msg
     }
 
     /// Builds a non-destructive IFCX governance provenance overlay node
@@ -1567,5 +1608,49 @@ mod tests {
             assert!(!report.hotspots.is_empty());
             assert!(report.peak_risk_01 >= report.mean_risk_01);
         }
+    }
+
+    #[test]
+    fn phase81_collab_relay_loopback_and_peer_delta_merge() {
+        use crate::core::web_bridge::{
+            collab_relay_connect, collab_relay_disconnect, collab_relay_inject_event,
+            collab_relay_poll_events, collab_relay_publish_json, collab_relay_snapshot,
+            CollabRelayEvent,
+        };
+
+        let proj = BimProject::sample_bimcraft_building();
+        let base_doc = IfcxDocument::from_bim_project(&proj, None, 0.0, None, None, None);
+        let peer_doc = synthesize_peer_branch_doc(&base_doc, CollabDiscipline::Geotechnical);
+        let peer_json = peer_doc.to_json_pretty();
+
+        let status = collab_relay_connect("wss://relay.eigengraph.net/test").expect("relay connect");
+        assert!(status.contains("wss://relay.eigengraph.net/test"));
+        assert!(collab_relay_snapshot().0);
+
+        let pub_msg = collab_relay_publish_json(&peer_json).expect("publish");
+        assert!(pub_msg.contains("byte"));
+
+        collab_relay_inject_event(CollabRelayEvent {
+            peer_author: "Dr. Sinta, GE".to_string(),
+            discipline: "Geotech".to_string(),
+            checkpoint_id: "CP-PEER-01".to_string(),
+            payload_json: peer_json,
+        });
+        let events = collab_relay_poll_events();
+        assert_eq!(events.len(), 1);
+        let parsed = IfcxDocument::parse(&events[0].payload_json).expect("parse relay ifcx");
+
+        let mut collab = IfcxCollabState::default();
+        let merge_msg = collab.ingest_relay_peer_doc(
+            &base_doc,
+            &base_doc,
+            &events[0].peer_author,
+            CollabDiscipline::Geotechnical,
+            &parsed,
+        );
+        assert!(merge_msg.contains("3-Way IFCX Merge"));
+        assert_eq!(collab.relay_synced_count, 1);
+        collab_relay_disconnect();
+        assert!(!collab_relay_snapshot().0);
     }
 }

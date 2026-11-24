@@ -366,10 +366,10 @@ impl SpatialWorkspaceState {
         self.evacuation_drawer_open = true;
     }
 
-    /// Idempotently opens the Phase 80 Collaborative IFCX Governance & District Risk drawer.
+    /// Idempotently opens the Phase 80/81 Collaborative IFCX Governance, Risk & Trade-Study drawer.
     pub fn open_collab_drawer(&mut self, tab: usize) {
         self.toggle_exclusive_drawer("__none");
-        self.collab_drawer_tab = tab.min(1);
+        self.collab_drawer_tab = tab.min(2);
         self.collab_drawer_open = true;
     }
 

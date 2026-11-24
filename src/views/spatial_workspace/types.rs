@@ -441,6 +441,10 @@ pub enum PlannedProposalAction {
     ApproveCheckpoint,
     RunIfcxMerge,
     ToggleRiskHeatmap(Option<crate::core::ifcx_collab::DistrictRiskMetric>),
+    // Phase 81: Parametric Trade-Study Matrix, Permit Annex & Peer Sync Relay
+    RunTradeStudy(Option<crate::core::trade_study::TradeStudyObjective>),
+    ExportPermitAnnex,
+    SyncPeerRelay(Option<String>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -524,6 +528,10 @@ pub enum GeminiDirective {
     ApproveCheckpoint,
     RunIfcxMerge,
     ToggleRiskHeatmap(Option<crate::core::ifcx_collab::DistrictRiskMetric>),
+    // Phase 81: Parametric Trade-Study Matrix, Permit Annex & Peer Sync Relay
+    RunTradeStudy(Option<crate::core::trade_study::TradeStudyObjective>),
+    ExportPermitAnnex,
+    SyncPeerRelay(Option<String>),
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -762,6 +770,30 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                     }
                 });
                 directives.push(GeminiDirective::ToggleRiskHeatmap(metric));
+            } else if upper == "RUN_TRADE_STUDY" || upper.starts_with("RUN_TRADE_STUDY:") {
+                let obj = upper.split_once(':').and_then(|(_, r)| {
+                    let k = r.trim();
+                    if k.contains("SAFETY") || k.contains("ARI") {
+                        Some(crate::core::trade_study::TradeStudyObjective::MaxSafetyAri)
+                    } else if k.contains("COST") {
+                        Some(crate::core::trade_study::TradeStudyObjective::MinCost)
+                    } else if k.contains("CARBON") || k.contains("CO2") {
+                        Some(crate::core::trade_study::TradeStudyObjective::MinCarbon)
+                    } else if k.contains("BAL") {
+                        Some(crate::core::trade_study::TradeStudyObjective::Balanced)
+                    } else {
+                        None
+                    }
+                });
+                directives.push(GeminiDirective::RunTradeStudy(obj));
+            } else if upper == "EXPORT_PERMIT_ANNEX" {
+                directives.push(GeminiDirective::ExportPermitAnnex);
+            } else if upper == "SYNC_PEER_RELAY" || upper.starts_with("SYNC_PEER_RELAY:") {
+                let url = tag
+                    .split_once(':')
+                    .map(|(_, r)| r.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                directives.push(GeminiDirective::SyncPeerRelay(url));
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -1529,6 +1561,36 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export signed .ifcx-bundle.json multi-discipline governance checkpoint chain",
         icon: AppIcon::SaveDisk,
     },
+    SlashCommandSpec {
+        cmd: "/trade-study",
+        category: "AI",
+        description: "Run 6-scenario Trade-Study Matrix (/trade-study balanced|safety|cost|carbon)",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/permit-check",
+        category: "Safety",
+        description: "Audit 10-clause SNI 1726 / SNI 2847 / ASCE 7 / UFC Permit Compliance Matrix",
+        icon: AppIcon::CheckCircle,
+    },
+    SlashCommandSpec {
+        cmd: "/permit-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-102 Pure-Vector Permit Compliance & Trade-Study Annex .svg",
+        icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
+        cmd: "/relay",
+        category: "Collab",
+        description: "Connect or disconnect Live Peer IFCX Sync Relay (/relay wss://... | off)",
+        icon: AppIcon::Pulse,
+    },
+    SlashCommandSpec {
+        cmd: "/sync-peer",
+        category: "Collab",
+        description: "Synchronize incoming peer IFCX delta via Relay & 3-Way Merge",
+        icon: AppIcon::Layers,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1595,6 +1657,15 @@ pub struct SpatialHudActions {
     pub run_ifcx_three_way_merge: bool,
     pub refresh_district_risk_field: bool,
     pub export_collab_bundle_ifcx: bool,
+    pub run_trade_study: Option<crate::core::trade_study::TradeStudyObjective>,
+    pub adopt_trade_study_scenario: Option<crate::core::trade_study::TradeScenarioArchetype>,
+    pub export_trade_study_ifcx: bool,
+    pub run_permit_compliance: bool,
+    pub export_permit_annex_svg: bool,
+    pub open_collab_bundle_picker: bool,
+    pub connect_collab_relay: Option<String>,
+    pub disconnect_collab_relay: bool,
+    pub sync_peer_relay_delta: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -1971,5 +2042,20 @@ impl SpatialHudActions {
         self.run_ifcx_three_way_merge |= other.run_ifcx_three_way_merge;
         self.refresh_district_risk_field |= other.refresh_district_risk_field;
         self.export_collab_bundle_ifcx |= other.export_collab_bundle_ifcx;
+        if other.run_trade_study.is_some() {
+            self.run_trade_study = other.run_trade_study;
+        }
+        if other.adopt_trade_study_scenario.is_some() {
+            self.adopt_trade_study_scenario = other.adopt_trade_study_scenario;
+        }
+        self.export_trade_study_ifcx |= other.export_trade_study_ifcx;
+        self.run_permit_compliance |= other.run_permit_compliance;
+        self.export_permit_annex_svg |= other.export_permit_annex_svg;
+        self.open_collab_bundle_picker |= other.open_collab_bundle_picker;
+        if other.connect_collab_relay.is_some() {
+            self.connect_collab_relay = other.connect_collab_relay;
+        }
+        self.disconnect_collab_relay |= other.disconnect_collab_relay;
+        self.sync_peer_relay_delta |= other.sync_peer_relay_delta;
     }
 }

@@ -4387,3 +4387,158 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn test_phase81_trade_study_permit_and_relay_slash_commands_zero_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let members = vec![StructuralMember {
+            id: 1,
+            name: "Col-A1".to_string(),
+            section: "RC 400x400".to_string(),
+            force_kn: -380.0,
+            capacity_kn: 720.0,
+            utilization: 0.74,
+            moment_my_knm: 38.0,
+            moment_mz_knm: 26.0,
+            is_critical: false,
+            is_active: true,
+            ari_score: 0.81,
+            svd_sensitivity: 0.14,
+            ari: 0.81,
+            dcr_interaction: 0.76,
+            shear_vy_kn: 50.0,
+            svd_margin: 0.44,
+            ci: 0.16,
+            rr: 0.87,
+        }];
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        for cmd in ["/trade-study", "/permit-check", "/permit-svg", "/relay", "/sync-peer"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|s| s.cmd == cmd),
+                "Missing Phase 81 slash command {cmd}"
+            );
+        }
+
+        let act_ts = spatial.execute_spatial_input(
+            "/trade-study carbon",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(
+            act_ts.run_trade_study,
+            Some(crate::core::trade_study::TradeStudyObjective::MinCarbon)
+        );
+        assert!(spatial.collab_drawer_open);
+        assert_eq!(spatial.collab_drawer_tab, 2);
+        let _ = canvas.run_trade_study_analysis(&build.bim_bus.project, &members);
+
+        let act_perm = spatial.execute_spatial_input(
+            "/permit-check",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_perm.run_permit_compliance);
+        let _ = canvas.refresh_permit_compliance(&build.bim_bus.project, &members);
+
+        let act_svg = spatial.execute_spatial_input(
+            "/permit-svg",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_svg.export_permit_annex_svg);
+
+        let act_relay = spatial.execute_spatial_input(
+            "/relay wss://relay.eigengraph.net/test",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(
+            act_relay.connect_collab_relay.as_deref(),
+            Some("wss://relay.eigengraph.net/test")
+        );
+        assert_eq!(spatial.collab_drawer_tab, 0);
+
+        let act_sync = spatial.execute_spatial_input(
+            "/sync-peer",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_sync.sync_peer_relay_delta);
+        let _ = canvas.simulate_peer_relay_sync(&build.bim_bus.project, &members);
+
+        let (clean_txt, dirs) = parse_gemini_action_directives(
+            "Trade check [[RUN_TRADE_STUDY:SAFETY]] [[EXPORT_PERMIT_ANNEX]] [[SYNC_PEER_RELAY:wss://relay.eigengraph.net/room1]]",
+        );
+        assert_eq!(clean_txt, "Trade check");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunTradeStudy(Some(
+                    crate::core::trade_study::TradeStudyObjective::MaxSafetyAri
+                )),
+                GeminiDirective::ExportPermitAnnex,
+                GeminiDirective::SyncPeerRelay(Some(
+                    "wss://relay.eigengraph.net/room1".to_string()
+                )),
+            ]
+        );
+
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1, 2] {
+            spatial.open_collab_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 81 Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

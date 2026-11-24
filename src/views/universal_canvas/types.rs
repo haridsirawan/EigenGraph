@@ -270,6 +270,8 @@ pub struct UnifiedWorkspaceArchive {
     pub monte_carlo_config: crate::core::gpu_fragility_mc::MonteCarloFragilityConfig,
     #[serde(default)]
     pub collab_config: crate::core::ifcx_collab::IfcxCollabConfig,
+    #[serde(default)]
+    pub trade_study_config: crate::core::trade_study::TradeStudyConfig,
     pub sha256_seal: String,
 }
 

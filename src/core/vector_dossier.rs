@@ -1016,6 +1016,226 @@ pub fn build_pure_vector_engineering_dossier_svg(
     }
 }
 
+/// Phase 81 (`v0.8.1`): Generates an archival A3 landscape (`1600 x 1131`, 0% raster pixels)
+/// Pure-Vector Engineering Permit Compliance & Parametric Trade-Study Annex SVG (`S-102`).
+pub fn build_permit_compliance_annex_svg(
+    project: &BimProject,
+    permit: &crate::core::trade_study::PermitComplianceReport,
+    trade_study: Option<&crate::core::trade_study::TradeStudyReport>,
+    collab_state: Option<&crate::core::ifcx_collab::IfcxCollabState>,
+    sheet_code: &str,
+    revision: &str,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(20_480);
+    let seal_token = "__EIGENGRAPH_PERMIT_SHA256__";
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#5b92a5" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH PERMIT COMPLIANCE &amp; TRADE-STUDY ANNEX — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#2b4963">SHEET {} • {} • 100% PURE VECTOR</text>"##,
+        escape_xml(&project.project_name),
+        escape_xml(sheet_code),
+        escape_xml(revision),
+    );
+
+    // Panel 1: 10-Clause SNI / ASCE / UFC Permit Compliance Matrix (Left column full height)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 1042.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. AUTOMATED SNI / ASCE / UFC / FEMA P-58 PERMIT COMPLIANCE MATRIX",
+        &format!(
+            "{}/10 PASS • {:.0}% READY",
+            permit.pass_count, permit.readiness_pct
+        ),
+    );
+    for (idx, cl) in permit.clauses.iter().take(10).enumerate() {
+        let ry = p1y + 44.0 + (idx as f64) * 96.0;
+        let col = cl.status.svg_hex();
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="84" rx="5" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<rect x="{:.1}" y="{:.1}" width="64" height="22" rx="4" fill="{col}"/>
+<text x="{:.1}" y="{:.1}" font-size="9.5" font-weight="bold" text-anchor="middle" fill="#ffffff">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="10.5" font-weight="bold" fill="#0f172a">{} — {}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.5" font-family="monospace" fill="#1e293b">Demand: {}   |   Code Limit: {}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" fill="#64748b">{}</text>"##,
+            p1x + 14.0,
+            p1w - 28.0,
+            p1x + 24.0,
+            ry + 12.0,
+            p1x + 56.0,
+            ry + 26.5,
+            cl.status.short_label(),
+            p1x + 100.0,
+            ry + 26.5,
+            escape_xml(&cl.code_ref),
+            escape_xml(&cl.title),
+            p1x + 24.0,
+            ry + 50.0,
+            escape_xml(&cl.demand_value),
+            escape_xml(&cl.limit_value),
+            p1x + 24.0,
+            ry + 70.0,
+            escape_xml(&truncate_clean(&cl.notes, 82)),
+        );
+    }
+
+    // Panel 2: Parametric Trade-Study Comparison Table (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 412.0);
+    let ts_sub = trade_study
+        .and_then(|ts| ts.recommended())
+        .map(|r| format!("WINNER: {} ({:.1})", r.archetype.short_label(), r.weighted_utility_score))
+        .unwrap_or_else(|| "NO MATRIX RUN".to_string());
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. PARAMETRIC MULTI-SCENARIO TRADE-STUDY COMPARISON",
+        &ts_sub,
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#2b4963">SCENARIO              ARI   DCR%  DRIFT  T1(s)  COST($k)  CO2(t)  SCORE</text>"##,
+        p2x + 18.0,
+        p2y + 48.0,
+    );
+    if let Some(ts) = trade_study {
+        for (idx, s) in ts.scenarios.iter().take(6).enumerate() {
+            let ry = p2y + 58.0 + (idx as f64) * 54.0;
+            let fill = if s.is_recommended { "#ecfdf5" } else { "#ffffff" };
+            let stroke = if s.is_recommended { "#059669" } else { "#cbd5e1" };
+            let badge = if s.is_recommended { " *" } else { "" };
+            let _ = writeln!(
+                svg,
+                r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="44" rx="4" fill="{fill}" stroke="{stroke}" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-family="monospace" font-weight="bold" fill="#0f172a">{:<18}{}  {:.2}  {:>4.0}%  {:>4.2}%  {:>4.2}s   {:>6.0}k  {:>5.1}   {:>5.1}</text>"##,
+                p2x + 14.0,
+                p2w - 28.0,
+                p2x + 22.0,
+                ry + 26.0,
+                escape_xml(&truncate_clean(s.archetype.short_label(), 18)),
+                badge,
+                s.min_ari,
+                s.max_dcr_pct,
+                s.max_drift_pct,
+                s.fundamental_period_s,
+                s.estimated_cost_usd * 0.001,
+                s.embodied_carbon_tco2e,
+                s.weighted_utility_score,
+            );
+        }
+    }
+
+    // Panel 3: Pure-Vector Trade-Study Utility & ARI Chart (Middle Right)
+    let (p3x, p3y, p3w, p3h) = (808.0, 484.0, 760.0, 324.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. MULTI-CRITERIA UTILITY & REDUNDANCY COMPARISON",
+        "PURE VECTOR BAR CHART",
+    );
+    if let Some(ts) = trade_study {
+        let bar_x0 = p3x + 150.0;
+        let max_bw = p3w - 250.0;
+        for (idx, s) in ts.scenarios.iter().take(6).enumerate() {
+            let by = p3y + 48.0 + (idx as f64) * 43.0;
+            let bw = ((s.weighted_utility_score / 100.0).clamp(0.05, 1.0)) * max_bw;
+            let col = if s.is_recommended { "#059669" } else { "#2b4963" };
+            let _ = writeln!(
+                svg,
+                r##"<text x="{:.1}" y="{:.1}" font-size="9.5" font-weight="bold" text-anchor="end" fill="#0f172a">{}</text>
+<rect x="{bar_x0:.1}" y="{by:.1}" width="{bw:.1}" height="24" rx="4" fill="{col}"/>
+<text x="{:.1}" y="{:.1}" font-size="9" font-family="monospace" fill="#0f172a">{:.1}/100 (ARI {:.2})</text>"##,
+                bar_x0 - 10.0,
+                by + 16.0,
+                escape_xml(s.archetype.short_label()),
+                bar_x0 + bw + 8.0,
+                by + 16.0,
+                s.weighted_utility_score,
+                s.min_ari,
+            );
+        }
+    }
+
+    // Panel 4: Certification Seal & Checkpoint Governance Stamp (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 824.0, 760.0, 274.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. PERMIT CERTIFICATION & SHA-256 GOVERNANCE SEAL",
+        &format!("REV {}", revision),
+    );
+    let gov_line = collab_state
+        .and_then(|cs| cs.active_checkpoint())
+        .map(|cp| {
+            format!(
+                "GOVERNANCE CHECKPOINT: {} [{}] ({}) • Chain SHA {}",
+                cp.checkpoint_id,
+                cp.approval_status.short_label(),
+                cp.discipline.short_label(),
+                cp.short_sha256(),
+            )
+        })
+        .unwrap_or_else(|| "GOVERNANCE CHECKPOINT: Pending Team Sign-Off".to_string());
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="202" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.2"/>
+<text x="{:.1}" y="{:.1}" font-size="12" font-weight="bold" fill="#065f46">EIGENGRAPH DETERMINISTIC PERMIT CERTIFICATION</text>
+<text x="{:.1}" y="{:.1}" font-size="10" fill="#0f172a">{} • Overall Permit Verdict: {}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.5" font-family="monospace" fill="#065f46">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#047857">SHA-256: {seal_token}</text>"##,
+        p4x + 16.0,
+        p4y + 48.0,
+        p4w - 32.0,
+        p4x + 30.0,
+        p4y + 82.0,
+        p4x + 30.0,
+        p4y + 114.0,
+        escape_xml(&permit.summary),
+        if permit.overall_ready { "READY FOR SUBMITTAL" } else { "ACTION REQUIRED" },
+        p4x + 30.0,
+        p4y + 148.0,
+        escape_xml(&gov_line),
+        p4x + 30.0,
+        p4y + 186.0,
+    );
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_PERMIT_ANNEX_A3");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count =
+        project.columns.len() + project.runs.len() + project.walls.len() + project.slabs.len();
+    let summary = format!(
+        "Exported Permit Compliance & Trade-Study Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1215,5 +1435,39 @@ mod tests {
         assert!(evac_export.svg_content.contains("Post-Disaster Evacuation &amp; Lifelines"));
         assert!(evac_export.svg_content.contains("Evac Conn "));
         assert!(evac_export.svg_content.contains("WD "));
+
+        let ts = crate::core::trade_study::run_parametric_trade_study(
+            &proj,
+            &members,
+            &site,
+            Some(&ssi_rep),
+            Some(&mc_rep),
+            &crate::core::trade_study::TradeStudyConfig::default(),
+        );
+        let permit = crate::core::trade_study::evaluate_permit_compliance_matrix(
+            &proj,
+            &members,
+            &site,
+            Some(&ssi_rep),
+            None,
+            Some(&shm_rep),
+            Some(&evac_rep),
+            Some(&mc_rep),
+            Some(&collab),
+        );
+        let annex = build_permit_compliance_annex_svg(
+            &proj,
+            &permit,
+            Some(&ts),
+            Some(&collab),
+            "S-102",
+            "REV 01",
+        );
+        assert!(annex.svg_content.starts_with("<svg"));
+        assert!(annex.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(!annex.svg_content.contains("<image"));
+        assert!(annex.svg_content.contains("PERMIT COMPLIANCE"));
+        assert!(annex.svg_content.contains("TRADE-STUDY"));
+        assert_eq!(annex.sha256_seal.len(), 64);
     }
 }

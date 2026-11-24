@@ -76,6 +76,7 @@ pub mod ns {
     pub const EG_SHM_WATCHDOG: &str = "eigengraph::analysis::shm_watchdog";
     pub const EG_GPU_MONTE_CARLO_LOSS: &str = "eigengraph::analysis::gpu_monte_carlo_loss";
     pub const EG_GOVERNANCE_SEAL: &str = "eigengraph::governance::checkpoint_seal";
+    pub const EG_TRADE_STUDY_MATRIX: &str = "eigengraph::analysis::trade_study_matrix";
 }
 
 fn default_ifcx_version() -> String {
@@ -1396,10 +1397,22 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), gov_overlay.clone()]);
         stage.to_composed_document(&format!("{}_governance_seal", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Parametric Trade-Study Matrix
+    /// overlay (`eigengraph::analysis::trade_study_matrix`).
+    pub fn compose_with_trade_study_overlay(
+        base_doc: &IfcxDocument,
+        ts_overlay: &IfcxDocument,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[base_doc.clone(), ts_overlay.clone()]);
+        stage.to_composed_document(&format!("{}_trade_study_matrix", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_GOVERNANCE_SEAL) {
+    if node.attributes.contains_key(ns::EG_TRADE_STUDY_MATRIX) {
+        "Trade-Study Matrix".to_string()
+    } else if node.attributes.contains_key(ns::EG_GOVERNANCE_SEAL) {
         "Governance Seal".to_string()
     } else if node.attributes.contains_key(ns::EG_GPU_MONTE_CARLO_LOSS) {
         "GPU Monte Carlo Risk".to_string()

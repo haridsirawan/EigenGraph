@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL + @compute Particles/Monte Carlo, Signed Collaborative IFCX Governance & 3D District Risk Heatmap, 6-DOF FEM & ARI v2, SHM Watchdog, ATC-20 Triage, Evacuation Lifelines & Width-First Dynamic Island)",
+                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL + @compute Particles/Monte Carlo, Parametric Trade-Study Matrix & SNI/ASCE Permit Annex, Signed Collaborative IFCX Relay & 3D District Risk Heatmap, 6-DOF FEM & ARI v2, SHM Watchdog, ATC-20 Triage, Evacuation Lifelines & Width-First Dynamic Island)",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)
@@ -719,10 +719,16 @@ impl SettingsView {
             ui.separator();
             ui.add_space(6.0);
 
-            let releases: [(&str, bool, &str, &str); 11] = [
+            let releases: [(&str, bool, &str, &str); 12] = [
+                (
+                    "v0.8.1",
+                    true,
+                    "Parametric Trade-Study Matrix, SNI/ASCE Permit Annex & Peer IFCX Sync Relay",
+                    "Evaluates 6 structural design alternatives (Baseline, Ductile Cols +100mm, Braced Core, HSC fc'+25%, Low-Carbon Hybrid, Base-Isolated) across ARI v2, DCR%, drift, T1, cost & embodied carbon with 1-click BIM adoption + eigengraph::analysis::trade_study_matrix IFCX overlay, 10-clause automated SNI/ASCE/UFC/FEMA Permit Compliance Matrix & Sheet S-102 Pure-Vector SVG Annex exporter, .ifcx-bundle.json import verification, and WebSocket Peer IFCX Delta Sync Relay.",
+                ),
                 (
                     "v0.8.0",
-                    true,
+                    false,
                     "Collaborative IFCX Governance, Signed Checkpoints & 3D WebGPU District Risk Heatmap",
                     "SHA-256 tamper-proof checkpoint chain across engineering disciplines, formal Approval sign-off sealed into A3 Pure-Vector SVG dossiers & eigengraph::governance::checkpoint_seal IFCX overlays, deterministic 3-Way Peer IFCX Merge with conflict resolver, .ifcx-bundle.json handover export, and terrain-draped Pure WebGPU WGSL iso-contour District Risk Field Heatmap uniting ARI v2, ATC-20, PML-90, liquefaction & evacuation isolation.",
                 ),

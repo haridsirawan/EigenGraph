@@ -1109,10 +1109,14 @@ impl SpatialWorkspaceState {
             icons::pill_badge(
                 ui,
                 AppIcon::Shield,
-                "IFCX Governance & Risk",
+                "IFCX Governance, Risk & Permit",
                 theme.accent_blue,
             );
-            for (tab_idx, tab_lbl) in [(0_usize, "Checkpoints & Merge"), (1_usize, "District Risk Field")] {
+            for (tab_idx, tab_lbl) in [
+                (0_usize, "Checkpoints & Relay"),
+                (1_usize, "District Risk Field"),
+                (2_usize, "Trade-Study & Permit"),
+            ] {
                 if Self::glass_pill_button(
                     ui,
                     theme,
@@ -1127,6 +1131,14 @@ impl SpatialWorkspaceState {
                     self.collab_drawer_tab = tab_idx;
                     if tab_idx == 1 && universal_canvas.last_risk_field_report.is_none() {
                         actions.refresh_district_risk_field = true;
+                    } else if tab_idx == 2 {
+                        if universal_canvas.last_trade_study_report.is_none() {
+                            actions.run_trade_study =
+                                Some(universal_canvas.trade_study_config.objective);
+                        }
+                        if universal_canvas.last_permit_report.is_none() {
+                            actions.run_permit_compliance = true;
+                        }
                     }
                 }
             }
@@ -1250,6 +1262,19 @@ impl SpatialWorkspaceState {
                             {
                                 actions.export_collab_bundle_ifcx = true;
                             }
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::UploadImport),
+                                "Import Bundle",
+                                false,
+                                theme.accent_blue,
+                                "Load & verify a signed .ifcx-bundle.json handover file from disk",
+                            )
+                            .clicked()
+                            {
+                                actions.open_collab_bundle_picker = true;
+                            }
                         });
                         ui.add_space(4.0);
                         ui.separator();
@@ -1300,11 +1325,63 @@ impl SpatialWorkspaceState {
                         }
                     } else {
                         ui.label(
-                            RichText::new("Deterministic 3-Way Peer IFCX Merge")
+                            RichText::new("Deterministic 3-Way Peer IFCX Merge & Live Sync Relay")
                                 .size(10.0)
                                 .strong()
                                 .color(theme.text_primary),
                         );
+                        ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
+                            ui.label(RichText::new("Relay:").size(9.0).color(theme.text_muted));
+                            ui.add(
+                                egui::TextEdit::singleline(
+                                    &mut universal_canvas.collab_state.relay_url_draft,
+                                )
+                                .desired_width((inner_w * 0.44).clamp(80.0, 170.0)),
+                            );
+                            let r_conn = universal_canvas.collab_state.relay_connected;
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Pulse),
+                                if r_conn { "Disconnect" } else { "Connect" },
+                                r_conn,
+                                if r_conn { theme.accent_green } else { theme.accent_blue },
+                                "Connect/disconnect WebSocket IFCX Delta Sync Relay",
+                            )
+                            .clicked()
+                            {
+                                if r_conn {
+                                    actions.disconnect_collab_relay = true;
+                                } else {
+                                    actions.connect_collab_relay =
+                                        Some(universal_canvas.collab_state.relay_url_draft.clone());
+                                }
+                            }
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                None,
+                                "Sync Peer",
+                                false,
+                                theme.accent_green,
+                                "Fetch or simulate incoming peer delta over Sync Relay & run 3-way merge",
+                            )
+                            .clicked()
+                            {
+                                actions.sync_peer_relay_delta = true;
+                            }
+                        });
+                        ui.label(
+                            RichText::new(format!(
+                                "Relay: {} (synced: {})",
+                                universal_canvas.collab_state.relay_status,
+                                universal_canvas.collab_state.relay_synced_count
+                            ))
+                            .size(8.6)
+                            .color(theme.text_muted),
+                        );
+                        ui.add_space(2.0);
                         ui.horizontal_wrapped(|ui| {
                             ui.set_max_width(inner_w);
                             let pdisc = universal_canvas.collab_state.peer_discipline;
@@ -1387,7 +1464,7 @@ impl SpatialWorkspaceState {
                             );
                         }
                     }
-                } else if is_left {
+                } else if tab == 1 && is_left {
                     ui.label(
                         RichText::new("3D WebGPU District Risk Field Heatmap")
                             .size(10.0)
@@ -1503,7 +1580,7 @@ impl SpatialWorkspaceState {
                             theme.text_secondary,
                         );
                     }
-                } else {
+                } else if tab == 1 {
                     ui.label(
                         RichText::new("Top District Risk Hotspot Parcels")
                             .size(10.0)
@@ -1568,6 +1645,230 @@ impl SpatialWorkspaceState {
                     } else {
                         ui.label(
                             RichText::new("Click 'Recompute' or run /risk-map to populate spatial hotspots.")
+                                .size(9.0)
+                                .color(theme.text_muted),
+                        );
+                    }
+                } else if is_left {
+                    use crate::core::trade_study::TradeStudyObjective;
+
+                    ui.label(
+                        RichText::new("Parametric 6-Scenario Trade-Study Matrix")
+                            .size(10.0)
+                            .strong()
+                            .color(theme.text_primary),
+                    );
+                    ui.horizontal_wrapped(|ui| {
+                        ui.set_max_width(inner_w);
+                        ui.label(RichText::new("Goal:").size(9.0).color(theme.text_muted));
+                        for &obj in TradeStudyObjective::all() {
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                None,
+                                obj.short_label(),
+                                universal_canvas.trade_study_config.objective == obj,
+                                theme.accent_blue,
+                                obj.label(),
+                            )
+                            .clicked()
+                            {
+                                universal_canvas.trade_study_config.objective = obj;
+                                actions.run_trade_study = Some(obj);
+                            }
+                        }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.set_max_width(inner_w);
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Bolt),
+                            "Run Trade-Study",
+                            true,
+                            theme.accent_blue,
+                            "Evaluate all 6 structural alternatives across ARI, DCR%, Cost & Carbon",
+                        )
+                        .clicked()
+                        {
+                            actions.run_trade_study = Some(universal_canvas.trade_study_config.objective);
+                        }
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Cube3D),
+                            "Trade-Study .ifcx",
+                            false,
+                            theme.accent_green,
+                            "Export non-destructive eigengraph::analysis::trade_study_matrix .ifcx overlay",
+                        )
+                        .clicked()
+                        {
+                            actions.export_trade_study_ifcx = true;
+                        }
+                    });
+                    if let Some(ref ts) = universal_canvas.last_trade_study_report {
+                        ui.label(
+                            RichText::new(&ts.summary)
+                                .size(8.8)
+                                .monospace()
+                                .color(theme.accent_green),
+                        );
+                        // Pure-vector Trade-Study utility comparison bar chart
+                        let chart_w = inner_w.clamp(140.0, 320.0);
+                        let row_h = 13.0_f32;
+                        let chart_h = (ts.scenarios.len().min(6) as f32) * row_h + 4.0;
+                        let (rect, _) = ui.allocate_exact_size(
+                            Vec2::new(chart_w, chart_h),
+                            egui::Sense::hover(),
+                        );
+                        let painter = ui.painter_at(rect);
+                        for (i, s) in ts.scenarios.iter().take(6).enumerate() {
+                            let y = rect.top() + 2.0 + (i as f32) * row_h;
+                            let bw = ((s.weighted_utility_score / 100.0).clamp(0.04, 1.0) as f32)
+                                * (rect.width() - 90.0).max(40.0);
+                            let col = if s.is_recommended {
+                                Color32::from_rgb(16, 185, 129)
+                            } else {
+                                Color32::from_rgb(56, 189, 248)
+                            };
+                            painter.text(
+                                egui::Pos2::new(rect.left(), y + 5.5),
+                                egui::Align2::LEFT_CENTER,
+                                s.archetype.short_label(),
+                                egui::FontId::monospace(8.0),
+                                theme.text_secondary,
+                            );
+                            painter.rect_filled(
+                                Rect::from_min_size(
+                                    egui::Pos2::new(rect.left() + 82.0, y + 1.5),
+                                    Vec2::new(bw, 8.5),
+                                ),
+                                CornerRadius::same(2),
+                                col,
+                            );
+                        }
+                        ui.add_space(2.0);
+                        for s in ts.scenarios.iter().take(6) {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.set_max_width(inner_w);
+                                let lbl_col = if s.is_recommended {
+                                    theme.accent_green
+                                } else {
+                                    theme.text_primary
+                                };
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} | ARI {:.2} | DCR {:.0}% | ${:.0}k | {:.0}t",
+                                        s.archetype.short_label(),
+                                        s.min_ari,
+                                        s.max_dcr_pct,
+                                        s.estimated_cost_usd * 0.001,
+                                        s.embodied_carbon_tco2e,
+                                    ))
+                                    .size(8.6)
+                                    .monospace()
+                                    .color(lbl_col),
+                                );
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    None,
+                                    if s.is_recommended { "Adopt *" } else { "Adopt" },
+                                    s.is_recommended,
+                                    theme.accent_green,
+                                    &s.archetype.description(),
+                                )
+                                .clicked()
+                                {
+                                    actions.adopt_trade_study_scenario = Some(s.archetype);
+                                }
+                            });
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new("Click 'Run Trade-Study' or /trade-study to compare 6 design options.")
+                                .size(9.0)
+                                .color(theme.text_muted),
+                        );
+                    }
+                } else {
+                    use crate::core::trade_study::PermitClauseStatus;
+
+                    ui.label(
+                        RichText::new("Automated SNI / ASCE / UFC Permit Compliance")
+                            .size(10.0)
+                            .strong()
+                            .color(theme.text_primary),
+                    );
+                    ui.horizontal_wrapped(|ui| {
+                        ui.set_max_width(inner_w);
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::CheckCircle),
+                            "Audit Permit",
+                            false,
+                            theme.accent_blue,
+                            "Evaluate 10 regulatory clauses (SNI 1726/2847/8460, ARI v2, ATC-20, FEMA P-58, IFCX Seal)",
+                        )
+                        .clicked()
+                        {
+                            actions.run_permit_compliance = true;
+                        }
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Printer),
+                            "Permit Annex .svg (S-102)",
+                            false,
+                            theme.accent_green,
+                            "Export A3 Pure-Vector Permit Compliance & Trade-Study Annex SVG (Sheet S-102)",
+                        )
+                        .clicked()
+                        {
+                            actions.export_permit_annex_svg = true;
+                        }
+                    });
+                    if let Some(ref permit) = universal_canvas.last_permit_report {
+                        ui.label(
+                            RichText::new(&permit.summary)
+                                .size(9.0)
+                                .monospace()
+                                .color(if permit.overall_ready {
+                                    theme.accent_green
+                                } else {
+                                    theme.accent_orange
+                                }),
+                        );
+                        for cl in &permit.clauses {
+                            let [cr, cg, cb] = cl.status.badge_color_rgb();
+                            ui.horizontal_wrapped(|ui| {
+                                ui.set_max_width(inner_w);
+                                ui.colored_label(
+                                    Color32::from_rgb(cr, cg, cb),
+                                    RichText::new(format!("[{}]", cl.status.short_label()))
+                                        .size(8.6)
+                                        .strong()
+                                        .monospace(),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{}: {} (Lim {})",
+                                        cl.code_ref, cl.demand_value, cl.limit_value
+                                    ))
+                                    .size(8.6)
+                                    .color(if cl.status == PermitClauseStatus::Fail {
+                                        theme.accent_red
+                                    } else {
+                                        theme.text_secondary
+                                    }),
+                                );
+                            });
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new("Click 'Audit Permit' or /permit-check to run the 10-clause code check.")
                                 .size(9.0)
                                 .color(theme.text_muted),
                         );

@@ -7,6 +7,21 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.8.1] - 2026-11-24 — Parametric Trade-Study Matrix, Automated SNI/ASCE Permit Compliance Annex & Live Peer IFCX Sync Relay
+
+### Added & Changed
+- **Parametric 6-Scenario Trade-Study Matrix & 10-Clause Permit Compliance Auditor (`src/core/trade_study.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Evaluates `BaselineIntact`, `DuctileColumnsPlus100`, `LateralBracedCore`, `HighStrengthConcrete`, `LowCarbonHybrid`, and `SeismicBaseIsolated` across `ARI v2`, LRFD DCR%, story drift %, fundamental period `T1`, capital cost (USD), embodied carbon (`tCO2e`), and FEMA P-58 PML-90 loss under 4 selectable multi-criteria objectives (`Balanced`, `MaxSafetyAri`, `MinCost`, `MinCarbon`), with 1-click BIM adoption + auto-checkpoint and non-destructive `eigengraph::analysis::trade_study_matrix` IFCX composition (`IfcxStage::compose_with_trade_study_overlay`).
+  - Audited 10 building-permit clauses (`SNI 1726` drift & pounding, `SNI 2847 / AISC 360` DCR%, `UFC 4-023-03 ARI v2`, `Spectral SVD Guard`, `SNI 8460` liquefaction, `ATC-20`, `NFPA/Lifelines`, `FEMA P-58 PML-90`, `IFC 5 SHA-256 Governance`) and added archival A3 Sheet `S-102` Pure-Vector SVG Annex exporter (`build_permit_compliance_annex_svg` in `src/core/vector_dossier.rs`).
+- **Live Peer IFCX Delta Sync Relay & Bundle Import Verification (`src/core/web_bridge.rs`, `src/core/ifcx_collab.rs`, `src/app.rs`)**:
+  - Added non-blocking WebSocket (`ws://` / `wss://` on `wasm32`) & native loopback Peer IFCX Sync Relay channels (`collab_relay_connect`, `collab_relay_publish_json`, `collab_relay_poll_events`, `IfcxCollabState::ingest_relay_peer_doc`) wired into per-frame 3-way merge ingestion and `.ifcx-bundle.json` SHA-256 verified file-picker import.
+- **Width-First 3-Tab Governance/Trade-Study Drawer, Commands & About EigenGraph (`src/views/spatial_workspace/`, `src/views/settings.rs`)**:
+  - Expanded the width-first `IFCX Governance, Risk & Permit` Dynamic Island drawer with Relay controls (`Checkpoints & Relay`) and the 3rd **`Trade-Study & Permit`** tab (pure-vector scenario utility bar chart, `Adopt` buttons, 10-clause ledger, `S-102` export), `/trade-study`, `/permit-check`, `/permit-svg`, `/relay`, `/sync-peer` slash commands, Gemini `[[RUN_TRADE_STUDY:...]]` / `[[EXPORT_PERMIT_ANNEX]]` / `[[SYNC_PEER_RELAY:...]]` directives, and prepended `v0.8.1 • LATEST` inside `Settings -> About EigenGraph`.
+- **Verification**:
+  - Verified clean native test suite (`cargo test --lib` — all 286 unit tests passing with 0 warnings, including `phase81_trade_study_matrix_adoption_ifcx_overlay_and_permit_compliance`, `phase81_collab_relay_loopback_and_peer_delta_merge`, `test_phase72_pure_vector_engineering_dossier_svg_and_sha256_seal` Sheet `S-102` assertions, and responsive width-first Dynamic Island test `test_phase81_trade_study_permit_and_relay_slash_commands_zero_overflow` across `1600px`/`1280px`/`768px`/`390px`), `cargo check --bin eigengraph --target wasm32-unknown-unknown`, `cargo build --bin eigengraph --target wasm32-unknown-unknown --release`, zero WebGL/`glow`/`glutin` crates, and zero external raster tokens.
+
+---
+
 ## [v0.8.0] - 2026-11-24 — Collaborative Multi-Layer IFCX Governance, Signed Checkpoints & 3D WebGPU District Risk Field Heatmap
 
 ### Added & Changed
