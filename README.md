@@ -4,7 +4,7 @@
 
 # EigenGraph Powered by EigenGate & EigenFlow
 
-### Doctoral Dissertation Reference Platform (Rust + WebGPU)
+### Rust + WebGPU + IFCX
 
 [![Live Web App](https://img.shields.io/badge/web%20app-eigengraph.net-0A84FF?style=for-the-badge&logo=cloudflare&logoColor=white)](https://eigengraph.net/)
 [![Version](https://img.shields.io/badge/version-v0.8.2-5B92A5?style=for-the-badge)](docs/CHANGELOG.md)
@@ -17,7 +17,7 @@
 
 ---
 
-## Doctoral Dissertation Summary
+## Dissertation Summary
 
 > **Title**: *Development and Validation of the Adjusted Redundancy Index for Pre-Analysis Screening of Element Damage Scenarios in Linear-Elastic Structures*
 >
