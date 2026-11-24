@@ -29,9 +29,9 @@ pub struct EigenGateConfig {
     pub beta: f64,          // Support reaction weighting floor (Eq 2.12, default 0.10)
     pub eta: f64,           // Existing load utilization penalty factor (Eq 2.17, default 0.50)
     pub tau_threshold: f64, // Operational criticality threshold (Eq 2.19, default 0.50 / 0.65)
-    pub w_k: f64,           // Kinematic stability channel weight in EigenGate v2 (Eq 4.13b, default 0.25)
-    pub w_c: f64,           // Section capacity channel weight in EigenGate v2 (Eq 4.13b, default 0.45)
-    pub w_d: f64,           // Deformation control channel weight in EigenGate v2 (Eq 4.13b, default 0.30)
+    pub w_k: f64,           // Kinematic stability channel weight in EigenGate (Eq 4.13b, default 0.25)
+    pub w_c: f64,           // Section capacity channel weight in EigenGate (Eq 4.13b, default 0.45)
+    pub w_d: f64,           // Deformation control channel weight in EigenGate (Eq 4.13b, default 0.30)
     pub z_th: f64,          // Safe utilization/deflection threshold before penalty (Eq 4.13c, default 0.70)
     pub include_geometric_stiffness: bool, // Evaluate post-disruption P-Delta & Kg buckling effects (default: true)
 }

@@ -2164,7 +2164,7 @@ impl EigenGraphApp {
                         .push(crate::models::ChatMessage {
                             is_user: false,
                             message: format!(
-                                "[EigenAI Two-Stage EigenGate v2 + StructGNN-CRC]: {}",
+                                "[EigenAI Two-Stage EigenGate + StructGNN-CRC]: {}",
                                 rep.summary
                             ),
                             time: crate::core::web_bridge::unix_timestamp_label(),

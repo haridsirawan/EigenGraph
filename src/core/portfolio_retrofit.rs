@@ -1,7 +1,7 @@
-//! portfolio_retrofit.rs — Autonomous Portfolio-Scale `EigenGate v2` Retrofit Optimization Across Multi-Building Districts (Phase 73 / v0.7.3).
+//! portfolio_retrofit.rs — Autonomous Portfolio-Scale `EigenGate` Retrofit Optimization Across Multi-Building Districts (Phase 73 / v0.7.3).
 //!
 //! Performs district-level multi-objective Pareto optimization across structural portfolios:
-//! - Jointly optimizes `EigenGate v2` resilience lift, upfront retrofit cost (`USD`), and embodied carbon (`kgCO2e`)
+//! - Jointly optimizes `EigenGate` resilience lift, upfront retrofit cost (`USD`), and embodied carbon (`kgCO2e`)
 //! - Sweeps budget/carbon scalarizations across all four [`RetrofitStrategy`] modes per vulnerable building
 //! - Prunes dominated portfolios into a non-dominated Pareto frontier (`PortfolioParetoPoint`)
 //! - Emits non-destructive OpenBIM IFCX district overlays (`eigengraph::portfolio::retrofit_plan`)
@@ -511,7 +511,7 @@ fn build_portfolio_ifcx_document(
     let mut plan_node = IfcxNode::new("/earth/portfolio/retrofit_plan")
         .with_class("IfcSpatialZone")
         .with_prop(
-            "District Portfolio EigenGate v2 Retrofit Plan",
+            "District Portfolio EigenGate Retrofit Plan",
             "Multi-Objective Cost/Carbon Pareto Optimization",
             summary,
         )
@@ -581,7 +581,7 @@ fn build_portfolio_ifcx_document(
     doc
 }
 
-/// Evaluates autonomous portfolio-scale `EigenGate v2` retrofit optimization across all buildings
+/// Evaluates autonomous portfolio-scale `EigenGate` retrofit optimization across all buildings
 /// in the district and constructs a non-dominated Cost vs. Embodied Carbon vs. EigenGate Pareto frontier.
 pub fn optimize_district_portfolio_retrofit(
     world_index: &WorldSpatialIndex,

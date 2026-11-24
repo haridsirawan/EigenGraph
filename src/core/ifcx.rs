@@ -61,9 +61,10 @@ pub mod ns {
     pub const EG_BIM_ELEMENT: &str = "eigengraph::bim::element";
     pub const EG_FEM_NODE: &str = "eigengraph::fem::node";
     pub const EG_FEM_MEMBER: &str = "eigengraph::fem::member";
-    pub const EG_EIGENGATE: &str = "eigengraph::eigengate::v2";
+    pub const EG_EIGENGATE: &str = "eigengraph::eigengate";
+    pub const EG_EIGENGATE_LEGACY_V2: &str = "eigengraph::eigengate::v2";
     pub const EG_EIGENGATE_LEGACY: &str = "eigengraph::ari::v2";
-    pub const EG_EIGENFLOW: &str = "eigengraph::eigenflow::v2";
+    pub const EG_EIGENFLOW: &str = "eigengraph::eigenflow";
     pub const EG_FIELD_QAQC_BBS: &str = "eigengraph::construction::field_qaqc_bbs";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
@@ -333,7 +334,7 @@ pub struct IfcxGeoWgs84 {
     pub south_hemisphere: bool,
 }
 
-/// Non-destructive 6-DOF FEM & EigenGate linear screening overlay stored under `eigengraph::eigengate::v2`.
+/// Non-destructive 6-DOF FEM & EigenGate linear screening overlay stored under `eigengraph::eigengate`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct IfcxEigenGateOverlay {
     #[serde(rename = "eigenGateSystem", alias = "ariSystem")]
@@ -545,7 +546,7 @@ impl IfcxDocument {
         );
         schemas.insert(
             ns::EG_EIGENGATE.to_string(),
-            json!({ "value": { "dataType": "Object", "spec": "EigenGraph EigenGate v2 Linear Screening" } }),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph EigenGate Linear Screening" } }),
         );
         schemas.insert(
             ns::EG_EIGENFLOW.to_string(),
@@ -1133,7 +1134,7 @@ impl IfcxStage {
 
     /// Composes an existing base `.ifcx` document with a non-destructive structural retrofit
     /// delta layer (`eigengraph::bim::retrofit_delta`), applying updated meshes, properties,
-    /// new BRB/shear-wall nodes, and refreshed `eigengraph::eigengate::v2` screening overlays.
+    /// new BRB/shear-wall nodes, and refreshed `eigengraph::eigengate` screening overlays.
     pub fn compose_with_retrofit_delta(
         base_doc: &IfcxDocument,
         retrofit_report: &crate::core::retrofit::StructuralRetrofitReport,
@@ -1146,7 +1147,7 @@ impl IfcxStage {
     }
 
     /// Composes an existing base `.ifcx` document with a non-destructive Two-Stage
-    /// `EigenGate v2 + StructGNN-CRC` Conformal Screening & Progressive Collapse Cascade overlay
+    /// `EigenGate + StructGNN-CRC` Conformal Screening & Progressive Collapse Cascade overlay
     /// (`eigengraph::analysis::crc_cascade`) without mutating base geometry nodes.
     pub fn compose_with_crc_cascade_overlay(
         base_doc: &IfcxDocument,
@@ -1496,10 +1497,11 @@ fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
     {
         "City-Builder".to_string()
     } else if (node.attributes.contains_key(ns::EG_EIGENGATE)
+        || node.attributes.contains_key(ns::EG_EIGENGATE_LEGACY_V2)
         || node.attributes.contains_key(ns::EG_EIGENGATE_LEGACY))
         && !node.attributes.contains_key(ns::EG_BIM_ELEMENT)
     {
-        "EigenGate v2".to_string()
+        "EigenGate".to_string()
     } else {
         "BIM Core".to_string()
     }
@@ -1827,10 +1829,10 @@ impl IfcxDocument {
 
         // Optional Non-Destructive 6-DOF FEM & EigenGate Screening Overlay
         if eigengate.is_some() || members.is_some_and(|m| !m.is_empty()) {
-            let analysis_path = format!("{bldg_path}/analysis/eigengate_v2");
+            let analysis_path = format!("{bldg_path}/analysis/eigengate");
             bldg_node
                 .children
-                .insert("eigengate_v2".to_string(), analysis_path.clone());
+                .insert("eigengate".to_string(), analysis_path.clone());
             let max_dcr = members
                 .map(|ms| {
                     ms.iter()
@@ -1876,7 +1878,7 @@ impl IfcxDocument {
             let mut an = IfcxNode::new(analysis_path)
                 .with_class("IfcStructuralAnalysisModel")
                 .with_prop(
-                    "EigenGate v2 & 6-DOF FEM Screening",
+                    "EigenGate & 6-DOF FEM Screening",
                     "Analytical Overlay",
                     &format!("System EigenGate {:.3} | Max DCR {:.1}%", overlay.eigengate_system, overlay.max_dcr_pct),
                 );
@@ -2574,7 +2576,7 @@ impl IfcxDocument {
     /// Streams an external or AI-reconstructed real-building `.ifcx` payload, automatically infers
     /// any missing primary structural framing (`IfcColumn` / `IfcBeam` / `IfcSlab` / `IfcFooting`),
     /// runs an instant 6-DOF FEM + EigenGate screening pass, and emits a composed `.ifcx` document with
-    /// embedded `eigengraph::eigengate::v2` telemetry.
+    /// embedded `eigengraph::eigengate` telemetry.
     pub fn ingest_ai_real_building_with_frame_inference(
         raw: &str,
         filename: &str,
@@ -3989,7 +3991,7 @@ mod tests {
                 .with_attr(ns::BSI_PROP, json!({ "material": "High-Strength Concrete fc' 50 MPa" })),
         );
         // Layer 3: Non-Destructive EigenGate Analysis Overlay
-        let mut eigengate_delta = IfcxDocument::new("eigengate_v2_overlay");
+        let mut eigengate_delta = IfcxDocument::new("eigengate_overlay");
         eigengate_delta.add_node(
             IfcxNode::new("/earth/sites/bandung_ai_capture/buildings/pavilion_01")
                 .with_attr(ns::EG_EIGENGATE, json!({ "eigenGateSystem": 0.91, "maxDcrPct": 58.4 })),
@@ -4141,7 +4143,7 @@ mod tests {
                 .data
                 .iter()
                 .any(|n| n.attributes.contains_key(ns::EG_EIGENGATE)),
-            "Composed IFCX output should embed eigengraph::eigengate::v2 triage overlay"
+            "Composed IFCX output should embed eigengraph::eigengate triage overlay"
         );
     }
 

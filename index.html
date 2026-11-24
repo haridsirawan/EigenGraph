@@ -1292,7 +1292,7 @@ self.onmessage = function (ev) {
     let critName = "";
     for (let sIdx = 0; sIdx < scenarios.length; sIdx++) {
       const sc = scenarios[sIdx];
-      const ariV2 = Number(sc.ariV2 || 0.9);
+      const eigenGate = Number(sc.eigenGate ?? sc.eigenGateV2 ?? sc.ariV2 ?? 0.9);
       const svdMech = Boolean(sc.svdMech);
       const postU = Number(sc.postU || 0.35) * driftAmp;
       const svdM = Number(sc.svdMargin || 0.8);
@@ -1300,9 +1300,9 @@ self.onmessage = function (ev) {
       const hE = Math.max(0.0, Math.min(1.0, 1.0 - svdM));
       const ovT = Math.max(0.0, Math.min(1.0, postU / 1.15));
       const bkT = Math.max(0.0, Math.min(1.0, 1.0 - buckM));
-      const gnnProb = svdMech ? 0.96 : Math.max(0.01, Math.min(0.99, 0.35 * (1.0 - ariV2) + 0.35 * ovT + 0.15 * hE + 0.15 * bkT));
+      const gnnProb = svdMech ? 0.96 : Math.max(0.01, Math.min(0.99, 0.35 * (1.0 - eigenGate) + 0.35 * ovT + 0.15 * hE + 0.15 * bkT));
       const bound = Math.min(1.0, gnnProb + qConformal);
-      const safe = !svdMech && !Boolean(sc.isCritical) && ariV2 >= 0.72 && postU < 0.92 && buckM >= 0.12;
+      const safe = !svdMech && !Boolean(sc.isCritical) && eigenGate >= 0.72 && postU < 0.92 && buckM >= 0.12;
       if (safe) prunedCount++;
       if (bound > maxBound) {
         maxBound = bound;

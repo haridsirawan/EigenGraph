@@ -3,7 +3,7 @@
 //!
 //! Evaluates 6 calibrated structural design alternatives side-by-side (`BaselineIntact`,
 //! `DuctileColumnsPlus100`, `LateralBracedCore`, `HighStrengthConcrete`, `LowCarbonHybrid`,
-//! `SeismicBaseIsolated`) across `EigenGate v2`, LRFD DCR%, inter-story drift, fundamental period `T1`,
+//! `SeismicBaseIsolated`) across `EigenGate`, LRFD DCR%, inter-story drift, fundamental period `T1`,
 //! construction cost (USD), embodied carbon (`tCO2e`), and FEMA P-58 PML-90 loss, supporting
 //! 1-click adoption onto `BimProject` and 10-clause building-permit compliance verification.
 
@@ -41,7 +41,7 @@ impl TradeStudyObjective {
     pub fn label(self) -> &'static str {
         match self {
             Self::Balanced => "Balanced Multi-Criteria",
-            Self::MaxSafetyEigenGate => "Max Safety & EigenGate v2",
+            Self::MaxSafetyEigenGate => "Max Safety & EigenGate",
             Self::MinCost => "Minimize Capital Cost",
             Self::MinCarbon => "Minimize Embodied Carbon",
         }
@@ -352,7 +352,7 @@ fn estimate_baseline_structural_quantities(
     )
 }
 
-/// Evaluates 6 calibrated design alternatives deterministically against structural safety (`EigenGate v2`, DCR%,
+/// Evaluates 6 calibrated design alternatives deterministically against structural safety (`EigenGate`, DCR%,
 /// drift), dynamic period `T1`, capital cost, embodied carbon, and FEMA P-58 PML-90 loss.
 pub fn run_parametric_trade_study(
     project: &BimProject,
@@ -592,7 +592,7 @@ pub fn apply_trade_study_scenario_to_bim(
 }
 
 /// Evaluates 10 deterministic building-permit compliance clauses across SNI 1726, SNI 2847 / AISC 360,
-/// UFC 4-023-03 (`EigenGate v2`), Spectral SVD Guard, Seed–Idriss Liquefaction, ATC-20, FEMA P-58, & IFC 5 Governance.
+/// UFC 4-023-03 (`EigenGate`), Spectral SVD Guard, Seed–Idriss Liquefaction, ATC-20, FEMA P-58, & IFC 5 Governance.
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_permit_compliance_matrix(
     project: &BimProject,
@@ -646,10 +646,10 @@ pub fn evaluate_permit_compliance_matrix(
         notes: "Envelope axial-flexural & shear utilization ratio".to_string(),
     });
 
-    // 3. System Redundancy Index (EigenGate v2 >= 0.70)
+    // 3. System Redundancy Index (EigenGate >= 0.70)
     clauses.push(PermitComplianceClause {
-        code_ref: "UFC 4-023-03 / EigenGate v2".to_string(),
-        title: "Minimum Member EigenGate v2".to_string(),
+        code_ref: "UFC 4-023-03 / EigenGate".to_string(),
+        title: "Minimum Member EigenGate".to_string(),
         demand_value: format!("{min_eigengate:.3}"),
         limit_value: ">= 0.700".to_string(),
         status: if min_eigengate >= 0.75 {

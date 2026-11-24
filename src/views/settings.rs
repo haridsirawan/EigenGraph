@@ -730,13 +730,13 @@ impl SettingsView {
                     "v0.8.1",
                     false,
                     "Parametric Trade-Study Matrix, SNI/ASCE Permit Annex & Peer IFCX Sync Relay",
-                    "Evaluates 6 structural design alternatives (Baseline, Ductile Cols +100mm, Braced Core, HSC fc'+25%, Low-Carbon Hybrid, Base-Isolated) across EigenGate v2, DCR%, drift, T1, cost & embodied carbon with 1-click BIM adoption + eigengraph::analysis::trade_study_matrix IFCX overlay, 10-clause automated SNI/ASCE/UFC/FEMA Permit Compliance Matrix & Sheet S-102 Pure-Vector SVG Annex exporter, .ifcx-bundle.json import verification, and WebSocket Peer IFCX Delta Sync Relay.",
+                    "Evaluates 6 structural design alternatives (Baseline, Ductile Cols +100mm, Braced Core, HSC fc'+25%, Low-Carbon Hybrid, Base-Isolated) across EigenGate, DCR%, drift, T1, cost & embodied carbon with 1-click BIM adoption + eigengraph::analysis::trade_study_matrix IFCX overlay, 10-clause automated SNI/ASCE/UFC/FEMA Permit Compliance Matrix & Sheet S-102 Pure-Vector SVG Annex exporter, .ifcx-bundle.json import verification, and WebSocket Peer IFCX Delta Sync Relay.",
                 ),
                 (
                     "v0.8.0",
                     false,
                     "Collaborative IFCX Governance, Signed Checkpoints & 3D WebGPU District Risk Heatmap",
-                    "SHA-256 tamper-proof checkpoint chain across engineering disciplines, formal Approval sign-off sealed into A3 Pure-Vector SVG dossiers & eigengraph::governance::checkpoint_seal IFCX overlays, deterministic 3-Way Peer IFCX Merge with conflict resolver, .ifcx-bundle.json handover export, and terrain-draped Pure WebGPU WGSL iso-contour District Risk Field Heatmap uniting EigenGate v2, ATC-20, PML-90, liquefaction & evacuation isolation.",
+                    "SHA-256 tamper-proof checkpoint chain across engineering disciplines, formal Approval sign-off sealed into A3 Pure-Vector SVG dossiers & eigengraph::governance::checkpoint_seal IFCX overlays, deterministic 3-Way Peer IFCX Merge with conflict resolver, .ifcx-bundle.json handover export, and terrain-draped Pure WebGPU WGSL iso-contour District Risk Field Heatmap uniting EigenGate, ATC-20, PML-90, liquefaction & evacuation isolation.",
                 ),
                 (
                     "v0.7.9",
@@ -777,8 +777,8 @@ impl SettingsView {
                 (
                     "v0.7.3",
                     false,
-                    "Autonomous District Portfolio EigenGate v2 Pareto Retrofit Optimizer",
-                    "Multi-objective Cost vs. Embodied Carbon vs. District EigenGate v2 Pareto frontier synthesis with 3D district retrofit crowns.",
+                    "Autonomous District Portfolio EigenGate Pareto Retrofit Optimizer",
+                    "Multi-objective Cost vs. Embodied Carbon vs. District EigenGate Pareto frontier synthesis with 3D district retrofit crowns.",
                 ),
                 (
                     "v0.7.2",
@@ -795,7 +795,7 @@ impl SettingsView {
                 (
                     "v0.7.0",
                     false,
-                    "Two-Stage EigenGate v2 + StructGNN-CRC Conformal Screening & Collapse Cascade",
+                    "Two-Stage EigenGate + StructGNN-CRC Conformal Screening & Collapse Cascade",
                     "Spectral kinematic guard + conformal risk calibration (alpha = 0.05) driving UFC 4-023-03 3D domino progressive collapse visualization.",
                 ),
             ];

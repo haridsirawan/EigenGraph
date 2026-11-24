@@ -1299,13 +1299,13 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/cascade",
         category: "Analysis",
-        description: "Run Two-Stage EigenGate v2 + StructGNN-CRC conformal screening & 3D progressive collapse cascade",
+        description: "Run Two-Stage EigenGate + StructGNN-CRC conformal screening & 3D progressive collapse cascade",
         icon: AppIcon::Bolt,
     },
     SlashCommandSpec {
         cmd: "/crc",
         category: "AI",
-        description: "Evaluate Two-Stage EigenGate v2 + StructGNN-CRC conformal scenario reduction & safety recall",
+        description: "Evaluate Two-Stage EigenGate + StructGNN-CRC conformal scenario reduction & safety recall",
         icon: AppIcon::Shield,
     },
     SlashCommandSpec {
@@ -1371,7 +1371,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/portfolio",
         category: "AI",
-        description: "Run autonomous multi-building district EigenGate v2 retrofit Pareto optimization",
+        description: "Run autonomous multi-building district EigenGate retrofit Pareto optimization",
         icon: AppIcon::ChartLine,
     },
     SlashCommandSpec {

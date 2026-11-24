@@ -51,7 +51,7 @@ All planetary, urban, architectural, and analytical objects live in a single can
         │   ├── .../walls/W1..                 (IfcWall + usd::usdgeom::mesh + bim::element)
         │   ├── .../slabs/S1..                 (IfcSlab + usd::usdgeom::mesh + bim::element)
         │   └── .../footings/F1..              (IfcFooting + usd::usdgeom::mesh + bim::element)
-        └── .../analysis/ari_v2                (eigengraph::ari::v2 + eigengraph::fem::6dof)
+        └── .../analysis/ari                (eigengraph::ari + eigengraph::fem::6dof)
 ```
 
 ### Standard & EigenGraph IFCX Attribute Namespaces
@@ -64,7 +64,7 @@ All planetary, urban, architectural, and analytical objects live in a single can
 | **`eigengraph::geo::wgs84`** | Planetary georeferencing & UTM metadata | `{ "lat": -6.9175, "lon": 107.6191, "elevM": 768.0, "headingDeg": 0.0, "address": "Bandung" }` |
 | **`eigengraph::earth::globe`** | Planetary vector globe theme & feature classification | `{ "theme": "CoastalBlueprint", "kind": "landmass", "region": "Java" }` |
 | **`eigengraph::bim::project`** | Lossless parametric `BimProject` snapshot for instant continuation editing | Full parametric levels, walls, columns, beams, slabs, footings, openings |
-| **`eigengraph::ari::v2`** | Non-destructive 6-DOF FEM, Modal, SVD & ARI screening overlay | `{ "ariSystem": 0.87, "maxDcrPct": 64.2, "t1Sec": 0.42, "svdDeficiency": 0 }` |
+| **`eigengraph::ari`** | Non-destructive 6-DOF FEM, Modal, SVD & ARI screening overlay | `{ "ariSystem": 0.87, "maxDcrPct": 64.2, "t1Sec": 0.42, "svdDeficiency": 0 }` |
 
 ---
 
@@ -95,7 +95,7 @@ flowchart TD
     C["Interactive Authoring & Continuation Deltas (BimProject <-> .ifcx)"] --> D
 
     D --> E["1:1 usd::usdgeom::mesh -> GPU VBO/IBO Uploader (f64 -> f32 RTC)"]
-    D --> F["Site-Coupled 6-DOF FEM, Modal, SVD & ARI v2 Engine"]
+    D --> F["Site-Coupled 6-DOF FEM, Modal, SVD & ARI Engine"]
     F -->|"ari_analysis_overlay.ifcx"| D
 
     E --> G["Pure WebGPU (egui-wgpu / wgpu WGSL) 3D Viewport (24-Bit Z-Buffer, Procedural Sun/AO/Ocean/Facades, Unified BIM/FEM/Modal/N-1/SHM/Lifelines)"]
@@ -127,7 +127,7 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 
 ### Phase 66 (`v0.6.6`) — 100% Pure-Rust IFCX (IFC 5) Engine & Living `earth_globe.ifcx` *(Implemented)*
 - **Pure-Rust IFCX JSON ECS Core (`src/core/ifcx.rs`)**:
-  - Official buildingSMART IFC 5 / IFCX document model (`header`, `imports`, `schemas`, `data` with `bsi::ifc::class`, `usd::usdgeom::mesh`, `usd::xformop::transform`, `eigengraph::geo::wgs84`, `eigengraph::bim`, `eigengraph::ari::v2`).
+  - Official buildingSMART IFC 5 / IFCX document model (`header`, `imports`, `schemas`, `data` with `bsi::ifc::class`, `usd::usdgeom::mesh`, `usd::xformop::transform`, `eigengraph::geo::wgs84`, `eigengraph::bim`, `eigengraph::ari`).
   - Non-destructive multi-layer composer (`IfcxStage::compose`) allowing seamless stacking of `earth_globe.ifcx` + AI-captured real buildings + user continuation edits + ARI structural analysis overlays.
 - **100% IFCX-Driven 3D Earth Globe**:
   - `IfcxStage::build_earth_globe_layer(theme)` constructs the entire 3D Vector Earth (ocean sphere, continents & Indonesian archipelago, mountain ridges, rivers) as genuine IFCX nodes with `usd::usdgeom::mesh`.
@@ -149,16 +149,16 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 - **Pure-Rust District Multi-Hazard Engine (`src/core/gis/district_hazard.rs`, `src/views/webgl_earth.rs`)**:
   - Evaluates animated SNI 1726 / ASCE 7 traveling seismic surface wavefields, phase-lag amplified inter-building pounding corridors, urban Venturi wind channeling streamlines with dynamic pressure (`Pa`), and interactive 3D flood / sea-level inundation planes against `IfcSite` TIN triangles, active ground-floor freeboard, neighbor buildings, and IFCX City-Builder roads/zones—emitting non-destructive `eigengraph::hazard::district` IFCX overlay nodes and GPU depth-masked WebGL2 overlays.
 - **Streaming AI Real-Building-to-IFCX Frame Inference & Instant 6-DOF ARI Triage (`src/core/ifcx.rs`, `src/views/spatial_workspace.rs`, `src/app.rs`)**:
-  - `IfcxDocument::ingest_ai_real_building_with_frame_inference` consumes exterior AI massing `.ifcx` scans (e.g. `sample_ai_massing_tower_capture_ifcx`) or partial frames, synthesizes multi-storey 3D RC columns, beams, slabs, and footings (`infer_structural_frame_for_bim`), executes instant `FemSolver::solve` + `AriEngine::evaluate_redundancy_fast` screening, and outputs composed `.ifcx` models embedded with `eigengraph::ari::v2` telemetry—accessible directly via the Dynamic Island `Multi-Hazard:` bar and `/seismic`, `/wind`, `/flood`, `/hazard`, `/ai-capture` slash commands.
+  - `IfcxDocument::ingest_ai_real_building_with_frame_inference` consumes exterior AI massing `.ifcx` scans (e.g. `sample_ai_massing_tower_capture_ifcx`) or partial frames, synthesizes multi-storey 3D RC columns, beams, slabs, and footings (`infer_structural_frame_for_bim`), executes instant `FemSolver::solve` + `AriEngine::evaluate_redundancy_fast` screening, and outputs composed `.ifcx` models embedded with `eigengraph::ari` telemetry—accessible directly via the Dynamic Island `Multi-Hazard:` bar and `/seismic`, `/wind`, `/flood`, `/hazard`, `/ai-capture` slash commands.
 
 ### Phase 69 (`v0.6.9`) — Automated Structural Retrofit & Non-Destructive `.ifcx` Strengthening Engine *(Implemented)*
 - **Pure-Rust Multi-Strategy Retrofit Synthesis (`src/core/retrofit.rs`, `src/core/ifcx.rs`)**:
-  - Synthesizes code-informed strengthening options (`AutoBalanced`, `BrbBracingOnly`, `RcJacketingOnly`, `ShearWallCore`) targeting low-ARI / high-DCR bottlenecks via RC column/beam jacketing, pad footing enlargement, 3D Buckling-Restrained Brace (`BRB`) bay injection, and RC Structural Shear Wall infill—verified by site-coupled 6-DOF FEM + `ARI v2` re-analysis with 5D cost (`USD`) & 6D embodied carbon (`kgCO2e`) Pareto scoring.
+  - Synthesizes code-informed strengthening options (`AutoBalanced`, `BrbBracingOnly`, `RcJacketingOnly`, `ShearWallCore`) targeting low-ARI / high-DCR bottlenecks via RC column/beam jacketing, pad footing enlargement, 3D Buckling-Restrained Brace (`BRB`) bay injection, and RC Structural Shear Wall infill—verified by site-coupled 6-DOF FEM + `ARI` re-analysis with 5D cost (`USD`) & 6D embodied carbon (`kgCO2e`) Pareto scoring.
   - Emits non-destructive `eigengraph::bim::retrofit_delta` `.ifcx` delta layers composable via `IfcxStage::compose_with_retrofit_delta`, with 3D WebGL2 inclined BRB strut rendering (`push_inclined_3d_strut_enu`), interactive Before vs. After comparison, and Dynamic Island `/retrofit`, `/brb`, `/jacket`, `/retrofit-ifcx`, and `/before-after` workflows.
 
-### Phase 70 (`v0.7.0`) — Two-Stage `ARI v2 + StructGNN-CRC` Conformal Screening & Progressive Collapse Cascade *(Implemented)*
+### Phase 70 (`v0.7.0`) — Two-Stage `ARI + StructGNN-CRC` Conformal Screening & Progressive Collapse Cascade *(Implemented)*
 - **Dissertation Conformal Screening & Domino Cascade (`src/core/cascade.rs`, `src/core/ifcx.rs`)**:
-  - Deploys Stage 1 analytical three-channel `ARI v2` ($w_k=0.25, w_c=0.45, w_d=0.30$) with SVD spectral kinematic guarding ahead of Stage 2 `StructGNN-CRC` ($\alpha=0.05$) conformal risk bounds and Green AI $\text{CO}_2\text{e}$ compute savings telemetry, coupled to UFC 4-023-03 DAF-driven Alternate Path progressive collapse simulation (`PVI`, `Rsys`, residual ARI).
+  - Deploys Stage 1 analytical three-channel `ARI` ($w_k=0.25, w_c=0.45, w_d=0.30$) with SVD spectral kinematic guarding ahead of Stage 2 `StructGNN-CRC` ($\alpha=0.05$) conformal risk bounds and Green AI $\text{CO}_2\text{e}$ compute savings telemetry, coupled to UFC 4-023-03 DAF-driven Alternate Path progressive collapse simulation (`PVI`, `Rsys`, residual ARI).
   - Emits non-destructive `eigengraph::analysis::crc_cascade` `.ifcx` overlays composable via `IfcxStage::compose_with_crc_cascade_overlay`, drives WebGL2 step-by-step crimson-orange domino ghosting with gravity sag (`build_rtc_active_bim_fem_mesh`), and integrates interactive `◀ Step` / `Step ▶` chronology controls and `/cascade`, `/crc`, and `/cascade-ifcx` commands directly inside the Single Unified Dynamic Island.
 
 ### Phase 71 (`v0.7.1`) — 3D Subsurface Geotechnical Stratigraphy, Coupled 6-DOF Winkler SSI & Modular View Architecture *(Implemented)*
@@ -171,17 +171,17 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 - **Multi-Layer IFCX Diff Manifest & 3D Ghost Highlighting (`src/core/ifcx.rs`, `src/views/webgl_earth/`, `src/views/universal_canvas/`)**:
   - Evaluates path-by-path, attribute-level semantic diffs across stacked `.ifcx` stages (`BIM Core`, `Subsurface SSI`, `Retrofit Delta`, `CRC Cascade`, `District Hazard`, `City-Builder`), emits non-destructive `eigengraph::ifcx::diff_manifest` nodes (`IfcxStage::compose_with_diff_manifest`), and renders Added (emerald), Modified (amber), and Deleted node AABB ghost volumes (translucent crimson) directly in WebGL2 Pass 2 and CPU fallback.
 - **A3 Pure-Vector Engineering Dossier SVG Exporter (`src/core/vector_dossier.rs`, `src/views/spatial_workspace/`, `src/app.rs`)**:
-  - Synthesizes 6-panel A3 landscape (`1600 × 1131`, 0% raster pixels) engineering calculation dossiers uniting structural framing plan, storey elevation + subsurface stratigraphy cut, ARI v2 / LRFD DCR% governing chart, multi-physics scorecard, IFCX diff manifest, and SHA-256 integrity seal, driven via `/snapshot`, `/diff`, `/diff-ifcx`, `/dossier` and the widened Dynamic Island Diff Inspector.
+  - Synthesizes 6-panel A3 landscape (`1600 × 1131`, 0% raster pixels) engineering calculation dossiers uniting structural framing plan, storey elevation + subsurface stratigraphy cut, ARI / LRFD DCR% governing chart, multi-physics scorecard, IFCX diff manifest, and SHA-256 integrity seal, driven via `/snapshot`, `/diff`, `/diff-ifcx`, `/dossier` and the widened Dynamic Island Diff Inspector.
 
-### Phase 73 (`v0.7.3`) — Autonomous Portfolio-Scale `ARI v2` Retrofit Optimization Across Multi-Building Districts *(Implemented)*
+### Phase 73 (`v0.7.3`) — Autonomous Portfolio-Scale `ARI` Retrofit Optimization Across Multi-Building Districts *(Implemented)*
 - **District Portfolio Optimizer & `eigengraph::portfolio::retrofit_plan` Overlay (`src/core/portfolio_retrofit.rs`, `src/core/ifcx.rs`)**:
-  - Evaluates coupled structural retrofit strategies across multi-building `.ifcx` district inventories (`WorldSpatialIndex`), solving a constrained Cost (`USD`) vs. Embodied Carbon (`kgCO2e`) vs. District `ARI v2` multi-objective Pareto frontier (`optimize_district_portfolio_retrofit`) and emitting non-destructive `eigengraph::portfolio::retrofit_plan` stages (`IfcxStage::compose_with_portfolio_retrofit_overlay`).
+  - Evaluates coupled structural retrofit strategies across multi-building `.ifcx` district inventories (`WorldSpatialIndex`), solving a constrained Cost (`USD`) vs. Embodied Carbon (`kgCO2e`) vs. District `ARI` multi-objective Pareto frontier (`optimize_district_portfolio_retrofit`) and emitting non-destructive `eigengraph::portfolio::retrofit_plan` stages (`IfcxStage::compose_with_portfolio_retrofit_overlay`).
 - **3D District Retrofit Crowns & Dynamic Island Pareto Frontier Drawer (`src/views/webgl_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/core/vector_dossier.rs`)**:
   - Projects per-building district retrofit status directly in 3D via WebGL2 Pass 2 (`build_rtc_portfolio_retrofit_mesh`) and CPU fallback (glowing emerald/cyan/amber retrofit crowns and deferred crimson alerts), renders a pure-vector Pareto scatter chart (`egui::Painter`) with selectable `F1..Fk` frontier solutions and ranked building cards with `Fly` camera targets inside the widening Dynamic Island `District Portfolio:` drawer, exposes `/portfolio`, `/pareto`, `/budget`, and `/portfolio-ifcx`, and embeds active portfolio KPIs inside exported A3 Pure-Vector Engineering Dossiers.
 
 ### Phase 74 (`v0.7.4`) — Real-Time WebWorker / Async Multi-Thread `StructGNN-CRC` & Live Earthquake Ground-Motion Replay *(Implemented)*
 - **BIM + SSI-Coupled NL-THA & Cross-Platform Async Background Worker (`src/core/ground_motion_replay.rs`, `src/core/web_bridge.rs`, `index.html`, `src/core/ifcx.rs`)**:
-  - Couples active `BimProject`, 6-DOF FEM, `ModalEngine`, and `SubsurfaceSsiAnalysisReport` ($\tilde{T}_1$ period lengthening) to HHT-$\alpha$ nonlinear dynamic time-history integration (`Northridge 1994`, `Kobe 1995`, `El Centro 1940`, `Chi-Chi 1999`, `Sumatra 2004`; Bouc-Wen, Takeda Pinching, Bilinear), dynamic ASCE 41-17 plastic hinge state evaluation, and Two-Stage `ARI v2 + StructGNN-CRC` conformal screening—offloaded cleanly via `AsyncReplayJobManager` (`std::thread::spawn` on Native; inline Blob WebWorker `EigenGraphWorkerBridge` + cooperative time-sliced Rust fallback on `wasm32`) and emitted as non-destructive `eigengraph::analysis::time_history_replay` overlays.
+  - Couples active `BimProject`, 6-DOF FEM, `ModalEngine`, and `SubsurfaceSsiAnalysisReport` ($\tilde{T}_1$ period lengthening) to HHT-$\alpha$ nonlinear dynamic time-history integration (`Northridge 1994`, `Kobe 1995`, `El Centro 1940`, `Chi-Chi 1999`, `Sumatra 2004`; Bouc-Wen, Takeda Pinching, Bilinear), dynamic ASCE 41-17 plastic hinge state evaluation, and Two-Stage `ARI + StructGNN-CRC` conformal screening—offloaded cleanly via `AsyncReplayJobManager` (`std::thread::spawn` on Native; inline Blob WebWorker `EigenGraphWorkerBridge` + cooperative time-sliced Rust fallback on `wasm32`) and emitted as non-destructive `eigengraph::analysis::time_history_replay` overlays.
 - **60 FPS WebGL2 Story Sway, Pulsing 3D Plastic Hinge Beacons & Dynamic Island Vector Charts (`src/views/webgl_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/core/vector_dossier.rs`, `src/app.rs`)**:
   - Drives interpolated 60 FPS structural sway (`EarthBimLens::TimeHistoryReplay`), pulsing octahedral 3D plastic hinge beacons (`hinge_vao/vbo/ibo`, GLSL `kind >= 5.5` with CPU projection fallback), interactive accelerogram/drift/hysteresis pure-vector charts inside the widening Dynamic Island drawer, `/replay`, `/record`, `/hinges`, `/replay-ifcx` commands, and pure-vector A3 dossier telemetry.
 
@@ -225,7 +225,7 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 ### Phase 81 (`v0.8.1`) — Parametric Multi-Scenario Trade-Study Matrix, Automated SNI/ASCE Permit Compliance Annex & Live Peer IFCX Delta Sync Relay *(Implemented)*
 - **6-Scenario Parametric Trade-Study Matrix & Permit Compliance (`src/core/trade_study.rs`, `src/core/vector_dossier.rs`)**:
   - Compares `BaselineIntact`, `DuctileColumnsPlus100`, `LateralBracedCore`, `HighStrengthConcrete`, `LowCarbonHybrid`, and `SeismicBaseIsolated` across `Balanced`, `MaxSafetyAri`, `MinCost`, and `MinCarbon` decision objectives with 1-click BIM adoption + `eigengraph::analysis::trade_study_matrix` IFCX overlay (`IfcxStage::compose_with_trade_study_overlay`).
-  - Evaluates 10 deterministic code compliance clauses (`SNI 1726` drift & pounding, `SNI 2847/AISC 360` DCR%, `ARI v2`, `Spectral SVD Guard`, `SNI 8460` liquefaction, `ATC-20`, `NFPA/Lifelines`, `FEMA P-58 PML-90`, `IFC 5 SHA-256 Governance`) and exports archival Sheet `S-102` Pure-Vector SVG Annex (`build_permit_compliance_annex_svg`, 0% raster).
+  - Evaluates 10 deterministic code compliance clauses (`SNI 1726` drift & pounding, `SNI 2847/AISC 360` DCR%, `ARI`, `Spectral SVD Guard`, `SNI 8460` liquefaction, `ATC-20`, `NFPA/Lifelines`, `FEMA P-58 PML-90`, `IFC 5 SHA-256 Governance`) and exports archival Sheet `S-102` Pure-Vector SVG Annex (`build_permit_compliance_annex_svg`, 0% raster).
 - **Live Peer IFCX Delta Sync Relay (`src/core/web_bridge.rs`, `src/core/ifcx_collab.rs`, `src/views/spatial_workspace/`)**:
   - Adds non-blocking WebSocket (`ws://`/`wss://`) & loopback peer delta sync (`collab_relay_connect`, `collab_relay_publish_json`, `collab_relay_poll_events`), `.ifcx-bundle.json` import verification, Dynamic Island **`Trade-Study & Permit`** tab (`hud_rects.len() == 1` across `1600px`–`390px`), `/trade-study`, `/permit-check`, `/permit-svg`, `/relay`, `/sync-peer` slash commands, and Gemini directives.
 

@@ -3,7 +3,7 @@
 //! Couples active 3D OpenBIM (`BimProject`), 6-DOF FEM + Modal eigenperiods, Subsurface SSI
 //! period lengthening ($\tilde{T}_1$), ASCE 7-22 / SNI 1726 HHT-$\alpha$ nonlinear time-history
 //! integration (NL-THA), dynamic ASCE 41-17 / FEMA 356 plastic hinge formation, and Two-Stage
-//! `EigenGate v2 + StructGNN-CRC` conformal screening inside a non-blocking background worker pipeline
+//! `EigenGate + StructGNN-CRC` conformal screening inside a non-blocking background worker pipeline
 //! (OS worker thread on Native, inline Blob WebWorker + cooperative time-sliced Rust fallback on WASM).
 
 use std::collections::HashMap;
@@ -320,7 +320,7 @@ pub struct GroundMotionReplayFrame {
     pub count_mechanism: usize,
 }
 
-/// Async Two-Stage `EigenGate v2 + StructGNN-CRC` Conformal Screening telemetry coupled to NL-THA demand.
+/// Async Two-Stage `EigenGate + StructGNN-CRC` Conformal Screening telemetry coupled to NL-THA demand.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AsyncCrcReplayTelemetry {
     pub total_scenarios: usize,
@@ -538,8 +538,8 @@ struct BaseCrcScenarioInput {
     bim_kind: Option<BimElementKind>,
     bim_id: Option<usize>,
     name: String,
-    #[serde(rename = "eigenGateV2")]
-    eigengate_v2: f64,
+    #[serde(rename = "eigenGate", alias = "eigenGateV2", alias = "ariV2")]
+    eigengate_val: f64,
     wk: f64,
     wc: f64,
     wd: f64,
@@ -850,7 +850,7 @@ fn prepare_replay_context(
             (0.5 * m_res.buckling_margin + 0.5 * m_res.rr).clamp(0.0, 1.0)
         };
         let convex_v2 = (0.25 * wk + 0.45 * wc + 0.30 * wd).clamp(0.0, 1.0);
-        let eigengate_v2 = if svd_mech {
+        let eigengate_val = if svd_mech {
             0.0
         } else {
             (0.5 * m_res.eigengate + 0.5 * convex_v2).clamp(0.0, 1.0)
@@ -860,7 +860,7 @@ fn prepare_replay_context(
             bim_kind: bim_pair.map(|p| p.0),
             bim_id: bim_pair.map(|p| p.1),
             name,
-            eigengate_v2,
+            eigengate_val,
             wk,
             wc,
             wd,
@@ -1351,7 +1351,7 @@ fn assemble_replay_report(
         }
     }
 
-    // Two-Stage EigenGate v2 + StructGNN-CRC Conformal Screening coupled with dynamic peak drift demand
+    // Two-Stage EigenGate + StructGNN-CRC Conformal Screening coupled with dynamic peak drift demand
     let conformal_alpha = 0.05_f64;
     let q_conformal = ((1.0_f64 / conformal_alpha).ln() / (2.0 * 300.0)).sqrt();
     let drift_amp = 1.0 + 0.35 * (peak_interstory_drift_ratio / 0.020);
@@ -1366,17 +1366,17 @@ fn assemble_replay_report(
         let gnn_prob = if sc.svd_mech {
             0.96
         } else {
-            (0.35 * (1.0 - sc.eigengate_v2) + 0.35 * ov_t + 0.15 * h_e + 0.15 * bk_t).clamp(0.01, 0.99)
+            (0.35 * (1.0 - sc.eigengate_val) + 0.35 * ov_t + 0.15 * h_e + 0.15 * bk_t).clamp(0.01, 0.99)
         };
         let crc_upper_bound = (gnn_prob + q_conformal).clamp(0.0, 1.0);
         let stage1_pruned = !sc.svd_mech
             && !sc.is_critical
-            && sc.eigengate_v2 >= 0.72
+            && sc.eigengate_val >= 0.72
             && dyn_u < 0.92
             && sc.buckling_margin >= 0.12;
         let risk_tier = if stage1_pruned {
             CrcRiskTier::SafePruned
-        } else if sc.svd_mech || crc_upper_bound >= 0.55 || sc.eigengate_v2 < 0.65 {
+        } else if sc.svd_mech || crc_upper_bound >= 0.55 || sc.eigengate_val < 0.65 {
             CrcRiskTier::CriticalCollapseForward
         } else {
             CrcRiskTier::ConformalWatch
@@ -1386,7 +1386,7 @@ fn assemble_replay_report(
             bim_kind: sc.bim_kind,
             bim_id: sc.bim_id,
             element_name: sc.name.clone(),
-            eigengate_v2_score: sc.eigengate_v2,
+            eigengate_score: sc.eigengate_val,
             kinematic_channel_wk: sc.wk,
             capacity_channel_wc: sc.wc,
             deformation_channel_wd: sc.wd,
@@ -1400,7 +1400,7 @@ fn assemble_replay_report(
     crc_scenarios.sort_by(|a, b| {
         b.crc_upper_bound
             .total_cmp(&a.crc_upper_bound)
-            .then_with(|| a.eigengate_v2_score.total_cmp(&b.eigengate_v2_score))
+            .then_with(|| a.eigengate_score.total_cmp(&b.eigengate_score))
     });
     let total_scenarios = crc_scenarios.len();
     let stage1_pruned = crc_scenarios.iter().filter(|s| s.stage1_pruned).count();

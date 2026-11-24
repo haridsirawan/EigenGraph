@@ -2,14 +2,14 @@
 //! Cryptographically Chained Checkpoints, Deterministic Three-Way Merge, & Coupled District Risk Field.
 //!
 //! Provides:
-//! - Tamper-evident SHA-256 checkpoint chain (`IfcxCheckpointRecord`) linking base BIM, FEM/EigenGate v2,
+//! - Tamper-evident SHA-256 checkpoint chain (`IfcxCheckpointRecord`) linking base BIM, FEM/EigenGate,
 //!   Geotechnical SSI, SHM/ATC-20, Evacuation, and Monte Carlo IFCX layers across disciplines
 //! - Formal engineering sign-off workflow (`Draft` -> `InReview` -> `Approved` / `Superseded`)
 //! - Portable `.ifcx-bundle.json` team handover package with end-to-end integrity verification
 //! - Deterministic Three-Way IFCX Node & Attribute Merge (`Base`, `Local`, `Incoming`) with
 //!   per-conflict resolution (`KeepLocal`, `KeepIncoming`, `KeepBothLayered`)
 //! - Non-destructive governance overlay (`eigengraph::governance::checkpoint_seal`)
-//! - Spatial Inverse-Distance-Weighted (IDW) District Risk Field evaluator uniting EigenGate v2, ATC-20,
+//! - Spatial Inverse-Distance-Weighted (IDW) District Risk Field evaluator uniting EigenGate, ATC-20,
 //!   FEMA P-58 PML-90, Seed–Idriss liquefaction, and A* evacuation isolation over `IfcSite` TIN terrain.
 
 use std::collections::BTreeMap;
@@ -177,7 +177,7 @@ impl DistrictRiskMetric {
         match self {
             Self::CompositeRisk => "Composite Multi-Hazard Risk",
             Self::McPml90Loss => "FEMA P-58 PML-90 Loss Density",
-            Self::StructuralEigenGate => "Structural EigenGate v2 Vulnerability",
+            Self::StructuralEigenGate => "Structural EigenGate Vulnerability",
             Self::EvacuationIsolation => "Post-Quake Isolation & ATC-20 Cordon",
         }
     }
@@ -1148,7 +1148,7 @@ fn placard_severity_01(placard: Atc20Placard) -> f32 {
 }
 
 /// Evaluates an Inverse-Distance-Weighted (IDW) spatial District Risk Field draped over `IfcSite` TIN
-/// relief, coupling EigenGate v2, ATC-20 placards, FEMA P-58 Monte Carlo PML-90, Seed–Idriss liquefaction,
+/// relief, coupling EigenGate, ATC-20 placards, FEMA P-58 Monte Carlo PML-90, Seed–Idriss liquefaction,
 /// and A* evacuation isolation across the active BIM asset and surrounding `WorldSpatialIndex` buildings.
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_district_risk_field(

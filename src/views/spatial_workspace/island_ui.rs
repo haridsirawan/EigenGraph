@@ -1718,7 +1718,7 @@ impl SpatialWorkspaceState {
                     "Pareto",
                     self.portfolio_drawer_open,
                     theme.accent_blue,
-                    "Open District Portfolio EigenGate v2 Pareto Optimizer inside Dynamic Island",
+                    "Open District Portfolio EigenGate Pareto Optimizer inside Dynamic Island",
                 )
                 .clicked()
                 {
@@ -2428,7 +2428,7 @@ impl SpatialWorkspaceState {
                                         AppIcon::ChartLine,
                                         12.5,
                                         theme.accent_green,
-                                        "District Portfolio EigenGate v2 Pareto Optimizer",
+                                        "District Portfolio EigenGate Pareto Optimizer",
                                         11.0,
                                         theme.text_primary,
                                         true,
@@ -3612,7 +3612,7 @@ impl SpatialWorkspaceState {
                                                         "CRC + Cascade",
                                                         universal_canvas.last_crc_cascade_report.is_some(),
                                                         theme.accent_orange,
-                                                        "Run Two-Stage EigenGate v2 + StructGNN-CRC Conformal Screening & 3D Progressive Collapse Cascade",
+                                                        "Run Two-Stage EigenGate + StructGNN-CRC Conformal Screening & 3D Progressive Collapse Cascade",
                                                     )
                                                     .clicked()
                                                     {
@@ -4163,7 +4163,7 @@ impl SpatialWorkspaceState {
                                                         "Portfolio Pareto",
                                                         pf_on,
                                                         theme.accent_green,
-                                                        "Run multi-building district EigenGate v2 Pareto optimizer & open frontier drawer",
+                                                        "Run multi-building district EigenGate Pareto optimizer & open frontier drawer",
                                                     )
                                                     .clicked()
                                                     {

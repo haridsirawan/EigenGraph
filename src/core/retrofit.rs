@@ -1,7 +1,7 @@
 //! retrofit.rs — Automated Structural Retrofit & Non-Destructive `.ifcx` Strengthening Engine (v0.6.9).
 //!
 //! Synthesizes code-informed strengthening interventions from live site-coupled 6-DOF FEM &
-//! EigenGate (`EigenGate v2`) screening:
+//! EigenGate (`EigenGate`) screening:
 //! - RC Column & Beam Jacketing (`+120 mm` columns, `+60x120 mm` beams) + Pad Footing Enlargement
 //! - Steel Buckling-Restrained Braces (`BRB`) injected across low-EigenGate structural bays
 //! - RC Structural Shear Wall Core Infill (`IfcWall`, `t = 250 mm`)
@@ -966,7 +966,7 @@ fn build_retrofit_delta_ifcx(
 }
 
 /// Synthesizes an automated structural retrofit plan + non-destructive `.ifcx` delta layer
-/// verified against site-coupled 6-DOF FEM & `EigenGate v2` redundancy metrics.
+/// verified against site-coupled 6-DOF FEM & `EigenGate` redundancy metrics.
 pub fn synthesize_structural_retrofit(
     project: &BimProject,
     strategy: RetrofitStrategy,
@@ -1173,7 +1173,7 @@ mod tests {
                     .data
                     .iter()
                     .any(|n| n.attributes.contains_key(ns::EG_EIGENGATE)),
-                "Delta IFCX must carry eigengraph::eigengate::v2 verification attributes"
+                "Delta IFCX must carry eigengraph::eigengate verification attributes"
             );
         }
 

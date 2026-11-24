@@ -2640,7 +2640,7 @@ impl SpatialWorkspaceState {
             actions.run_crc_cascade_screening = Some(universal_canvas.cascade_daf);
             self.push_trace(
                 format!(
-                    "Queued Two-Stage EigenGate v2 + StructGNN-CRC Cascade (DAF {:.2}x)",
+                    "Queued Two-Stage EigenGate + StructGNN-CRC Cascade (DAF {:.2}x)",
                     universal_canvas.cascade_daf
                 ),
                 true,

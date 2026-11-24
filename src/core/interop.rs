@@ -229,7 +229,7 @@ impl DxfExporter {
 pub struct IfcxExporter;
 
 impl IfcxExporter {
-    /// Generates a pure-JSON `.ifcx` document representing 3D structural elements and optional EigenGate v2 metrics.
+    /// Generates a pure-JSON `.ifcx` document representing 3D structural elements and optional EigenGate metrics.
     pub fn export_to_ifcx(
         model: &StructuralModel,
         assessment: Option<&RedundancyAssessment>,

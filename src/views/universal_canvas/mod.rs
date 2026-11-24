@@ -125,7 +125,7 @@ pub struct UniversalCanvasState {
     pub last_retrofit_report: Option<crate::core::retrofit::StructuralRetrofitReport>,
     pub pre_retrofit_baseline: Option<BimProject>,
     pub viewing_pre_retrofit_baseline: bool,
-    // Phase 70: Two-Stage `EigenGate v2 + StructGNN-CRC` Screening & Animated Progressive Collapse Cascade
+    // Phase 70: Two-Stage `EigenGate + StructGNN-CRC` Screening & Animated Progressive Collapse Cascade
     pub last_crc_cascade_report: Option<crate::core::cascade::TwoStageCrcCascadeReport>,
     pub active_cascade_step: usize,
     pub cascade_daf: f64,
@@ -139,7 +139,7 @@ pub struct UniversalCanvasState {
     pub ifcx_diff_overlay_active: bool,
     pub ifcx_diff_filter: crate::core::ifcx::IfcxDiffLayerFilter,
     pub last_vector_dossier_seal: Option<String>,
-    // Phase 73: Autonomous Portfolio-Scale `EigenGate v2` Retrofit Optimization & Pareto Overlay
+    // Phase 73: Autonomous Portfolio-Scale `EigenGate` Retrofit Optimization & Pareto Overlay
     pub portfolio_retrofit_config: crate::core::portfolio_retrofit::PortfolioRetrofitConfig,
     pub last_portfolio_retrofit_report: Option<crate::core::portfolio_retrofit::DistrictPortfolioRetrofitReport>,
     // Phase 74: Real-Time Async `StructGNN-CRC` & Live 60 FPS Earthquake Ground-Motion Replay
@@ -558,7 +558,7 @@ impl UniversalCanvasState {
         }
     }
 
-    /// Evaluates autonomous multi-building portfolio `EigenGate v2` retrofit Pareto optimization.
+    /// Evaluates autonomous multi-building portfolio `EigenGate` retrofit Pareto optimization.
     pub fn refresh_portfolio_retrofit(
         &mut self,
         bim_project: &BimProject,
@@ -832,7 +832,7 @@ impl UniversalCanvasState {
         msg
     }
 
-    /// Evaluates the 6-scenario Parametric Trade-Study Matrix (`EigenGate v2`, DCR%, Drift, Cost, CO2, PML-90).
+    /// Evaluates the 6-scenario Parametric Trade-Study Matrix (`EigenGate`, DCR%, Drift, Cost, CO2, PML-90).
     pub fn run_trade_study_analysis(
         &mut self,
         bim_project: &BimProject,

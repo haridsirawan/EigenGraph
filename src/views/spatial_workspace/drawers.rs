@@ -1810,7 +1810,7 @@ impl SpatialWorkspaceState {
                             "Audit Permit",
                             false,
                             theme.accent_blue,
-                            "Evaluate 10 regulatory clauses (SNI 1726/2847/8460, EigenGate v2, ATC-20, FEMA P-58, IFCX Seal)",
+                            "Evaluate 10 regulatory clauses (SNI 1726/2847/8460, EigenGate, ATC-20, FEMA P-58, IFCX Seal)",
                         )
                         .clicked()
                         {

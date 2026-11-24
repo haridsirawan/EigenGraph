@@ -61,7 +61,7 @@ impl AnalyzeView {
             ui.horizontal_wrapped(|ui| {
                 icons::icon_label(ui, AppIcon::Shield, 14.0, theme.accent_blue, "SVD Kinematic Guard & Sherman-Morrison Engine:", 13.0, theme.text_primary, true);
                 ui.label(RichText::new("rank(K) = ndof - nrigid. Fast perturbation m_e(λ) = 1 - (1-λ)h_e via Sherman-Morrison Rank-1 O(N²) verified safe.").size(12.0).color(theme.text_secondary));
-                icons::pill_badge(ui, AppIcon::CheckCircle, "Gate 1 SVD & EigenGate v2 Certified", theme.accent_green);
+                icons::pill_badge(ui, AppIcon::CheckCircle, "Gate 1 SVD & EigenGate Certified", theme.accent_green);
             });
 
             ui.add_space(8.0);

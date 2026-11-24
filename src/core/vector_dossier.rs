@@ -2,7 +2,7 @@
 //!
 //! Synthesizes an archival A3 landscape (`1600 x 1131`) pure-vector drafting & engineering sheet
 //! uniting structural framing plans, storey elevation + 3D subsurface borehole stratigraphy,
-//! EigenGate v2 / LRFD DCR% governing charts, coupled multi-physics scorecards, multi-layer IFCX
+//! EigenGate / LRFD DCR% governing charts, coupled multi-physics scorecards, multi-layer IFCX
 //! diff manifests, and a SHA-256 verification seal — strictly 0% raster pixels and 0 `<image>` tags.
 
 use std::fmt::Write as _;
@@ -474,7 +474,7 @@ fn draw_dcr_eigengate_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
         py,
         pw,
         ph,
-        "3. EigenGate v2 & LRFD DCR% GOVERNING AUDIT",
+        "3. EigenGate & LRFD DCR% GOVERNING AUDIT",
         &format!("EigenGate_min={min_eigengate:.3}"),
     );
 
@@ -751,7 +751,7 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
         ("WGS84 Geodetic Anchor", format!("{:.5} deg, {:.5} deg | Elev {:.1} m", input.lat_lon.0, input.lat_lon.1, input.site.elevation_m)),
         ("SNI 1726 Seismic & Wind", format!("Ss={:.2}g | S1={:.2}g | Wind={:.1} m/s | {}", input.site.seismic_pga_ss_g, input.site.seismic_pga_s1_g, input.site.design_wind_ms, input.site.site_label)),
         ("6-DOF Winkler SSI & Soil", ssi_line),
-        ("EigenGate v2 + StructGNN-CRC", crc_line),
+        ("EigenGate + StructGNN-CRC", crc_line),
         ("Automated Retrofit Delta", ret_line),
         (sixth_label, haz_line),
     ];
@@ -912,7 +912,7 @@ fn draw_title_block_panel(svg: &mut String, input: &VectorDossierInput<'_>, plac
         ("DRAWING SHEET", input.sheet_code),
         ("REVISION & STATUS", input.revision),
         ("DESIGN STANDARDS", "SNI 1726:2019 • SNI 2847:2019 • ASCE 7-22 • AISC 360-16 • UFC 4-023-03"),
-        ("METHODOLOGY", "EigenGate v2 + Spectral SVD + 6-DOF Winkler SSI"),
+        ("METHODOLOGY", "EigenGate + Spectral SVD + 6-DOF Winkler SSI"),
     ];
     for (i, (k, v)) in meta.iter().enumerate() {
         let my = py + 144.0 + (i as f64) * 50.0;
@@ -964,7 +964,7 @@ fn draw_title_block_panel(svg: &mut String, input: &VectorDossierInput<'_>, plac
 }
 
 /// Generates a publication-grade 100% Pure-Vector SVG engineering dossier containing plan,
-/// elevation/stratigraphy, EigenGate v2 / LRFD DCR% charts, multi-physics telemetry, IFCX diff,
+/// elevation/stratigraphy, EigenGate / LRFD DCR% charts, multi-physics telemetry, IFCX diff,
 /// and ISO Title Block with cryptographic SHA-256 verification seal.
 pub fn build_pure_vector_engineering_dossier_svg(
     input: &VectorDossierInput<'_>,
