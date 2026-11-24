@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL 24-Bit Z-Buffer, f64 RTC, 6-DOF FEM & ARI v2, SHM Digital Twin, ATC-20 Triage & Evacuation Lifelines)",
+                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL, 6-DOF FEM & ARI v2, Live WebSocket SHM Watchdog, ATC-20 Triage, Evacuation Lifelines & Width-First Dynamic Island)",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)
@@ -719,10 +719,16 @@ impl SettingsView {
             ui.separator();
             ui.add_space(6.0);
 
-            let releases: [(&str, bool, &str, &str); 8] = [
+            let releases: [(&str, bool, &str, &str); 9] = [
+                (
+                    "v0.7.8",
+                    true,
+                    "Live WebSocket SHM Watchdog, Closed-Loop Cascade & Width-First Dynamic Island",
+                    "Real-time WebSocket (ws:// / wss://) & deterministic triaxial telemetry streaming with rolling STA/LTA trigger detection, automatic ATC-20 -> A* evacuation re-routing, eigengraph::analysis::shm_watchdog IFCX export, and width-first horizontal Dynamic Island expansion on wide screens.",
+                ),
                 (
                     "v0.7.7",
-                    true,
+                    false,
                     "Autonomous Multi-Hazard Evacuation Routing & Emergency Lifelines",
                     "A* safe egress & emergency responder routing over IfcRoad/IfcBridge graphs with ATC-20 debris cordons, 3D flood & liquefaction road closures, Pure WebGPU animated flow corridors, and eigengraph::analysis::evacuation_lifelines IFCX export.",
                 ),

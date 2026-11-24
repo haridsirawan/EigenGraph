@@ -34,6 +34,7 @@ pub struct VectorDossierInput<'a> {
     pub replay_report: Option<&'a crate::core::ground_motion_replay::GroundMotionReplayReport>,
     pub shm_report: Option<&'a crate::core::shm_twin::ShmDigitalTwinReport>,
     pub evacuation_report: Option<&'a crate::core::evacuation_routing::EvacuationLifelineReport>,
+    pub watchdog_state: Option<&'a crate::core::shm_watchdog::ShmWatchdogState>,
     pub sheet_code: &'a str,
     pub revision: &'a str,
 }
@@ -614,8 +615,28 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
         "Baseline Intact (No retrofit delta active)".to_string()
     };
 
+    let wd_suffix = input
+        .watchdog_state
+        .filter(|w| w.total_packets_ingested > 0)
+        .map(|w| {
+            format!(
+                " | WD {} STA/LTA {:.1}",
+                w.alert_level.short_label(),
+                w.current_sta_lta
+            )
+        })
+        .unwrap_or_default();
+
     let haz_line = if let Some(shm) = input.shm_report {
-        if let Some(evac) = input.evacuation_report {
+        if !wd_suffix.is_empty() {
+            format!(
+                "SHM {} | f1 {:.2}Hz ({:+.1}%) | K {:.0}%{wd_suffix}",
+                shm.atc20_placard.short_label(),
+                shm.observed_freq_1_hz,
+                shm.freq_shift_pct,
+                shm.global_stiffness_retention_pct,
+            )
+        } else if let Some(evac) = input.evacuation_report {
             format!(
                 "SHM {} | f1 {:.2}->{:.2}Hz ({:+.1}%) | MAC {:.2} | Evac Conn {:.0}% Resp {:.0}",
                 shm.atc20_placard.short_label(),
@@ -641,16 +662,27 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
             )
         }
     } else if let Some(evac) = input.evacuation_report {
-        format!(
-            "Evac Conn {:.0}% ({}/{} open) | Resp {:.0}/100 | Isolated {} | Bridges {}/{} ok",
-            evac.network_connectivity_pct,
-            evac.open_edges,
-            evac.total_edges,
-            evac.responder_accessibility_score,
-            evac.isolated_building_count,
-            evac.bridges_evaluated.saturating_sub(evac.bridges_compromised),
-            evac.bridges_evaluated,
-        )
+        if !wd_suffix.is_empty() {
+            format!(
+                "Evac Conn {:.0}% ({}/{}) | Resp {:.0} | Iso {}{wd_suffix}",
+                evac.network_connectivity_pct,
+                evac.open_edges,
+                evac.total_edges,
+                evac.responder_accessibility_score,
+                evac.isolated_building_count,
+            )
+        } else {
+            format!(
+                "Evac Conn {:.0}% ({}/{} open) | Resp {:.0}/100 | Isolated {} | Bridges {}/{} ok",
+                evac.network_connectivity_pct,
+                evac.open_edges,
+                evac.total_edges,
+                evac.responder_accessibility_score,
+                evac.isolated_building_count,
+                evac.bridges_evaluated.saturating_sub(evac.bridges_compromised),
+                evac.bridges_evaluated,
+            )
+        }
     } else if let Some(rep) = input.replay_report {
         format!(
             "NL-THA {} ({}, {:.2}g) | Drift {:.2}% | Hinges {}IO/{}LS/{}CP/{}M | Fragility ${:.0}k ({:.0}d {:?})",
@@ -1020,6 +1052,7 @@ mod tests {
             replay_report: Some(&replay_rep),
             shm_report: None,
             evacuation_report: None,
+            watchdog_state: None,
             sheet_code: "S-101",
             revision: "REV 01",
         });
@@ -1064,6 +1097,7 @@ mod tests {
             replay_report: Some(&replay_rep),
             shm_report: Some(&shm_rep),
             evacuation_report: None,
+            watchdog_state: None,
             sheet_code: "S-102",
             revision: "REV 02",
         });
@@ -1083,6 +1117,11 @@ mod tests {
             (-6.2088, 106.8456),
         )
         .expect("Evacuation report");
+        let mut wd = crate::core::shm_watchdog::ShmWatchdogState::default();
+        wd.start_simulator(crate::core::shm_watchdog::WatchdogSimMode::AftershockPulse);
+        for _ in 0..85 {
+            let _ = wd.step_live_tick(0.05, 2.25, 2);
+        }
         let evac_export = build_pure_vector_engineering_dossier_svg(&VectorDossierInput {
             project: &proj,
             members: &members,
@@ -1097,10 +1136,12 @@ mod tests {
             replay_report: Some(&replay_rep),
             shm_report: None,
             evacuation_report: Some(&evac_rep),
+            watchdog_state: Some(&wd),
             sheet_code: "S-103",
             revision: "REV 03",
         });
         assert!(evac_export.svg_content.contains("Post-Disaster Evacuation &amp; Lifelines"));
         assert!(evac_export.svg_content.contains("Evac Conn "));
+        assert!(evac_export.svg_content.contains("WD "));
     }
 }

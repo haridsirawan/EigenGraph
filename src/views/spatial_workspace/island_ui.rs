@@ -70,14 +70,46 @@ impl SpatialWorkspaceState {
         max_w: f32,
         add_contents: impl FnOnce(&mut Ui),
     ) {
+        let clamped_max = max_w.min(ui.available_width().max(130.0));
         theme.glass_subpill_frame(corner_r, pad).show(ui, |ui| {
-            let inner_max = (max_w - pad.left as f32 - pad.right as f32 - 4.0).max(130.0);
+            let inner_max = (clamped_max - pad.left as f32 - pad.right as f32 - 4.0).max(130.0);
             ui.set_max_width(inner_max);
             ui.horizontal_wrapped(|ui| {
                 ui.set_max_width(inner_max);
                 add_contents(ui);
             });
         });
+    }
+
+    /// Places two sub-pill groups side-by-side in equal width-bounded columns when `two_col`
+    /// is true (wide screens), and stacks them vertically on narrower screens.
+    /// Uses a single callback (`is_left = true`, then `false`) to avoid double-borrow conflicts.
+    pub(super) fn width_first_pair(
+        ui: &mut Ui,
+        deck_w: f32,
+        two_col: bool,
+        mut render_side: impl FnMut(&mut Ui, bool, f32),
+    ) {
+        if two_col {
+            let col_w = ((deck_w - 8.0) * 0.5).floor().max(220.0);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.vertical(|ui| {
+                    ui.set_width(col_w);
+                    ui.set_max_width(col_w);
+                    render_side(ui, true, col_w);
+                });
+                ui.vertical(|ui| {
+                    ui.set_width(col_w);
+                    ui.set_max_width(col_w);
+                    render_side(ui, false, col_w);
+                });
+            });
+        } else {
+            render_side(ui, true, deck_w);
+            ui.add_space(4.0);
+            render_side(ui, false, deck_w);
+        }
     }
 
     pub(super) fn render_dynamic_island_row1_left(
@@ -818,6 +850,38 @@ impl SpatialWorkspaceState {
                         {
                             self.toggle_exclusive_drawer("evacuation");
                         }
+                    }
+                }
+                if universal_canvas.shm_watchdog.is_streaming()
+                    || universal_canvas.shm_watchdog.total_packets_ingested > 0
+                {
+                    let wd = &universal_canvas.shm_watchdog;
+                    let [wr, wg, wb] = wd.alert_level.badge_color_rgb();
+                    let mode_tag = if wd.ws_connected { "LIVE WS" } else { "SIM" };
+                    ui.label(
+                        RichText::new(format!(
+                            "{mode_tag} {} • STA/LTA {:.2} • {} pkt",
+                            wd.alert_level.short_label(),
+                            wd.current_sta_lta,
+                            wd.total_packets_ingested
+                        ))
+                        .size(9.2)
+                        .monospace()
+                        .color(Color32::from_rgb(wr, wg, wb)),
+                    );
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "Watchdog",
+                        self.shm_drawer_open && self.shm_drawer_tab == 2,
+                        Color32::from_rgb(wr, wg, wb),
+                        "Open Live WebSocket SHM Watchdog & Rolling Anomaly Stream",
+                    )
+                    .clicked()
+                    {
+                        self.shm_drawer_tab = 2;
+                        self.open_shm_drawer();
                     }
                 }
             }
@@ -1735,17 +1799,17 @@ impl SpatialWorkspaceState {
         let compact_w = if is_mobile {
             (vp.x - 16.0).clamp(220.0, 420.0)
         } else {
-            (vp.x * 0.62).clamp(520.0, 740.0)
+            (vp.x * 0.48).clamp(500.0, 680.0)
         };
         let expanded_w = if is_mobile {
             (vp.x - 14.0).clamp(220.0, 440.0)
         } else {
-            (vp.x * 0.72).clamp(580.0, 840.0)
+            (vp.x - 28.0).clamp(640.0, 1520.0)
         };
         let wide_w = if is_mobile {
             (vp.x - 14.0).clamp(220.0, 440.0)
         } else {
-            (vp.x * 0.88).clamp(680.0, 1040.0).min((vp.x - 24.0).max(260.0))
+            (vp.x - 24.0).clamp(700.0, 1680.0)
         };
         let base_w = egui::lerp(compact_w..=expanded_w, expand_t);
         let dock_w = egui::lerp(base_w..=wide_w, wide_t).min((vp.x - 14.0).max(220.0));
@@ -3111,226 +3175,16 @@ impl SpatialWorkspaceState {
                                 AgentModelChoice::Gemini25Flash | AgentModelChoice::Gemini25Pro
                             ) && !has_key;
 
-                            // 1. Compact Telemetry & Glass Utility Bar
-                            Self::glass_subpill_group(
-                                ui,
-                                theme,
-                                9,
-                                Margin::symmetric(6, 3),
-                                deck_w,
-                                |ui| {
-                                    if world_total > 0 {
-                                        icons::pill_badge(
-                                            ui,
-                                            AppIcon::Layers,
-                                            format!("World: {world_total}"),
-                                            theme.accent_blue,
-                                        );
-                                        let rep = &universal_canvas.neighborhood_report;
-                                        if rep.neighbors_evaluated > 0 {
-                                            let exp_tag = match rep.recommended_exposure {
-                                                crate::core::wind::ExposureCategory::ExposureB => {
-                                                    "ExpB"
-                                                }
-                                                crate::core::wind::ExposureCategory::ExposureC => {
-                                                    "ExpC"
-                                                }
-                                                crate::core::wind::ExposureCategory::ExposureD => {
-                                                    "ExpD"
-                                                }
-                                            };
-                                            let gap_tag = rep
-                                                .min_clear_gap_m
-                                                .map_or("--".to_string(), |g| format!("{g:.1}m"));
-                                            let nb_col = if rep.pounding_risk_count > 0 {
-                                                theme.accent_red
-                                            } else if rep.tight_buffer_count > 0 {
-                                                theme.accent_orange
-                                            } else {
-                                                theme.accent_green
-                                            };
-                                            icons::pill_badge(
-                                                ui,
-                                                AppIcon::AlertTriangle,
-                                                format!(
-                                                    "Nb:{} Gap {gap_tag} {exp_tag}{}",
-                                                    rep.neighbors_evaluated,
-                                                    if rep.pounding_risk_count > 0 {
-                                                        " POUND"
-                                                    } else {
-                                                        ""
-                                                    }
-                                                ),
-                                                nb_col,
-                                            );
-                                        }
-                                    }
-                                    if !build_view.bim_bus.project.is_empty() || !members.is_empty()
-                                    {
-                                        icons::pill_badge(
-                                            ui,
-                                            AppIcon::Bolt,
-                                            format!(
-                                                "{}C {}B • DCR {:.0}% • ARI {:.2}{}",
-                                                build_view.bim_bus.project.columns.len(),
-                                                build_view.bim_bus.project.runs.len(),
-                                                max_dcr,
-                                                min_ari,
-                                                if crit_cnt > 0 {
-                                                    format!(" • Crit {crit_cnt}")
-                                                } else {
-                                                    String::new()
-                                                }
-                                            ),
-                                            health_col,
-                                        );
-                                    }
-                                    if let Some(target) = worst_target {
-                                        if Self::glass_pill_button(
-                                            ui,
-                                            theme,
-                                            Some(AppIcon::Target),
-                                            "Worst",
-                                            false,
-                                            theme.accent_orange,
-                                            "Select critical / highest-DCR structural element on Earth 3D",
-                                        )
-                                        .clicked()
-                                        {
-                                            self.active_canvas_mode =
-                                                SpatialCanvasMode::EarthGlobe;
-                                            universal_canvas.globe_mode = true;
-                                            self.selected_target = Some(target);
-                                            self.popup_tab = SmartPopupTab::Calculations;
-                                            actions.fit_camera = true;
-                                            self.push_trace(
-                                                "Focused worst bottleneck member",
-                                                true,
-                                            );
-                                        }
-                                    }
-                                    if (crit_cnt > 0 || max_dcr > 95.0)
-                                        && Self::glass_pill_button(
-                                            ui,
-                                            theme,
-                                            Some(AppIcon::Wrench),
-                                            "Auto-Repair",
-                                            true,
-                                            theme.accent_orange,
-                                            "Upgrade low-redundancy / overstressed elements cleanly",
-                                        )
-                                        .clicked()
-                                    {
-                                        actions.run_auto_repair = true;
-                                    }
-
-                                    ui.separator();
-
-                                    if Self::glass_pill_button(
-                                        ui,
-                                        theme,
-                                        Some(AppIcon::Undo),
-                                        "Undo",
-                                        false,
-                                        theme.accent_blue,
-                                        "Undo last BIM or 2D canvas action (Cmd/Ctrl+Z)",
-                                    )
-                                    .clicked()
-                                        && can_undo
-                                    {
-                                        actions.undo = true;
-                                    }
-                                    if Self::glass_pill_button(
-                                        ui,
-                                        theme,
-                                        Some(AppIcon::Redo),
-                                        "Redo",
-                                        false,
-                                        theme.accent_blue,
-                                        "Redo undone BIM or 2D canvas action (Cmd/Ctrl+Y)",
-                                    )
-                                    .clicked()
-                                        && can_redo
-                                    {
-                                        actions.redo = true;
-                                    }
-                                    if Self::glass_pill_button(
-                                        ui,
-                                        theme,
-                                        Some(AppIcon::ZoomFit),
-                                        "Fit",
-                                        false,
-                                        theme.accent_blue,
-                                        "Fit Earth 3D viewport to model",
-                                    )
-                                    .clicked()
-                                    {
-                                        actions.fit_camera = true;
-                                    }
-                                    let key_accent = if has_key {
-                                        theme.accent_green
-                                    } else if needs_key {
-                                        theme.accent_orange
-                                    } else {
-                                        theme.accent_blue
-                                    };
-                                    if Self::glass_pill_button(
-                                        ui,
-                                        theme,
-                                        Some(AppIcon::Lock),
-                                        if has_key { "Key OK" } else { "API Key" },
-                                        self.api_key_popover_open || has_key || needs_key,
-                                        key_accent,
-                                        "Configure Gemini API Key",
-                                    )
-                                    .clicked()
-                                    {
-                                        self.toggle_exclusive_drawer("api_key");
-                                    }
-                                    if Self::glass_pill_button(
-                                        ui,
-                                        theme,
-                                        Some(AppIcon::SettingsGear),
-                                        "Settings",
-                                        false,
-                                        theme.accent_blue,
-                                        "Open Workspace Settings",
-                                    )
-                                    .clicked()
-                                    {
-                                        actions.open_settings = true;
-                                    }
-                                    if Self::glass_pill_button(
-                                        ui,
-                                        theme,
-                                        Some(AppIcon::MapPin),
-                                        if self.mobile_deck_pinned { "Pinned" } else { "Pin" },
-                                        self.mobile_deck_pinned,
-                                        theme.accent_green,
-                                        "Pin Studio Deck open while authoring on Earth 3D (Alt+1..4 tabs)",
-                                    )
-                                    .clicked()
-                                    {
-                                        self.mobile_deck_pinned = !self.mobile_deck_pinned;
-                                    }
-                                },
-                            );
-
-                            ui.add_space(4.0);
-
-                            // 2. Segmented Studio Category Tabs
+                            // 1 + 2. Width-First Layout: Segmented Studio Tabs + Utility Bar side-by-side inside one wrapping glass bar on wide screens
                             let effective_tab = if self.hover_more_tools_open {
                                 DynamicIslandStudioTab::CadAndExport
                             } else {
                                 self.studio_tab
                             };
-                            Self::glass_subpill_group(
-                                ui,
-                                theme,
-                                10,
-                                Margin::symmetric(6, 3),
-                                deck_w,
-                                |ui| {
+                            let wide_deck = !is_mobile && deck_w >= 860.0;
+                            let two_col_deck = !is_mobile && deck_w >= 1040.0;
+                            let mut render_header_strip = |ui: &mut Ui, draw_tabs: bool, draw_util: bool| {
+                                if draw_tabs {
                                     for tab in DynamicIslandStudioTab::ALL {
                                         let is_act = effective_tab == tab;
                                         let lbl = if is_mobile {
@@ -3354,13 +3208,240 @@ impl SpatialWorkspaceState {
                                                 tab == DynamicIslandStudioTab::CadAndExport;
                                         }
                                     }
-                                },
-                            );
+                                }
+                                if draw_tabs && draw_util {
+                                    ui.separator();
+                                }
+                                if draw_util {
+                                        if world_total > 0 {
+                                            icons::pill_badge(
+                                                ui,
+                                                AppIcon::Layers,
+                                                format!("World: {world_total}"),
+                                                theme.accent_blue,
+                                            );
+                                            let rep = &universal_canvas.neighborhood_report;
+                                            if rep.neighbors_evaluated > 0 {
+                                                let exp_tag = match rep.recommended_exposure {
+                                                    crate::core::wind::ExposureCategory::ExposureB => {
+                                                        "ExpB"
+                                                    }
+                                                    crate::core::wind::ExposureCategory::ExposureC => {
+                                                        "ExpC"
+                                                    }
+                                                    crate::core::wind::ExposureCategory::ExposureD => {
+                                                        "ExpD"
+                                                    }
+                                                };
+                                                let gap_tag = rep
+                                                    .min_clear_gap_m
+                                                    .map_or("--".to_string(), |g| format!("{g:.1}m"));
+                                                let nb_col = if rep.pounding_risk_count > 0 {
+                                                    theme.accent_red
+                                                } else if rep.tight_buffer_count > 0 {
+                                                    theme.accent_orange
+                                                } else {
+                                                    theme.accent_green
+                                                };
+                                                icons::pill_badge(
+                                                    ui,
+                                                    AppIcon::AlertTriangle,
+                                                    format!(
+                                                        "Nb:{} Gap {gap_tag} {exp_tag}{}",
+                                                        rep.neighbors_evaluated,
+                                                        if rep.pounding_risk_count > 0 {
+                                                            " POUND"
+                                                        } else {
+                                                            ""
+                                                        }
+                                                    ),
+                                                    nb_col,
+                                                );
+                                            }
+                                        }
+                                        if !build_view.bim_bus.project.is_empty() || !members.is_empty()
+                                        {
+                                            icons::pill_badge(
+                                                ui,
+                                                AppIcon::Bolt,
+                                                format!(
+                                                    "{}C {}B • DCR {:.0}% • ARI {:.2}{}",
+                                                    build_view.bim_bus.project.columns.len(),
+                                                    build_view.bim_bus.project.runs.len(),
+                                                    max_dcr,
+                                                    min_ari,
+                                                    if crit_cnt > 0 {
+                                                        format!(" • Crit {crit_cnt}")
+                                                    } else {
+                                                        String::new()
+                                                    }
+                                                ),
+                                                health_col,
+                                            );
+                                        }
+                                        if let Some(target) = worst_target {
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Target),
+                                                "Worst",
+                                                false,
+                                                theme.accent_orange,
+                                                "Select critical / highest-DCR structural element on Earth 3D",
+                                            )
+                                            .clicked()
+                                            {
+                                                self.active_canvas_mode =
+                                                    SpatialCanvasMode::EarthGlobe;
+                                                universal_canvas.globe_mode = true;
+                                                self.selected_target = Some(target);
+                                                self.popup_tab = SmartPopupTab::Calculations;
+                                                actions.fit_camera = true;
+                                                self.push_trace(
+                                                    "Focused worst bottleneck member",
+                                                    true,
+                                                );
+                                            }
+                                        }
+                                        if (crit_cnt > 0 || max_dcr > 95.0)
+                                            && Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Wrench),
+                                                "Auto-Repair",
+                                                true,
+                                                theme.accent_orange,
+                                                "Upgrade low-redundancy / overstressed elements cleanly",
+                                            )
+                                            .clicked()
+                                        {
+                                            actions.run_auto_repair = true;
+                                        }
+
+                                        ui.separator();
+
+                                        if Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            Some(AppIcon::Undo),
+                                            "Undo",
+                                            false,
+                                            theme.accent_blue,
+                                            "Undo last BIM or 2D canvas action (Cmd/Ctrl+Z)",
+                                        )
+                                        .clicked()
+                                            && can_undo
+                                        {
+                                            actions.undo = true;
+                                        }
+                                        if Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            Some(AppIcon::Redo),
+                                            "Redo",
+                                            false,
+                                            theme.accent_blue,
+                                            "Redo undone BIM or 2D canvas action (Cmd/Ctrl+Y)",
+                                        )
+                                        .clicked()
+                                            && can_redo
+                                        {
+                                            actions.redo = true;
+                                        }
+                                        if Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            Some(AppIcon::ZoomFit),
+                                            "Fit",
+                                            false,
+                                            theme.accent_blue,
+                                            "Fit Earth 3D viewport to model",
+                                        )
+                                        .clicked()
+                                        {
+                                            actions.fit_camera = true;
+                                        }
+                                        let key_accent = if has_key {
+                                            theme.accent_green
+                                        } else if needs_key {
+                                            theme.accent_orange
+                                        } else {
+                                            theme.accent_blue
+                                        };
+                                        if Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            Some(AppIcon::Lock),
+                                            if has_key { "Key OK" } else { "API Key" },
+                                            self.api_key_popover_open || has_key || needs_key,
+                                            key_accent,
+                                            "Configure Gemini API Key",
+                                        )
+                                        .clicked()
+                                        {
+                                            self.toggle_exclusive_drawer("api_key");
+                                        }
+                                        if Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            Some(AppIcon::SettingsGear),
+                                            "Settings",
+                                            false,
+                                            theme.accent_blue,
+                                            "Open Workspace Settings",
+                                        )
+                                        .clicked()
+                                        {
+                                            actions.open_settings = true;
+                                        }
+                                        if Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            Some(AppIcon::MapPin),
+                                            if self.mobile_deck_pinned { "Pinned" } else { "Pin" },
+                                            self.mobile_deck_pinned,
+                                            theme.accent_green,
+                                            "Pin Studio Deck open while authoring on Earth 3D (Alt+1..4 tabs)",
+                                        )
+                                        .clicked()
+                                        {
+                                            self.mobile_deck_pinned = !self.mobile_deck_pinned;
+                                        }
+                                }
+                            };
+                            if wide_deck {
+                                Self::glass_subpill_group(
+                                    ui,
+                                    theme,
+                                    10,
+                                    Margin::symmetric(6, 3),
+                                    deck_w,
+                                    |ui| render_header_strip(ui, true, true),
+                                );
+                            } else {
+                                Self::glass_subpill_group(
+                                    ui,
+                                    theme,
+                                    10,
+                                    Margin::symmetric(6, 3),
+                                    deck_w,
+                                    |ui| render_header_strip(ui, true, false),
+                                );
+                                ui.add_space(4.0);
+                                Self::glass_subpill_group(
+                                    ui,
+                                    theme,
+                                    9,
+                                    Margin::symmetric(6, 3),
+                                    deck_w,
+                                    |ui| render_header_strip(ui, false, true),
+                                );
+                            }
 
                             ui.add_space(4.0);
 
-                            // 3. Active Studio Tab Content (Grouped inside frosted glass sub-pills)
-                            match effective_tab {
+                            // 3. Active Studio Tab Content (Width-First horizontal flow on wide screens, stacking upward only when horizontal bounds fill)
+                            let mut render_tab_body = |ui: &mut Ui, deck_w: f32| match effective_tab {
                                 DynamicIslandStudioTab::ViewAndLens => {
                                     let tilt = universal_canvas.earth_world.camera.tilt_deg;
                                     Self::glass_subpill_group(
@@ -3466,232 +3547,236 @@ impl SpatialWorkspaceState {
                                         );
                                     }
                                     ui.add_space(4.0);
-                                    Self::glass_subpill_group(
-                                        ui,
-                                        theme,
-                                        9,
-                                        Margin::symmetric(7, 3),
-                                        deck_w,
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new("CRC & Cascade:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
-                                            );
-                                            if Self::glass_pill_button(
+                                    Self::width_first_pair(ui, deck_w, two_col_deck, |ui, is_left, col_w| {
+                                        if is_left {
+                                            Self::glass_subpill_group(
                                                 ui,
                                                 theme,
-                                                Some(AppIcon::Bolt),
-                                                "CRC + Cascade",
-                                                universal_canvas.last_crc_cascade_report.is_some(),
-                                                theme.accent_orange,
-                                                "Run Two-Stage ARI v2 + StructGNN-CRC Conformal Screening & 3D Progressive Collapse Cascade",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.run_crc_cascade_screening =
-                                                    Some(universal_canvas.cascade_daf);
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                None,
-                                                format!("DAF {:.2}x", universal_canvas.cascade_daf),
-                                                false,
-                                                theme.accent_blue,
-                                                "Cycle UFC 4-023-03 Dynamic Amplification Factor: 1.20x / 1.50x / 2.00x",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.cascade_daf =
-                                                    if universal_canvas.cascade_daf < 1.35 {
-                                                        1.50
-                                                    } else if universal_canvas.cascade_daf < 1.75 {
-                                                        2.00
-                                                    } else {
-                                                        1.20
-                                                    };
-                                            }
-                                            if let Some(ref crc_rep) =
-                                                universal_canvas.last_crc_cascade_report
-                                            {
-                                                let max_steps = crc_rep.total_steps.clamp(1, 4);
-                                                for s in 1..=max_steps {
-                                                    let act = universal_canvas.active_cascade_step == s;
+                                                9,
+                                                Margin::symmetric(7, 3),
+                                                col_w,
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new("CRC & Cascade:")
+                                                            .size(9.3)
+                                                            .strong()
+                                                            .color(theme.text_muted),
+                                                    );
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Bolt),
+                                                        "CRC + Cascade",
+                                                        universal_canvas.last_crc_cascade_report.is_some(),
+                                                        theme.accent_orange,
+                                                        "Run Two-Stage ARI v2 + StructGNN-CRC Conformal Screening & 3D Progressive Collapse Cascade",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.run_crc_cascade_screening =
+                                                            Some(universal_canvas.cascade_daf);
+                                                    }
                                                     if Self::glass_pill_button(
                                                         ui,
                                                         theme,
                                                         None,
-                                                        format!("S{s}"),
-                                                        act,
-                                                        theme.accent_red,
-                                                        "Inspect domino collapse chronology at step",
+                                                        format!("DAF {:.2}x", universal_canvas.cascade_daf),
+                                                        false,
+                                                        theme.accent_blue,
+                                                        "Cycle UFC 4-023-03 Dynamic Amplification Factor: 1.20x / 1.50x / 2.00x",
                                                     )
                                                     .clicked()
                                                     {
-                                                        universal_canvas.active_cascade_step = s;
+                                                        universal_canvas.cascade_daf =
+                                                            if universal_canvas.cascade_daf < 1.35 {
+                                                                1.50
+                                                            } else if universal_canvas.cascade_daf < 1.75 {
+                                                                2.00
+                                                            } else {
+                                                                1.20
+                                                            };
                                                     }
-                                                }
-                                                if Self::glass_pill_button(
-                                                    ui,
-                                                    theme,
-                                                    Some(AppIcon::Cube3D),
-                                                    "CRC .ifcx",
-                                                    false,
-                                                    theme.accent_green,
-                                                    "Export eigengraph::analysis::crc_cascade .ifcx overlay",
-                                                )
-                                                .clicked()
-                                                {
-                                                    actions.export_crc_cascade_ifcx = true;
-                                                }
-                                            }
-                                        },
-                                    );
-                                    ui.add_space(4.0);
-                                    Self::glass_subpill_group(
-                                        ui,
-                                        theme,
-                                        9,
-                                        Margin::symmetric(7, 3),
-                                        deck_w,
-                                        |ui| {
-                                            use crate::core::ground_motion_replay::GroundMotionReplayConfig;
-                                            ui.label(
-                                                RichText::new("Ground Motion & Async CRC:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
+                                                    if let Some(ref crc_rep) =
+                                                        universal_canvas.last_crc_cascade_report
+                                                    {
+                                                        let max_steps = crc_rep.total_steps.clamp(1, 4);
+                                                        for s in 1..=max_steps {
+                                                            let act = universal_canvas.active_cascade_step == s;
+                                                            if Self::glass_pill_button(
+                                                                ui,
+                                                                theme,
+                                                                None,
+                                                                format!("S{s}"),
+                                                                act,
+                                                                theme.accent_red,
+                                                                "Inspect domino collapse chronology at step",
+                                                            )
+                                                            .clicked()
+                                                            {
+                                                                universal_canvas.active_cascade_step = s;
+                                                            }
+                                                        }
+                                                        if Self::glass_pill_button(
+                                                            ui,
+                                                            theme,
+                                                            Some(AppIcon::Cube3D),
+                                                            "CRC .ifcx",
+                                                            false,
+                                                            theme.accent_green,
+                                                            "Export eigengraph::analysis::crc_cascade .ifcx overlay",
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            actions.export_crc_cascade_ifcx = true;
+                                                        }
+                                                    }
+                                                },
                                             );
-                                            let worker_busy = universal_canvas.replay_async_manager.is_running();
-                                            let has_rep = universal_canvas.last_ground_motion_replay_report.is_some();
-                                            if Self::glass_pill_button(
+                                        } else {
+                                            Self::glass_subpill_group(
                                                 ui,
                                                 theme,
-                                                Some(AppIcon::Bolt),
-                                                if worker_busy { "Running..." } else { "Async EQ" },
-                                                has_rep || worker_busy,
-                                                theme.accent_orange,
-                                                "Run non-blocking background StructGNN-CRC & live 60 FPS Earthquake Replay",
-                                            )
-                                            .clicked()
-                                            {
-                                                self.apply_lens_to_views(
-                                                    SpatialLens::TimeHistoryReplay,
-                                                    build_view,
-                                                    universal_canvas,
-                                                );
-                                                actions.run_async_ground_motion_replay = true;
-                                            }
-                                            let rec_lbl = format!(
-                                                "Rec: {}",
-                                                GroundMotionReplayConfig::record_short_label(
-                                                    universal_canvas.ground_motion_replay_config.record
-                                                )
-                                            );
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                None,
-                                                rec_lbl,
-                                                false,
-                                                theme.accent_blue,
-                                                "Cycle earthquake record (Northridge / Kobe / El Centro / Chi-Chi / Sumatra)",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.ground_motion_replay_config.record =
-                                                    GroundMotionReplayConfig::next_record(
-                                                        universal_canvas.ground_motion_replay_config.record,
+                                                9,
+                                                Margin::symmetric(7, 3),
+                                                col_w,
+                                                |ui| {
+                                                    use crate::core::ground_motion_replay::GroundMotionReplayConfig;
+                                                    ui.label(
+                                                        RichText::new("Ground Motion & Async CRC:")
+                                                            .size(9.3)
+                                                            .strong()
+                                                            .color(theme.text_muted),
                                                     );
-                                                self.apply_lens_to_views(
-                                                    SpatialLens::TimeHistoryReplay,
-                                                    build_view,
-                                                    universal_canvas,
-                                                );
-                                                actions.run_async_ground_motion_replay = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                None,
-                                                format!(
-                                                    "SF {:.2}x",
-                                                    universal_canvas.ground_motion_replay_config.scale_factor
-                                                ),
-                                                false,
-                                                theme.text_secondary,
-                                                "Cycle MCE ground motion scale factor (0.75x..2.00x)",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.ground_motion_replay_config.cycle_scale_factor();
-                                                actions.run_async_ground_motion_replay = true;
-                                            }
-                                            let hinges_on = universal_canvas.ground_motion_replay_config.show_plastic_hinges;
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Target),
-                                                "Hinges",
-                                                hinges_on,
-                                                theme.accent_red,
-                                                "Toggle 3D ASCE 41-17 plastic hinge beacons",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.ground_motion_replay_config.show_plastic_hinges = !hinges_on;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::ChartLine),
-                                                "Replay UI",
-                                                self.ground_motion_drawer_open,
-                                                theme.accent_blue,
-                                                "Open Live Earthquake Replay & Async StructGNN-CRC drawer",
-                                            )
-                                            .clicked()
-                                            {
-                                                self.toggle_exclusive_drawer("ground_motion");
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Cube3D),
-                                                "Replay .ifcx",
-                                                false,
-                                                theme.accent_green,
-                                                "Export non-destructive eigengraph::analysis::time_history_replay .ifcx overlay",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.export_ground_motion_replay_ifcx = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Shield),
-                                                "SHM UI",
-                                                self.shm_drawer_open,
-                                                theme.accent_green,
-                                                "Open Live SHM Digital Twin & Automated ATC-20 Placard drawer",
-                                            )
-                                            .clicked()
-                                            {
-                                                self.toggle_exclusive_drawer("shm");
-                                                self.apply_lens_to_views(
-                                                    SpatialLens::ShmDigitalTwin,
-                                                    build_view,
-                                                    universal_canvas,
-                                                );
-                                                if universal_canvas.last_shm_twin_report.is_none() {
-                                                    actions.run_shm_digital_twin = true;
-                                                }
-                                            }
-                                        },
-                                    );
+                                                    let worker_busy = universal_canvas.replay_async_manager.is_running();
+                                                    let has_rep = universal_canvas.last_ground_motion_replay_report.is_some();
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Bolt),
+                                                        if worker_busy { "Running..." } else { "Async EQ" },
+                                                        has_rep || worker_busy,
+                                                        theme.accent_orange,
+                                                        "Run non-blocking background StructGNN-CRC & live 60 FPS Earthquake Replay",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.apply_lens_to_views(
+                                                            SpatialLens::TimeHistoryReplay,
+                                                            build_view,
+                                                            universal_canvas,
+                                                        );
+                                                        actions.run_async_ground_motion_replay = true;
+                                                    }
+                                                    let rec_lbl = format!(
+                                                        "Rec: {}",
+                                                        GroundMotionReplayConfig::record_short_label(
+                                                            universal_canvas.ground_motion_replay_config.record
+                                                        )
+                                                    );
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        None,
+                                                        rec_lbl,
+                                                        false,
+                                                        theme.accent_blue,
+                                                        "Cycle earthquake record (Northridge / Kobe / El Centro / Chi-Chi / Sumatra)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.ground_motion_replay_config.record =
+                                                            GroundMotionReplayConfig::next_record(
+                                                                universal_canvas.ground_motion_replay_config.record,
+                                                            );
+                                                        self.apply_lens_to_views(
+                                                            SpatialLens::TimeHistoryReplay,
+                                                            build_view,
+                                                            universal_canvas,
+                                                        );
+                                                        actions.run_async_ground_motion_replay = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        None,
+                                                        format!(
+                                                            "SF {:.2}x",
+                                                            universal_canvas.ground_motion_replay_config.scale_factor
+                                                        ),
+                                                        false,
+                                                        theme.text_secondary,
+                                                        "Cycle MCE ground motion scale factor (0.75x..2.00x)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.ground_motion_replay_config.cycle_scale_factor();
+                                                        actions.run_async_ground_motion_replay = true;
+                                                    }
+                                                    let hinges_on = universal_canvas.ground_motion_replay_config.show_plastic_hinges;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Target),
+                                                        "Hinges",
+                                                        hinges_on,
+                                                        theme.accent_red,
+                                                        "Toggle 3D ASCE 41-17 plastic hinge beacons",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.ground_motion_replay_config.show_plastic_hinges = !hinges_on;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::ChartLine),
+                                                        "Replay UI",
+                                                        self.ground_motion_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Open Live Earthquake Replay & Async StructGNN-CRC drawer",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.toggle_exclusive_drawer("ground_motion");
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Cube3D),
+                                                        "Replay .ifcx",
+                                                        false,
+                                                        theme.accent_green,
+                                                        "Export non-destructive eigengraph::analysis::time_history_replay .ifcx overlay",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.export_ground_motion_replay_ifcx = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Shield),
+                                                        "SHM UI",
+                                                        self.shm_drawer_open,
+                                                        theme.accent_green,
+                                                        "Open Live SHM Digital Twin & Automated ATC-20 Placard drawer",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.toggle_exclusive_drawer("shm");
+                                                        self.apply_lens_to_views(
+                                                            SpatialLens::ShmDigitalTwin,
+                                                            build_view,
+                                                            universal_canvas,
+                                                        );
+                                                        if universal_canvas.last_shm_twin_report.is_none() {
+                                                            actions.run_shm_digital_twin = true;
+                                                        }
+                                                    }
+                                                },
+                                            );
+                                        }
+                                    });
                                 }
                                 DynamicIslandStudioTab::BimAndStory => {
                                     let (_, _, story_lbl, lvl_cnt) =
@@ -3879,631 +3964,639 @@ impl SpatialWorkspaceState {
                                         },
                                     );
                                     ui.add_space(4.0);
-                                    Self::glass_subpill_group(
-                                        ui,
-                                        theme,
-                                        9,
-                                        Margin::symmetric(7, 3),
-                                        deck_w,
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new("Retrofit:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
-                                            );
-                                            if Self::glass_pill_button(
+                                    Self::width_first_pair(ui, deck_w, two_col_deck, |ui, is_left, col_w| {
+                                        if is_left {
+                                            Self::glass_subpill_group(
                                                 ui,
                                                 theme,
-                                                None,
-                                                format!("Mode: {}", universal_canvas.retrofit_strategy.short_label()),
-                                                false,
-                                                theme.accent_blue,
-                                                "Cycle automated retrofit strategy: Auto / BRB / Jacket / Shear Wall",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.retrofit_strategy =
-                                                    universal_canvas.retrofit_strategy.cycle_next();
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Shield),
-                                                "Auto-Retrofit",
-                                                universal_canvas.last_retrofit_report.is_some(),
-                                                theme.accent_green,
-                                                "Synthesize code-verified structural retrofit & non-destructive .ifcx strengthening layer",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.run_structural_retrofit =
-                                                    Some(universal_canvas.retrofit_strategy);
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Bolt),
-                                                "+ BRB",
-                                                false,
-                                                theme.accent_orange,
-                                                "Inject 3D Buckling-Restrained Braces (BRB) across low-ARI structural bays",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.retrofit_strategy =
-                                                    crate::core::retrofit::RetrofitStrategy::BrbBracingOnly;
-                                                actions.run_structural_retrofit = Some(
-                                                    crate::core::retrofit::RetrofitStrategy::BrbBracingOnly,
-                                                );
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Wrench),
-                                                "+ Jacket",
-                                                false,
-                                                theme.accent_blue,
-                                                "Apply RC column/beam jacketing & foundation footing enlargement",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.retrofit_strategy =
-                                                    crate::core::retrofit::RetrofitStrategy::RcJacketingOnly;
-                                                actions.run_structural_retrofit = Some(
-                                                    crate::core::retrofit::RetrofitStrategy::RcJacketingOnly,
-                                                );
-                                            }
-                                            if universal_canvas.last_retrofit_report.is_some() {
-                                                ui.separator();
-                                                if Self::glass_pill_button(
-                                                    ui,
-                                                    theme,
-                                                    None,
-                                                    if universal_canvas.viewing_pre_retrofit_baseline {
-                                                        "View: Before"
-                                                    } else {
-                                                        "View: After"
-                                                    },
-                                                    !universal_canvas.viewing_pre_retrofit_baseline,
-                                                    theme.accent_blue,
-                                                    "Compare intact pre-retrofit baseline vs. strengthened 3D structure",
-                                                )
-                                                .clicked()
-                                                {
-                                                    actions.toggle_retrofit_before_after = true;
-                                                }
-                                                if Self::glass_pill_button(
-                                                    ui,
-                                                    theme,
-                                                    Some(AppIcon::Cube3D),
-                                                    "Delta .ifcx",
-                                                    false,
-                                                    theme.accent_green,
-                                                    "Export non-destructive eigengraph::bim::retrofit_delta .ifcx strengthening layer",
-                                                )
-                                                .clicked()
-                                                {
-                                                    actions.export_retrofit_delta_ifcx = true;
-                                                }
-                                            }
-                                        },
-                                    );
-                                    ui.add_space(4.0);
-                                    Self::glass_subpill_group(
-                                        ui,
-                                        theme,
-                                        9,
-                                        Margin::symmetric(7, 3),
-                                        deck_w,
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new("District Portfolio:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
-                                            );
-                                            let pf_on = universal_canvas.portfolio_retrofit_config.overlay_visible
-                                                || self.portfolio_drawer_open;
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::ChartLine),
-                                                "Portfolio Pareto",
-                                                pf_on,
-                                                theme.accent_green,
-                                                "Run multi-building district ARI v2 Pareto optimizer & open frontier drawer",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.portfolio_retrofit_config.overlay_visible = true;
-                                                self.toggle_exclusive_drawer("portfolio");
-                                                actions.run_portfolio_retrofit = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Target),
-                                                format!(
-                                                    "Obj: {}",
-                                                    universal_canvas
-                                                        .portfolio_retrofit_config
-                                                        .objective
-                                                        .short_label()
-                                                ),
-                                                false,
-                                                theme.accent_blue,
-                                                "Cycle portfolio Pareto selection objective (ARI/$ / Balanced / Low-CO2 / Max ARI)",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.portfolio_retrofit_config.objective =
-                                                    universal_canvas
-                                                        .portfolio_retrofit_config
-                                                        .objective
-                                                        .cycle_next();
-                                                actions.run_portfolio_retrofit = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Coins),
-                                                format!(
-                                                    "Cap: ${:.0}k",
-                                                    universal_canvas
-                                                        .portfolio_retrofit_config
-                                                        .budget_cap_usd
-                                                        / 1000.0
-                                                ),
-                                                false,
-                                                theme.accent_orange,
-                                                "Cycle district budget cap ($100k / $250k / $500k / $1000k)",
-                                            )
-                                            .clicked()
-                                            {
-                                                let cur = universal_canvas
-                                                    .portfolio_retrofit_config
-                                                    .budget_cap_usd;
-                                                let next = if cur < 150_000.0 {
-                                                    250_000.0
-                                                } else if cur < 375_000.0 {
-                                                    500_000.0
-                                                } else if cur < 750_000.0 {
-                                                    1_000_000.0
-                                                } else {
-                                                    100_000.0
-                                                };
-                                                universal_canvas
-                                                    .portfolio_retrofit_config
-                                                    .budget_cap_usd = next;
-                                                actions.run_portfolio_retrofit = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Cube3D),
-                                                "Portfolio .ifcx",
-                                                false,
-                                                theme.accent_green,
-                                                "Export non-destructive eigengraph::portfolio::retrofit_plan .ifcx overlay",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.export_portfolio_retrofit_ifcx = true;
-                                            }
-                                        },
-                                    );
-                                }
-                                DynamicIslandStudioTab::GisAndSite => {
-                                    Self::glass_subpill_group(
-                                        ui,
-                                        theme,
-                                        9,
-                                        Margin::symmetric(7, 3),
-                                        deck_w,
-                                        |ui| {
-                                            let map_lbl = format!(
-                                                "Theme: {}",
-                                                universal_canvas.world_map.visual_layer_label()
-                                            );
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                None,
-                                                map_lbl,
-                                                false,
-                                                theme.accent_blue,
-                                                "Cycle Pure-Rust Vector Earth theme: Coastal Blueprint / City Daylight / Night Cyber-Twin / Topographic",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.world_map.cycle_basemap_visual_mode();
-                                                self.push_trace(
-                                                    format!(
-                                                        "Vector Earth theme: {}",
-                                                        universal_canvas.world_map.tile_provider.display_name()
-                                                    ),
-                                                    true,
-                                                );
-                                            }
-                                            let topo_lbl = if universal_canvas.show_terrain_contours {
-                                                if universal_canvas.site_tin_from_ifc {
-                                                    "Topo IFC"
-                                                } else {
-                                                    "Topo ON"
-                                                }
-                                            } else {
-                                                "Topo"
-                                            };
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                None,
-                                                topo_lbl,
-                                                universal_canvas.show_terrain_contours,
-                                                theme.accent_green,
-                                                "Toggle pure-vector 3D TIN terrain contours (IFC IfcSite / survey / procedural) & SNI 8460:2017 steep slope (>30°) overlay",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.show_terrain_contours =
-                                                    !universal_canvas.show_terrain_contours;
-                                                if universal_canvas.show_terrain_contours {
-                                                    universal_canvas.ensure_site_tin_generated();
-                                                }
-                                            }
-                                            let sun_preset = universal_canvas
-                                                .earth_world
-                                                .camera
-                                                .lighting_preset_label();
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(if sun_preset == "Night" {
-                                                    AppIcon::Moon
-                                                } else {
-                                                    AppIcon::Sun
-                                                }),
-                                                format!("Sun: {sun_preset}"),
-                                                sun_preset != "Day",
-                                                theme.accent_orange,
-                                                "Cycle Pure WebGPU Earth Vector solar lighting: Day (13:30) / Golden Dusk (17:24) / Night (22:00)",
-                                            )
-                                            .clicked()
-                                            {
-                                                let lon = universal_canvas.world_map.center_lat_lon.1;
-                                                let next_h = match sun_preset {
-                                                    "Day" => 17.4,
-                                                    "Dusk" => 22.0,
-                                                    _ => 13.5,
-                                                };
-                                                universal_canvas
-                                                    .earth_world
-                                                    .camera
-                                                    .set_local_sun_hour(next_h, lon);
-                                                self.push_trace(
-                                                    format!(
-                                                        "Solar lighting: {}",
-                                                        universal_canvas
-                                                            .earth_world
-                                                            .camera
-                                                            .lighting_preset_label()
-                                                    ),
-                                                    true,
-                                                );
-                                            }
-                                            let gpu_on = universal_canvas.webgpu_earth.is_active();
-                                            let gpu_lbl = if gpu_on {
-                                                "WebGPU"
-                                            } else if universal_canvas.webgpu_earth.is_available() {
-                                                "CPU Vec"
-                                            } else {
-                                                "Vec 3D"
-                                            };
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                None,
-                                                gpu_lbl,
-                                                gpu_on,
-                                                theme.accent_blue,
-                                                "Toggle 100% Pure WebGPU (WGSL) 3D Vector Earth pass vs. CPU vector fallback",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.webgpu_earth.enabled =
-                                                    !universal_canvas.webgpu_earth.enabled;
-                                            }
-                                            ui.separator();
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::MapPin),
-                                                "Anchor Here",
-                                                false,
-                                                theme.accent_blue,
-                                                "Relocate BIM/IFC origin (0,0) to current Earth 3D center GPS coordinates",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.anchor_and_build_site =
-                                                    Some(universal_canvas.world_map.center_lat_lon);
-                                            }
-                                            if let Some(rel) =
-                                                universal_canvas.active_world_project_rel_path.clone()
-                                            {
-                                                if Self::glass_pill_button(
-                                                    ui,
-                                                    theme,
-                                                    None,
-                                                    "Move Pin",
-                                                    false,
-                                                    theme.accent_orange,
-                                                    "Reposition active building on Earth 3D with automatic road/parcel vector OSNAP",
-                                                )
-                                                .clicked()
-                                                {
-                                                    universal_canvas.globe_mode = true;
-                                                    universal_canvas.placing_unlocated_rel_path =
-                                                        Some(rel.clone());
-                                                    universal_canvas.placing_heading_deg =
-                                                        universal_canvas
-                                                            .world_index
-                                                            .get(&rel)
-                                                            .map(|b| b.heading_deg)
-                                                            .unwrap_or(0.0);
-                                                }
-                                                if Self::glass_pill_button(
-                                                    ui,
-                                                    theme,
-                                                    None,
-                                                    "-15°",
-                                                    false,
-                                                    theme.accent_blue,
-                                                    "Rotate active Earth building -15° counter-clockwise (Shift+R)",
-                                                )
-                                                .clicked()
-                                                {
-                                                    actions.rotate_active_world_heading_deg =
-                                                        Some(-15.0);
-                                                }
-                                                if Self::glass_pill_button(
-                                                    ui,
-                                                    theme,
-                                                    None,
-                                                    "+15°",
-                                                    false,
-                                                    theme.accent_blue,
-                                                    "Rotate active Earth building +15° clockwise (R)",
-                                                )
-                                                .clicked()
-                                                {
-                                                    actions.rotate_active_world_heading_deg =
-                                                        Some(15.0);
-                                                }
-                                            }
-                                            if world_total > 0 && (world_crit > 0 || world_unloc > 0)
-                                            {
-                                                ui.separator();
-                                                if world_crit > 0
-                                                    && Self::glass_pill_button(
-                                                        ui,
-                                                        theme,
-                                                        None,
-                                                        format!("{world_crit} Crit • Fly"),
-                                                        false,
-                                                        theme.accent_red,
-                                                        "Fly Earth 3D camera to the next high-DCR/low-ARI structure across the Vault",
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    actions.fly_to_next_world_building = Some(
-                                                        crate::core::gis::WorldPortfolioFilter::CriticalRisk,
+                                                9,
+                                                Margin::symmetric(7, 3),
+                                                col_w,
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new("Retrofit:")
+                                                            .size(9.3)
+                                                            .strong()
+                                                            .color(theme.text_muted),
                                                     );
-                                                }
-                                                if world_unloc > 0 {
                                                     if Self::glass_pill_button(
                                                         ui,
                                                         theme,
                                                         None,
-                                                        format!("{world_unloc} Unlocated • Place"),
+                                                        format!("Mode: {}", universal_canvas.retrofit_strategy.short_label()),
                                                         false,
-                                                        theme.accent_orange,
-                                                        "Pick next unlocated Staging model and click anywhere on Earth 3D to pin its real address",
+                                                        theme.accent_blue,
+                                                        "Cycle automated retrofit strategy: Auto / BRB / Jacket / Shear Wall",
                                                     )
                                                     .clicked()
                                                     {
-                                                        let next_rel = universal_canvas
-                                                            .active_world_project_rel_path
-                                                            .clone()
-                                                            .filter(|r| {
-                                                                universal_canvas
-                                                                    .world_index
-                                                                    .get(r)
-                                                                    .is_some_and(|b| {
-                                                                        b.is_unlocated()
-                                                                    })
-                                                            })
-                                                            .or_else(|| {
-                                                                universal_canvas
-                                                                    .world_index
-                                                                    .buildings
-                                                                    .iter()
-                                                                    .find(|b| b.is_unlocated())
-                                                                    .map(|b| b.rel_path.clone())
-                                                            });
-                                                        if let Some(rel) = next_rel {
-                                                            universal_canvas.globe_mode = true;
+                                                        universal_canvas.retrofit_strategy =
+                                                            universal_canvas.retrofit_strategy.cycle_next();
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Shield),
+                                                        "Auto-Retrofit",
+                                                        universal_canvas.last_retrofit_report.is_some(),
+                                                        theme.accent_green,
+                                                        "Synthesize code-verified structural retrofit & non-destructive .ifcx strengthening layer",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.run_structural_retrofit =
+                                                            Some(universal_canvas.retrofit_strategy);
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Bolt),
+                                                        "+ BRB",
+                                                        false,
+                                                        theme.accent_orange,
+                                                        "Inject 3D Buckling-Restrained Braces (BRB) across low-ARI structural bays",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.retrofit_strategy =
+                                                            crate::core::retrofit::RetrofitStrategy::BrbBracingOnly;
+                                                        actions.run_structural_retrofit = Some(
+                                                            crate::core::retrofit::RetrofitStrategy::BrbBracingOnly,
+                                                        );
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Wrench),
+                                                        "+ Jacket",
+                                                        false,
+                                                        theme.accent_blue,
+                                                        "Apply RC column/beam jacketing & foundation footing enlargement",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.retrofit_strategy =
+                                                            crate::core::retrofit::RetrofitStrategy::RcJacketingOnly;
+                                                        actions.run_structural_retrofit = Some(
+                                                            crate::core::retrofit::RetrofitStrategy::RcJacketingOnly,
+                                                        );
+                                                    }
+                                                    if universal_canvas.last_retrofit_report.is_some() {
+                                                        ui.separator();
+                                                        if Self::glass_pill_button(
+                                                            ui,
+                                                            theme,
+                                                            None,
+                                                            if universal_canvas.viewing_pre_retrofit_baseline {
+                                                                "View: Before"
+                                                            } else {
+                                                                "View: After"
+                                                            },
+                                                            !universal_canvas.viewing_pre_retrofit_baseline,
+                                                            theme.accent_blue,
+                                                            "Compare intact pre-retrofit baseline vs. strengthened 3D structure",
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            actions.toggle_retrofit_before_after = true;
+                                                        }
+                                                        if Self::glass_pill_button(
+                                                            ui,
+                                                            theme,
+                                                            Some(AppIcon::Cube3D),
+                                                            "Delta .ifcx",
+                                                            false,
+                                                            theme.accent_green,
+                                                            "Export non-destructive eigengraph::bim::retrofit_delta .ifcx strengthening layer",
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            actions.export_retrofit_delta_ifcx = true;
+                                                        }
+                                                    }
+                                                },
+                                            );
+                                        } else {
+                                            Self::glass_subpill_group(
+                                                ui,
+                                                theme,
+                                                9,
+                                                Margin::symmetric(7, 3),
+                                                col_w,
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new("District Portfolio:")
+                                                            .size(9.3)
+                                                            .strong()
+                                                            .color(theme.text_muted),
+                                                    );
+                                                    let pf_on = universal_canvas.portfolio_retrofit_config.overlay_visible
+                                                        || self.portfolio_drawer_open;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::ChartLine),
+                                                        "Portfolio Pareto",
+                                                        pf_on,
+                                                        theme.accent_green,
+                                                        "Run multi-building district ARI v2 Pareto optimizer & open frontier drawer",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.portfolio_retrofit_config.overlay_visible = true;
+                                                        self.toggle_exclusive_drawer("portfolio");
+                                                        actions.run_portfolio_retrofit = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Target),
+                                                        format!(
+                                                            "Obj: {}",
                                                             universal_canvas
-                                                                .placing_unlocated_rel_path =
+                                                                .portfolio_retrofit_config
+                                                                .objective
+                                                                .short_label()
+                                                        ),
+                                                        false,
+                                                        theme.accent_blue,
+                                                        "Cycle portfolio Pareto selection objective (ARI/$ / Balanced / Low-CO2 / Max ARI)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.portfolio_retrofit_config.objective =
+                                                            universal_canvas
+                                                                .portfolio_retrofit_config
+                                                                .objective
+                                                                .cycle_next();
+                                                        actions.run_portfolio_retrofit = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Coins),
+                                                        format!(
+                                                            "Cap: ${:.0}k",
+                                                            universal_canvas
+                                                                .portfolio_retrofit_config
+                                                                .budget_cap_usd
+                                                                / 1000.0
+                                                        ),
+                                                        false,
+                                                        theme.accent_orange,
+                                                        "Cycle district budget cap ($100k / $250k / $500k / $1000k)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        let cur = universal_canvas
+                                                            .portfolio_retrofit_config
+                                                            .budget_cap_usd;
+                                                        let next = if cur < 150_000.0 {
+                                                            250_000.0
+                                                        } else if cur < 375_000.0 {
+                                                            500_000.0
+                                                        } else if cur < 750_000.0 {
+                                                            1_000_000.0
+                                                        } else {
+                                                            100_000.0
+                                                        };
+                                                        universal_canvas
+                                                            .portfolio_retrofit_config
+                                                            .budget_cap_usd = next;
+                                                        actions.run_portfolio_retrofit = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Cube3D),
+                                                        "Portfolio .ifcx",
+                                                        false,
+                                                        theme.accent_green,
+                                                        "Export non-destructive eigengraph::portfolio::retrofit_plan .ifcx overlay",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.export_portfolio_retrofit_ifcx = true;
+                                                    }
+                                                },
+                                            );
+                                        }
+                                    });
+                                }
+                                DynamicIslandStudioTab::GisAndSite => {
+                                    Self::width_first_pair(ui, deck_w, two_col_deck, |ui, is_left, col_w| {
+                                        if is_left {
+                                            Self::glass_subpill_group(
+                                                ui,
+                                                theme,
+                                                9,
+                                                Margin::symmetric(7, 3),
+                                                col_w,
+                                                |ui| {
+                                                    let map_lbl = format!(
+                                                        "Theme: {}",
+                                                        universal_canvas.world_map.visual_layer_label()
+                                                    );
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        None,
+                                                        map_lbl,
+                                                        false,
+                                                        theme.accent_blue,
+                                                        "Cycle Pure-Rust Vector Earth theme: Coastal Blueprint / City Daylight / Night Cyber-Twin / Topographic",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.world_map.cycle_basemap_visual_mode();
+                                                        self.push_trace(
+                                                            format!(
+                                                                "Vector Earth theme: {}",
+                                                                universal_canvas.world_map.tile_provider.display_name()
+                                                            ),
+                                                            true,
+                                                        );
+                                                    }
+                                                    let topo_lbl = if universal_canvas.show_terrain_contours {
+                                                        if universal_canvas.site_tin_from_ifc {
+                                                            "Topo IFC"
+                                                        } else {
+                                                            "Topo ON"
+                                                        }
+                                                    } else {
+                                                        "Topo"
+                                                    };
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        None,
+                                                        topo_lbl,
+                                                        universal_canvas.show_terrain_contours,
+                                                        theme.accent_green,
+                                                        "Toggle pure-vector 3D TIN terrain contours (IFC IfcSite / survey / procedural) & SNI 8460:2017 steep slope (>30°) overlay",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.show_terrain_contours =
+                                                            !universal_canvas.show_terrain_contours;
+                                                        if universal_canvas.show_terrain_contours {
+                                                            universal_canvas.ensure_site_tin_generated();
+                                                        }
+                                                    }
+                                                    let sun_preset = universal_canvas
+                                                        .earth_world
+                                                        .camera
+                                                        .lighting_preset_label();
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(if sun_preset == "Night" {
+                                                            AppIcon::Moon
+                                                        } else {
+                                                            AppIcon::Sun
+                                                        }),
+                                                        format!("Sun: {sun_preset}"),
+                                                        sun_preset != "Day",
+                                                        theme.accent_orange,
+                                                        "Cycle Pure WebGPU Earth Vector solar lighting: Day (13:30) / Golden Dusk (17:24) / Night (22:00)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        let lon = universal_canvas.world_map.center_lat_lon.1;
+                                                        let next_h = match sun_preset {
+                                                            "Day" => 17.4,
+                                                            "Dusk" => 22.0,
+                                                            _ => 13.5,
+                                                        };
+                                                        universal_canvas
+                                                            .earth_world
+                                                            .camera
+                                                            .set_local_sun_hour(next_h, lon);
+                                                        self.push_trace(
+                                                            format!(
+                                                                "Solar lighting: {}",
+                                                                universal_canvas
+                                                                    .earth_world
+                                                                    .camera
+                                                                    .lighting_preset_label()
+                                                            ),
+                                                            true,
+                                                        );
+                                                    }
+                                                    let gpu_on = universal_canvas.webgpu_earth.is_active();
+                                                    let gpu_lbl = if gpu_on {
+                                                        "WebGPU"
+                                                    } else if universal_canvas.webgpu_earth.is_available() {
+                                                        "CPU Vec"
+                                                    } else {
+                                                        "Vec 3D"
+                                                    };
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        None,
+                                                        gpu_lbl,
+                                                        gpu_on,
+                                                        theme.accent_blue,
+                                                        "Toggle 100% Pure WebGPU (WGSL) 3D Vector Earth pass vs. CPU vector fallback",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.webgpu_earth.enabled =
+                                                            !universal_canvas.webgpu_earth.enabled;
+                                                    }
+                                                    ui.separator();
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::MapPin),
+                                                        "Anchor Here",
+                                                        false,
+                                                        theme.accent_blue,
+                                                        "Relocate BIM/IFC origin (0,0) to current Earth 3D center GPS coordinates",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.anchor_and_build_site =
+                                                            Some(universal_canvas.world_map.center_lat_lon);
+                                                    }
+                                                    if let Some(rel) =
+                                                        universal_canvas.active_world_project_rel_path.clone()
+                                                    {
+                                                        if Self::glass_pill_button(
+                                                            ui,
+                                                            theme,
+                                                            None,
+                                                            "Move Pin",
+                                                            false,
+                                                            theme.accent_orange,
+                                                            "Reposition active building on Earth 3D with automatic road/parcel vector OSNAP",
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            universal_canvas.globe_mode = true;
+                                                            universal_canvas.placing_unlocated_rel_path =
                                                                 Some(rel.clone());
                                                             universal_canvas.placing_heading_deg =
-                                                                0.0;
-                                                            self.push_trace(
-                                                                format!(
-                                                                    "Place '{rel}' onto Earth 3D (Q/E rotate)"
-                                                                ),
-                                                                true,
+                                                                universal_canvas
+                                                                    .world_index
+                                                                    .get(&rel)
+                                                                    .map(|b| b.heading_deg)
+                                                                    .unwrap_or(0.0);
+                                                        }
+                                                        if Self::glass_pill_button(
+                                                            ui,
+                                                            theme,
+                                                            None,
+                                                            "-15°",
+                                                            false,
+                                                            theme.accent_blue,
+                                                            "Rotate active Earth building -15° counter-clockwise (Shift+R)",
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            actions.rotate_active_world_heading_deg =
+                                                                Some(-15.0);
+                                                        }
+                                                        if Self::glass_pill_button(
+                                                            ui,
+                                                            theme,
+                                                            None,
+                                                            "+15°",
+                                                            false,
+                                                            theme.accent_blue,
+                                                            "Rotate active Earth building +15° clockwise (R)",
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            actions.rotate_active_world_heading_deg =
+                                                                Some(15.0);
+                                                        }
+                                                    }
+                                                    if world_total > 0 && (world_crit > 0 || world_unloc > 0)
+                                                    {
+                                                        ui.separator();
+                                                        if world_crit > 0
+                                                            && Self::glass_pill_button(
+                                                                ui,
+                                                                theme,
+                                                                None,
+                                                                format!("{world_crit} Crit • Fly"),
+                                                                false,
+                                                                theme.accent_red,
+                                                                "Fly Earth 3D camera to the next high-DCR/low-ARI structure across the Vault",
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            actions.fly_to_next_world_building = Some(
+                                                                crate::core::gis::WorldPortfolioFilter::CriticalRisk,
                                                             );
+                                                        }
+                                                        if world_unloc > 0 {
+                                                            if Self::glass_pill_button(
+                                                                ui,
+                                                                theme,
+                                                                None,
+                                                                format!("{world_unloc} Unlocated • Place"),
+                                                                false,
+                                                                theme.accent_orange,
+                                                                "Pick next unlocated Staging model and click anywhere on Earth 3D to pin its real address",
+                                                            )
+                                                            .clicked()
+                                                            {
+                                                                let next_rel = universal_canvas
+                                                                    .active_world_project_rel_path
+                                                                    .clone()
+                                                                    .filter(|r| {
+                                                                        universal_canvas
+                                                                            .world_index
+                                                                            .get(r)
+                                                                            .is_some_and(|b| {
+                                                                                b.is_unlocated()
+                                                                            })
+                                                                    })
+                                                                    .or_else(|| {
+                                                                        universal_canvas
+                                                                            .world_index
+                                                                            .buildings
+                                                                            .iter()
+                                                                            .find(|b| b.is_unlocated())
+                                                                            .map(|b| b.rel_path.clone())
+                                                                    });
+                                                                if let Some(rel) = next_rel {
+                                                                    universal_canvas.globe_mode = true;
+                                                                    universal_canvas
+                                                                        .placing_unlocated_rel_path =
+                                                                        Some(rel.clone());
+                                                                    universal_canvas.placing_heading_deg =
+                                                                        0.0;
+                                                                    self.push_trace(
+                                                                        format!(
+                                                                            "Place '{rel}' onto Earth 3D (Q/E rotate)"
+                                                                        ),
+                                                                        true,
+                                                                    );
+                                                                }
+                                                            }
+                                                            if Self::glass_pill_button(
+                                                                ui,
+                                                                theme,
+                                                                None,
+                                                                "Next Unloc",
+                                                                false,
+                                                                theme.accent_blue,
+                                                                "Fly camera to the next unlocated Staging parcel on Earth 3D",
+                                                            )
+                                                            .clicked()
+                                                            {
+                                                                actions.fly_to_next_world_building = Some(
+                                                                    crate::core::gis::WorldPortfolioFilter::UnlocatedStaging,
+                                                                );
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                            );
+                                        } else {
+                                            // Phase 67: IFCX City-Builder Authoring (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`, Auto Cut/Fill Pad)
+                                            Self::glass_subpill_group(
+                                                ui,
+                                                theme,
+                                                9,
+                                                Margin::symmetric(7, 3),
+                                                col_w,
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new("IFCX City:")
+                                                            .size(9.3)
+                                                            .strong()
+                                                            .color(theme.text_muted),
+                                                    );
+                                                    let road_on = universal_canvas.earth_bim_author.active_tool
+                                                        == crate::views::universal_canvas::EarthBimTool::Road;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::MapPin),
+                                                        format!("Road ({})", universal_canvas.city_scene.roads.iter().filter(|r| !r.is_bridge).count()),
+                                                        road_on,
+                                                        theme.accent_blue,
+                                                        "Draw IFCX IfcRoad multi-lane corridor on Earth 3D (2 clicks)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                                                        universal_canvas.earth_bim_author.active_tool = if road_on {
+                                                            crate::views::universal_canvas::EarthBimTool::None
+                                                        } else {
+                                                            crate::views::universal_canvas::EarthBimTool::Road
+                                                        };
+                                                        universal_canvas.earth_bim_author.pending_start_mm = None;
+                                                        universal_canvas.is_frozen = false;
+                                                    }
+                                                    let bridge_on = universal_canvas.earth_bim_author.active_tool
+                                                        == crate::views::universal_canvas::EarthBimTool::Bridge;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::BridgeSpan),
+                                                        format!("Bridge ({})", universal_canvas.city_scene.roads.iter().filter(|r| r.is_bridge).count()),
+                                                        bridge_on,
+                                                        theme.accent_blue,
+                                                        "Draw elevated IFCX IfcBridge deck & piers on Earth 3D (2 clicks)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                                                        universal_canvas.earth_bim_author.active_tool = if bridge_on {
+                                                            crate::views::universal_canvas::EarthBimTool::None
+                                                        } else {
+                                                            crate::views::universal_canvas::EarthBimTool::Bridge
+                                                        };
+                                                        universal_canvas.earth_bim_author.pending_start_mm = None;
+                                                        universal_canvas.is_frozen = false;
+                                                    }
+                                                    let zone_on = universal_canvas.earth_bim_author.active_tool
+                                                        == crate::views::universal_canvas::EarthBimTool::Zone;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Building),
+                                                        format!(
+                                                            "Zone: {}",
+                                                            universal_canvas.city_scene.active_zone_kind.short_label()
+                                                        ),
+                                                        zone_on,
+                                                        theme.accent_green,
+                                                        "Click on Earth 3D to stamp IFCX IfcSpatialZone parcel with context massing & trees",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
+                                                        if zone_on {
+                                                            universal_canvas.city_scene.active_zone_kind =
+                                                                universal_canvas.city_scene.active_zone_kind.cycle_next();
+                                                        } else {
+                                                            universal_canvas.earth_bim_author.active_tool =
+                                                                crate::views::universal_canvas::EarthBimTool::Zone;
+                                                            universal_canvas.is_frozen = false;
                                                         }
                                                     }
                                                     if Self::glass_pill_button(
                                                         ui,
                                                         theme,
-                                                        None,
-                                                        "Next Unloc",
-                                                        false,
-                                                        theme.accent_blue,
-                                                        "Fly camera to the next unlocated Staging parcel on Earth 3D",
+                                                        Some(AppIcon::Layers),
+                                                        "Grade Pad",
+                                                        !universal_canvas.city_scene.graded_pads.is_empty(),
+                                                        theme.accent_orange,
+                                                        "Auto-grade flat foundation pad onto IfcSite TIN & compute Cut/Fill m3",
                                                     )
                                                     .clicked()
                                                     {
-                                                        actions.fly_to_next_world_building = Some(
-                                                            crate::core::gis::WorldPortfolioFilter::UnlocatedStaging,
+                                                        let tin = universal_canvas.active_site_tin.get_or_insert_with(|| {
+                                                            crate::core::gis::TinSurfaceMesh::generate_from_dem_preset(
+                                                                universal_canvas.site_tin_preset,
+                                                                400.0,
+                                                                400.0,
+                                                                36,
+                                                                36,
+                                                                1.0,
+                                                            )
+                                                        });
+                                                        let pad = universal_canvas
+                                                            .city_scene
+                                                            .auto_grade_building_pad(&build_view.bim_bus.project, tin);
+                                                        universal_canvas.show_terrain_contours = true;
+                                                        self.push_trace(
+                                                            format!(
+                                                                "Graded {} ({:.0}x{:.0}m): Cut {:.0}m3 | Fill {:.0}m3",
+                                                                pad.name,
+                                                                pad.width_m,
+                                                                pad.depth_m,
+                                                                pad.cut_volume_m3,
+                                                                pad.fill_volume_m3
+                                                            ),
+                                                            true,
                                                         );
                                                     }
-                                                }
-                                            }
-                                        },
-                                    );
-                                    ui.add_space(4.0);
-                                    // Phase 67: IFCX City-Builder Authoring (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`, Auto Cut/Fill Pad)
-                                    Self::glass_subpill_group(
-                                        ui,
-                                        theme,
-                                        9,
-                                        Margin::symmetric(7, 3),
-                                        deck_w,
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new("IFCX City:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
-                                            );
-                                            let road_on = universal_canvas.earth_bim_author.active_tool
-                                                == crate::views::universal_canvas::EarthBimTool::Road;
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::MapPin),
-                                                format!("Road ({})", universal_canvas.city_scene.roads.iter().filter(|r| !r.is_bridge).count()),
-                                                road_on,
-                                                theme.accent_blue,
-                                                "Draw IFCX IfcRoad multi-lane corridor on Earth 3D (2 clicks)",
-                                            )
-                                            .clicked()
-                                            {
-                                                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
-                                                universal_canvas.earth_bim_author.active_tool = if road_on {
-                                                    crate::views::universal_canvas::EarthBimTool::None
-                                                } else {
-                                                    crate::views::universal_canvas::EarthBimTool::Road
-                                                };
-                                                universal_canvas.earth_bim_author.pending_start_mm = None;
-                                                universal_canvas.is_frozen = false;
-                                            }
-                                            let bridge_on = universal_canvas.earth_bim_author.active_tool
-                                                == crate::views::universal_canvas::EarthBimTool::Bridge;
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::BridgeSpan),
-                                                format!("Bridge ({})", universal_canvas.city_scene.roads.iter().filter(|r| r.is_bridge).count()),
-                                                bridge_on,
-                                                theme.accent_blue,
-                                                "Draw elevated IFCX IfcBridge deck & piers on Earth 3D (2 clicks)",
-                                            )
-                                            .clicked()
-                                            {
-                                                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
-                                                universal_canvas.earth_bim_author.active_tool = if bridge_on {
-                                                    crate::views::universal_canvas::EarthBimTool::None
-                                                } else {
-                                                    crate::views::universal_canvas::EarthBimTool::Bridge
-                                                };
-                                                universal_canvas.earth_bim_author.pending_start_mm = None;
-                                                universal_canvas.is_frozen = false;
-                                            }
-                                            let zone_on = universal_canvas.earth_bim_author.active_tool
-                                                == crate::views::universal_canvas::EarthBimTool::Zone;
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Building),
-                                                format!(
-                                                    "Zone: {}",
-                                                    universal_canvas.city_scene.active_zone_kind.short_label()
-                                                ),
-                                                zone_on,
-                                                theme.accent_green,
-                                                "Click on Earth 3D to stamp IFCX IfcSpatialZone parcel with context massing & trees",
-                                            )
-                                            .clicked()
-                                            {
-                                                build_view.ground_author_tool = Ground3DAuthorTool::Orbit;
-                                                if zone_on {
-                                                    universal_canvas.city_scene.active_zone_kind =
-                                                        universal_canvas.city_scene.active_zone_kind.cycle_next();
-                                                } else {
-                                                    universal_canvas.earth_bim_author.active_tool =
-                                                        crate::views::universal_canvas::EarthBimTool::Zone;
-                                                    universal_canvas.is_frozen = false;
-                                                }
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Layers),
-                                                "Grade Pad",
-                                                !universal_canvas.city_scene.graded_pads.is_empty(),
-                                                theme.accent_orange,
-                                                "Auto-grade flat foundation pad onto IfcSite TIN & compute Cut/Fill m3",
-                                            )
-                                            .clicked()
-                                            {
-                                                let tin = universal_canvas.active_site_tin.get_or_insert_with(|| {
-                                                    crate::core::gis::TinSurfaceMesh::generate_from_dem_preset(
-                                                        universal_canvas.site_tin_preset,
-                                                        400.0,
-                                                        400.0,
-                                                        36,
-                                                        36,
-                                                        1.0,
+                                                    let snap_on = universal_canvas.city_scene.road_snap_enabled;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        None,
+                                                        if snap_on { "Road Snap" } else { "Snap Off" },
+                                                        snap_on,
+                                                        theme.accent_blue,
+                                                        "Snap BIM columns/walls/footings to road setbacks & parcel alignments",
                                                     )
-                                                });
-                                                let pad = universal_canvas
-                                                    .city_scene
-                                                    .auto_grade_building_pad(&build_view.bim_bus.project, tin);
-                                                universal_canvas.show_terrain_contours = true;
-                                                self.push_trace(
-                                                    format!(
-                                                        "Graded {} ({:.0}x{:.0}m): Cut {:.0}m3 | Fill {:.0}m3",
-                                                        pad.name,
-                                                        pad.width_m,
-                                                        pad.depth_m,
-                                                        pad.cut_volume_m3,
-                                                        pad.fill_volume_m3
-                                                    ),
-                                                    true,
-                                                );
-                                            }
-                                            let snap_on = universal_canvas.city_scene.road_snap_enabled;
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                None,
-                                                if snap_on { "Road Snap" } else { "Snap Off" },
-                                                snap_on,
-                                                theme.accent_blue,
-                                                "Snap BIM columns/walls/footings to road setbacks & parcel alignments",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.city_scene.road_snap_enabled = !snap_on;
-                                            }
-                                        },
-                                    );
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.city_scene.road_snap_enabled = !snap_on;
+                                                    }
+                                                },
+                                            );
+                                        }
+                                    });
                                     ui.add_space(4.0);
                                     Self::glass_subpill_group(
                                         ui,
@@ -4651,433 +4744,443 @@ impl SpatialWorkspaceState {
                                         },
                                     );
                                     ui.add_space(4.0);
-                                    Self::glass_subpill_group(
-                                        ui,
-                                        theme,
-                                        9,
-                                        Margin::symmetric(7, 3),
-                                        deck_w,
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new("SSI & Soil:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
+                                    Self::width_first_pair(ui, deck_w, two_col_deck, |ui, is_left, col_w| {
+                                        if is_left {
+                                            Self::glass_subpill_group(
+                                                ui,
+                                                theme,
+                                                9,
+                                                Margin::symmetric(7, 3),
+                                                col_w,
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new("SSI & Soil:")
+                                                            .size(9.3)
+                                                            .strong()
+                                                            .color(theme.text_muted),
+                                                    );
+                                                    let ssi_on =
+                                                        universal_canvas.subsurface_ssi.ssi_coupling_enabled;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Layers),
+                                                        "Winkler SSI",
+                                                        ssi_on,
+                                                        theme.accent_blue,
+                                                        "Toggle coupled 6-DOF Winkler foundation springs & modal period lengthening",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas
+                                                            .subsurface_ssi
+                                                            .ssi_coupling_enabled = !ssi_on;
+                                                        actions.run_subsurface_ssi_sync = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Database),
+                                                        format!(
+                                                            "Soil: {}",
+                                                            universal_canvas
+                                                                .subsurface_ssi
+                                                                .borehole_preset
+                                                                .short_label()
+                                                        ),
+                                                        ssi_on
+                                                            || universal_canvas
+                                                                .subsurface_ssi
+                                                                .xray_subsurface_visible,
+                                                        theme.accent_orange,
+                                                        "Cycle borehole soil stratigraphy archetype (Soft Clay / Liquefiable / Stiff Alluvium / Dense Rock)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.subsurface_ssi.borehole_preset =
+                                                            universal_canvas
+                                                                .subsurface_ssi
+                                                                .borehole_preset
+                                                                .cycle_next();
+                                                        universal_canvas
+                                                            .subsurface_ssi
+                                                            .xray_subsurface_visible = true;
+                                                        actions.run_subsurface_ssi_sync = true;
+                                                    }
+                                                    let liq_on = universal_canvas
+                                                        .subsurface_ssi
+                                                        .liquefaction_trigger_active;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Waves),
+                                                        "Liquefy",
+                                                        liq_on,
+                                                        theme.accent_red,
+                                                        "Toggle Seed-Idriss seismic liquefaction trigger & p-y spring degradation",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas
+                                                            .subsurface_ssi
+                                                            .liquefaction_trigger_active = !liq_on;
+                                                        actions.run_subsurface_ssi_sync = true;
+                                                    }
+                                                    let xray_on = universal_canvas
+                                                        .subsurface_ssi
+                                                        .xray_subsurface_visible;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::SectionCut),
+                                                        "X-Ray Ground",
+                                                        xray_on,
+                                                        theme.accent_blue,
+                                                        "Toggle 3D Pure WebGPU subsurface stratigraphy, borehole casing & groundwater table cutaway",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas
+                                                            .subsurface_ssi
+                                                            .xray_subsurface_visible = !xray_on;
+                                                        actions.run_subsurface_ssi_sync = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Cube3D),
+                                                        "SSI .ifcx",
+                                                        false,
+                                                        theme.accent_green,
+                                                        "Export non-destructive eigengraph::geotech::stratigraphy & ssi_springs .ifcx overlay",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.export_subsurface_ssi_ifcx = true;
+                                                    }
+                                                },
                                             );
-                                            let ssi_on =
-                                                universal_canvas.subsurface_ssi.ssi_coupling_enabled;
-                                            if Self::glass_pill_button(
+                                        } else {
+                                            Self::glass_subpill_group(
                                                 ui,
                                                 theme,
-                                                Some(AppIcon::Layers),
-                                                "Winkler SSI",
-                                                ssi_on,
-                                                theme.accent_blue,
-                                                "Toggle coupled 6-DOF Winkler foundation springs & modal period lengthening",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas
-                                                    .subsurface_ssi
-                                                    .ssi_coupling_enabled = !ssi_on;
-                                                actions.run_subsurface_ssi_sync = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Database),
-                                                format!(
-                                                    "Soil: {}",
-                                                    universal_canvas
-                                                        .subsurface_ssi
-                                                        .borehole_preset
-                                                        .short_label()
-                                                ),
-                                                ssi_on
-                                                    || universal_canvas
-                                                        .subsurface_ssi
-                                                        .xray_subsurface_visible,
-                                                theme.accent_orange,
-                                                "Cycle borehole soil stratigraphy archetype (Soft Clay / Liquefiable / Stiff Alluvium / Dense Rock)",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.subsurface_ssi.borehole_preset =
-                                                    universal_canvas
-                                                        .subsurface_ssi
-                                                        .borehole_preset
-                                                        .cycle_next();
-                                                universal_canvas
-                                                    .subsurface_ssi
-                                                    .xray_subsurface_visible = true;
-                                                actions.run_subsurface_ssi_sync = true;
-                                            }
-                                            let liq_on = universal_canvas
-                                                .subsurface_ssi
-                                                .liquefaction_trigger_active;
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Waves),
-                                                "Liquefy",
-                                                liq_on,
-                                                theme.accent_red,
-                                                "Toggle Seed-Idriss seismic liquefaction trigger & p-y spring degradation",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas
-                                                    .subsurface_ssi
-                                                    .liquefaction_trigger_active = !liq_on;
-                                                actions.run_subsurface_ssi_sync = true;
-                                            }
-                                            let xray_on = universal_canvas
-                                                .subsurface_ssi
-                                                .xray_subsurface_visible;
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::SectionCut),
-                                                "X-Ray Ground",
-                                                xray_on,
-                                                theme.accent_blue,
-                                                "Toggle 3D Pure WebGPU subsurface stratigraphy, borehole casing & groundwater table cutaway",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas
-                                                    .subsurface_ssi
-                                                    .xray_subsurface_visible = !xray_on;
-                                                actions.run_subsurface_ssi_sync = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Cube3D),
-                                                "SSI .ifcx",
-                                                false,
-                                                theme.accent_green,
-                                                "Export non-destructive eigengraph::geotech::stratigraphy & ssi_springs .ifcx overlay",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.export_subsurface_ssi_ifcx = true;
-                                            }
-                                        },
-                                    );
-                                    Self::glass_subpill_group(
-                                        ui,
-                                        theme,
-                                        9,
-                                        Margin::symmetric(7, 3),
-                                        deck_w,
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new("Evacuation & Lifelines:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
+                                                9,
+                                                Margin::symmetric(7, 3),
+                                                col_w,
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new("Evacuation & Lifelines:")
+                                                            .size(9.3)
+                                                            .strong()
+                                                            .color(theme.text_muted),
+                                                    );
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Shield),
+                                                        "Evac Route",
+                                                        self.evacuation_drawer_open,
+                                                        theme.accent_green,
+                                                        "Compute A* post-disaster safe evacuation & emergency responder routes",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_evacuation_drawer();
+                                                        actions.run_evacuation_routing = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Target),
+                                                        format!(
+                                                            "Mode: {}",
+                                                            universal_canvas
+                                                                .evacuation_config
+                                                                .mode
+                                                                .short_label()
+                                                        ),
+                                                        universal_canvas.evacuation_config.overlay_visible,
+                                                        theme.accent_blue,
+                                                        "Cycle lifeline routing display (Pedestrian / Responder / Both)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.evacuation_config.mode =
+                                                            universal_canvas
+                                                                .evacuation_config
+                                                                .mode
+                                                                .cycle_next();
+                                                        actions.run_evacuation_routing = true;
+                                                    }
+                                                    let evac_3d =
+                                                        universal_canvas.evacuation_config.overlay_visible;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Globe),
+                                                        "Evac 3D",
+                                                        evac_3d,
+                                                        theme.accent_green,
+                                                        "Toggle 3D Pure WebGPU evacuation corridors, debris cordons & assembly beacons",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas
+                                                            .evacuation_config
+                                                            .overlay_visible = !evac_3d;
+                                                        if universal_canvas
+                                                            .evacuation_config
+                                                            .overlay_visible
+                                                            && universal_canvas
+                                                                .last_evacuation_report
+                                                                .is_none()
+                                                        {
+                                                            actions.run_evacuation_routing = true;
+                                                        }
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Cube3D),
+                                                        "Evac .ifcx",
+                                                        false,
+                                                        theme.accent_green,
+                                                        "Export non-destructive eigengraph::analysis::evacuation_lifelines .ifcx overlay",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.export_evacuation_ifcx = true;
+                                                    }
+                                                },
                                             );
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Shield),
-                                                "Evac Route",
-                                                self.evacuation_drawer_open,
-                                                theme.accent_green,
-                                                "Compute A* post-disaster safe evacuation & emergency responder routes",
-                                            )
-                                            .clicked()
-                                            {
-                                                self.open_evacuation_drawer();
-                                                actions.run_evacuation_routing = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Target),
-                                                format!(
-                                                    "Mode: {}",
-                                                    universal_canvas
-                                                        .evacuation_config
-                                                        .mode
-                                                        .short_label()
-                                                ),
-                                                universal_canvas.evacuation_config.overlay_visible,
-                                                theme.accent_blue,
-                                                "Cycle lifeline routing display (Pedestrian / Responder / Both)",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.evacuation_config.mode =
-                                                    universal_canvas
-                                                        .evacuation_config
-                                                        .mode
-                                                        .cycle_next();
-                                                actions.run_evacuation_routing = true;
-                                            }
-                                            let evac_3d =
-                                                universal_canvas.evacuation_config.overlay_visible;
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Globe),
-                                                "Evac 3D",
-                                                evac_3d,
-                                                theme.accent_green,
-                                                "Toggle 3D Pure WebGPU evacuation corridors, debris cordons & assembly beacons",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas
-                                                    .evacuation_config
-                                                    .overlay_visible = !evac_3d;
-                                                if universal_canvas
-                                                    .evacuation_config
-                                                    .overlay_visible
-                                                    && universal_canvas
-                                                        .last_evacuation_report
-                                                        .is_none()
-                                                {
-                                                    actions.run_evacuation_routing = true;
-                                                }
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Cube3D),
-                                                "Evac .ifcx",
-                                                false,
-                                                theme.accent_green,
-                                                "Export non-destructive eigengraph::analysis::evacuation_lifelines .ifcx overlay",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.export_evacuation_ifcx = true;
-                                            }
-                                        },
-                                    );
+                                        }
+                                    });
                                 }
                                 DynamicIslandStudioTab::CadAndExport => {
-                                    Self::glass_subpill_group(
-                                        ui,
-                                        theme,
-                                        9,
-                                        Margin::symmetric(7, 3),
-                                        deck_w,
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new("2D & Earth:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
-                                            );
-                                            for ext_tool in [
-                                                UniversalCanvasTool::Freehand,
-                                                UniversalCanvasTool::Circle,
-                                                UniversalCanvasTool::Dimension,
-                                                UniversalCanvasTool::Callout,
-                                                UniversalCanvasTool::BoxSelect,
-                                                UniversalCanvasTool::Eraser,
-                                                UniversalCanvasTool::EarthUplift,
-                                                UniversalCanvasTool::EarthCarve,
-                                                UniversalCanvasTool::EarthSeawall,
-                                                UniversalCanvasTool::EarthBridge,
-                                                UniversalCanvasTool::EarthCorridor,
-                                            ] {
-                                                let is_act = build_view.ground_author_tool
-                                                    == Ground3DAuthorTool::Orbit
-                                                    && universal_canvas.active_tool == ext_tool;
-                                                if Self::glass_pill_button(
-                                                    ui,
-                                                    theme,
-                                                    Some(ext_tool.app_icon()),
-                                                    ext_tool.short_label(),
-                                                    is_act,
-                                                    theme.accent_orange,
-                                                    ext_tool.tooltip(),
-                                                )
-                                                .clicked()
-                                                {
-                                                    self.active_canvas_mode =
-                                                        SpatialCanvasMode::EarthGlobe;
-                                                    universal_canvas.globe_mode = true;
-                                                    build_view.ground_author_tool =
-                                                        Ground3DAuthorTool::Orbit;
-                                                    universal_canvas.earth_bim_author.active_tool =
-                                                        crate::views::universal_canvas::EarthBimTool::None;
-                                                    universal_canvas.active_tool = ext_tool;
-                                                    self.push_trace(
-                                                        format!(
-                                                            "Earth 3D Tool: {}",
-                                                            ext_tool.short_label()
-                                                        ),
-                                                        true,
+                                    Self::width_first_pair(ui, deck_w, two_col_deck, |ui, is_left, col_w| {
+                                        if is_left {
+                                            Self::glass_subpill_group(
+                                                ui,
+                                                theme,
+                                                9,
+                                                Margin::symmetric(7, 3),
+                                                col_w,
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new("2D & Earth:")
+                                                            .size(9.3)
+                                                            .strong()
+                                                            .color(theme.text_muted),
                                                     );
-                                                }
-                                            }
-                                            if !universal_canvas.entities.is_empty()
-                                                && Self::glass_pill_button(
-                                                    ui,
-                                                    theme,
-                                                    None,
-                                                    "Promote -> BIM",
-                                                    false,
-                                                    theme.accent_green,
-                                                    "Promote selected vector Lines/Rects on Earth 3D into 3D BIM Walls, Beams & Slabs",
-                                                )
-                                                .clicked()
-                                            {
-                                                let (w, r, s) = universal_canvas
-                                                    .promote_selection_to_bim(
-                                                        &mut build_view.bim_bus.project,
+                                                    for ext_tool in [
+                                                        UniversalCanvasTool::Freehand,
+                                                        UniversalCanvasTool::Circle,
+                                                        UniversalCanvasTool::Dimension,
+                                                        UniversalCanvasTool::Callout,
+                                                        UniversalCanvasTool::BoxSelect,
+                                                        UniversalCanvasTool::Eraser,
+                                                        UniversalCanvasTool::EarthUplift,
+                                                        UniversalCanvasTool::EarthCarve,
+                                                        UniversalCanvasTool::EarthSeawall,
+                                                        UniversalCanvasTool::EarthBridge,
+                                                        UniversalCanvasTool::EarthCorridor,
+                                                    ] {
+                                                        let is_act = build_view.ground_author_tool
+                                                            == Ground3DAuthorTool::Orbit
+                                                            && universal_canvas.active_tool == ext_tool;
+                                                        if Self::glass_pill_button(
+                                                            ui,
+                                                            theme,
+                                                            Some(ext_tool.app_icon()),
+                                                            ext_tool.short_label(),
+                                                            is_act,
+                                                            theme.accent_orange,
+                                                            ext_tool.tooltip(),
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            self.active_canvas_mode =
+                                                                SpatialCanvasMode::EarthGlobe;
+                                                            universal_canvas.globe_mode = true;
+                                                            build_view.ground_author_tool =
+                                                                Ground3DAuthorTool::Orbit;
+                                                            universal_canvas.earth_bim_author.active_tool =
+                                                                crate::views::universal_canvas::EarthBimTool::None;
+                                                            universal_canvas.active_tool = ext_tool;
+                                                            self.push_trace(
+                                                                format!(
+                                                                    "Earth 3D Tool: {}",
+                                                                    ext_tool.short_label()
+                                                                ),
+                                                                true,
+                                                            );
+                                                        }
+                                                    }
+                                                    if !universal_canvas.entities.is_empty()
+                                                        && Self::glass_pill_button(
+                                                            ui,
+                                                            theme,
+                                                            None,
+                                                            "Promote -> BIM",
+                                                            false,
+                                                            theme.accent_green,
+                                                            "Promote selected vector Lines/Rects on Earth 3D into 3D BIM Walls, Beams & Slabs",
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        let (w, r, s) = universal_canvas
+                                                            .promote_selection_to_bim(
+                                                                &mut build_view.bim_bus.project,
+                                                            );
+                                                        if w + r + s > 0 {
+                                                            actions.sync_fem_and_earth = true;
+                                                            self.push_trace(
+                                                                format!(
+                                                                    "Promoted +{w}W +{r}B +{s}S on Earth 3D"
+                                                                ),
+                                                                true,
+                                                            );
+                                                        }
+                                                    }
+                                                    ui.separator();
+                                                    ui.label(
+                                                        RichText::new("Export:")
+                                                            .size(9.3)
+                                                            .strong()
+                                                            .color(theme.text_muted),
                                                     );
-                                                if w + r + s > 0 {
-                                                    actions.sync_fem_and_earth = true;
-                                                    self.push_trace(
-                                                        format!(
-                                                            "Promoted +{w}W +{r}B +{s}S on Earth 3D"
-                                                        ),
-                                                        true,
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::SaveDisk),
+                                                        "Export",
+                                                        false,
+                                                        theme.accent_blue,
+                                                        "Export .eigen.json workspace",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.export_archive = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Cube3D),
+                                                        "IFCX",
+                                                        false,
+                                                        theme.accent_blue,
+                                                        "Export georeferenced IFCX (IFC 5 JSON ECS) site layer",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.export_ifcx = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Globe),
+                                                        "Earth .ifcx",
+                                                        false,
+                                                        theme.accent_green,
+                                                        "Export composed Living Earth Globe + Site IFCX graph",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.export_earth_ifcx = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Document),
+                                                        "Audit .md",
+                                                        false,
+                                                        theme.accent_green,
+                                                        "Save Engineering Audit Markdown note to Vault",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.save_audit_note = true;
+                                                    }
+                                                },
+                                            );
+                                        } else {
+                                            Self::glass_subpill_group(
+                                                ui,
+                                                theme,
+                                                9,
+                                                Margin::symmetric(7, 3),
+                                                col_w,
+                                                |ui| {
+                                                    ui.label(
+                                                        RichText::new("IFCX Diff & Dossier:")
+                                                            .size(9.3)
+                                                            .strong()
+                                                            .color(theme.text_muted),
                                                     );
-                                                }
-                                            }
-                                            ui.separator();
-                                            ui.label(
-                                                RichText::new("Export:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Camera),
+                                                        "Snapshot Base",
+                                                        false,
+                                                        theme.accent_blue,
+                                                        "Capture baseline .ifcx snapshot for layer visual diffing",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.capture_ifcx_baseline = true;
+                                                    }
+                                                    let diff_active = universal_canvas.ifcx_diff_overlay_active
+                                                        || self.ifcx_diff_drawer_open;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Layers),
+                                                        "Visual Diff",
+                                                        diff_active,
+                                                        theme.accent_orange,
+                                                        "Open Multi-Layer IFCX visual diff inspector & 3D delta highlighting",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas.ifcx_diff_overlay_active =
+                                                            !universal_canvas.ifcx_diff_overlay_active;
+                                                        self.toggle_exclusive_drawer("ifcx_diff");
+                                                        actions.run_ifcx_visual_diff = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Cube3D),
+                                                        "Diff .ifcx",
+                                                        false,
+                                                        theme.accent_green,
+                                                        "Export non-destructive eigengraph::ifcx::diff_manifest .ifcx layer",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.export_ifcx_diff_manifest = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Printer),
+                                                        "Vector Dossier .svg",
+                                                        false,
+                                                        theme.accent_green,
+                                                        "Export publication-grade 100% Pure-Vector SVG engineering dossier",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.export_vector_dossier_svg = true;
+                                                    }
+                                                },
                                             );
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::SaveDisk),
-                                                "Export",
-                                                false,
-                                                theme.accent_blue,
-                                                "Export .eigen.json workspace",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.export_archive = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Cube3D),
-                                                "IFCX",
-                                                false,
-                                                theme.accent_blue,
-                                                "Export georeferenced IFCX (IFC 5 JSON ECS) site layer",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.export_ifcx = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Globe),
-                                                "Earth .ifcx",
-                                                false,
-                                                theme.accent_green,
-                                                "Export composed Living Earth Globe + Site IFCX graph",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.export_earth_ifcx = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Document),
-                                                "Audit .md",
-                                                false,
-                                                theme.accent_green,
-                                                "Save Engineering Audit Markdown note to Vault",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.save_audit_note = true;
-                                            }
-                                        },
-                                    );
-                                    ui.add_space(4.0);
-                                    Self::glass_subpill_group(
-                                        ui,
-                                        theme,
-                                        9,
-                                        Margin::symmetric(7, 3),
-                                        deck_w,
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new("IFCX Diff & Dossier:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
-                                            );
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Camera),
-                                                "Snapshot Base",
-                                                false,
-                                                theme.accent_blue,
-                                                "Capture baseline .ifcx snapshot for layer visual diffing",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.capture_ifcx_baseline = true;
-                                            }
-                                            let diff_active = universal_canvas.ifcx_diff_overlay_active
-                                                || self.ifcx_diff_drawer_open;
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Layers),
-                                                "Visual Diff",
-                                                diff_active,
-                                                theme.accent_orange,
-                                                "Open Multi-Layer IFCX visual diff inspector & 3D delta highlighting",
-                                            )
-                                            .clicked()
-                                            {
-                                                universal_canvas.ifcx_diff_overlay_active =
-                                                    !universal_canvas.ifcx_diff_overlay_active;
-                                                self.toggle_exclusive_drawer("ifcx_diff");
-                                                actions.run_ifcx_visual_diff = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Cube3D),
-                                                "Diff .ifcx",
-                                                false,
-                                                theme.accent_green,
-                                                "Export non-destructive eigengraph::ifcx::diff_manifest .ifcx layer",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.export_ifcx_diff_manifest = true;
-                                            }
-                                            if Self::glass_pill_button(
-                                                ui,
-                                                theme,
-                                                Some(AppIcon::Printer),
-                                                "Vector Dossier .svg",
-                                                false,
-                                                theme.accent_green,
-                                                "Export publication-grade 100% Pure-Vector SVG engineering dossier",
-                                            )
-                                            .clicked()
-                                            {
-                                                actions.export_vector_dossier_svg = true;
-                                            }
-                                        },
-                                    );
+                                        }
+                                    });
                                 }
-                            }
+                            };
+                            render_tab_body(ui, deck_w);
                         });
                         });
                     ui.add_space(4.0);
@@ -6464,7 +6567,11 @@ impl SpatialWorkspaceState {
                     Color32::from_rgb(r, g, b),
                 );
             }
-            for (idx, lbl) in [(0usize, "Live Sensors & Modal Shift"), (1usize, "ATC-20 Placard Triage")] {
+            for (idx, lbl) in [
+                (0usize, "Live Sensors & Modal Shift"),
+                (1usize, "ATC-20 Placard Triage"),
+                (2usize, "Live Stream & Watchdog"),
+            ] {
                 if Self::glass_pill_button(
                     ui,
                     theme,
@@ -6792,7 +6899,8 @@ impl SpatialWorkspaceState {
                         .color(theme.text_muted),
                 );
             }
-        } else if let Some(ref rep) = universal_canvas.last_shm_twin_report {
+        } else if self.shm_drawer_tab == 1 {
+            if let Some(ref rep) = universal_canvas.last_shm_twin_report {
             let [pr, pg, pb] = rep.atc20_placard.badge_color_rgb();
             let placard_col = Color32::from_rgb(pr, pg, pb);
             Frame::new()
@@ -6855,6 +6963,306 @@ impl SpatialWorkspaceState {
                     actions.run_shm_digital_twin = true;
                 }
             });
+        }
+        } else {
+            // Sub-Tab 2: Phase 78 Live WebSocket SHM Telemetry Streaming & Rolling-Window Watchdog
+            use crate::core::shm_watchdog::{WatchdogAlertLevel, WatchdogSimMode};
+            let [ar, ag, ab] = universal_canvas.shm_watchdog.alert_level.badge_color_rgb();
+            let alert_col = Color32::from_rgb(ar, ag, ab);
+            let mut sim_to_start: Option<WatchdogSimMode> = None;
+
+            ui.horizontal_wrapped(|ui| {
+                let wd = &mut universal_canvas.shm_watchdog;
+                ui.label(RichText::new("WS Endpoint:").size(9.2).strong().color(theme.text_secondary));
+                ui.add(
+                    egui::TextEdit::singleline(&mut wd.config.ws_url)
+                        .desired_width(if is_mobile { (avail_w - 130.0).max(110.0) } else { 250.0 }),
+                );
+                if wd.ws_connected {
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Close),
+                        "Disconnect",
+                        true,
+                        theme.accent_red,
+                        "Close live WebSocket telemetry connection",
+                    )
+                    .clicked()
+                    {
+                        actions.disconnect_shm_ws = true;
+                    }
+                } else if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Bolt),
+                    "Connect WS",
+                    false,
+                    theme.accent_green,
+                    "Connect browser/native WebSocket stream (ws:// or wss://)",
+                )
+                .clicked()
+                {
+                    actions.connect_shm_ws = Some(wd.config.ws_url.clone());
+                }
+
+                ui.separator();
+                ui.label(RichText::new("Live Sim:").size(9.2).color(theme.text_muted));
+                for &m in WatchdogSimMode::all() {
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        m.short_label(),
+                        wd.config.sim_mode == m && m != WatchdogSimMode::Off,
+                        if m == WatchdogSimMode::AmbientNominal {
+                            theme.accent_green
+                        } else if m == WatchdogSimMode::Off {
+                            theme.accent_red
+                        } else {
+                            theme.accent_orange
+                        },
+                        m.label(),
+                    )
+                    .clicked()
+                    {
+                        sim_to_start = Some(m);
+                    }
+                }
+            });
+            if let Some(m) = sim_to_start {
+                universal_canvas.shm_watchdog.start_simulator(m);
+                if m != WatchdogSimMode::Off {
+                    self.apply_lens_to_views(
+                        SpatialLens::ShmDigitalTwin,
+                        build_view,
+                        universal_canvas,
+                    );
+                }
+            }
+
+            ui.add_space(3.0);
+            let wd = &mut universal_canvas.shm_watchdog;
+            ui.horizontal_wrapped(|ui| {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "Auto ATC-20",
+                    wd.config.auto_update_atc20,
+                    theme.accent_blue,
+                    "Automatically re-evaluate ATC-20 placard when STA/LTA or f1 shift triggers",
+                )
+                .clicked()
+                {
+                    wd.config.auto_update_atc20 = !wd.config.auto_update_atc20;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "Auto Evac Reroute",
+                    wd.config.auto_reroute_evacuation,
+                    theme.accent_green,
+                    "Automatically recompute A* evacuation routes when ATC-20 escalates to Yellow/Red",
+                )
+                .clicked()
+                {
+                    wd.config.auto_reroute_evacuation = !wd.config.auto_reroute_evacuation;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    "Watchdog .ifcx",
+                    false,
+                    theme.accent_green,
+                    "Export non-destructive eigengraph::analysis::shm_watchdog .ifcx overlay",
+                )
+                .clicked()
+                {
+                    actions.export_watchdog_ifcx = true;
+                }
+                icons::pill_badge(ui, AppIcon::Shield, wd.alert_level.label(), alert_col);
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Waves,
+                    format!("STA/LTA {:.2} (Pk {:.2})", wd.current_sta_lta, wd.peak_sta_lta),
+                    if wd.current_sta_lta >= wd.config.sta_lta_trigger_ratio {
+                        theme.accent_red
+                    } else {
+                        theme.accent_blue
+                    },
+                );
+                icons::pill_badge(
+                    ui,
+                    AppIcon::ChartLine,
+                    format!(
+                        "f1 {:.2}Hz ({:+.1}%) • {} pkt • Reroutes {}",
+                        wd.current_freq_1_hz,
+                        wd.current_freq_shift_pct,
+                        wd.total_packets_ingested,
+                        wd.auto_reroute_count
+                    ),
+                    if wd.alert_level >= WatchdogAlertLevel::Warning {
+                        theme.accent_orange
+                    } else {
+                        theme.accent_green
+                    },
+                );
+            });
+
+            ui.add_space(4.0);
+            let two_col = !is_mobile && avail_w >= 620.0;
+            let chart_w = if two_col {
+                ((avail_w - 12.0) * 0.5).floor().max(180.0)
+            } else {
+                (avail_w - 4.0).clamp(160.0, cap_w - 24.0)
+            };
+
+            let wd_ro = &universal_canvas.shm_watchdog;
+            let draw_wave = |ui: &mut Ui| {
+                let (resp, p) = ui.allocate_painter(Vec2::new(chart_w, 92.0), egui::Sense::hover());
+                let r = resp.rect;
+                p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+                p.text(
+                    egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                    Align2::LEFT_TOP,
+                    "Rolling Triaxial Accel ax(t) & STA/LTA Ratio",
+                    egui::FontId::proportional(8.6),
+                    theme.text_muted,
+                );
+                if wd_ro.ring.len() >= 2 {
+                    let t_min = wd_ro.ring.first().map(|s| s.time_s).unwrap_or(0.0);
+                    let t_max = wd_ro.ring.last().map(|s| s.time_s).unwrap_or(1.0).max(t_min + 0.5);
+                    let max_a = wd_ro
+                        .ring
+                        .iter()
+                        .map(|s| s.accel_x_g.abs())
+                        .fold(0.02_f64, f64::max);
+                    let mid_y = r.center().y + 4.0;
+                    let amp_h = (r.height() * 0.34).max(12.0);
+                    let w = (r.width() - 12.0).max(20.0);
+                    let pts: Vec<egui::Pos2> = wd_ro
+                        .ring
+                        .iter()
+                        .map(|s| {
+                            let x = r.left() + 6.0 + ((s.time_s - t_min) / (t_max - t_min)) as f32 * w;
+                            let y = mid_y - (s.accel_x_g / max_a) as f32 * amp_h;
+                            egui::Pos2::new(x, y)
+                        })
+                        .collect();
+                    p.add(egui::Shape::line(pts, Stroke::new(1.5, theme.accent_blue)));
+
+                    let sta_max = wd_ro
+                        .sta_lta_history
+                        .iter()
+                        .map(|&(_, v)| v)
+                        .fold(wd_ro.config.sta_lta_trigger_ratio * 1.4, f64::max)
+                        .max(3.5);
+                    let trig_y = r.bottom() - 6.0 - ((wd_ro.config.sta_lta_trigger_ratio / sta_max) as f32) * (r.height() - 24.0);
+                    p.line_segment(
+                        [egui::Pos2::new(r.left() + 6.0, trig_y), egui::Pos2::new(r.right() - 6.0, trig_y)],
+                        Stroke::new(1.0, theme.accent_red.gamma_multiply(0.65)),
+                    );
+                    let sta_pts: Vec<egui::Pos2> = wd_ro
+                        .sta_lta_history
+                        .iter()
+                        .map(|&(t, v)| {
+                            let x = r.left() + 6.0 + ((t - t_min) / (t_max - t_min)).clamp(0.0, 1.0) as f32 * w;
+                            let y = r.bottom() - 6.0 - (v / sta_max).clamp(0.0, 1.0) as f32 * (r.height() - 24.0);
+                            egui::Pos2::new(x, y)
+                        })
+                        .collect();
+                    if sta_pts.len() >= 2 {
+                        p.add(egui::Shape::line(sta_pts, Stroke::new(1.3, theme.accent_orange)));
+                    }
+                }
+            };
+
+            let draw_freq = |ui: &mut Ui| {
+                let (resp, p) = ui.allocate_painter(Vec2::new(chart_w, 92.0), egui::Sense::hover());
+                let r = resp.rect;
+                p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+                p.text(
+                    egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                    Align2::LEFT_TOP,
+                    "Rolling Fundamental Frequency f1(t) vs Baseline",
+                    egui::FontId::proportional(8.6),
+                    theme.text_muted,
+                );
+                if wd_ro.freq_history_hz.len() >= 2 {
+                    let t_min = wd_ro.freq_history_hz.first().map(|x| x.0).unwrap_or(0.0);
+                    let t_max = wd_ro.freq_history_hz.last().map(|x| x.0).unwrap_or(1.0).max(t_min + 0.5);
+                    let f_max = (wd_ro.baseline_freq_1_hz * 1.15).max(1.0);
+                    let f_min = (wd_ro.baseline_freq_1_hz * 0.55).max(0.2);
+                    let w = (r.width() - 12.0).max(20.0);
+                    let h = (r.height() - 24.0).max(16.0);
+                    let base_y = r.bottom() - 6.0 - (((wd_ro.baseline_freq_1_hz - f_min) / (f_max - f_min)).clamp(0.0, 1.0) as f32) * h;
+                    p.line_segment(
+                        [egui::Pos2::new(r.left() + 6.0, base_y), egui::Pos2::new(r.right() - 6.0, base_y)],
+                        Stroke::new(1.0, theme.accent_green.gamma_multiply(0.7)),
+                    );
+                    let pts: Vec<egui::Pos2> = wd_ro
+                        .freq_history_hz
+                        .iter()
+                        .map(|&(t, f)| {
+                            let x = r.left() + 6.0 + ((t - t_min) / (t_max - t_min)).clamp(0.0, 1.0) as f32 * w;
+                            let y = r.bottom() - 6.0 - ((f - f_min) / (f_max - f_min)).clamp(0.0, 1.0) as f32 * h;
+                            egui::Pos2::new(x, y)
+                        })
+                        .collect();
+                    p.add(egui::Shape::line(pts, Stroke::new(1.6, alert_col)));
+                }
+            };
+
+            if two_col {
+                ui.horizontal(|ui| {
+                    draw_wave(ui);
+                    draw_freq(ui);
+                });
+            } else {
+                draw_wave(ui);
+                ui.add_space(4.0);
+                draw_freq(ui);
+            }
+
+            ui.add_space(3.0);
+            if wd_ro.events.is_empty() {
+                ui.label(
+                    RichText::new(format!("Status: {} — No Watchdog escalations yet.", wd_ro.ws_status))
+                        .size(8.8)
+                        .color(theme.text_muted),
+                );
+            } else {
+                for ev in wd_ro.events.iter().rev().take(4) {
+                    let [er, eg, eb] = ev.level.badge_color_rgb();
+                    ui.horizontal_wrapped(|ui| {
+                        ui.colored_label(
+                            Color32::from_rgb(er, eg, eb),
+                            RichText::new(format!("[#{} {}]", ev.seq, ev.level.short_label()))
+                                .size(8.8)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} {}{}",
+                                ev.summary,
+                                ev.triggered_atc20
+                                    .map(|p| format!("-> ATC-20 {}", p.short_label()))
+                                    .unwrap_or_default(),
+                                if ev.triggered_evac_reroute {
+                                    " -> Evac Rerouted"
+                                } else {
+                                    ""
+                                }
+                            ))
+                            .size(8.8)
+                            .color(theme.text_secondary),
+                        );
+                    });
+                }
+            }
         }
     }
 
@@ -7066,124 +7474,145 @@ impl SpatialWorkspaceState {
             });
 
             ui.add_space(4.0);
-            // Pure-Vector Lifeline Network & Safe Egress Mini-Map
-            let map_w = avail_w;
+            let two_col = !is_mobile && avail_w >= 860.0;
+            let map_w = if two_col {
+                (avail_w * 0.48).clamp(240.0, 520.0)
+            } else {
+                avail_w
+            };
             let map_h = if is_mobile { 125.0 } else { 148.0 };
-            let (map_rect, _) = ui.allocate_exact_size(Vec2::new(map_w, map_h), egui::Sense::hover());
-            let painter = ui.painter_at(map_rect);
-            painter.rect_filled(map_rect, 8.0, theme.bg_sidebar.gamma_multiply(0.85));
-            painter.rect_stroke(
-                map_rect,
-                8.0,
-                Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.35)),
-                egui::StrokeKind::Inside,
-            );
+            let draw_minimap = |ui: &mut Ui| {
+                let (map_rect, _) = ui.allocate_exact_size(Vec2::new(map_w, map_h), egui::Sense::hover());
+                let painter = ui.painter_at(map_rect);
+                painter.rect_filled(map_rect, 8.0, theme.bg_sidebar.gamma_multiply(0.85));
+                painter.rect_stroke(
+                    map_rect,
+                    8.0,
+                    Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.35)),
+                    egui::StrokeKind::Inside,
+                );
 
-            let (mut min_x, mut max_x) = (-95.0_f64, 95.0_f64);
-            let (mut min_y, mut max_y) = (-95.0_f64, 95.0_f64);
-            for n in &rep.nodes {
-                min_x = min_x.min(n.pos_enu_m[0] - 10.0);
-                max_x = max_x.max(n.pos_enu_m[0] + 10.0);
-                min_y = min_y.min(n.pos_enu_m[1] - 10.0);
-                max_y = max_y.max(n.pos_enu_m[1] + 10.0);
-            }
-            let span = (max_x - min_x).max(max_y - min_y).max(40.0);
-            let cx_w = 0.5 * (min_x + max_x);
-            let cy_w = 0.5 * (min_y + max_y);
-            let scale = ((map_rect.width() - 18.0).min(map_rect.height() - 18.0) as f64) / span;
-            let to_pt = |p: [f64; 2]| -> egui::Pos2 {
-                egui::Pos2::new(
-                    map_rect.center().x + ((p[0] - cx_w) * scale) as f32,
-                    map_rect.center().y - ((p[1] - cy_w) * scale) as f32,
-                )
+                let (mut min_x, mut max_x) = (-95.0_f64, 95.0_f64);
+                let (mut min_y, mut max_y) = (-95.0_f64, 95.0_f64);
+                for n in &rep.nodes {
+                    min_x = min_x.min(n.pos_enu_m[0] - 10.0);
+                    max_x = max_x.max(n.pos_enu_m[0] + 10.0);
+                    min_y = min_y.min(n.pos_enu_m[1] - 10.0);
+                    max_y = max_y.max(n.pos_enu_m[1] + 10.0);
+                }
+                let span = (max_x - min_x).max(max_y - min_y).max(40.0);
+                let cx_w = 0.5 * (min_x + max_x);
+                let cy_w = 0.5 * (min_y + max_y);
+                let scale = ((map_rect.width() - 18.0).min(map_rect.height() - 18.0) as f64) / span;
+                let to_pt = |p: [f64; 2]| -> egui::Pos2 {
+                    egui::Pos2::new(
+                        map_rect.center().x + ((p[0] - cx_w) * scale) as f32,
+                        map_rect.center().y - ((p[1] - cy_w) * scale) as f32,
+                    )
+                };
+
+                for e in &rep.edges {
+                    if e.road_name == "Site Access Spur" {
+                        continue;
+                    }
+                    if let (Some(nu), Some(nv)) = (rep.nodes.get(e.u), rep.nodes.get(e.v)) {
+                        let col = match e.status {
+                            RoadEdgeStatus::OpenSafe => theme.text_muted.gamma_multiply(0.55),
+                            RoadEdgeStatus::DegradedDetour => Color32::from_rgb(245, 158, 11),
+                            RoadEdgeStatus::BlockedClosed => Color32::from_rgb(239, 68, 68),
+                        };
+                        painter.line_segment(
+                            [to_pt(nu.pos_enu_m), to_pt(nv.pos_enu_m)],
+                            Stroke::new(if e.is_bridge { 2.6 } else { 1.6 }, col),
+                        );
+                    }
+                }
+
+                for c in &rep.cordons {
+                    let col = match c.placard {
+                        Atc20Placard::InspectedGreen => Color32::from_rgb(34, 197, 94),
+                        Atc20Placard::RestrictedYellow => Color32::from_rgb(245, 158, 11),
+                        Atc20Placard::UnsafeRed => Color32::from_rgb(239, 68, 68),
+                    };
+                    let rad_px = (c.cordon_radius_m * scale) as f32;
+                    let center_px = to_pt(c.center_enu_m);
+                    painter.circle_filled(center_px, rad_px.max(3.5), col.gamma_multiply(0.24));
+                    painter.circle_stroke(center_px, rad_px.max(3.5), Stroke::new(1.2, col));
+                }
+
+                for r in &rep.routes {
+                    if !r.reachable || r.waypoints_enu_m.len() < 2 {
+                        continue;
+                    }
+                    let pts: Vec<egui::Pos2> = r.waypoints_enu_m.iter().map(|&p| to_pt(p)).collect();
+                    let col = if r.is_responder_route {
+                        Color32::from_rgb(56, 189, 248)
+                    } else {
+                        Color32::from_rgb(34, 211, 153)
+                    };
+                    painter.add(egui::Shape::line(
+                        pts,
+                        Stroke::new(if r.is_active_building { 2.6 } else { 1.5 }, col),
+                    ));
+                }
+
+                for sp in &rep.safe_points {
+                    let p = to_pt(sp.center_enu_m);
+                    painter.circle_filled(p, 4.5, Color32::from_rgb(34, 197, 94));
+                    painter.circle_stroke(p, 6.5, Stroke::new(1.1, Color32::WHITE));
+                }
+            };
+            let draw_routes_list = |ui: &mut Ui| {
+                for r in rep.routes.iter().take(4) {
+                    let col = if !r.reachable {
+                        theme.accent_red
+                    } else if r.is_responder_route {
+                        theme.accent_blue
+                    } else {
+                        theme.accent_green
+                    };
+                    ui.horizontal_wrapped(|ui| {
+                        ui.colored_label(
+                            col,
+                            RichText::new(if r.is_responder_route {
+                                "[RESPONDER]"
+                            } else if r.reachable {
+                                "[EGRESS]"
+                            } else {
+                                "[ISOLATED]"
+                            })
+                            .size(8.8)
+                            .strong(),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} -> {} | {:.0} m ({:.0} s) | Safety {:.0}/100",
+                                r.origin_label,
+                                r.target_safe_zone,
+                                r.distance_m,
+                                r.estimated_time_sec,
+                                r.safety_score_0_100
+                            ))
+                            .size(8.8)
+                            .color(theme.text_secondary),
+                        );
+                    });
+                }
             };
 
-            for e in &rep.edges {
-                if e.road_name == "Site Access Spur" {
-                    continue;
-                }
-                if let (Some(nu), Some(nv)) = (rep.nodes.get(e.u), rep.nodes.get(e.v)) {
-                    let col = match e.status {
-                        RoadEdgeStatus::OpenSafe => theme.text_muted.gamma_multiply(0.55),
-                        RoadEdgeStatus::DegradedDetour => Color32::from_rgb(245, 158, 11),
-                        RoadEdgeStatus::BlockedClosed => Color32::from_rgb(239, 68, 68),
-                    };
-                    painter.line_segment(
-                        [to_pt(nu.pos_enu_m), to_pt(nv.pos_enu_m)],
-                        Stroke::new(if e.is_bridge { 2.6 } else { 1.6 }, col),
-                    );
-                }
-            }
-
-            for c in &rep.cordons {
-                let col = match c.placard {
-                    Atc20Placard::InspectedGreen => Color32::from_rgb(34, 197, 94),
-                    Atc20Placard::RestrictedYellow => Color32::from_rgb(245, 158, 11),
-                    Atc20Placard::UnsafeRed => Color32::from_rgb(239, 68, 68),
-                };
-                let rad_px = (c.cordon_radius_m * scale) as f32;
-                let center_px = to_pt(c.center_enu_m);
-                painter.circle_filled(center_px, rad_px.max(3.5), col.gamma_multiply(0.24));
-                painter.circle_stroke(center_px, rad_px.max(3.5), Stroke::new(1.2, col));
-            }
-
-            for r in &rep.routes {
-                if !r.reachable || r.waypoints_enu_m.len() < 2 {
-                    continue;
-                }
-                let pts: Vec<egui::Pos2> = r.waypoints_enu_m.iter().map(|&p| to_pt(p)).collect();
-                let col = if r.is_responder_route {
-                    Color32::from_rgb(56, 189, 248)
-                } else {
-                    Color32::from_rgb(34, 211, 153)
-                };
-                painter.add(egui::Shape::line(
-                    pts,
-                    Stroke::new(if r.is_active_building { 2.6 } else { 1.5 }, col),
-                ));
-            }
-
-            for sp in &rep.safe_points {
-                let p = to_pt(sp.center_enu_m);
-                painter.circle_filled(p, 4.5, Color32::from_rgb(34, 197, 94));
-                painter.circle_stroke(p, 6.5, Stroke::new(1.1, Color32::WHITE));
-            }
-
-            ui.add_space(4.0);
-            for r in rep.routes.iter().take(4) {
-                let col = if !r.reachable {
-                    theme.accent_red
-                } else if r.is_responder_route {
-                    theme.accent_blue
-                } else {
-                    theme.accent_green
-                };
-                ui.horizontal_wrapped(|ui| {
-                    ui.colored_label(
-                        col,
-                        RichText::new(if r.is_responder_route {
-                            "[RESPONDER]"
-                        } else if r.reachable {
-                            "[EGRESS]"
-                        } else {
-                            "[ISOLATED]"
-                        })
-                        .size(8.8)
-                        .strong(),
-                    );
-                    ui.label(
-                        RichText::new(format!(
-                            "{} -> {} | {:.0} m ({:.0} s) | Safety {:.0}/100",
-                            r.origin_label,
-                            r.target_safe_zone,
-                            r.distance_m,
-                            r.estimated_time_sec,
-                            r.safety_score_0_100
-                        ))
-                        .size(8.8)
-                        .color(theme.text_secondary),
-                    );
+            if two_col {
+                ui.horizontal(|ui| {
+                    draw_minimap(ui);
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.set_max_width((avail_w - map_w - 26.0).max(160.0));
+                        draw_routes_list(ui);
+                    });
                 });
+            } else {
+                draw_minimap(ui);
+                ui.add_space(4.0);
+                draw_routes_list(ui);
             }
         } else {
             ui.horizontal_wrapped(|ui| {

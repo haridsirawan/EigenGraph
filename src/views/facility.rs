@@ -517,11 +517,13 @@ impl FacilityView {
                             Ok(msg) => {
                                 crate::core::web_bridge::shm_inject_packet(crate::core::web_bridge::ShmTelemetryPacket {
                                     sensor_id: "SG-01".to_string(),
+                                    story_number: 1,
                                     strain_micro: self.simulated_strain_micro + 6.5,
                                     freq_hz: (self.simulated_freq_hz - 0.01).max(0.8),
                                     accel_g: 0.019,
                                     temp_c: 29.2,
                                     timestamp: crate::core::web_bridge::unix_timestamp_label(),
+                                    ..Default::default()
                                 });
                                 self.maintenance_dispatch_status = Some(msg);
                             }

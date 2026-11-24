@@ -7,6 +7,20 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.7.8] - 2026-11-24 — Live WebSocket SHM Watchdog, Closed-Loop ATC-20 → Evacuation Cascade & Width-First Responsive Dynamic Island
+
+### Added & Changed
+- **Live WebSocket SHM Telemetry Streaming & Rolling-Window Watchdog (`src/core/web_bridge.rs`, `src/core/shm_watchdog.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`, `src/core/vector_dossier.rs`)**:
+  - Extended `ShmTelemetryPacket` with triaxial acceleration (`accel_x_g`, `accel_y_g`, `accel_z_g`), `story_number`, and `drift_ratio` support plus dual-queue fan-out (`shm_watchdog_poll_packets`) preserving 100% compatibility with `FacilityView`.
+  - Implemented `ShmWatchdogState` sliding ring buffer with STA/LTA seismic onset trigger detection, rolling fundamental frequency shift tracking ($f_1(t)$ vs. baseline), hysteresis-guarded anomaly Z-scores, built-in deterministic stream simulator (`AmbientNominal`, `AftershockPulse`, `ProgressiveSoftStory`), closed-loop escalation (`Watchdog -> ATC-20 Placard -> A* Evacuation Rerouting`), non-destructive `eigengraph::analysis::shm_watchdog` IFCX overlay (`IfcxStage::compose_with_shm_watchdog_overlay`), and pure-vector A3 SVG dossier telemetry (`VectorDossierInput::watchdog_state`).
+- **Width-First Responsive Dynamic Island & Live Stream Drawer (`src/views/spatial_workspace/`, `src/views/universal_canvas/`, `src/views/settings.rs`, `src/app.rs`)**:
+  - Upgraded `render_dynamic_island_with_host` to expand **horizontally first** on wide viewports (`vp.x - 28 px`, up to `1520–1680 px`) laying out Studio Deck tabs, utility controls, sub-pill groups, and drawer charts side-by-side, wrapping upward only when horizontal bounds fill or on narrow/mobile screens (`1600px` / `1280px` / `768px` / `390px`, strictly `hud_rects.len() == 1`).
+  - Added the `Live Stream & Watchdog` sub-tab inside the SHM drawer with `ws://`/`wss://` connection controls, live simulator pills, `Auto ATC-20` & `Auto Evac Reroute` toggles, 2 pure-vector rolling charts (Waveform + STA/LTA & $f_1(t)$ trend), Watchdog Alert Ledger, `/watchdog`, `/ws`, `/ws-stop`, `/ws-sim`, `/watchdog-ifcx` slash commands, `[[START_SHM_WATCHDOG]]` / `[[CONNECT_SHM_WS:...]]` / `[[TRIGGER_WATCHDOG_SIM:...]]` Gemini directives, and updated `Settings -> About EigenGraph` with `v0.7.8 • LATEST`.
+- **Verification**:
+  - Verified clean native test suite (`cargo test --lib` — all 277 unit tests passing with 0 warnings, including `phase78_websocket_triaxial_packet_parser_and_fanout`, `phase78_shm_watchdog_sta_lta_trigger_and_closed_loop_evac_cascade`, and responsive width-first Dynamic Island test `test_phase78_watchdog_slash_commands_and_width_first_dynamic_island` across `1600px`/`1280px`/`768px`/`390px`), `cargo check --bin eigengraph --target wasm32-unknown-unknown`, `cargo build --bin eigengraph --target wasm32-unknown-unknown --release`, zero WebGL/`glow`/`glutin` crates, and zero external raster tokens.
+
+---
+
 ## [v0.7.7] - 2026-11-24 — Autonomous Multi-Hazard Evacuation Routing, Emergency Lifelines, Post-Disaster Road Network Connectivity & In-App Release Notes
 
 ### Added & Changed

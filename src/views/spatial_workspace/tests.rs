@@ -3982,3 +3982,129 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_phase78_watchdog_slash_commands_and_width_first_dynamic_island() {
+        for cmd in ["/watchdog", "/ws", "/ws-stop", "/ws-sim", "/watchdog-ifcx"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|c| c.cmd == cmd),
+                "Missing Phase 78 slash command {cmd} in SLASH_COMMANDS"
+            );
+        }
+
+        let raw_ai = "Watchdog armed [[START_SHM_WATCHDOG]] [[CONNECT_SHM_WS:wss://shm.eigengraph.net/ws]] [[TRIGGER_WATCHDOG_SIM:aftershock]]";
+        let (clean, directives) = parse_gemini_action_directives(raw_ai);
+        assert_eq!(clean, "Watchdog armed");
+        assert_eq!(directives.len(), 3);
+        assert!(matches!(directives[0], GeminiDirective::StartShmWatchdog));
+        assert!(matches!(directives[1], GeminiDirective::ConnectShmWs(ref u) if u == "wss://shm.eigengraph.net/ws"));
+        assert!(matches!(directives[2], GeminiDirective::TriggerWatchdogSim(ref m) if m == "aftershock"));
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let members: Vec<StructuralMember> = Vec::new();
+        let projects: Vec<crate::models::ProjectItem> = Vec::new();
+        let mut db_components: Vec<crate::models::DatabaseComponent> = Vec::new();
+
+        build.bim_bus.project = BimProject::sample_bimcraft_building();
+
+        let _ = spatial.execute_spatial_input(
+            "/ws-sim aftershock",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(spatial.shm_drawer_open);
+        assert_eq!(spatial.shm_drawer_tab, 2);
+        assert_eq!(
+            canvas.shm_watchdog.config.sim_mode,
+            crate::core::WatchdogSimMode::AftershockPulse
+        );
+        for _ in 0..85 {
+            let _ = canvas.tick_live_shm_watchdog(0.05, &build.bim_bus.project);
+        }
+
+        let act_ifcx = spatial.execute_spatial_input(
+            "/watchdog-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_ifcx.export_watchdog_ifcx);
+
+        // Width-first Dynamic Island verification:
+        // On a 1600px wide screen with Studio Deck expanded, Dynamic Island expands wide (> 1200px)
+        // before stacking vertically; on narrow viewports (768px / 390px) it fits with zero overflow.
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        spatial.shm_drawer_open = false;
+        spatial.mobile_deck_pinned = true;
+        let raw_wide = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(1600.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        let mut out_wide = ctx.run_ui(raw_wide, |ui| {
+            let _ = spatial.render_hud_overlays(
+                ui.ctx(),
+                &theme,
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            );
+        });
+        out_wide.textures_delta.clear();
+        assert_eq!(spatial.hud_rects.len(), 1);
+        assert!(
+            spatial.hud_rects[0].width() > 1200.0
+                && spatial.hud_rects[0].right() <= 1601.0
+                && spatial.hud_rects[0].left() >= -1.0,
+            "Wide 1600px screen Studio Deck should expand horizontally first without overflow (got rect {:?})",
+            spatial.hud_rects[0]
+        );
+
+        spatial.mobile_deck_pinned = false;
+        spatial.shm_drawer_tab = 2;
+        spatial.open_shm_drawer();
+        for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(win_w, 800.0),
+                )),
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let _ = spatial.render_hud_overlays(
+                    ui.ctx(),
+                    &theme,
+                    &mut canvas,
+                    &mut build,
+                    &mut ai,
+                    &members,
+                    &projects,
+                    &mut db_components,
+                );
+            });
+            out.textures_delta.clear();
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 78 Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
+        }
+    }

@@ -264,6 +264,8 @@ pub struct UnifiedWorkspaceArchive {
     pub shm_digital_twin: crate::core::shm_twin::ShmDigitalTwinConfig,
     #[serde(default)]
     pub evacuation_routing: crate::core::evacuation_routing::EvacuationRoutingConfig,
+    #[serde(default)]
+    pub shm_watchdog: crate::core::shm_watchdog::ShmWatchdogConfig,
     pub sha256_seal: String,
 }
 

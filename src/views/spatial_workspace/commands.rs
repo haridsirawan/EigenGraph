@@ -394,6 +394,35 @@ impl SpatialWorkspaceState {
                     out.run_evacuation_routing = true;
                     self.push_trace("Computed Autonomous Multi-Hazard Evacuation & Emergency Lifelines", true);
                 }
+                PlannedProposalAction::StartShmWatchdog => {
+                    self.shm_drawer_tab = 2;
+                    self.open_shm_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::ShmDigitalTwin,
+                        build_view,
+                        universal_canvas,
+                    );
+                    self.push_trace("Opened Live WebSocket SHM Watchdog", true);
+                }
+                PlannedProposalAction::ConnectShmWs(url) => {
+                    self.shm_drawer_tab = 2;
+                    self.open_shm_drawer();
+                    out.connect_shm_ws = Some(url.clone());
+                    self.push_trace(format!("Armed SHM WebSocket stream: {url}"), true);
+                }
+                PlannedProposalAction::TriggerWatchdogSim(mode_str) => {
+                    let mode = crate::core::WatchdogSimMode::from_keyword(mode_str)
+                        .unwrap_or(crate::core::WatchdogSimMode::AftershockPulse);
+                    universal_canvas.shm_watchdog.start_simulator(mode);
+                    self.shm_drawer_tab = 2;
+                    self.open_shm_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::ShmDigitalTwin,
+                        build_view,
+                        universal_canvas,
+                    );
+                    self.push_trace(format!("Started Live Watchdog Simulator: {}", mode.label()), true);
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -603,6 +632,15 @@ impl SpatialWorkspaceState {
                             GeminiDirective::OpenEvacuationDrawer => {
                                 PlannedProposalAction::OpenEvacuationDrawer
                             }
+                            GeminiDirective::StartShmWatchdog => {
+                                PlannedProposalAction::StartShmWatchdog
+                            }
+                            GeminiDirective::ConnectShmWs(url) => {
+                                PlannedProposalAction::ConnectShmWs(url.clone())
+                            }
+                            GeminiDirective::TriggerWatchdogSim(mode) => {
+                                PlannedProposalAction::TriggerWatchdogSim(mode.clone())
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -663,6 +701,9 @@ impl SpatialWorkspaceState {
                             GeminiDirective::RunAtc20Triage => "Atc20Triage".to_string(),
                             GeminiDirective::RunEvacuationRouting => "RunEvacuation".to_string(),
                             GeminiDirective::OpenEvacuationDrawer => "OpenEvacDrawer".to_string(),
+                            GeminiDirective::StartShmWatchdog => "StartShmWatchdog".to_string(),
+                            GeminiDirective::ConnectShmWs(u) => format!("ConnectWs({u})"),
+                            GeminiDirective::TriggerWatchdogSim(m) => format!("WatchdogSim({m})"),
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1938,6 +1979,48 @@ impl SpatialWorkspaceState {
                 }
                 "/evac-ifcx" => {
                     actions.export_evacuation_ifcx = true;
+                }
+                "/watchdog" => {
+                    self.shm_drawer_tab = 2;
+                    self.open_shm_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::ShmDigitalTwin,
+                        build_view,
+                        universal_canvas,
+                    );
+                    if universal_canvas.last_shm_twin_report.is_none() {
+                        actions.run_shm_digital_twin = true;
+                    }
+                    self.push_trace("Opened Live WebSocket SHM Watchdog", true);
+                }
+                "/ws" => {
+                    let url = if arg.trim().is_empty() {
+                        universal_canvas.shm_watchdog.config.ws_url.clone()
+                    } else {
+                        arg.trim().to_string()
+                    };
+                    self.shm_drawer_tab = 2;
+                    self.open_shm_drawer();
+                    actions.connect_shm_ws = Some(url);
+                }
+                "/ws-stop" => {
+                    actions.disconnect_shm_ws = true;
+                }
+                "/ws-sim" => {
+                    let mode = crate::core::WatchdogSimMode::from_keyword(arg)
+                        .unwrap_or(crate::core::WatchdogSimMode::AftershockPulse);
+                    universal_canvas.shm_watchdog.start_simulator(mode);
+                    self.shm_drawer_tab = 2;
+                    self.open_shm_drawer();
+                    self.apply_lens_to_views(
+                        SpatialLens::ShmDigitalTwin,
+                        build_view,
+                        universal_canvas,
+                    );
+                    self.push_trace(format!("Watchdog Simulator: {}", mode.label()), true);
+                }
+                "/watchdog-ifcx" => {
+                    actions.export_watchdog_ifcx = true;
                 }
                 "/section" | "/cut" => {
                     let elev_opt = arg

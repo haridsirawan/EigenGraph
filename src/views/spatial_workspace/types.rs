@@ -428,6 +428,10 @@ pub enum PlannedProposalAction {
     // Phase 77: Autonomous Multi-Hazard Evacuation Routing & Emergency Lifelines
     RunEvacuationRouting,
     OpenEvacuationDrawer,
+    // Phase 78: Live WebSocket SHM Telemetry Streaming & Rolling Watchdog
+    StartShmWatchdog,
+    ConnectShmWs(String),
+    TriggerWatchdogSim(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -498,6 +502,10 @@ pub enum GeminiDirective {
     // Phase 77: Autonomous Multi-Hazard Evacuation Routing & Emergency Lifelines
     RunEvacuationRouting,
     OpenEvacuationDrawer,
+    // Phase 78: Live WebSocket SHM Telemetry Streaming & Rolling Watchdog
+    StartShmWatchdog,
+    ConnectShmWs(String),
+    TriggerWatchdogSim(String),
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -688,6 +696,19 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::RunEvacuationRouting);
             } else if upper == "OPEN_EVAC_DRAWER" {
                 directives.push(GeminiDirective::OpenEvacuationDrawer);
+            } else if upper == "START_SHM_WATCHDOG" {
+                directives.push(GeminiDirective::StartShmWatchdog);
+            } else if let Some(rest) = tag.strip_prefix("CONNECT_SHM_WS:")
+                .or_else(|| tag.strip_prefix("connect_shm_ws:"))
+            {
+                let url = rest.trim();
+                if !url.is_empty() {
+                    directives.push(GeminiDirective::ConnectShmWs(url.to_string()));
+                }
+            } else if let Some(rest) = upper.strip_prefix("TRIGGER_WATCHDOG_SIM:") {
+                directives.push(GeminiDirective::TriggerWatchdogSim(
+                    rest.trim().to_ascii_lowercase(),
+                ));
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -1371,6 +1392,36 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export non-destructive eigengraph::analysis::evacuation_lifelines .ifcx overlay",
         icon: AppIcon::Cube3D,
     },
+    SlashCommandSpec {
+        cmd: "/watchdog",
+        category: "AI",
+        description: "Open Live WebSocket SHM Telemetry Stream & Rolling STA/LTA Anomaly Watchdog",
+        icon: AppIcon::Waves,
+    },
+    SlashCommandSpec {
+        cmd: "/ws",
+        category: "AI",
+        description: "Connect live WebSocket SHM telemetry stream (/ws wss://host/ws/telemetry)",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/ws-stop",
+        category: "AI",
+        description: "Disconnect active WebSocket SHM telemetry stream and stop Watchdog simulator",
+        icon: AppIcon::Close,
+    },
+    SlashCommandSpec {
+        cmd: "/ws-sim",
+        category: "AI",
+        description: "Run live SHM stream simulator (/ws-sim ambient | aftershock | soft_story | off)",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/watchdog-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::shm_watchdog .ifcx overlay",
+        icon: AppIcon::Cube3D,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1427,6 +1478,9 @@ pub struct SpatialHudActions {
     pub export_shm_atc20_ifcx: bool,
     pub run_evacuation_routing: bool,
     pub export_evacuation_ifcx: bool,
+    pub connect_shm_ws: Option<String>,
+    pub disconnect_shm_ws: bool,
+    pub export_watchdog_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -1787,5 +1841,10 @@ impl SpatialHudActions {
         self.export_shm_atc20_ifcx |= other.export_shm_atc20_ifcx;
         self.run_evacuation_routing |= other.run_evacuation_routing;
         self.export_evacuation_ifcx |= other.export_evacuation_ifcx;
+        if other.connect_shm_ws.is_some() {
+            self.connect_shm_ws = other.connect_shm_ws;
+        }
+        self.disconnect_shm_ws |= other.disconnect_shm_ws;
+        self.export_watchdog_ifcx |= other.export_watchdog_ifcx;
     }
 }

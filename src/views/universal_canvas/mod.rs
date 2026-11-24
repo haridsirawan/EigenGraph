@@ -154,6 +154,8 @@ pub struct UniversalCanvasState {
     // Phase 77: Autonomous Multi-Hazard Evacuation Routing & Emergency Lifelines
     pub evacuation_config: crate::core::evacuation_routing::EvacuationRoutingConfig,
     pub last_evacuation_report: Option<crate::core::evacuation_routing::EvacuationLifelineReport>,
+    // Phase 78: Live WebSocket SHM Telemetry Streaming & Rolling-Window Watchdog
+    pub shm_watchdog: crate::core::shm_watchdog::ShmWatchdogState,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -276,6 +278,7 @@ impl Default for UniversalCanvasState {
             last_shm_twin_report: None,
             evacuation_config: crate::core::evacuation_routing::EvacuationRoutingConfig::default(),
             last_evacuation_report: None,
+            shm_watchdog: crate::core::shm_watchdog::ShmWatchdogState::default(),
         }
     }
 }
@@ -444,6 +447,13 @@ impl UniversalCanvasState {
                 &doc, evac,
             );
         }
+        if self.shm_watchdog.total_packets_ingested > 0 {
+            let wd_overlay = self.shm_watchdog.build_ifcx_overlay(bim_project);
+            doc = crate::core::ifcx::IfcxStage::compose_with_shm_watchdog_overlay(
+                &doc,
+                &wd_overlay,
+            );
+        }
         doc
     }
 
@@ -577,6 +587,49 @@ impl UniversalCanvasState {
         let summary = report.summary.clone();
         self.last_evacuation_report = Some(report);
         Ok(summary)
+    }
+
+    /// Steps the Phase 78 Live WebSocket / Simulator SHM Watchdog and triggers closed-loop
+    /// ATC-20 placard evaluation + A* evacuation rerouting on structural warning/critical triggers.
+    pub fn tick_live_shm_watchdog(
+        &mut self,
+        dt_s: f64,
+        bim_project: &BimProject,
+    ) -> crate::core::shm_watchdog::ShmWatchdogTickOutcome {
+        let base_f1 = self
+            .last_shm_twin_report
+            .as_ref()
+            .map(|r| r.baseline_freq_1_hz)
+            .unwrap_or(2.25);
+        let num_stories = bim_project.levels.len().saturating_sub(1).max(1);
+        let outcome = self.shm_watchdog.step_live_tick(dt_s, base_f1, num_stories);
+
+        if outcome.should_refresh_shm && !bim_project.is_empty() {
+            if let Some(custom_log) = self.shm_watchdog.to_custom_telemetry_log() {
+                self.shm_twin_config.custom_telemetry = Some(custom_log);
+                self.shm_twin_config.fault_scenario =
+                    crate::core::shm_twin::ShmFaultScenario::CustomTelemetryStream;
+            }
+            if self.run_shm_digital_twin(bim_project).is_ok() {
+                let placard = self
+                    .last_shm_twin_report
+                    .as_ref()
+                    .map(|r| r.atc20_placard);
+                let mut rerouted = false;
+                if outcome.should_reroute_evacuation
+                    && placard.is_some_and(|p| p >= crate::core::shm_twin::Atc20Placard::RestrictedYellow)
+                    && self.run_evacuation_lifeline_routing(bim_project).is_ok()
+                {
+                    rerouted = true;
+                    self.shm_watchdog.auto_reroute_count += 1;
+                }
+                if let Some(last_ev) = self.shm_watchdog.events.last_mut() {
+                    last_ev.triggered_atc20 = placard;
+                    last_ev.triggered_evac_reroute = rerouted;
+                }
+            }
+        }
+        outcome
     }
 
     /// Launches a non-blocking background Ground-Motion Replay & Async `StructGNN-CRC` worker job.
@@ -763,6 +816,7 @@ impl UniversalCanvasState {
             ground_motion_replay: self.ground_motion_replay_config.clone(),
             shm_digital_twin: self.shm_twin_config.clone(),
             evacuation_routing: self.evacuation_config.clone(),
+            shm_watchdog: self.shm_watchdog.config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -871,6 +925,10 @@ impl UniversalCanvasState {
         self.last_shm_twin_report = None;
         self.evacuation_config = archive.evacuation_routing;
         self.last_evacuation_report = None;
+        self.shm_watchdog = crate::core::shm_watchdog::ShmWatchdogState {
+            config: archive.shm_watchdog,
+            ..Default::default()
+        };
         self.status_message = Some(format!(
             "Imported verified 1-file workspace '{}' ({} canvas objects)",
             archive.project_name,

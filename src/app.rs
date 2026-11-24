@@ -841,6 +841,34 @@ impl App for EigenGraphApp {
         } else if self.universal_canvas.replay_async_manager.is_running() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
+        if self.universal_canvas.shm_watchdog.is_streaming()
+            || crate::core::web_bridge::shm_connection_snapshot().0
+        {
+            let dt_s = ctx.input(|i| i.stable_dt).clamp(0.01, 0.25) as f64;
+            let wd_out = self
+                .universal_canvas
+                .tick_live_shm_watchdog(dt_s, &self.build_view.bim_bus.project);
+            if let Some(banner) = wd_out.alert_banner {
+                self.spatial_workspace.push_trace(banner.clone(), false);
+                self.ai_assistant_view
+                    .chat_history
+                    .push(crate::models::ChatMessage {
+                        is_user: false,
+                        message: format!("[EigenAI Live SHM Watchdog Escalation]: {banner}"),
+                        time: crate::core::web_bridge::unix_timestamp_label(),
+                    });
+                if self.universal_canvas.earth_bim_author.active_lens
+                    != crate::views::universal_canvas::EarthBimLens::ShmDigitalTwin
+                {
+                    self.spatial_workspace.apply_lens_to_views(
+                        crate::views::spatial_workspace::SpatialLens::ShmDigitalTwin,
+                        &mut self.build_view,
+                        &mut self.universal_canvas,
+                    );
+                }
+            }
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
         if self.universal_canvas.earth_bim_author.active_lens
             == crate::views::universal_canvas::EarthBimLens::TimeHistoryReplay
             && self.universal_canvas.replay_anim_playing
@@ -2358,6 +2386,8 @@ impl EigenGraphApp {
                     replay_report: self.universal_canvas.last_ground_motion_replay_report.as_ref(),
                     shm_report: self.universal_canvas.last_shm_twin_report.as_ref(),
                     evacuation_report: self.universal_canvas.last_evacuation_report.as_ref(),
+                    watchdog_state: (self.universal_canvas.shm_watchdog.total_packets_ingested > 0)
+                        .then_some(&self.universal_canvas.shm_watchdog),
                     sheet_code: "S-101",
                     revision: "REV 01",
                 },
@@ -2739,6 +2769,72 @@ impl EigenGraphApp {
             } else {
                 self.spatial_workspace
                     .push_trace("No Evacuation Lifelines report available.", false);
+            }
+        }
+        if let Some(ws_url) = hud_actions.connect_shm_ws.clone() {
+            match crate::core::web_bridge::shm_connect_websocket(&ws_url) {
+                Ok(msg) => {
+                    self.universal_canvas.shm_watchdog.config.ws_url = ws_url;
+                    self.universal_canvas.shm_watchdog.ws_connected = true;
+                    self.universal_canvas.shm_watchdog.ws_status = msg.clone();
+                    self.universal_canvas.shm_watchdog.alert_level =
+                        crate::core::shm_watchdog::WatchdogAlertLevel::Monitoring;
+                    self.universal_canvas.shm_watchdog.push_event(
+                        crate::core::shm_watchdog::WatchdogAlertLevel::Monitoring,
+                        msg.clone(),
+                        None,
+                        false,
+                    );
+                    self.spatial_workspace.push_trace(msg, true);
+                }
+                Err(err) => {
+                    self.universal_canvas.shm_watchdog.ws_status = err.clone();
+                    self.spatial_workspace.push_trace(err, false);
+                }
+            }
+        }
+        if hud_actions.disconnect_shm_ws {
+            crate::core::web_bridge::shm_disconnect_websocket();
+            self.universal_canvas
+                .shm_watchdog
+                .start_simulator(crate::core::shm_watchdog::WatchdogSimMode::Off);
+            self.universal_canvas.shm_watchdog.ws_connected = false;
+            self.universal_canvas.shm_watchdog.ws_status =
+                "WebSocket & simulator disconnected.".to_string();
+            self.spatial_workspace
+                .push_trace("Disconnected live SHM telemetry stream.", true);
+        }
+        if hud_actions.export_watchdog_ifcx {
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_shm_watchdog.ifcx");
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let wd_overlay = self
+                .universal_canvas
+                .shm_watchdog
+                .build_ifcx_overlay(&self.build_view.bim_bus.project);
+            let composed = crate::core::IfcxStage::compose_with_shm_watchdog_overlay(
+                &layered,
+                &wd_overlay,
+            );
+            let json = composed.to_json_pretty();
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &json,
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.spatial_workspace.push_trace(
+                        format!(
+                            "Exported SHM Watchdog IFCX ({fname}, {} nodes)",
+                            composed.data.len()
+                        ),
+                        true,
+                    );
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
     }

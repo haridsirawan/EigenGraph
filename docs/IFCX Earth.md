@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.7` Delivered** (`v0.7.8` Planned)  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.8` Delivered** (`v0.7.9` Planned)  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% External Raster**  
-> **Current Platform**: EigenGraph `v0.7.7` (Autonomous Multi-Hazard Evacuation Routing, Emergency Lifelines & Post-Disaster Road Network Connectivity on Pure WebGPU/WGSL)  
+> **Current Platform**: EigenGraph `v0.7.8` (Live WebSocket SHM Watchdog, Closed-Loop ATC-20 → Evacuation Cascade & Width-First Responsive Dynamic Island on Pure WebGPU/WGSL)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -114,7 +114,7 @@ Because 100% of Earth and buildings live in analytical vector `.ifcx` nodes, cri
 
 ---
 
-## 6. Phased Implementation Roadmap (`v0.6.4 – v0.7.7`)
+## 6. Phased Implementation Roadmap (`v0.6.4 – v0.7.8`)
 
 Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.md` — advancing one patch digit per phase):
 
@@ -203,5 +203,12 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 - **Pure WebGPU Animated Flow Corridors, Dynamic Island Drawer & About Release Notes (`src/views/webgpu_earth/`, `src/views/spatial_workspace/`, `src/views/settings.rs`)**:
   - Adds WGSL `kind >= 8.5` animated directional flow chevrons & Fresnel beacons (`evacuation` GPU slot in hardware 24-bit `Depth24PlusStencil8` offscreen pass, backed by CPU vector fallback), Dynamic Island `Evacuation & Lifelines` drawer with pure-vector lifeline mini-map, `/evac`, `/lifelines`, `/safezone`, `/evac-ifcx` commands, `[[RUN_EVACUATION_ROUTING]]` / `[[OPEN_EVAC_DRAWER]]` Gemini directives, and in-app **What's New & Release Highlights** inside Settings → About EigenGraph.
 
-### Planned Next Phases (`v0.7.8`)
-- **Phase 78 (`v0.7.8`) — Live WebSocket SHM Telemetry Streaming & Continuous Watchdog**: Extending Phase 76/77 with live `web_sys::WebSocket` sensor streaming, rolling Welch PSD anomaly detection, and automatic ATC-20 placard + evacuation lifeline re-routing triggers.
+### Phase 78 (`v0.7.8`) — Live WebSocket SHM Telemetry Streaming, Rolling-Window Watchdog & Width-First Dynamic Island *(Implemented)*
+- **Live WebSocket & Rolling STA/LTA Anomaly Watchdog (`src/core/web_bridge.rs`, `src/core/shm_watchdog.rs`, `src/core/ifcx.rs`, `src/core/vector_dossier.rs`)**:
+  - Upgraded `ShmTelemetryPacket` with triaxial `accel_x_g`/`accel_y_g`/`accel_z_g`, `story_number`, and `drift_ratio` support plus dual fan-out queuing (`shm_watchdog_poll_packets`) alongside `FacilityView`.
+  - Added deterministic sliding ring buffer (`ShmWatchdogState`), STA/LTA seismic onset trigger, rolling $f_1(t)$ frequency-shift tracker, anomaly Z-score with hysteresis, built-in `Ambient` / `Aftershock` / `Soft-Story` simulator, closed-loop escalation (`Watchdog -> ATC-20 Placard -> A* Evacuation Rerouting`), non-destructive `eigengraph::analysis::shm_watchdog` IFCX overlay, and A3 Pure-Vector SVG dossier telemetry.
+- **Width-First Responsive Dynamic Island & Live Stream Tab (`src/views/spatial_workspace/`, `src/views/settings.rs`, `src/app.rs`)**:
+  - Updated Dynamic Island expansion to prioritize horizontal width on wide displays (`vp.x - 28 px` up to `1520/1680 px`, laying out Studio Deck tabs, utility bar, sub-pill groups, and drawer columns side-by-side) and wrap upward only when horizontal bounds fill or on narrow/mobile screens (`hud_rects.len() == 1` across `1600px`/`1280px`/`768px`/`390px`), added the `Live Stream & Watchdog` drawer sub-tab with pure-vector rolling waveform & frequency trend charts, `/watchdog`, `/ws`, `/ws-stop`, `/ws-sim`, `/watchdog-ifcx` commands, Gemini directives, and updated `Settings -> About EigenGraph`.
+
+### Planned Next Phases (`v0.7.9`)
+- **Phase 79 (`v0.7.9`) — WebGPU Compute Shaders (`@compute` WGSL) for Multi-Hazard & Fragility Acceleration**: Leveraging `wgpu` compute passes for high-throughput FEMA P-58 Monte Carlo fragility sampling and 60 FPS GPU seismic wavefield / Venturi particle propagation with full CPU CI fallback.

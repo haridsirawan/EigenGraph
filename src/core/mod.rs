@@ -44,6 +44,7 @@ pub mod lifecycle_ops;
 pub mod portfolio_retrofit;
 pub mod ground_motion_replay;
 pub mod shm_twin;
+pub mod shm_watchdog;
 pub mod evacuation_routing;
 pub mod web_bridge;
 pub mod vector_dossier;
@@ -237,6 +238,10 @@ pub use evacuation_routing::{
     evaluate_evacuation_and_lifelines, AssemblySafePoint, DebrisCordonZone,
     EvacuationLifelineReport, EvacuationMode, EvacuationRoutePath, EvacuationRoutingConfig,
     LifelineGraphEdge, LifelineGraphNode, RoadEdgeStatus, NS_EG_EVACUATION_LIFELINES,
+};
+pub use shm_watchdog::{
+    ShmWatchdogConfig, ShmWatchdogState, ShmWatchdogTickOutcome, WatchdogAlertLevel,
+    WatchdogEventEntry, WatchdogSamplePoint, WatchdogSimMode, NS_EG_SHM_WATCHDOG,
 };
 
 

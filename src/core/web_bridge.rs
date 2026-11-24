@@ -780,10 +780,12 @@ pub fn save_text_file(filename: &str, content: &str, mime_type: &str) -> Result<
 }
 
 /// Real-time IoT / SHM sensor packet ingested via WebSocket, MQTT-over-WS, or manual CSV/JSON feed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ShmTelemetryPacket {
     #[serde(default)]
     pub sensor_id: String,
+    #[serde(default = "default_story_one")]
+    pub story_number: usize,
     #[serde(default)]
     pub strain_micro: f32,
     #[serde(default)]
@@ -791,12 +793,26 @@ pub struct ShmTelemetryPacket {
     #[serde(default)]
     pub accel_g: f32,
     #[serde(default)]
+    pub accel_x_g: Option<f32>,
+    #[serde(default)]
+    pub accel_y_g: Option<f32>,
+    #[serde(default)]
+    pub accel_z_g: Option<f32>,
+    #[serde(default)]
+    pub drift_ratio: Option<f32>,
+    #[serde(default)]
     pub temp_c: f32,
     #[serde(default)]
     pub timestamp: String,
 }
 
+fn default_story_one() -> usize {
+    1
+}
+
 static PENDING_SHM_PACKETS: std::sync::Mutex<Vec<ShmTelemetryPacket>> =
+    std::sync::Mutex::new(Vec::new());
+static PENDING_WATCHDOG_SHM_PACKETS: std::sync::Mutex<Vec<ShmTelemetryPacket>> =
     std::sync::Mutex::new(Vec::new());
 static SHM_SOCKET_STATE: std::sync::Mutex<(bool, String)> =
     std::sync::Mutex::new((false, String::new()));
@@ -807,7 +823,8 @@ std::thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// Parses an incoming JSON object or CSV line (`sensor_id,strain_micro,freq_hz,accel_g,temp_c`) into `ShmTelemetryPacket`.
+/// Parses an incoming JSON object or CSV line (`sensor_id,strain_micro,freq_hz[,accel_g,temp_c,story,ax,ay,az,drift]`)
+/// into `ShmTelemetryPacket`.
 pub fn parse_shm_packet_payload(raw: &str) -> Result<ShmTelemetryPacket, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -818,6 +835,16 @@ pub fn parse_shm_packet_payload(raw: &str) -> Result<ShmTelemetryPacket, String>
             .map_err(|e| format!("Invalid SHM JSON packet: {e}"))?;
         if pkt.sensor_id.trim().is_empty() {
             pkt.sensor_id = "SG-01".to_string();
+        }
+        if pkt.story_number == 0 {
+            pkt.story_number = 1;
+        }
+        if pkt.accel_x_g.is_none() && pkt.accel_g != 0.0 {
+            pkt.accel_x_g = Some(pkt.accel_g);
+        } else if pkt.accel_g == 0.0 {
+            if let Some(ax) = pkt.accel_x_g {
+                pkt.accel_g = ax;
+            }
         }
         if pkt.timestamp.trim().is_empty() {
             pkt.timestamp = unix_timestamp_label();
@@ -836,11 +863,28 @@ pub fn parse_shm_packet_payload(raw: &str) -> Result<ShmTelemetryPacket, String>
         .map_err(|_| format!("Invalid frequency value '{}'", parts[2]))?;
     let accel_g = parts.get(3).and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.015);
     let temp_c = parts.get(4).and_then(|v| v.parse::<f32>().ok()).unwrap_or(28.5);
+    let story_number = parts
+        .get(5)
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1)
+        .max(1);
+    let accel_x_g = parts
+        .get(6)
+        .and_then(|v| v.parse::<f32>().ok())
+        .or(Some(accel_g));
+    let accel_y_g = parts.get(7).and_then(|v| v.parse::<f32>().ok());
+    let accel_z_g = parts.get(8).and_then(|v| v.parse::<f32>().ok());
+    let drift_ratio = parts.get(9).and_then(|v| v.parse::<f32>().ok());
     Ok(ShmTelemetryPacket {
         sensor_id: if parts[0].is_empty() { "SG-01" } else { parts[0] }.to_string(),
+        story_number,
         strain_micro,
         freq_hz,
         accel_g,
+        accel_x_g,
+        accel_y_g,
+        accel_z_g,
+        drift_ratio,
         temp_c,
         timestamp: unix_timestamp_label(),
     })
@@ -848,7 +892,16 @@ pub fn parse_shm_packet_payload(raw: &str) -> Result<ShmTelemetryPacket, String>
 
 fn push_shm_packet(pkt: ShmTelemetryPacket) {
     if let Ok(mut queue) = PENDING_SHM_PACKETS.lock() {
-        queue.push(pkt);
+        if queue.len() >= 1024 {
+            queue.remove(0);
+        }
+        queue.push(pkt.clone());
+    }
+    if let Ok(mut wd_queue) = PENDING_WATCHDOG_SHM_PACKETS.lock() {
+        if wd_queue.len() >= 1024 {
+            wd_queue.remove(0);
+        }
+        wd_queue.push(pkt);
     }
 }
 
@@ -942,6 +995,16 @@ pub fn shm_inject_packet(pkt: ShmTelemetryPacket) {
 /// Drains newly arrived SHM telemetry packets for processing in `FacilityView`.
 pub fn shm_poll_packets() -> Vec<ShmTelemetryPacket> {
     if let Ok(mut queue) = PENDING_SHM_PACKETS.lock() {
+        std::mem::take(&mut *queue)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Drains newly arrived SHM telemetry packets for the Phase 78 Spatial Rolling Watchdog
+/// without stealing packets consumed by `FacilityView`.
+pub fn shm_watchdog_poll_packets() -> Vec<ShmTelemetryPacket> {
+    if let Ok(mut queue) = PENDING_WATCHDOG_SHM_PACKETS.lock() {
         std::mem::take(&mut *queue)
     } else {
         Vec::new()

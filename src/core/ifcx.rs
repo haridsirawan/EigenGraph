@@ -73,6 +73,7 @@ pub mod ns {
     pub const EG_SHM_DIGITAL_TWIN: &str = "eigengraph::analysis::shm_digital_twin";
     pub const EG_ATC20_PLACARD: &str = "eigengraph::analysis::atc20_placard";
     pub const EG_EVACUATION_LIFELINES: &str = "eigengraph::analysis::evacuation_lifelines";
+    pub const EG_SHM_WATCHDOG: &str = "eigengraph::analysis::shm_watchdog";
 }
 
 fn default_ifcx_version() -> String {
@@ -1363,10 +1364,22 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), evac.evacuation_overlay_ifcx.clone()]);
         stage.to_composed_document(&format!("{}_evacuation_lifelines", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Live SHM Watchdog overlay
+    /// (`eigengraph::analysis::shm_watchdog`).
+    pub fn compose_with_shm_watchdog_overlay(
+        base_doc: &IfcxDocument,
+        wd_overlay: &IfcxDocument,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[base_doc.clone(), wd_overlay.clone()]);
+        stage.to_composed_document(&format!("{}_shm_watchdog", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_EVACUATION_LIFELINES) {
+    if node.attributes.contains_key(ns::EG_SHM_WATCHDOG) {
+        "SHM Live Watchdog".to_string()
+    } else if node.attributes.contains_key(ns::EG_EVACUATION_LIFELINES) {
         "Evacuation Lifelines".to_string()
     } else if node.attributes.contains_key(ns::EG_SHM_DIGITAL_TWIN)
         || node.attributes.contains_key(ns::EG_ATC20_PLACARD)
