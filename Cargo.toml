@@ -7,7 +7,7 @@ authors = ["Harids Irawan <harids.irawan@gmail.com>"]
 description = "EigenGraph — 100% Pure-Rust Vector Earth, WebGPU (WGSL), OpenBIM IFCX (IFC 5) & Structural Graph Analytics"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/EigenGraph/EigenGraph"
+repository = "https://github.com/haridsirawan/EigenGraph"
 
 [dependencies]
 eframe = { version = "0.36", default-features = false, features = [
