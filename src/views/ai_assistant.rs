@@ -292,7 +292,7 @@ impl AiAssistantView {
                         if icons::icon_button(
                             ui,
                             AppIcon::Wrench,
-                            "Auto-Repair ARI",
+                            "Auto-Repair EigenGate",
                             11.0,
                             Color32::WHITE,
                             theme.accent_green,
@@ -300,7 +300,7 @@ impl AiAssistantView {
                             CornerRadius::same(6),
                             Vec2::ZERO,
                         )
-                        .on_hover_text("Automatically upsize critical columns/beams, inject stabilizer bracing, re-run FEM/ARI, and support Ctrl+Z undo")
+                        .on_hover_text("Automatically upsize critical columns/beams, inject stabilizer bracing, re-run FEM/EigenGate, and support Ctrl+Z undo")
                         .clicked()
                         {
                             self.execute_prompt(
@@ -414,7 +414,7 @@ impl AiAssistantView {
                 (AppIcon::Eraser, "Clean & Organize Vault", "Organize all Vault contents, validate JSON schemas, and sync category metadata."),
                 (AppIcon::Document, "Portfolio Summary", "Summarize all projects and compare redundancy indices across the portfolio."),
                 (AppIcon::Shield, "EigenGraph Audit Certificate", "Open and print official EigenGraph 2026 Structural Redundancy Audit Certificate."),
-                (AppIcon::ChartBar, "Rank by Safety", "Sort projects by minimum ARI score and deflection criteria."),
+                (AppIcon::ChartBar, "Rank by Safety", "Sort projects by minimum EigenGate score and deflection criteria."),
                 (AppIcon::BoxPackage, "DB Component Library", "Display all parametric truss modules stored in the project database."),
             ],
             NavigationPillar::AiAgent => &[
@@ -426,12 +426,12 @@ impl AiAssistantView {
             NavigationPillar::ResearchConcept => &[
                 (AppIcon::Sparkles, "Project Feasibility Review", "Check technical feasibility study and bridge clear span limits."),
                 (AppIcon::Document, "SNI 1729 / AISC Standards", "Verify compliance with LRFD resistance factors and yield DCR limits."),
-                (AppIcon::Search, "View ARI Formulation", "Review official EigenGraph formulation equations (Michaelis-Menten and SVD Guard)."),
+                (AppIcon::Search, "View EigenGate Formulation", "Review official EigenGraph formulation equations (Michaelis-Menten and SVD Guard)."),
             ],
             NavigationPillar::ParametricDED => &[
                 (AppIcon::Bot, "Autocomplete Active Structure", "Help complete connecting beam elements and automated rebar detailing on active structure."),
                 (AppIcon::Folder, "Live Vault Status", "Review autosave storage status and model mutation history in Vault."),
-                (AppIcon::Sparkles, "ARI Bracing Recommendation", "Run AI-ARI Topology Suggestion to eliminate fracture-critical collapse points."),
+                (AppIcon::Sparkles, "EigenGate Bracing Recommendation", "Run EigenGate AI Topology Suggestion to eliminate fracture-critical collapse points."),
                 (AppIcon::RulerSquare, "Warren Truss 24m", "Generate parametric Warren truss with L=24m, H=3.2m, n=6."),
                 (AppIcon::LinkChain, "Bind H = L / 7.5", "Apply driving formula constraint between height and span."),
                 (AppIcon::SaveDisk, "Save to DB", "Save drawn parametric component into project database."),
@@ -441,36 +441,36 @@ impl AiAssistantView {
                 (AppIcon::Folder, "Full Vault Inspection", "Inspect full contents, category directories, and files in the active Vault."),
                 (AppIcon::AlertTriangle, "Multi-Disruption Test (N-2)", "Simulate simultaneous removal of 2 members and detect progressive domino collapse."),
                 (AppIcon::Bolt, "Check SVD Mechanism", "Run full singular value decomposition rank verification on the current structure."),
-                (AppIcon::Target, "Screen Critical ARI", "Screen all members to find the lowest Adjusted Redundancy Index contributions."),
+                (AppIcon::Target, "Screen Critical EigenGate", "Screen all members to find the lowest EigenGate contributions."),
                 (AppIcon::RulerSquare, "Warren Truss 24m", "Instantiate a 24m span Warren truss with 6 panels into workspace."),
             ],
             NavigationPillar::AnalysisSimulation => &[
-                (AppIcon::Wrench, "Auto-Repair ARI", "repair critical members"),
+                (AppIcon::Wrench, "Auto-Repair EigenGate", "repair critical members"),
                 (AppIcon::Bolt, "SVD Kinematic Guard", "Check minimum singular value sigma_min and verify absence of nullspace mechanisms."),
                 (AppIcon::Pulse, "Seismic Shake Table", "Propagate dynamic ground motion accelerograms and record interstory drift."),
                 (AppIcon::Wind, "Wind Particle Streamlines", "Simulate MWFRS facade surface pressure and aerodynamic vortex suction."),
                 (AppIcon::Layers, "Flood Inundation Rise", "Evaluate hydrostatic water plane rise and basement buoyancy uplift factor."),
-                (AppIcon::Target, "ARI Member Sensitivity", "Evaluate Adjusted Redundancy Index distribution across all structural elements."),
+                (AppIcon::Target, "EigenGate Member Sensitivity", "Evaluate EigenGate distribution across all structural elements."),
             ],
             NavigationPillar::TimeScheduling => &[
-                (AppIcon::Cube3D, "Check 4D Erection Safety", "Simulate staged erection stability and ARI scores during field assembly stages."),
+                (AppIcon::Cube3D, "Check 4D Erection Safety", "Simulate staged erection stability and EigenGate scores during field assembly stages."),
                 (AppIcon::ChartBar, "Export 4D S-Curve", "Generate 4D erection schedule, CPM critical path, and weekly cashflow S-Curve."),
                 (AppIcon::Clock, "Critical Cantilever Stage", "Verify absence of SVD singularities during cantilever erection stage."),
             ],
             NavigationPillar::CostBudgeting => &[
                 (AppIcon::Coins, "Automated 5D BoQ Estimate", "Calculate full 5D construction estimate based on active parametric variables."),
-                (AppIcon::ChartLine, "Cost vs ARI Trade-Off", "Evaluate budget impact to increase system Adjusted Redundancy Index."),
+                (AppIcon::ChartLine, "Cost vs EigenGate Trade-Off", "Evaluate budget impact to increase system EigenGate."),
                 (AppIcon::Document, "Steel AHSP Unit Rates", "Display unit price analysis for structural steel fabrication and erection."),
             ],
             NavigationPillar::SustainabilityEnergy => &[
                 (AppIcon::Leaf, "Calculate Embodied CO₂e", "Calculate total embodied carbon emissions of steel and reinforced concrete materials."),
-                (AppIcon::ChartLine, "Carbon vs ARI Trade-Off", "Display optimization curve balancing structural redundancy against embodied emissions."),
+                (AppIcon::ChartLine, "Carbon vs EigenGate Trade-Off", "Display optimization curve balancing structural redundancy against embodied emissions."),
                 (AppIcon::Star, "Predict GBCI/LEED Rating", "Simulate green building certification tier for this project."),
             ],
             NavigationPillar::FacilityManagement => &[
                 (AppIcon::Pulse, "Realtime SHM Sensors", "Display telemetry from strain gauges and bridge natural frequencies."),
-                (AppIcon::ChartLine, "Evaluate ARI(t) Degradation", "Monitor redundancy degradation rate due to aging and cyclic fatigue."),
-                (AppIcon::Wrench, "Issue Maintenance Work Order", "Issue inspection work order if ARI falls below safety threshold."),
+                (AppIcon::ChartLine, "Evaluate EigenGate(t) Degradation", "Monitor redundancy degradation rate due to aging and cyclic fatigue."),
+                (AppIcon::Wrench, "Issue Maintenance Work Order", "Issue inspection work order if EigenGate falls below safety threshold."),
             ],
             NavigationPillar::SafetyHealth => &[
                 (AppIcon::Cube3D, "Tower Crane Radius Arc", "Check 50m working radius sweep, hook load limits, and exclusion zones."),
@@ -486,7 +486,7 @@ impl AiAssistantView {
             NavigationPillar::IndustrializedAutomation => &[
                 (AppIcon::Truck, "Verify DfMA Modules", "Check highway trailer transport clearance dimensions for 12m modules."),
                 (AppIcon::Cpu, "Robotic Welding Toolpath", "Simulate 6-axis robotic automated weld seam toolpath on gusset plates."),
-                (AppIcon::Globe, "Export OpenBIM IFC 4.3", "Export structural topology and ARI metadata to buildingSMART IFC standard."),
+                (AppIcon::Globe, "Export OpenBIM IFC 4.3", "Export structural topology and EigenGate metadata to buildingSMART IFC standard."),
             ],
             NavigationPillar::Prediction => &[
                 (AppIcon::Pulse, "APM Domino Collapse Simulation", "Simulate nonlinear Alternate Path Method progressive collapse propagation per DoD UFC 4-023-03."),
@@ -521,7 +521,7 @@ impl AiAssistantView {
         let is_repair_cmd = p_lower.contains("repair critical")
             || p_lower.contains("auto-repair")
             || p_lower.contains("upgrade critical")
-            || p_lower.contains("optimize ari")
+            || p_lower.contains("optimize eigengate")
             || p_lower.contains("fix dcr")
             || p_lower.contains("auto-remedi")
             || p_lower.contains("apply bracing")
@@ -543,7 +543,7 @@ impl AiAssistantView {
             || matches!(p_lower.trim(), "rebar" | "reinforce" | "clear" | "reset");
         let response_msg = if is_repair_cmd {
             self.pending_bim_nl_command = Some("__repair_critical__".to_string());
-            "[EigenAI Closed-Loop Structural Optimizer]: Auditing live BIM + FEM member utilization & ARI to execute transactional strengthening..."
+            "[EigenAI Closed-Loop Structural Optimizer]: Auditing live BIM + FEM member utilization & EigenGate to execute transactional strengthening..."
                 .to_string()
         } else if is_nl_bim {
             self.pending_bim_nl_command = Some(prompt.trim().to_string());
@@ -685,7 +685,7 @@ impl AiAssistantView {
                 "[Modal Dynamics]: Failed to initialize structural model.".to_string()
             }
         } else if p_lower.contains("apply bracing") || p_lower.contains("install bracing") || p_lower.contains("terapkan bracing") || p_lower.contains("pasang bracing") || p_lower.contains("auto-remedi") {
-            "[Autonomous 1-Click Auto-Remediation Successful]:\n• Action: Injected new bracing stiffener element (Connecting Node 4 -> Node 11 with profile WF300x150).\n• Recalculation Results FEA & SVD: Free of kinematic mechanisms (100% full rank).\n• Redundancy Increase: Minimum System ARI jumped from 0.6800 -> 0.9124 (+34.2% [GRADE A SAFE]).\n• Active topology updated live and 3D visualization refreshed.".to_string()
+            "[Autonomous 1-Click Auto-Remediation Successful]:\n• Action: Injected new bracing stiffener element (Connecting Node 4 -> Node 11 with profile WF300x150).\n• Recalculation Results FEA & SVD: Free of kinematic mechanisms (100% full rank).\n• Redundancy Increase: Minimum System EigenGate jumped from 0.6800 -> 0.9124 (+34.2% [GRADE A SAFE]).\n• Active topology updated live and 3D visualization refreshed.".to_string()
         } else if p_lower.contains("pushover") || p_lower.contains("non-linear") || p_lower.contains("p-delta") || p_lower.contains("plastic hinge") || p_lower.contains("sendi plastis") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
@@ -720,8 +720,8 @@ impl AiAssistantView {
         } else if p_lower.contains("seal") || p_lower.contains("segel") || p_lower.contains("sha256") || p_lower.contains("crypto") || p_lower.contains("kripto") || p_lower.contains("tamper") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
-                if let Ok(assessment) = crate::core::AriEngine::evaluate_redundancy(&model) {
-                    let hash = crate::core::Sha256Hasher::hash_model_and_ari(&model, &assessment);
+                if let Ok(assessment) = crate::core::EigenGateEngine::evaluate_redundancy(&model) {
+                    let hash = crate::core::Sha256Hasher::hash_model_and_eigengate(&model, &assessment);
                     format!(
                         "[NIST FIPS 180-4 Cryptographic Audit Seal]:\n• Status: AUTHENTIC & VERIFIED (Tamper-Proof)\n• Model: {}\n• SHA-256 Digest: {}\n• QR Verification URI: eigengraph://verify?hash={}&org=eigengraph\n• Certification: EigenGraph Structural Authority & Cryptographic Registry (2026).",
                         model.name,
@@ -735,13 +735,13 @@ impl AiAssistantView {
                 "[Cryptographic Seal]: Failed to initialize structural model.".to_string()
             }
         } else if p_lower.contains("import ifc") || p_lower.contains("impor ifc") || p_lower.contains("read ifc") || p_lower.contains("baca ifc") || p_lower.contains("parse ifc") {
-            "[Native OpenBIM IFCX (IFC 5 JSON ECS) Engine]:\n• Capabilities: Imports pure-JSON .ifcx layers (bsi::ifc::class, usd::usdgeom::mesh, eigengraph::geo::wgs84, eigengraph::ari::v2).\n• Multi-Layer Composition: Stacks earth_globe.ifcx + AI real-building captures + user continuation edits non-destructively.\n• Automated Boundary Conditions: Fixed/pinned support restraints at lowest Z level.\n• Automated Loading: Initial roof gravity load for instant SVD & ARI analysis without manual setup.".to_string()
+            "[Native OpenBIM IFCX (IFC 5 JSON ECS) Engine]:\n• Capabilities: Imports pure-JSON .ifcx layers (bsi::ifc::class, usd::usdgeom::mesh, eigengraph::geo::wgs84, eigengraph::eigengate::v2).\n• Multi-Layer Composition: Stacks earth_globe.ifcx + AI real-building captures + user continuation edits non-destructively.\n• Automated Boundary Conditions: Fixed/pinned support restraints at lowest Z level.\n• Automated Loading: Initial roof gravity load for instant SVD & EigenGate analysis without manual setup.".to_string()
         } else if p_lower.contains("n-2") || p_lower.contains("disruption") || p_lower.contains("disrupsi") || p_lower.contains("cascading") || p_lower.contains("domino") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
                 if let Ok(report) = crate::core::CascadingSimulator::simulate_disruption(&model, &[1, 2], Some(1.25)) {
                     format!(
-                        "[Disruption & Cascading Failure Simulation - Live Engine]:\n• Status: {:?}\n• Initial Disrupted: Member {:?}\n• Total Collapsed: {} Members {:?}\n• Dynamics: DAF = {:.2}x | Steps: {}\n• Propagation Vulnerability Index (PVI): {:.4}\n• System Robustness (R_sys): {:.4}\n• Residual System ARI: {:.4} | Max Redistributed DCR: {:.2}%\n• Mitigation: {}",
+                        "[Disruption & Cascading Failure Simulation - Live Engine]:\n• Status: {:?}\n• Initial Disrupted: Member {:?}\n• Total Collapsed: {} Members {:?}\n• Dynamics: DAF = {:.2}x | Steps: {}\n• Propagation Vulnerability Index (PVI): {:.4}\n• System Robustness (R_sys): {:.4}\n• Residual System EigenGate: {:.4} | Max Redistributed DCR: {:.2}%\n• Mitigation: {}",
                         report.status,
                         report.initial_disrupted_ids,
                         report.total_collapsed_ids.len(),
@@ -750,7 +750,7 @@ impl AiAssistantView {
                         report.steps_count,
                         report.pvi,
                         report.robustness_index,
-                        report.residual_ari,
+                        report.residual_eigengate,
                         report.max_redistributed_dcr * 100.0,
                         if report.robustness_index > 0.7 { "Safe — Load successfully redistributed without collapsing global structure." } else { "Critical — Domino effect collapsed truss stability." }
                     )
@@ -763,67 +763,67 @@ impl AiAssistantView {
         } else if p_lower.contains("p-m-v") || p_lower.contains("interaction") || p_lower.contains("interaksi") || p_lower.contains("frame 3d") || p_lower.contains("moment") || p_lower.contains("momen") {
             "[AISC 360-16 / SNI 1729:2020 LRFD P-M-V Interaction]:\n• Member E1 (W14x90): Pu=-45.2kN, My=12.4kNm, Mz=34.8kNm, Vy=18.2kN -> DCR = 48.5% (Code Compliant)\n• Member E2 (W14x90): Pu=-18.5kN, My=8.5kNm, Mz=22.1kNm, Vy=11.4kN -> DCR = 52.8% (Code Compliant)\n• All beam-column elements remain well below elastic yield limits (DCR < 1.0).".to_string()
         } else if p_lower.contains("certificate") || p_lower.contains("sertifikat") || p_lower.contains("audit") || p_lower.contains("dossier") {
-            "[Official EigenGraph 2026 Audit Certificate]:\n• Verification Authority: EigenGraph Structural Systems\n• Framework: Development and Validation of Adjusted Redundancy Index for Pre-Analysis Element Disruption Screening in Linear-Elastic Structures\n• Active Model Results: Minimum System ARI = 0.942 [GRADE A], SVD Kinematic Guard = STABLE ZERO MECHANISM (dim(Null)=0), CI_max = 0.4200.\n• Status: OFFICIALLY VALIDATED (EIGENGRAPH 2026). Open the MY LIBRARY workspace to print full calculation dossier.".to_string()
+            "[Official EigenGraph 2026 Audit Certificate]:\n• Verification Authority: EigenGraph Structural Systems\n• Framework: Development and Validation of EigenGate for Pre-Analysis Element Disruption Screening in Linear-Elastic Structures\n• Active Model Results: Minimum System EigenGate = 0.942 [GRADE A], SVD Kinematic Guard = STABLE ZERO MECHANISM (dim(Null)=0), CI_max = 0.4200.\n• Status: OFFICIALLY VALIDATED (EIGENGRAPH 2026). Open the MY LIBRARY workspace to print full calculation dossier.".to_string()
         } else if p_lower.contains("bracing") || p_lower.contains("suggest") || p_lower.contains("rekomendasi") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
-                if let Ok(report) = crate::core::AriTopologyOptimizer::optimize_bracing(&model, Some(5.0)) {
+                if let Ok(report) = crate::core::EigenGateTopologyOptimizer::optimize_bracing(&model, Some(5.0)) {
                     if let Some(best) = &report.best_candidate {
                         format!(
-                            "[AI-ARI Bracing Suggestion - Live Optimizer]:\n• Evaluation: {} bracing candidates evaluated autonomously.\n• Best Recommendation: Connect Node {} -> Node {} with profile {}\n• Projected Improvement: System ARI increases from {:.4} -> {:.4} (+{:.1}%)\n• SVD Status: Free of kinematic mechanisms\n• Added Mass Estimate: {:.1} kg.",
+                            "[EigenGate AI Bracing Suggestion - Live Optimizer]:\n• Evaluation: {} bracing candidates evaluated autonomously.\n• Best Recommendation: Connect Node {} -> Node {} with profile {}\n• Projected Improvement: System EigenGate increases from {:.4} -> {:.4} (+{:.1}%)\n• SVD Status: Free of kinematic mechanisms\n• Added Mass Estimate: {:.1} kg.",
                             report.candidates_evaluated,
                             best.from_node,
                             best.to_node,
                             best.section_name,
-                            report.baseline_min_ari,
-                            best.new_min_ari,
-                            best.delta_min_ari * 100.0,
+                            report.baseline_min_eigengate,
+                            best.new_min_eigengate,
+                            best.delta_min_eigengate * 100.0,
                             best.added_weight_kg
                         )
                     } else {
-                        format!("[AI-ARI Bracing Suggestion]: Baseline structure is stable (ARI = {:.4}), no additional bracing candidates required.", report.baseline_min_ari)
+                        format!("[EigenGate AI Bracing Suggestion]: Baseline structure is stable (EigenGate = {:.4}), no additional bracing candidates required.", report.baseline_min_eigengate)
                     }
                 } else {
-                    "[AI-ARI Bracing Suggestion]: Bracing optimization failed to execute.".to_string()
+                    "[EigenGate AI Bracing Suggestion]: Bracing optimization failed to execute.".to_string()
                 }
             } else {
-                "[AI-ARI Bracing Suggestion]: Failed to initialize parametric model.".to_string()
+                "[EigenGate AI Bracing Suggestion]: Failed to initialize parametric model.".to_string()
             }
         } else if p_lower.contains("top 5") || p_lower.contains("top 3") || p_lower.contains("critical") || p_lower.contains("paling kritis") {
-            "[Top Fracture Critical Elements Ranking]:\n1. E1 (Center Bottom Chord): ARI = 0.5800, CI = 0.4200 — WARNING: Vulnerable to Collapse if severed\n2. E2 (Center Top Chord): ARI = 0.6500, CI = 0.3500 — Buckling verification required\n3. E3 (Diagonal Web): ARI = 0.8200, CI = 0.1800 — Good Redundancy\n4. E4 (Vertical Post): ARI = 0.9100, CI = 0.0900 — Very Safe\nOpen ANALYZE workspace to inspect full internal forces diagrams.".to_string()
+            "[Top Fracture Critical Elements Ranking]:\n1. E1 (Center Bottom Chord): EigenGate = 0.5800, CI = 0.4200 — WARNING: Vulnerable to Collapse if severed\n2. E2 (Center Top Chord): EigenGate = 0.6500, CI = 0.3500 — Buckling verification required\n3. E3 (Diagonal Web): EigenGate = 0.8200, CI = 0.1800 — Good Redundancy\n4. E4 (Vertical Post): EigenGate = 0.9100, CI = 0.0900 — Very Safe\nOpen ANALYZE workspace to inspect full internal forces diagrams.".to_string()
         } else if p_lower.contains("portfolio") || p_lower.contains("summary") {
             if projects.is_empty() {
                 "[Portfolio Analysis]: Workspace is blank (0 active projects loaded). Ground a new model on the World Map Canvas or create/import a structural project first.".to_string()
             } else {
                 let names: Vec<&str> = projects.iter().take(3).map(|p| p.title.as_str()).collect();
                 format!(
-                    "[Portfolio Analysis]: Loaded {} active project(s): {}. Use Evaluate & Run Solver to compute live ARI metrics.",
+                    "[Portfolio Analysis]: Loaded {} active project(s): {}. Use Evaluate & Run Solver to compute live EigenGate metrics.",
                     projects.len(),
                     names.join(", ")
                 )
             }
         } else if p_lower.contains("rank by safety") || p_lower.contains("rank") {
-            "[Safety Ranking]:\n1. Steel Arch Bridge (ARI: 0.94, Defl: 1.2mm) — Grade A\n2. Airport Dome Structure (ARI: 0.91, Defl: 2.1mm) — Grade A\n3. Gedebage Industrial Warehouse (ARI: 0.64, Defl: 4.8mm) — Grade B- (Review Needed)".to_string()
+            "[Safety Ranking]:\n1. Steel Arch Bridge (EigenGate: 0.94, Defl: 1.2mm) — Grade A\n2. Airport Dome Structure (EigenGate: 0.91, Defl: 2.1mm) — Grade A\n3. Gedebage Industrial Warehouse (EigenGate: 0.64, Defl: 4.8mm) — Grade B- (Review Needed)".to_string()
         } else if p_lower.contains("ifc") || p_lower.contains("openbim") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
-                let ari_assessment = crate::core::AriEngine::evaluate_redundancy(&model).ok();
-                let ifcx_str = crate::core::IfcxExporter::export_to_ifcx(&model, ari_assessment.as_ref());
+                let eigengate_assessment = crate::core::EigenGateEngine::evaluate_redundancy(&model).ok();
+                let ifcx_str = crate::core::IfcxExporter::export_to_ifcx(&model, eigengate_assessment.as_ref());
                 let lines_count = ifcx_str.lines().count();
                 format!(
-                    "[OpenBIM IFCX (IFC 5 JSON ECS) Export]:\n• Schema: buildingSMART IFC 5 (ifcx_alpha) + OpenUSD usd::usdgeom::mesh\n• JSON Graph Payload: {} lines generated with zero legacy STEP dependencies.\n• Analytical Overlay: eigengraph::ari::v2 (ARI System = {:.4}, SVD Status = Valid)\n• Composable: Stacks directly on top of earth_globe.ifcx.",
+                    "[OpenBIM IFCX (IFC 5 JSON ECS) Export]:\n• Schema: buildingSMART IFC 5 (ifcx_alpha) + OpenUSD usd::usdgeom::mesh\n• JSON Graph Payload: {} lines generated with zero legacy STEP dependencies.\n• Analytical Overlay: eigengraph::eigengate::v2 (EigenGate System = {:.4}, SVD Status = Valid)\n• Composable: Stacks directly on top of earth_globe.ifcx.",
                     lines_count,
-                    ari_assessment.as_ref().map(|a| a.min_system_ari).unwrap_or(0.942)
+                    eigengate_assessment.as_ref().map(|a| a.min_system_eigengate).unwrap_or(0.942)
                 )
             } else {
                 "[OpenBIM IFCX]: Failed to export IFCX model.".to_string()
             }
         } else if p_lower.contains("dossier") || p_lower.contains("export") {
-            "[Engineering Dossier]: Compiled 42-page calculation sheet for 'Red Steel Arch Bridge'. SVD nullspace certificates, ARI member sensitivity matrix, and BIM 5D BoQ (Rp 3.84B) ready for client export.".to_string()
+            "[Engineering Dossier]: Compiled 42-page calculation sheet for 'Red Steel Arch Bridge'. SVD nullspace certificates, EigenGate member sensitivity matrix, and BIM 5D BoQ (Rp 3.84B) ready for client export.".to_string()
         } else if p_lower.contains("svd") || p_lower.contains("mechanism") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
-                if let Ok(report) = crate::core::AriEngine::evaluate_redundancy(&model) {
+                if let Ok(report) = crate::core::EigenGateEngine::evaluate_redundancy(&model) {
                     format!("[SVD Kinematic Guard]: rank(K_free) = {}/{} active DOFs. Condition number kappa = {:.2e}. Zero null-space kinematic mechanisms detected. Structural stability is mechanically certified by SVD decomposition.",
                         report.kinematic_guard.rank,
                         report.kinematic_guard.active_dofs,
@@ -834,22 +834,22 @@ impl AiAssistantView {
             } else {
                 "[SVD Kinematic Guard]: Full rank verified across active DOFs. No kinematic mechanisms detected.".to_string()
             }
-        } else if p_lower.contains("screen") || p_lower.contains("ari") {
+        } else if p_lower.contains("screen") || p_lower.contains("eigengate") {
             let mut engine = crate::core::ParametricEngine::new();
             if let Ok(model) = engine.generate_warren_truss() {
-                if let Ok(report) = crate::core::AriEngine::evaluate_redundancy(&model) {
-                    format!("[ARI Sensitivity Screening]: Real FEM perturbation computed across {} members. Minimum System ARI = {:.4} (Safe threshold: 0.70). Critical members count: {}. Average redundancy reserve: {:.2}%.",
+                if let Ok(report) = crate::core::EigenGateEngine::evaluate_redundancy(&model) {
+                    format!("[EigenGate Sensitivity Screening]: Real FEM perturbation computed across {} members. Minimum System EigenGate = {:.4} (Safe threshold: 0.70). Critical members count: {}. Average redundancy reserve: {:.2}%.",
                         report.member_results.len(),
-                        report.min_system_ari,
+                        report.min_system_eigengate,
                         report.critical_members_count,
-                        report.average_ari * 100.0)
+                        report.average_eigengate * 100.0)
                 } else {
-                    let critical_count = members.iter().filter(|m| m.is_critical || m.ari < 0.7).count();
-                    format!("[ARI Screening]: Analyzed {} structural elements. Found {} critical member(s) with ARI < 0.70.", members.len(), critical_count)
+                    let critical_count = members.iter().filter(|m| m.is_critical || m.eigengate < 0.7).count();
+                    format!("[EigenGate Screening]: Analyzed {} structural elements. Found {} critical member(s) with EigenGate < 0.70.", members.len(), critical_count)
                 }
             } else {
-                let critical_count = members.iter().filter(|m| m.is_critical || m.ari < 0.7).count();
-                format!("[ARI Screening]: Analyzed {} structural elements. Found {} critical member(s) with ARI < 0.70.", members.len(), critical_count)
+                let critical_count = members.iter().filter(|m| m.is_critical || m.eigengate < 0.7).count();
+                format!("[EigenGate Screening]: Analyzed {} structural elements. Found {} critical member(s) with EigenGate < 0.70.", members.len(), critical_count)
             }
         } else if p_lower.contains("truss") || p_lower.contains("warren") {
             let mut engine = crate::core::ParametricEngine::new();
@@ -866,7 +866,7 @@ impl AiAssistantView {
                 let rates = crate::core::AhspUnitRates::default();
                 let boq = crate::core::CostEngine::calculate_boq(&model, Some(&rates));
                 format!(
-                    "[BIM 5D Cost Intelligence - Live AHSP Engine]:\n• Total Estimated Construction Cost: Rp {}\n• Total Structural Steel Mass: {:.2} Tonnes ({:.1} kg)\n• Work Breakdown Items (BoQ 6-Division):\n  1. {}\n  2. {}\n  3. {}\n• ARI Efficiency per Billion Cost: {:.3} ARI/Billion IDR",
+                    "[BIM 5D Cost Intelligence - Live AHSP Engine]:\n• Total Estimated Construction Cost: Rp {}\n• Total Structural Steel Mass: {:.2} Tonnes ({:.1} kg)\n• Work Breakdown Items (BoQ 6-Division):\n  1. {}\n  2. {}\n  3. {}\n• EigenGate Efficiency per Billion Cost: {:.3} EigenGate/Billion IDR",
                     crate::core::cost::CostEngine::format_idr(boq.total_cost_idr),
                     boq.grand_total_steel_tonnage,
                     boq.total_profile_steel_mass_kg,
@@ -903,7 +903,7 @@ impl AiAssistantView {
             if let Ok(model) = engine.generate_warren_truss() {
                 let report = crate::core::CarbonEngine::calculate_lca(&model, crate::core::CarbonSteelRoute::EafRecycled, Some(65.0), Some(0.942));
                 format!(
-                    "[Embodied Carbon & Sustainability LCA - ISO 14040/EN 15978]:\n• Total Steel Mass: {:.2} Tonnes ({})\n• Total Embodied Carbon Footprint (A1–A5): {:.2} tCO2e\n• Lifecycle Breakdown:\n  - A1–A3 (Material & Fabrication): {:.2} tCO2e ({:.1}%)\n  - A4 (Transport {:.0} km): {:.3} tCO2e ({:.1}%)\n  - A5 (Erection & Heavy Equipment): {:.2} tCO2e ({:.1}%)\n• Emission Reduction vs Conventional (BF-BOF): -{:.1}%\n• Rating Tier Prediction: {}\n• Eco-Redundancy Efficiency (η_eco): {:.4} ARI / tCO2e",
+                    "[Embodied Carbon & Sustainability LCA - ISO 14040/EN 15978]:\n• Total Steel Mass: {:.2} Tonnes ({})\n• Total Embodied Carbon Footprint (A1–A5): {:.2} tCO2e\n• Lifecycle Breakdown:\n  - A1–A3 (Material & Fabrication): {:.2} tCO2e ({:.1}%)\n  - A4 (Transport {:.0} km): {:.3} tCO2e ({:.1}%)\n  - A5 (Erection & Heavy Equipment): {:.2} tCO2e ({:.1}%)\n• Emission Reduction vs Conventional (BF-BOF): -{:.1}%\n• Rating Tier Prediction: {}\n• Eco-Redundancy Efficiency (η_eco): {:.4} EigenGate / tCO2e",
                     report.steel_tonnage,
                     report.route.display_name(),
                     report.total_embodied_carbon_ton,

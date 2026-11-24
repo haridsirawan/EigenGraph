@@ -7,7 +7,7 @@
 //! Core capabilities:
 //! - Unified Living Earth hierarchy (`/earth/globe/...` + `/earth/sites/<site>/buildings/<bldg>/...`)
 //! - `IfcxStage::compose`: non-destructive multi-layer stacking (Earth Base -> AI Real-Building
-//!   Capture -> User Continuation Edits -> 6-DOF FEM/ARI Structural Overlay)
+//!   Capture -> User Continuation Edits -> 6-DOF FEM/EigenGate Structural Overlay)
 //! - `IfcxStage::build_earth_globe_layer`: builds the entire 3D Vector Earth Globe (ocean sphere,
 //!   continents, Indonesian archipelago, mountain ridges, major rivers) as native `IfcxNode`s with
 //!   `usd::usdgeom::mesh` ready for 1:1 WebGPU (WGSL) vertex/index buffer upload
@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::core::ari::{AriEngine, RedundancyAssessment};
+use crate::core::eigengate::{EigenGateEngine, RedundancyAssessment};
 use crate::core::bim::{
     BimColumn, BimElementKind, BimFooting, BimLevel, BimProject, BimRun, BimSlab, BimWall,
     RunCategory, RunJustify,
@@ -61,7 +61,10 @@ pub mod ns {
     pub const EG_BIM_ELEMENT: &str = "eigengraph::bim::element";
     pub const EG_FEM_NODE: &str = "eigengraph::fem::node";
     pub const EG_FEM_MEMBER: &str = "eigengraph::fem::member";
-    pub const EG_ARI: &str = "eigengraph::ari::v2";
+    pub const EG_EIGENGATE: &str = "eigengraph::eigengate::v2";
+    pub const EG_EIGENGATE_LEGACY: &str = "eigengraph::ari::v2";
+    pub const EG_EIGENFLOW: &str = "eigengraph::eigenflow::v2";
+    pub const EG_FIELD_QAQC_BBS: &str = "eigengraph::construction::field_qaqc_bbs";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
@@ -330,13 +333,13 @@ pub struct IfcxGeoWgs84 {
     pub south_hemisphere: bool,
 }
 
-/// Non-destructive 6-DOF FEM & ARI structural screening overlay stored under `eigengraph::ari::v2`.
+/// Non-destructive 6-DOF FEM & EigenGate linear screening overlay stored under `eigengraph::eigengate::v2`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct IfcxAriOverlay {
-    #[serde(rename = "ariSystem")]
-    pub ari_system: f64,
-    #[serde(rename = "ariAverage")]
-    pub ari_average: f64,
+pub struct IfcxEigenGateOverlay {
+    #[serde(rename = "eigenGateSystem", alias = "ariSystem")]
+    pub eigengate_system: f64,
+    #[serde(rename = "eigenGateAverage", alias = "ariAverage")]
+    pub eigengate_average: f64,
     #[serde(rename = "criticalMembersCount")]
     pub critical_members_count: usize,
     #[serde(rename = "maxDcrPct")]
@@ -348,7 +351,7 @@ pub struct IfcxAriOverlay {
 }
 
 /// Result summary produced when streaming an AI-reconstructed real-world building `.ifcx`
-/// capture through automatic structural frame inference and 6-DOF ARI redundancy triage.
+/// capture through automatic structural frame inference and 6-DOF EigenGate redundancy triage.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AiBuildingFrameInferenceReport {
     pub building_name: String,
@@ -360,8 +363,8 @@ pub struct AiBuildingFrameInferenceReport {
     pub inferred_slabs: usize,
     pub inferred_footings: usize,
     pub total_fem_elements: usize,
-    pub min_ari: f64,
-    pub average_ari: f64,
+    pub min_eigengate: f64,
+    pub average_eigengate: f64,
     pub max_dcr_pct: f64,
     pub critical_member_count: usize,
     pub svd_nullspace_dim: usize,
@@ -541,8 +544,16 @@ impl IfcxDocument {
             json!({ "value": { "dataType": "Object", "spec": "EigenGraph WGS84 Georeferencing" } }),
         );
         schemas.insert(
-            ns::EG_ARI.to_string(),
-            json!({ "value": { "dataType": "Object", "spec": "EigenGraph ARI v2 Structural Screening" } }),
+            ns::EG_EIGENGATE.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph EigenGate v2 Linear Screening" } }),
+        );
+        schemas.insert(
+            ns::EG_EIGENFLOW.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph EigenFlow Non-Linear Woodbury Engine" } }),
+        );
+        schemas.insert(
+            ns::EG_FIELD_QAQC_BBS.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph Field Construction QA/QC & 1D Rebar BBS Cut-List" } }),
         );
         Self {
             header: IfcxHeader {
@@ -658,7 +669,7 @@ impl IfcxDocument {
 
 /// Non-destructive composed IFCX stage merging stacked `.ifcx` layers in order:
 /// `Layer 0: earth_globe.ifcx` -> `Layer 1: ai_city_capture.ifcx` -> `Layer 2: user_edits.ifcx`
-/// -> `Layer 3: ari_analysis.ifcx`.
+/// -> `Layer 3: eigengate_analysis.ifcx`.
 #[derive(Debug, Clone, Default)]
 pub struct IfcxStage {
     pub layer_ids: Vec<String>,
@@ -1056,7 +1067,7 @@ impl IfcxStage {
     }
 
     /// Composes the Living Earth base layer (`earth_globe.ifcx`), active `BimProject` site layer,
-    /// optional `IfcxCityScene` (`IfcRoad`/`IfcBridge`/`IfcSpatialZone`), ARI overlay, and
+    /// optional `IfcxCityScene` (`IfcRoad`/`IfcBridge`/`IfcSpatialZone`), EigenGate overlay, and
     /// optional `DistrictMultiHazardReport` non-destructive hazard node into one unified `.ifcx` graph.
     #[allow(clippy::too_many_arguments)]
     pub fn compose_earth_with_site_city_and_hazard(
@@ -1066,12 +1077,12 @@ impl IfcxStage {
         heading_deg: f64,
         address: Option<&str>,
         members: Option<&[StructuralMember]>,
-        ari: Option<&RedundancyAssessment>,
+        eigengate: Option<&RedundancyAssessment>,
         city: Option<&crate::core::gis::IfcxCityScene>,
         hazard: Option<&DistrictMultiHazardReport>,
     ) -> IfcxDocument {
         let earth = Self::build_earth_globe_layer(theme);
-        let mut site = IfcxDocument::from_bim_project(project, geo_opt, heading_deg, address, members, ari);
+        let mut site = IfcxDocument::from_bim_project(project, geo_opt, heading_deg, address, members, eigengate);
         let site_path = format!("/earth/sites/{}", sanitize_slug(&project.project_name));
         if let Some(c) = city.filter(|c| !c.is_empty()) {
             for cn in c.to_ifcx_nodes(&site_path) {
@@ -1089,7 +1100,7 @@ impl IfcxStage {
     }
 
     /// Composes the Living Earth base layer (`earth_globe.ifcx`) with an active `BimProject` site
-    /// layer, optional `IfcxCityScene` (`IfcRoad`/`IfcBridge`/`IfcSpatialZone`), and ARI overlay.
+    /// layer, optional `IfcxCityScene` (`IfcRoad`/`IfcBridge`/`IfcSpatialZone`), and EigenGate overlay.
     #[allow(clippy::too_many_arguments)]
     pub fn compose_earth_with_site_and_city(
         theme: VectorEarthTheme,
@@ -1098,16 +1109,16 @@ impl IfcxStage {
         heading_deg: f64,
         address: Option<&str>,
         members: Option<&[StructuralMember]>,
-        ari: Option<&RedundancyAssessment>,
+        eigengate: Option<&RedundancyAssessment>,
         city: Option<&crate::core::gis::IfcxCityScene>,
     ) -> IfcxDocument {
         Self::compose_earth_with_site_city_and_hazard(
-            theme, project, geo_opt, heading_deg, address, members, ari, city, None,
+            theme, project, geo_opt, heading_deg, address, members, eigengate, city, None,
         )
     }
 
     /// Composes the Living Earth base layer (`earth_globe.ifcx`) with an active `BimProject` site
-    /// layer and optional ARI screening overlay into one unified planetary `.ifcx` graph.
+    /// layer and optional EigenGate screening overlay into one unified planetary `.ifcx` graph.
     pub fn compose_earth_with_site(
         theme: VectorEarthTheme,
         project: &BimProject,
@@ -1115,14 +1126,14 @@ impl IfcxStage {
         heading_deg: f64,
         address: Option<&str>,
         members: Option<&[StructuralMember]>,
-        ari: Option<&RedundancyAssessment>,
+        eigengate: Option<&RedundancyAssessment>,
     ) -> IfcxDocument {
-        Self::compose_earth_with_site_and_city(theme, project, geo_opt, heading_deg, address, members, ari, None)
+        Self::compose_earth_with_site_and_city(theme, project, geo_opt, heading_deg, address, members, eigengate, None)
     }
 
     /// Composes an existing base `.ifcx` document with a non-destructive structural retrofit
     /// delta layer (`eigengraph::bim::retrofit_delta`), applying updated meshes, properties,
-    /// new BRB/shear-wall nodes, and refreshed `eigengraph::ari::v2` screening overlays.
+    /// new BRB/shear-wall nodes, and refreshed `eigengraph::eigengate::v2` screening overlays.
     pub fn compose_with_retrofit_delta(
         base_doc: &IfcxDocument,
         retrofit_report: &crate::core::retrofit::StructuralRetrofitReport,
@@ -1135,7 +1146,7 @@ impl IfcxStage {
     }
 
     /// Composes an existing base `.ifcx` document with a non-destructive Two-Stage
-    /// `ARI v2 + StructGNN-CRC` Conformal Screening & Progressive Collapse Cascade overlay
+    /// `EigenGate v2 + StructGNN-CRC` Conformal Screening & Progressive Collapse Cascade overlay
     /// (`eigengraph::analysis::crc_cascade`) without mutating base geometry nodes.
     pub fn compose_with_crc_cascade_overlay(
         base_doc: &IfcxDocument,
@@ -1407,10 +1418,46 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), ts_overlay.clone()]);
         stage.to_composed_document(&format!("{}_trade_study_matrix", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Field Construction QA/QC &
+    /// 1D Rebar BBS Cutting-Stock overlay (`eigengraph::construction::field_qaqc_bbs`).
+    pub fn compose_with_field_qaqc_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::field_fabrication::FieldFabricationIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_field_qaqc_bbs", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcWorkSchedule", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Field QA/QC & Rebar BBS Overlay",
+                "stockLengthM": overlay.stock_length_m,
+                "yieldPct": overlay.material_yield_pct,
+                "openNcrCount": overlay.open_ncr_count,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_FIELD_QAQC_BBS.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/construction/field_qaqc_bbs".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_field_qaqc_bbs", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_TRADE_STUDY_MATRIX) {
+    if node.attributes.contains_key(ns::EG_FIELD_QAQC_BBS) {
+        "Field QA/QC & BBS".to_string()
+    } else if node.attributes.contains_key(ns::EG_TRADE_STUDY_MATRIX) {
         "Trade-Study Matrix".to_string()
     } else if node.attributes.contains_key(ns::EG_GOVERNANCE_SEAL) {
         "Governance Seal".to_string()
@@ -1448,10 +1495,11 @@ fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
     ) || node.path.contains("/city/")
     {
         "City-Builder".to_string()
-    } else if node.attributes.contains_key(ns::EG_ARI)
+    } else if (node.attributes.contains_key(ns::EG_EIGENGATE)
+        || node.attributes.contains_key(ns::EG_EIGENGATE_LEGACY))
         && !node.attributes.contains_key(ns::EG_BIM_ELEMENT)
     {
-        "ARI v2".to_string()
+        "EigenGate v2".to_string()
     } else {
         "BIM Core".to_string()
     }
@@ -1492,7 +1540,7 @@ impl IfcxDocument {
         heading_deg: f64,
         address: Option<&str>,
         members: Option<&[StructuralMember]>,
-        ari: Option<&RedundancyAssessment>,
+        eigengate: Option<&RedundancyAssessment>,
     ) -> Self {
         let slug = sanitize_slug(&project.project_name);
         let mut doc = Self::new(format!("site_{slug}"));
@@ -1777,12 +1825,12 @@ impl IfcxDocument {
             );
         }
 
-        // Optional Non-Destructive 6-DOF FEM & ARI Screening Overlay
-        if ari.is_some() || members.is_some_and(|m| !m.is_empty()) {
-            let analysis_path = format!("{bldg_path}/analysis/ari_v2");
+        // Optional Non-Destructive 6-DOF FEM & EigenGate Screening Overlay
+        if eigengate.is_some() || members.is_some_and(|m| !m.is_empty()) {
+            let analysis_path = format!("{bldg_path}/analysis/eigengate_v2");
             bldg_node
                 .children
-                .insert("ari_v2".to_string(), analysis_path.clone());
+                .insert("eigengate_v2".to_string(), analysis_path.clone());
             let max_dcr = members
                 .map(|ms| {
                     ms.iter()
@@ -1790,10 +1838,10 @@ impl IfcxDocument {
                         .fold(0.0_f64, f64::max)
                 })
                 .unwrap_or(0.0);
-            let overlay = if let Some(a) = ari {
-                IfcxAriOverlay {
-                    ari_system: a.min_system_ari,
-                    ari_average: a.average_ari,
+            let overlay = if let Some(a) = eigengate {
+                IfcxEigenGateOverlay {
+                    eigengate_system: a.min_system_eigengate,
+                    eigengate_average: a.average_eigengate,
                     critical_members_count: a.critical_members_count,
                     max_dcr_pct: max_dcr.max(
                         a.member_results
@@ -1805,18 +1853,18 @@ impl IfcxDocument {
                     is_kinematically_stable: a.kinematic_guard.is_stable,
                 }
             } else {
-                IfcxAriOverlay {
-                    ari_system: members
-                        .and_then(|ms| ms.iter().map(|m| m.ari).reduce(f64::min))
+                IfcxEigenGateOverlay {
+                    eigengate_system: members
+                        .and_then(|ms| ms.iter().map(|m| m.eigengate).reduce(f64::min))
                         .unwrap_or(1.0),
-                    ari_average: members
+                    eigengate_average: members
                         .filter(|ms| !ms.is_empty())
-                        .map(|ms| ms.iter().map(|m| m.ari).sum::<f64>() / ms.len() as f64)
+                        .map(|ms| ms.iter().map(|m| m.eigengate).sum::<f64>() / ms.len() as f64)
                         .unwrap_or(1.0),
                     critical_members_count: members
                         .map(|ms| {
                             ms.iter()
-                                .filter(|m| m.utilization.max(m.dcr_interaction) >= 0.85 || m.ari < 0.50)
+                                .filter(|m| m.utilization.max(m.dcr_interaction) >= 0.85 || m.eigengate < 0.50)
                                 .count()
                         })
                         .unwrap_or(0),
@@ -1828,12 +1876,12 @@ impl IfcxDocument {
             let mut an = IfcxNode::new(analysis_path)
                 .with_class("IfcStructuralAnalysisModel")
                 .with_prop(
-                    "ARI v2 & 6-DOF FEM Screening",
+                    "EigenGate v2 & 6-DOF FEM Screening",
                     "Analytical Overlay",
-                    &format!("System ARI {:.3} | Max DCR {:.1}%", overlay.ari_system, overlay.max_dcr_pct),
+                    &format!("System EigenGate {:.3} | Max DCR {:.1}%", overlay.eigengate_system, overlay.max_dcr_pct),
                 );
             if let Ok(v) = serde_json::to_value(&overlay) {
-                an.attributes.insert(ns::EG_ARI.to_string(), v);
+                an.attributes.insert(ns::EG_EIGENGATE.to_string(), v);
             }
             element_nodes.push(an);
         }
@@ -2525,8 +2573,8 @@ impl IfcxDocument {
 
     /// Streams an external or AI-reconstructed real-building `.ifcx` payload, automatically infers
     /// any missing primary structural framing (`IfcColumn` / `IfcBeam` / `IfcSlab` / `IfcFooting`),
-    /// runs an instant 6-DOF FEM + ARI screening pass, and emits a composed `.ifcx` document with
-    /// embedded `eigengraph::ari::v2` telemetry.
+    /// runs an instant 6-DOF FEM + EigenGate screening pass, and emits a composed `.ifcx` document with
+    /// embedded `eigengraph::eigengate::v2` telemetry.
     pub fn ingest_ai_real_building_with_frame_inference(
         raw: &str,
         filename: &str,
@@ -2602,16 +2650,16 @@ impl IfcxDocument {
             }
             Err(_) => (100.0, 1.0, false),
         };
-        let ari_res = if total_fem_elements <= 72 {
-            AriEngine::evaluate_redundancy_fast(&model).ok()
+        let eigengate_res = if total_fem_elements <= 72 {
+            EigenGateEngine::evaluate_redundancy_fast(&model).ok()
         } else {
             None
         };
-        let (min_ari, average_ari, critical_member_count, svd_nullspace_dim) =
-            if let Some(ref a) = ari_res {
+        let (min_eigengate, average_eigengate, critical_member_count, svd_nullspace_dim) =
+            if let Some(ref a) = eigengate_res {
                 (
-                    a.min_system_ari,
-                    a.average_ari,
+                    a.min_system_eigengate,
+                    a.average_eigengate,
                     a.critical_members_count,
                     a.kinematic_guard.nullspace_dimension,
                 )
@@ -2625,9 +2673,9 @@ impl IfcxDocument {
                 (0.0, 0.0, total_fem_elements, 1)
             };
 
-        let triage_grade = if svd_nullspace_dim == 0 && min_ari >= 0.70 && max_dcr_pct <= 95.0 {
+        let triage_grade = if svd_nullspace_dim == 0 && min_eigengate >= 0.70 && max_dcr_pct <= 95.0 {
             "GREEN (Redundant)".to_string()
-        } else if svd_nullspace_dim == 0 && min_ari >= 0.45 && max_dcr_pct <= 115.0 {
+        } else if svd_nullspace_dim == 0 && min_eigengate >= 0.45 && max_dcr_pct <= 115.0 {
             "AMBER (Monitor)".to_string()
         } else {
             "RED (Retrofit Required)".to_string()
@@ -2640,7 +2688,7 @@ impl IfcxDocument {
             heading_deg,
             (!address.trim().is_empty()).then_some(address.as_str()),
             None,
-            ari_res.as_ref(),
+            eigengate_res.as_ref(),
         );
 
         let report = AiBuildingFrameInferenceReport {
@@ -2653,8 +2701,8 @@ impl IfcxDocument {
             inferred_slabs: proj.slabs.len(),
             inferred_footings: proj.footings.len(),
             total_fem_elements,
-            min_ari,
-            average_ari,
+            min_eigengate,
+            average_eigengate,
             max_dcr_pct,
             critical_member_count,
             svd_nullspace_dim,
@@ -2668,11 +2716,11 @@ impl IfcxDocument {
     // 4. STRUCTURALMODEL (6-DOF FEM) <-> IFCX BRIDGE (REPLACES LEGACY STEP)
     // =========================================================================
 
-    /// Exports a 6-DOF `StructuralModel` (and optional ARI assessment) into a pure `.ifcx` document.
+    /// Exports a 6-DOF `StructuralModel` (and optional EigenGate assessment) into a pure `.ifcx` document.
     /// Replaces legacy `IfcExporter` and `IfcSamExporter`.
     pub fn from_structural_model(
         model: &StructuralModel,
-        ari: Option<&RedundancyAssessment>,
+        eigengate: Option<&RedundancyAssessment>,
         sam_mode: bool,
     ) -> Self {
         let slug = sanitize_slug(&model.name);
@@ -2763,12 +2811,12 @@ impl IfcxDocument {
                 )
                 .with_mesh(&mesh);
 
-            if let Some(a) = ari {
+            if let Some(a) = eigengate {
                 if let Some(mr) = a.member_results.iter().find(|r| r.member_id == e.id) {
                     en.attributes.insert(
-                        ns::EG_ARI.to_string(),
+                        ns::EG_EIGENGATE.to_string(),
                         json!({
-                            "ari": mr.ari,
+                            "eigengate": mr.eigengate,
                             "dcr": mr.utilization_initial,
                             "svdMargin": mr.svd_margin,
                             "isCritical": mr.is_critical
@@ -2814,10 +2862,10 @@ impl IfcxDocument {
             );
         }
 
-        if let Some(a) = ari {
-            let overlay = IfcxAriOverlay {
-                ari_system: a.min_system_ari,
-                ari_average: a.average_ari,
+        if let Some(a) = eigengate {
+            let overlay = IfcxEigenGateOverlay {
+                eigengate_system: a.min_system_eigengate,
+                eigengate_average: a.average_eigengate,
                 critical_members_count: a.critical_members_count,
                 max_dcr_pct: a
                     .member_results
@@ -2828,7 +2876,7 @@ impl IfcxDocument {
                 is_kinematically_stable: a.kinematic_guard.is_stable,
             };
             if let Ok(v) = serde_json::to_value(&overlay) {
-                root.attributes.insert(ns::EG_ARI.to_string(), v);
+                root.attributes.insert(ns::EG_EIGENGATE.to_string(), v);
             }
         }
 
@@ -3144,7 +3192,7 @@ impl IfcxDocument {
     /// Generates a pure exterior massing AI real-world building capture `.ifcx` containing ONLY an
     /// `IfcSite` geodetic anchor and one `IfcBuilding` `usd::usdgeom::mesh` envelope (`12m x 6m x 10.8m`,
     /// zero explicit internal columns/beams/slabs), exercising automatic structural frame inference
-    /// and instant 6-DOF ARI screening upon ingestion.
+    /// and instant 6-DOF EigenGate screening upon ingestion.
     pub fn sample_ai_massing_tower_capture_ifcx(
         lat: f64,
         lon: f64,
@@ -3929,7 +3977,7 @@ mod tests {
     }
 
     #[test]
-    fn phase66_non_destructive_multilayer_composition_earth_ai_user_ari() {
+    fn phase66_non_destructive_multilayer_composition_earth_ai_user_eigengate() {
         // Layer 0: Living Earth Base
         let earth = IfcxStage::build_earth_globe_layer(VectorEarthTheme::CityDaylight);
         // Layer 1: Future AI Real-World Building Capture
@@ -3940,14 +3988,14 @@ mod tests {
             IfcxNode::new("/earth/sites/bandung_ai_capture/buildings/pavilion_01/columns/C1")
                 .with_attr(ns::BSI_PROP, json!({ "material": "High-Strength Concrete fc' 50 MPa" })),
         );
-        // Layer 3: Non-Destructive ARI Analysis Overlay
-        let mut ari_delta = IfcxDocument::new("ari_v2_overlay");
-        ari_delta.add_node(
+        // Layer 3: Non-Destructive EigenGate Analysis Overlay
+        let mut eigengate_delta = IfcxDocument::new("eigengate_v2_overlay");
+        eigengate_delta.add_node(
             IfcxNode::new("/earth/sites/bandung_ai_capture/buildings/pavilion_01")
-                .with_attr(ns::EG_ARI, json!({ "ariSystem": 0.91, "maxDcrPct": 58.4 })),
+                .with_attr(ns::EG_EIGENGATE, json!({ "eigenGateSystem": 0.91, "maxDcrPct": 58.4 })),
         );
 
-        let stage = IfcxStage::compose(&[earth, ai_capture, user_delta, ari_delta]);
+        let stage = IfcxStage::compose(&[earth, ai_capture, user_delta, eigengate_delta]);
         assert_eq!(stage.layer_ids.len(), 4);
         assert!(stage.get("/earth/globe/ocean").is_some());
 
@@ -3962,7 +4010,7 @@ mod tests {
         let bldg = stage
             .get("/earth/sites/bandung_ai_capture/buildings/pavilion_01")
             .expect("composed building");
-        assert!(bldg.attributes.contains_key(ns::EG_ARI));
+        assert!(bldg.attributes.contains_key(ns::EG_EIGENGATE));
     }
 
     #[test]
@@ -4064,7 +4112,7 @@ mod tests {
     }
 
     #[test]
-    fn phase68_ai_real_building_massing_frame_inference_and_instant_ari_triage() {
+    fn phase68_ai_real_building_massing_frame_inference_and_instant_eigengate_triage() {
         let massing_doc = IfcxDocument::sample_ai_massing_tower_capture_ifcx(
             -6.2088,
             106.8456,
@@ -4078,7 +4126,7 @@ mod tests {
             None,
             6.0,
         )
-        .expect("AI massing frame inference & ARI triage");
+        .expect("AI massing frame inference & EigenGate triage");
 
         assert!(report.massing_synthesized);
         assert_eq!(report.inferred_storeys, 3);
@@ -4087,13 +4135,13 @@ mod tests {
         assert!(proj.slabs.len() >= 3);
         assert!(proj.footings.len() >= 6);
         assert_eq!(report.svd_nullspace_dim, 0);
-        assert!(report.min_ari.is_finite() && report.max_dcr_pct.is_finite());
+        assert!(report.min_eigengate.is_finite() && report.max_dcr_pct.is_finite());
         assert!(
             composed
                 .data
                 .iter()
-                .any(|n| n.attributes.contains_key(ns::EG_ARI)),
-            "Composed IFCX output should embed eigengraph::ari::v2 triage overlay"
+                .any(|n| n.attributes.contains_key(ns::EG_EIGENGATE)),
+            "Composed IFCX output should embed eigengraph::eigengate::v2 triage overlay"
         );
     }
 

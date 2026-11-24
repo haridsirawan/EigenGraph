@@ -87,14 +87,14 @@ impl ReliabilityEngine {
         (beta, pf)
     }
 
-    /// Generates a FEMA P-58 / ASCE 41 Multi-State Fragility Curve calibrated to system redundancy (min_ari)
-    pub fn generate_fragility_curve(min_ari: f64, steps: usize) -> Vec<FragilityCurvePoint> {
-        let ari_factor = min_ari.clamp(0.25, 1.0);
+    /// Generates a FEMA P-58 / ASCE 41 Multi-State Fragility Curve calibrated to system redundancy (min_eigengate)
+    pub fn generate_fragility_curve(min_eigengate: f64, steps: usize) -> Vec<FragilityCurvePoint> {
+        let eigengate_factor = min_eigengate.clamp(0.25, 1.0);
         // Median PGA thresholds (in g) scaled by structural redundancy
-        let theta_slight = 0.18 * ari_factor;
-        let theta_moderate = 0.38 * ari_factor;
-        let theta_extensive = 0.68 * ari_factor;
-        let theta_collapse = 1.10 * ari_factor;
+        let theta_slight = 0.18 * eigengate_factor;
+        let theta_moderate = 0.38 * eigengate_factor;
+        let theta_extensive = 0.68 * eigengate_factor;
+        let theta_collapse = 1.10 * eigengate_factor;
 
         let beta_disp = 0.40; // Log-normal standard deviation (dispersion)
         let n = steps.max(5);
@@ -281,7 +281,7 @@ impl ReliabilityEngine {
     pub fn evaluate_full_reliability(
         model: &StructuralModel,
         target_beta: f64,
-        min_ari: f64,
+        min_eigengate: f64,
     ) -> Result<ReliabilityAndClashReport, String> {
         let sol = FemSolver::solve(model)?;
         let v_r = 0.10; // Resistance COV for structural steel (JCSS / AISC)
@@ -310,7 +310,7 @@ impl ReliabilityEngine {
             });
         }
 
-        let fragility_curve = Self::generate_fragility_curve(min_ari, 10);
+        let fragility_curve = Self::generate_fragility_curve(min_eigengate, 10);
         let detected_clashes = Self::detect_3d_spatial_clashes(model, 0.05);
 
         Ok(ReliabilityAndClashReport {

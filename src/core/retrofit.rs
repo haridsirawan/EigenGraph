@@ -1,9 +1,9 @@
 //! retrofit.rs — Automated Structural Retrofit & Non-Destructive `.ifcx` Strengthening Engine (v0.6.9).
 //!
 //! Synthesizes code-informed strengthening interventions from live site-coupled 6-DOF FEM &
-//! Adjusted Redundancy Index (`ARI v2`) screening:
+//! EigenGate (`EigenGate v2`) screening:
 //! - RC Column & Beam Jacketing (`+120 mm` columns, `+60x120 mm` beams) + Pad Footing Enlargement
-//! - Steel Buckling-Restrained Braces (`BRB`) injected across low-ARI structural bays
+//! - Steel Buckling-Restrained Braces (`BRB`) injected across low-EigenGate structural bays
 //! - RC Structural Shear Wall Core Infill (`IfcWall`, `t = 250 mm`)
 //! - Non-destructive IFCX Delta Layer (`eigengraph::bim::retrofit_delta`) ready for
 //!   `IfcxStage::compose` stacking over base building `.ifcx` models.
@@ -13,11 +13,11 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::ari::{AriEngine, MARGIN_TOL};
+use crate::core::eigengate::{EigenGateEngine, MARGIN_TOL};
 use crate::core::bim::{
     BimElementKind, BimProject, BimRun, BimWall, RunCategory, RunJustify,
 };
-use crate::core::ifcx::{ns, sanitize_slug, IfcxAriOverlay, IfcxDocument, IfcxImport, IfcxNode, UsdGeomMesh};
+use crate::core::ifcx::{ns, sanitize_slug, IfcxEigenGateOverlay, IfcxDocument, IfcxImport, IfcxNode, UsdGeomMesh};
 use crate::core::lifecycle_ops::SiteEnvironmentalCoupling;
 use crate::core::solver::FemSolver;
 
@@ -117,10 +117,10 @@ pub struct RetrofitElementAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StructuralRetrofitReport {
     pub strategy: RetrofitStrategy,
-    pub before_min_ari: f64,
-    pub after_min_ari: f64,
-    pub before_avg_ari: f64,
-    pub after_avg_ari: f64,
+    pub before_min_eigengate: f64,
+    pub after_min_eigengate: f64,
+    pub before_avg_eigengate: f64,
+    pub after_avg_eigengate: f64,
     pub before_max_dcr_pct: f64,
     pub after_max_dcr_pct: f64,
     pub before_critical_count: usize,
@@ -145,8 +145,8 @@ pub struct StructuralRetrofitReport {
 
 #[derive(Debug, Clone, Copy)]
 struct ElementHealthMetrics {
-    min_ari: f64,
-    avg_ari: f64,
+    min_eigengate: f64,
+    avg_eigengate: f64,
     max_dcr_pct: f64,
     critical_count: usize,
     svd_mechanisms: usize,
@@ -168,7 +168,7 @@ fn evaluate_site_coupled_health(
         return Err("No analytical 3D frame elements available to retrofit.".to_string());
     }
     let fea = FemSolver::solve(&fem)?;
-    let eval = AriEngine::evaluate_redundancy_fast(&fem)?;
+    let eval = EigenGateEngine::evaluate_redundancy_fast(&fem)?;
 
     let mut fem_to_bim: HashMap<usize, (BimElementKind, usize)> =
         HashMap::with_capacity(fem_map.len());
@@ -194,14 +194,14 @@ fn evaluate_site_coupled_health(
         }
         if let Some(&(kind, bid)) = fem_to_bim.get(&res.member_id) {
             let entry = bim_metrics.entry((kind, bid)).or_insert((1.0, 0.0));
-            entry.0 = entry.0.min(res.ari);
+            entry.0 = entry.0.min(res.eigengate);
             entry.1 = entry.1.max(eff_dcr);
         }
     }
 
     let metrics = ElementHealthMetrics {
-        min_ari: eval.min_system_ari,
-        avg_ari: eval.average_ari,
+        min_eigengate: eval.min_system_eigengate,
+        avg_eigengate: eval.average_eigengate,
         max_dcr_pct: max_dcr,
         critical_count: eval.critical_members_count,
         svd_mechanisms: svd_mechs,
@@ -250,9 +250,9 @@ fn rank_bottleneck_ids(
     let mut scored: Vec<(usize, f64, bool)> = all_ids
         .iter()
         .map(|&id| {
-            let (ari, dcr) = bim_metrics.get(&(kind, id)).copied().unwrap_or((0.85, 0.45));
-            let is_bottleneck = ari < 0.80 || dcr > 0.70;
-            let severity = dcr + (1.0 - ari).max(0.0);
+            let (eigengate, dcr) = bim_metrics.get(&(kind, id)).copied().unwrap_or((0.85, 0.45));
+            let is_bottleneck = eigengate < 0.80 || dcr > 0.70;
+            let severity = dcr + (1.0 - eigengate).max(0.0);
             (id, severity, is_bottleneck)
         })
         .collect();
@@ -266,7 +266,7 @@ fn rank_bottleneck_ids(
     if !flagged.is_empty() {
         return flagged;
     }
-    // Strengthen uniform baseline frames uniformly so no un-jacketed members cap min_ari
+    // Strengthen uniform baseline frames uniformly so no un-jacketed members cap min_eigengate
     all_ids.iter().copied().collect()
 }
 
@@ -495,15 +495,15 @@ fn apply_brb_bracing_pass(
                 let dx = (cb.pos.0 - ca.pos.0).abs();
                 let dy = (cb.pos.1 - ca.pos.1).abs();
                 let is_orthogonal = dx <= 250.0 || dy <= 250.0;
-                let (ari_a, dcr_a) = bim_metrics
+                let (eigengate_a, dcr_a) = bim_metrics
                     .get(&(BimElementKind::Column, ca.id))
                     .copied()
                     .unwrap_or((0.85, 0.45));
-                let (ari_b, dcr_b) = bim_metrics
+                let (eigengate_b, dcr_b) = bim_metrics
                     .get(&(BimElementKind::Column, cb.id))
                     .copied()
                     .unwrap_or((0.85, 0.45));
-                let severity = (1.0 - ari_a.min(ari_b)).max(0.0)
+                let severity = (1.0 - eigengate_a.min(eigengate_b)).max(0.0)
                     + dcr_a.max(dcr_b)
                     + if is_orthogonal { 0.35 } else { 0.0 };
                 let x_major = dx >= dy;
@@ -626,15 +626,15 @@ fn apply_shear_wall_infill_pass(
             let dx = (cb.pos.0 - ca.pos.0).abs();
             let dy = (cb.pos.1 - ca.pos.1).abs();
             let orthogonal_bonus = if dx <= 250.0 || dy <= 250.0 { 0.5 } else { 0.0 };
-            let (ari_a, dcr_a) = bim_metrics
+            let (eigengate_a, dcr_a) = bim_metrics
                 .get(&(BimElementKind::Column, ca.id))
                 .copied()
                 .unwrap_or((0.85, 0.45));
-            let (ari_b, dcr_b) = bim_metrics
+            let (eigengate_b, dcr_b) = bim_metrics
                 .get(&(BimElementKind::Column, cb.id))
                 .copied()
                 .unwrap_or((0.85, 0.45));
-            let score = (1.0 - ari_a.min(ari_b)).max(0.0) + dcr_a.max(dcr_b) + orthogonal_bonus;
+            let score = (1.0 - eigengate_a.min(eigengate_b)).max(0.0) + dcr_a.max(dcr_b) + orthogonal_bonus;
             candidates.push((i, j, score, dx >= dy));
         }
     }
@@ -753,22 +753,22 @@ fn build_retrofit_delta_ifcx(
             .insert(ns::EG_BIM_PROJECT.to_string(), v);
     }
 
-    let ari_overlay = IfcxAriOverlay {
-        ari_system: after.min_ari,
-        ari_average: after.avg_ari,
+    let eigengate_overlay = IfcxEigenGateOverlay {
+        eigengate_system: after.min_eigengate,
+        eigengate_average: after.avg_eigengate,
         critical_members_count: after.critical_count,
         max_dcr_pct: after.max_dcr_pct,
         svd_rank_deficiency: after.svd_mechanisms,
         is_kinematically_stable: after.svd_mechanisms == 0,
     };
-    if let Ok(v) = serde_json::to_value(&ari_overlay) {
-        bldg_node.attributes.insert(ns::EG_ARI.to_string(), v);
+    if let Ok(v) = serde_json::to_value(&eigengate_overlay) {
+        bldg_node.attributes.insert(ns::EG_EIGENGATE.to_string(), v);
     }
 
     let delta_summary_json = json!({
         "strategy": strategy.label(),
-        "beforeMinAri": before.min_ari,
-        "afterMinAri": after.min_ari,
+        "beforeMinEigenGate": before.min_eigengate,
+        "afterMinEigenGate": after.min_eigengate,
         "beforeMaxDcrPct": before.max_dcr_pct,
         "afterMaxDcrPct": after.max_dcr_pct,
         "beforeCriticalCount": before.critical_count,
@@ -798,9 +798,9 @@ fn build_retrofit_delta_ifcx(
             "Automated Structural Retrofit Delta",
             strategy.label(),
             &format!(
-                "ARI {:.3}->{:.3}, DCR {:.1}%->{:.1}%, Cost ${:.0}, Carbon {:.0} kgCO2e",
-                before.min_ari,
-                after.min_ari,
+                "EigenGate {:.3}->{:.3}, DCR {:.1}%->{:.1}%, Cost ${:.0}, Carbon {:.0} kgCO2e",
+                before.min_eigengate,
+                after.min_eigengate,
                 before.max_dcr_pct,
                 after.max_dcr_pct,
                 cost_usd,
@@ -808,8 +808,8 @@ fn build_retrofit_delta_ifcx(
             ),
         )
         .with_attr(NS_EG_RETROFIT, delta_summary_json);
-    if let Ok(v) = serde_json::to_value(&ari_overlay) {
-        delta_node.attributes.insert(ns::EG_ARI.to_string(), v);
+    if let Ok(v) = serde_json::to_value(&eigengate_overlay) {
+        delta_node.attributes.insert(ns::EG_EIGENGATE.to_string(), v);
     }
     doc.add_node(delta_node);
 
@@ -966,7 +966,7 @@ fn build_retrofit_delta_ifcx(
 }
 
 /// Synthesizes an automated structural retrofit plan + non-destructive `.ifcx` delta layer
-/// verified against site-coupled 6-DOF FEM & `ARI v2` redundancy metrics.
+/// verified against site-coupled 6-DOF FEM & `EigenGate v2` redundancy metrics.
 pub fn synthesize_structural_retrofit(
     project: &BimProject,
     strategy: RetrofitStrategy,
@@ -1047,11 +1047,11 @@ pub fn synthesize_structural_retrofit(
     let estimated_cost_usd: f64 = actions.iter().map(|a| a.cost_delta_usd).sum();
     let embodied_carbon_kg_co2e: f64 = actions.iter().map(|a| a.carbon_delta_kg_co2e).sum();
 
-    let ari_gain = (after.min_ari - before.min_ari).max(0.0) * 100.0
-        + (after.avg_ari - before.avg_ari).max(0.0) * 50.0;
+    let eigengate_gain = (after.min_eigengate - before.min_eigengate).max(0.0) * 100.0
+        + (after.avg_eigengate - before.avg_eigengate).max(0.0) * 50.0;
     let dcr_drop = (before.max_dcr_pct - after.max_dcr_pct).max(0.0);
     let cost_penalty = (estimated_cost_usd / 2500.0).clamp(0.0, 25.0);
-    let pareto_efficiency_score = (55.0 + ari_gain * 1.4 + dcr_drop * 0.7 - cost_penalty).clamp(15.0, 99.5);
+    let pareto_efficiency_score = (55.0 + eigengate_gain * 1.4 + dcr_drop * 0.7 - cost_penalty).clamp(15.0, 99.5);
 
     let retrofit_delta_ifcx = build_retrofit_delta_ifcx(
         &retro,
@@ -1076,10 +1076,10 @@ pub fn synthesize_structural_retrofit(
     );
 
     let summary = format!(
-        "[Retrofit {}]: ARI {:.3}->{:.3} | Max DCR {:.1}%->{:.1}% | +{} BRB, +{} Jacket Cols, +{} Beams, +{} ShearWall, +{} Footings | Cost ${:.0} | Embodied Carbon {:.0} kgCO2e",
+        "[Retrofit {}]: EigenGate {:.3}->{:.3} | Max DCR {:.1}%->{:.1}% | +{} BRB, +{} Jacket Cols, +{} Beams, +{} ShearWall, +{} Footings | Cost ${:.0} | Embodied Carbon {:.0} kgCO2e",
         strategy.short_label(),
-        before.min_ari,
-        after.min_ari,
+        before.min_eigengate,
+        after.min_eigengate,
         before.max_dcr_pct,
         after.max_dcr_pct,
         added_brb_braces,
@@ -1093,10 +1093,10 @@ pub fn synthesize_structural_retrofit(
 
     Ok(StructuralRetrofitReport {
         strategy,
-        before_min_ari: before.min_ari,
-        after_min_ari: after.min_ari,
-        before_avg_ari: before.avg_ari,
-        after_avg_ari: after.avg_ari,
+        before_min_eigengate: before.min_eigengate,
+        after_min_eigengate: after.min_eigengate,
+        before_avg_eigengate: before.avg_eigengate,
+        after_avg_eigengate: after.avg_eigengate,
         before_max_dcr_pct: before.max_dcr_pct,
         after_max_dcr_pct: after.max_dcr_pct,
         before_critical_count: before.critical_count,
@@ -1127,7 +1127,7 @@ mod tests {
     use crate::core::ifcx::IfcxStage;
 
     #[test]
-    fn phase69_retrofit_synthesizes_and_improves_ari_across_all_strategies() {
+    fn phase69_retrofit_synthesizes_and_improves_eigengate_across_all_strategies() {
         let mut bus = BimCommandBus::new();
         bus.execute_natural_language("portal 3x2 @6m 2floors")
             .expect("portal frame");
@@ -1146,10 +1146,10 @@ mod tests {
                 "Strategy {strategy:?} must produce concrete/steel retrofit actions"
             );
             assert!(
-                report.after_min_ari + 1e-6 >= report.before_min_ari,
-                "Strategy {strategy:?} reduced min ARI ({} -> {})",
-                report.before_min_ari,
-                report.after_min_ari
+                report.after_min_eigengate + 1e-6 >= report.before_min_eigengate,
+                "Strategy {strategy:?} reduced min EigenGate ({} -> {})",
+                report.before_min_eigengate,
+                report.after_min_eigengate
             );
             assert!(
                 report.after_max_dcr_pct <= report.before_max_dcr_pct + 1.0,
@@ -1172,8 +1172,8 @@ mod tests {
                     .retrofit_delta_ifcx
                     .data
                     .iter()
-                    .any(|n| n.attributes.contains_key(ns::EG_ARI)),
-                "Delta IFCX must carry eigengraph::ari::v2 verification attributes"
+                    .any(|n| n.attributes.contains_key(ns::EG_EIGENGATE)),
+                "Delta IFCX must carry eigengraph::eigengate::v2 verification attributes"
             );
         }
 
@@ -1204,6 +1204,6 @@ mod tests {
         assert!(composed
             .data
             .iter()
-            .any(|n| n.attributes.contains_key(ns::EG_ARI)));
+            .any(|n| n.attributes.contains_key(ns::EG_EIGENGATE)));
     }
 }

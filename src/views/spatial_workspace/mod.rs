@@ -131,6 +131,9 @@ pub struct SpatialWorkspaceState {
     // Phase 80: Collaborative Multi-Layer IFCX Governance & 3D District Risk Field Drawer
     pub collab_drawer_open: bool,
     pub collab_drawer_tab: usize,
+    // Phase 82: Field Construction QA/QC Spatial Waypoints & 1D Rebar BBS Cut-List Drawer
+    pub field_qaqc_drawer_open: bool,
+    pub field_qaqc_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -231,6 +234,8 @@ impl Default for SpatialWorkspaceState {
             evacuation_drawer_open: false,
             collab_drawer_open: false,
             collab_drawer_tab: 0,
+            field_qaqc_drawer_open: false,
+            field_qaqc_drawer_tab: 0,
         }
     }
 }
@@ -258,6 +263,7 @@ impl SpatialWorkspaceState {
             || self.shm_drawer_open
             || self.evacuation_drawer_open
             || self.collab_drawer_open
+            || self.field_qaqc_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -279,6 +285,7 @@ impl SpatialWorkspaceState {
         self.shm_drawer_open = false;
         self.evacuation_drawer_open = false;
         self.collab_drawer_open = false;
+        self.field_qaqc_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -343,6 +350,11 @@ impl SpatialWorkspaceState {
         } else {
             self.collab_drawer_open = !self.collab_drawer_open;
         }
+        if drawer != "field_qaqc" {
+            self.field_qaqc_drawer_open = false;
+        } else {
+            self.field_qaqc_drawer_open = !self.field_qaqc_drawer_open;
+        }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
@@ -373,6 +385,13 @@ impl SpatialWorkspaceState {
         self.collab_drawer_open = true;
     }
 
+    /// Idempotently opens the Phase 82 Field Construction QA/QC & 1D Rebar BBS Cut-List drawer.
+    pub fn open_field_qaqc_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.field_qaqc_drawer_tab = tab.min(1);
+        self.field_qaqc_drawer_open = true;
+    }
+
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.
     /// Fast O(M) structural health summary using the cached `EarthStructuralRenderCache` lookup table.
     pub fn structural_health_summary_cached(
@@ -385,16 +404,16 @@ impl SpatialWorkspaceState {
             let mut worst_target: Option<SmartSelectionTarget> = None;
             let mut worst_score = -1.0_f64;
             let mut max_dcr = 0.0_f64;
-            let mut min_ari = 1.0_f64;
+            let mut min_eigengate = 1.0_f64;
             let mut crit_count = 0usize;
             for m in members {
                 let dcr_pct = m.utilization * 100.0;
                 max_dcr = max_dcr.max(dcr_pct);
-                min_ari = min_ari.min(m.ari);
-                if m.is_critical || m.ari < 0.70 || m.utilization > 0.95 {
+                min_eigengate = min_eigengate.min(m.eigengate);
+                if m.is_critical || m.eigengate < 0.70 || m.utilization > 0.95 {
                     crit_count += 1;
                 }
-                let severity = m.utilization + (1.0 - m.ari).max(0.0);
+                let severity = m.utilization + (1.0 - m.eigengate).max(0.0);
                 if severity > worst_score {
                     if let Some((kind, id)) = fem_cache.bim_ref(m.id) {
                         worst_score = severity;
@@ -402,7 +421,7 @@ impl SpatialWorkspaceState {
                     }
                 }
             }
-            return (worst_target, max_dcr, min_ari, crit_count);
+            return (worst_target, max_dcr, min_eigengate, crit_count);
         }
         self.structural_health_summary(project, members)
     }
@@ -415,7 +434,7 @@ impl SpatialWorkspaceState {
         let mut worst_target: Option<SmartSelectionTarget> = None;
         let mut worst_score = -1.0_f64;
         let mut max_dcr = 0.0_f64;
-        let mut min_ari = 1.0_f64;
+        let mut min_eigengate = 1.0_f64;
         let mut crit_count = 0usize;
         let (_, fem_map) = project.to_structural_model_with_map();
         let mut fem_to_bim = std::collections::HashMap::with_capacity(fem_map.len());
@@ -425,11 +444,11 @@ impl SpatialWorkspaceState {
         for m in members {
             let dcr_pct = m.utilization * 100.0;
             max_dcr = max_dcr.max(dcr_pct);
-            min_ari = min_ari.min(m.ari);
-            if m.is_critical || m.ari < 0.70 || m.utilization > 0.95 {
+            min_eigengate = min_eigengate.min(m.eigengate);
+            if m.is_critical || m.eigengate < 0.70 || m.utilization > 0.95 {
                 crit_count += 1;
             }
-            let severity = m.utilization + (1.0 - m.ari).max(0.0);
+            let severity = m.utilization + (1.0 - m.eigengate).max(0.0);
             if severity > worst_score {
                 if let Some(&(kind, id)) = fem_to_bim.get(&m.id) {
                     worst_score = severity;
@@ -437,7 +456,7 @@ impl SpatialWorkspaceState {
                 }
             }
         }
-        (worst_target, max_dcr, min_ari, crit_count)
+        (worst_target, max_dcr, min_eigengate, crit_count)
     }
 
     /// Formats top-6 bottleneck BIM elements with exact IDs & section dimensions for Gemini prompts.
@@ -470,8 +489,8 @@ impl SpatialWorkspaceState {
                 };
                 if let Some(desc) = tag {
                     ranked.push((
-                        m.utilization + (1.0 - m.ari).max(0.0),
-                        format!("{desc}: DCR={:.1}%, ARI={:.3}", m.utilization * 100.0, m.ari),
+                        m.utilization + (1.0 - m.eigengate).max(0.0),
+                        format!("{desc}: DCR={:.1}%, EigenGate={:.3}", m.utilization * 100.0, m.eigengate),
                     ));
                 }
             }
@@ -1139,7 +1158,7 @@ impl SpatialWorkspaceState {
         ai_assistant.chat_history.clear();
         ai_assistant.chat_history.push(crate::models::ChatMessage {
             is_user: false,
-            message: "Ready in Antigravity Agent Studio. Add a Vault folder, attach @ context, or ask me to fly Earth, generate BIM frames, or verify FEM/ARI redundancy.".to_string(),
+            message: "Ready in Antigravity Agent Studio. Add a Vault folder, attach @ context, or ask me to fly Earth, generate BIM frames, or verify FEM/EigenGate redundancy.".to_string(),
             time: crate::core::web_bridge::unix_timestamp_label(),
         });
         self.turn_metadata.clear();

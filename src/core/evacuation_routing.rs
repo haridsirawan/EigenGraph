@@ -592,9 +592,9 @@ pub fn evaluate_evacuation_and_lifelines(
             if cx.hypot(cy) > 1500.0 {
                 continue;
             }
-            let placard = if b.max_dcr >= 1.05 || b.min_ari < 0.65 {
+            let placard = if b.max_dcr >= 1.05 || b.min_eigengate < 0.65 {
                 Atc20Placard::UnsafeRed
-            } else if b.max_dcr >= 0.85 || b.min_ari < 0.80 {
+            } else if b.max_dcr >= 0.85 || b.min_eigengate < 0.80 {
                 Atc20Placard::RestrictedYellow
             } else {
                 Atc20Placard::InspectedGreen

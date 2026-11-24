@@ -26,7 +26,7 @@ pub enum ResearchSubTab {
     HydrologyFloodplain,
     ConceptFeasibility,
     RegulatoryCodes,
-    AriFormulations,
+    EigenGateFormulations,
 }
 
 #[derive(Clone, Debug)]
@@ -472,7 +472,7 @@ impl ResearchConceptView {
                         self.render_concept_feasibility(ui, theme, active_pillar)
                     }
                     ResearchSubTab::RegulatoryCodes => self.render_regulatory_codes(ui, theme),
-                    ResearchSubTab::AriFormulations => self.render_ari_formulations(ui, theme),
+                    ResearchSubTab::EigenGateFormulations => self.render_eigengate_formulations(ui, theme),
                 }
 
                 ui.add_space(24.0);
@@ -503,8 +503,8 @@ impl ResearchConceptView {
                 "📜 Design Codes (SNI / AISC / UFC)",
             ),
             (
-                ResearchSubTab::AriFormulations,
-                "🔬 Official ARI Formulations",
+                ResearchSubTab::EigenGateFormulations,
+                "🔬 Official EigenGate Formulations",
             ),
         ];
         ui_kit::subtab_bar(ui, theme, "research_subtab_bar", &mut self.active_subtab, &tabs);
@@ -1971,7 +1971,7 @@ impl ResearchConceptView {
                         ui.add_space(4.0);
                         ui.label(
                             RichText::new(
-                                "Early stage integration of design ideas, river clear span limitations, setting ARI redundancy target ≥ 0.85, and budget readiness.",
+                                "Early stage integration of design ideas, river clear span limitations, setting EigenGate redundancy target ≥ 0.85, and budget readiness.",
                             )
                             .size(12.0)
                             .color(theme.text_secondary),
@@ -2012,7 +2012,7 @@ impl ResearchConceptView {
                 ui,
                 theme,
                 "REDUNDANCY TARGET",
-                "ARI ≥ 0.85",
+                "EigenGate ≥ 0.85",
                 "Grade A Criteria: Free of Single Point of Failure",
                 theme.accent_blue,
             ),
@@ -2058,15 +2058,15 @@ impl ResearchConceptView {
                     (
                         "Option 1: Red Steel Warren Bowstring Truss (Selected)",
                         "Span 24.0m, Height 3.2m",
-                        "ARI = 0.94",
+                        "EigenGate = 0.94",
                         "IDR 3.84 B",
-                        "Optimum: Highest ARI score, controlled cost, iconic aesthetics",
+                        "Optimum: Highest EigenGate score, controlled cost, iconic aesthetics",
                         true,
                     ),
                     (
                         "Option 2: Twin Composite I-Girder System",
                         "Span 24.0m, 4 Girders",
-                        "ARI = 0.62",
+                        "EigenGate = 0.62",
                         "IDR 3.65 B",
                         "Vulnerable: Large midspan deflection, low redundancy",
                         false,
@@ -2074,14 +2074,14 @@ impl ResearchConceptView {
                     (
                         "Option 3: Cantilever Pratt Truss",
                         "Span 24.0m, Sub-Truss 12m",
-                        "ARI = 0.74",
+                        "EigenGate = 0.74",
                         "IDR 4.05 B",
                         "Fair: Efficient erection but higher material cost",
                         false,
                     ),
                 ];
 
-                for (name, spec, ari, cost, notes, is_best) in rows {
+                for (name, spec, eigengate, cost, notes, is_best) in rows {
                     let fill = if is_best {
                         theme.accent_blue.gamma_multiply(0.10)
                     } else {
@@ -2129,7 +2129,7 @@ impl ResearchConceptView {
                                 });
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     ui.vertical(|ui| {
-                                        ui.label(RichText::new(ari).size(13.0).strong().color(
+                                        ui.label(RichText::new(eigengate).size(13.0).strong().color(
                                             if is_best {
                                                 theme.accent_green
                                             } else {
@@ -2230,7 +2230,7 @@ impl ResearchConceptView {
             });
     }
 
-    fn render_ari_formulations(&mut self, ui: &mut Ui, theme: &MacTheme) {
+    fn render_eigengate_formulations(&mut self, ui: &mut Ui, theme: &MacTheme) {
         Frame::new()
             .fill(theme.bg_card)
             .corner_radius(CornerRadius::same(10))
@@ -2243,7 +2243,7 @@ impl ResearchConceptView {
                         AppIcon::Target,
                         15.0,
                         theme.text_primary,
-                        "Official Theoretical Foundation: Adjusted Redundancy Index (EigenGraph 2026)",
+                        "Official Theoretical Foundation: EigenGate (EigenGraph 2026)",
                         13.5,
                         theme.text_primary,
                         true,
@@ -2275,8 +2275,8 @@ impl ResearchConceptView {
                         "Traces topological redundancy of alternative load transfer paths.",
                     ),
                     (
-                        "4. Multiplicative Adjusted Redundancy Index Core (Equation 2.17)",
-                        "ARI_e = RR_e × (1.0 - U_e^*)",
+                        "4. Multiplicative EigenGate Core (Equation 2.17)",
+                        "EigenGate_e = RR_e × (1.0 - U_e^*)",
                         "Integrates topological redundancy ratio with remaining elastic reserve of the member.",
                     ),
                     (

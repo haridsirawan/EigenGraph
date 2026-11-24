@@ -908,7 +908,7 @@ impl SpatialWorkspaceState {
                             ),
                             (
                                 AiContextAttachment::FemRedundancy,
-                                "FEM Stiffness & ARI Matrix",
+                                "FEM Stiffness & EigenGate Matrix",
                                 "DCR%, SVD nullspace & critical members".to_string(),
                             ),
                             (
@@ -1303,11 +1303,11 @@ impl SpatialWorkspaceState {
                                         theme,
                                         None,
                                         format!(
-                                            "{} [{}] • {} • ARI {:.2}",
+                                            "{} [{}] • {} • EigenGate {:.2}",
                                             cp.checkpoint_id,
                                             cp.approval_status.short_label(),
                                             cp.short_sha256(),
-                                            cp.kpi.min_ari
+                                            cp.kpi.min_eigengate
                                         ),
                                         sel,
                                         Color32::from_rgb(sr, sg, sb),
@@ -1497,7 +1497,7 @@ impl SpatialWorkspaceState {
                             "Recompute",
                             false,
                             theme.accent_blue,
-                            "Re-evaluate IDW Spatial Risk Field uniting ARI, ATC-20, PML-90, SSI & Evacuation",
+                            "Re-evaluate IDW Spatial Risk Field uniting EigenGate, ATC-20, PML-90, SSI & Evacuation",
                         )
                         .clicked()
                         {
@@ -1609,8 +1609,8 @@ impl SpatialWorkspaceState {
                                 );
                                 ui.label(
                                     RichText::new(format!(
-                                        "{} ({}) • ARI {:.2} • {:.1} {unit}",
-                                        h.name, h.atc20_tag, h.min_ari, h.metric_value
+                                        "{} ({}) • EigenGate {:.2} • {:.1} {unit}",
+                                        h.name, h.atc20_tag, h.min_eigengate, h.metric_value
                                     ))
                                     .size(8.8)
                                     .color(theme.text_secondary),
@@ -1687,7 +1687,7 @@ impl SpatialWorkspaceState {
                             "Run Trade-Study",
                             true,
                             theme.accent_blue,
-                            "Evaluate all 6 structural alternatives across ARI, DCR%, Cost & Carbon",
+                            "Evaluate all 6 structural alternatives across EigenGate, DCR%, Cost & Carbon",
                         )
                         .clicked()
                         {
@@ -1759,9 +1759,9 @@ impl SpatialWorkspaceState {
                                 };
                                 ui.label(
                                     RichText::new(format!(
-                                        "{} | ARI {:.2} | DCR {:.0}% | ${:.0}k | {:.0}t",
+                                        "{} | EigenGate {:.2} | DCR {:.0}% | ${:.0}k | {:.0}t",
                                         s.archetype.short_label(),
-                                        s.min_ari,
+                                        s.min_eigengate,
                                         s.max_dcr_pct,
                                         s.estimated_cost_usd * 0.001,
                                         s.embodied_carbon_tco2e,
@@ -1810,7 +1810,7 @@ impl SpatialWorkspaceState {
                             "Audit Permit",
                             false,
                             theme.accent_blue,
-                            "Evaluate 10 regulatory clauses (SNI 1726/2847/8460, ARI v2, ATC-20, FEMA P-58, IFCX Seal)",
+                            "Evaluate 10 regulatory clauses (SNI 1726/2847/8460, EigenGate v2, ATC-20, FEMA P-58, IFCX Seal)",
                         )
                         .clicked()
                         {
@@ -1874,6 +1874,431 @@ impl SpatialWorkspaceState {
                         );
                     }
                 }
+                });
+            });
+        });
+    }
+
+    /// Phase 82 (`v0.8.2`): Width-first Dynamic Island drawer for Field Construction QA/QC
+    /// Spatial Waypoints, 1D Rebar BBS Cutting-Stock Optimization & Sheet `S-103` Fabrication Annex.
+    pub(super) fn render_field_qaqc_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Wrench,
+                13.0,
+                theme.accent_blue,
+                "Field QA/QC & Rebar BBS",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [(0usize, "Rebar BBS & Cut-List"), (1usize, "Field Waypoints & ITP/NCR")] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.field_qaqc_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.field_qaqc_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Field QA/QC & Rebar BBS drawer",
+            )
+            .clicked()
+            {
+                self.field_qaqc_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        let tab = self.field_qaqc_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(9, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    if tab == 0 {
+                        if is_left {
+                            ui.label(
+                                RichText::new("1D Master Stock Bar Cutting-Stock Optimizer")
+                                    .size(10.0)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.horizontal_wrapped(|ui| {
+                                ui.set_max_width(inner_w);
+                                ui.label(RichText::new("Stock:").size(9.0).color(theme.text_muted));
+                                for stock_m in [12.0_f64, 6.0_f64] {
+                                    let active = (universal_canvas.field_fab_config.stock_length_m - stock_m).abs() < 0.2;
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        None,
+                                        format!("{stock_m:.0}.0 m"),
+                                        active,
+                                        theme.accent_blue,
+                                        "Select commercial master rebar stock bar length",
+                                    )
+                                    .clicked()
+                                    {
+                                        universal_canvas.field_fab_config.stock_length_m = stock_m;
+                                        actions.run_field_fabrication = Some(stock_m);
+                                    }
+                                }
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    Some(AppIcon::Bolt),
+                                    "Optimize BBS",
+                                    false,
+                                    theme.accent_green,
+                                    "Compute SNI 2847 Bar Bending Schedule & 1D BFD cut-list",
+                                )
+                                .clicked()
+                                {
+                                    actions.run_field_fabrication =
+                                        Some(universal_canvas.field_fab_config.stock_length_m);
+                                }
+                            });
+
+                            if let Some(ref rep) = universal_canvas.last_field_fab_report {
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Yield: {:.1}%  |  Scrap: {:.1}%  |  Bars: {} x {:.0}m",
+                                        rep.cso_report.material_yield_pct,
+                                        rep.cso_report.scrap_waste_pct,
+                                        rep.cso_report.master_bars_used,
+                                        rep.cso_report.stock_length_m,
+                                    ))
+                                    .size(9.2)
+                                    .strong()
+                                    .monospace()
+                                    .color(theme.accent_green),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Rebar Mass: {:.0} kg  |  Reusable Offcut: {:.1}m  |  Save ~${:.0}",
+                                        rep.total_rebar_weight_kg,
+                                        rep.cso_report.reusable_offcut_m,
+                                        rep.estimated_savings_usd,
+                                    ))
+                                    .size(8.8)
+                                    .monospace()
+                                    .color(theme.text_secondary),
+                                );
+                            } else {
+                                ui.label(
+                                    RichText::new("Click 'Optimize BBS' or /bbs to compute yield & cut patterns.")
+                                        .size(8.8)
+                                        .color(theme.text_muted),
+                                );
+                            }
+
+                            ui.add_space(3.0);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.set_max_width(inner_w);
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    Some(AppIcon::Printer),
+                                    "Sheet S-103 .svg",
+                                    false,
+                                    theme.accent_green,
+                                    "Export A3 Pure-Vector Rebar BBS & Field QA/QC Shop Annex (Sheet S-103)",
+                                )
+                                .clicked()
+                                {
+                                    actions.export_shop_drawing_svg = true;
+                                }
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    Some(AppIcon::SaveDisk),
+                                    "BBS .csv",
+                                    false,
+                                    theme.accent_blue,
+                                    "Export Bar Bending Schedule CSV",
+                                )
+                                .clicked()
+                                {
+                                    actions.export_bbs_csv = true;
+                                }
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    Some(AppIcon::SaveDisk),
+                                    "Cut-List .csv",
+                                    false,
+                                    theme.accent_blue,
+                                    "Export 1D CAM Cutting Pattern CSV",
+                                )
+                                .clicked()
+                                {
+                                    actions.export_cutlist_csv = true;
+                                }
+                            });
+                        } else {
+                            ui.label(
+                                RichText::new("Pure-Vector Stock Bar Cutting Patterns")
+                                    .size(10.0)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            if let Some(ref rep) = universal_canvas.last_field_fab_report {
+                                let bar_count = rep.cso_report.bars.len().min(5);
+                                if bar_count > 0 {
+                                    let chart_h = (bar_count as f32) * 18.0 + 8.0;
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        Vec2::new(inner_w, chart_h),
+                                        egui::Sense::hover(),
+                                    );
+                                    let p = ui.painter_at(rect);
+                                    let stock_m = rep.cso_report.stock_length_m.max(1.0);
+                                    let bar_x0 = rect.left() + 42.0;
+                                    let bar_w = (rect.width() - 48.0).max(40.0);
+                                    for (idx, bar) in rep.cso_report.bars.iter().take(5).enumerate() {
+                                        let y = rect.top() + 4.0 + (idx as f32) * 18.0;
+                                        p.text(
+                                            egui::pos2(rect.left() + 2.0, y + 6.5),
+                                            egui::Align2::LEFT_CENTER,
+                                            format!("#{}", bar.bar_index),
+                                            egui::FontId::monospace(8.5),
+                                            theme.text_secondary,
+                                        );
+                                        let track = egui::Rect::from_min_size(
+                                            egui::pos2(bar_x0, y),
+                                            Vec2::new(bar_w, 13.0),
+                                        );
+                                        p.rect_filled(track, 2.0, theme.bg_card.gamma_multiply(0.75));
+                                        for (ci, cut) in bar.cuts.iter().enumerate() {
+                                            let sx = bar_x0 + ((cut.start_m / stock_m) as f32) * bar_w;
+                                            let cw = (((cut.length_m / stock_m) as f32) * bar_w).max(2.0);
+                                            let col = if ci % 2 == 0 {
+                                                theme.accent_blue
+                                            } else {
+                                                theme.accent_green
+                                            };
+                                            p.rect_filled(
+                                                egui::Rect::from_min_size(
+                                                    egui::pos2(sx, y + 1.0),
+                                                    Vec2::new(cw, 11.0),
+                                                ),
+                                                1.5,
+                                                col,
+                                            );
+                                        }
+                                        if bar.remainder_m > 0.02 {
+                                            let rx = bar_x0 + ((bar.used_length_m / stock_m) as f32) * bar_w;
+                                            let rw = (((bar.remainder_m / stock_m) as f32) * bar_w).max(2.0);
+                                            let rcol = if bar.is_reusable_offcut {
+                                                Color32::from_rgb(34, 211, 238)
+                                            } else {
+                                                theme.accent_orange
+                                            };
+                                            p.rect_filled(
+                                                egui::Rect::from_min_size(
+                                                    egui::pos2(rx, y + 1.0),
+                                                    Vec2::new(rw, 11.0),
+                                                ),
+                                                1.5,
+                                                rcol,
+                                            );
+                                        }
+                                    }
+                                }
+                                for item in rep.bbs_items.iter().take(3) {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{} • D{:.0} x{} @ {:.0}mm ({:.1}kg)",
+                                            item.mark,
+                                            item.bar_size_mm,
+                                            item.count,
+                                            item.cut_length_mm,
+                                            item.total_weight_kg,
+                                        ))
+                                        .size(8.6)
+                                        .monospace()
+                                        .color(theme.text_secondary),
+                                    );
+                                }
+                            } else {
+                                ui.label(
+                                    RichText::new("Run 'Optimize BBS' to preview cutting-stock bars & BBS marks.")
+                                        .size(8.8)
+                                        .color(theme.text_muted),
+                                );
+                            }
+                        }
+                    } else if is_left {
+                        ui.label(
+                            RichText::new("Field QA/QC Scorecard & 3D Pour-Strip Overlay")
+                                .size(10.0)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        let sc = universal_canvas.field_qaqc_ledger.evaluate_scorecard();
+                        ui.label(
+                            RichText::new(format!(
+                                "f'c Pass: {:.0}%  |  ITP: {}/{}  |  Open NCR: {}  |  MEP: {:.0}%",
+                                sc.fc_pass_rate_pct,
+                                sc.itp_cleared_count,
+                                sc.itp_total_count,
+                                sc.open_ncr_count,
+                                sc.mep_tc_pass_pct,
+                            ))
+                            .size(9.0)
+                            .monospace()
+                            .color(if sc.open_ncr_count == 0 {
+                                theme.accent_green
+                            } else {
+                                theme.accent_orange
+                            }),
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Target),
+                                if universal_canvas.field_qaqc_overlay_visible {
+                                    "3D QA/QC ON"
+                                } else {
+                                    "3D QA/QC Overlay"
+                                },
+                                universal_canvas.field_qaqc_overlay_visible,
+                                theme.accent_green,
+                                "Toggle 3D Pure WebGPU Pour-Strip & NCR Waypoint Pin overlay",
+                            )
+                            .clicked()
+                            {
+                                actions.toggle_field_qaqc_3d = true;
+                            }
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::CheckCircle),
+                                "Clear Hold",
+                                false,
+                                theme.accent_blue,
+                                "Sign off the next pending ITP hold point or close open NCR",
+                            )
+                            .clicked()
+                            {
+                                actions.clear_waypoint_hold = Some(String::new());
+                            }
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Plus),
+                                "Log NCR",
+                                false,
+                                theme.accent_orange,
+                                "Log a field NCR inspection waypoint onto active structural bay",
+                            )
+                            .clicked()
+                            {
+                                actions.log_field_ncr_quick = true;
+                            }
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::SaveDisk),
+                                "QA/QC .ifcx",
+                                false,
+                                theme.accent_blue,
+                                "Export eigengraph::construction::field_qaqc_bbs IFCX overlay",
+                            )
+                            .clicked()
+                            {
+                                actions.export_field_qaqc_ifcx = true;
+                            }
+                        });
+                    } else {
+                        ui.label(
+                            RichText::new("Spatial Field Inspection Waypoints (ENU)")
+                                .size(10.0)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        if let Some(ref rep) = universal_canvas.last_field_fab_report {
+                            for (idx, wp) in rep.waypoints.iter().take(4).enumerate() {
+                                let [r, g, b] = wp.status.badge_color_rgb();
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.set_max_width(inner_w);
+                                    ui.colored_label(
+                                        Color32::from_rgb(r, g, b),
+                                        RichText::new(format!("[{}]", wp.status.short_label()))
+                                            .size(8.4)
+                                            .strong()
+                                            .monospace(),
+                                    );
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{} @ {} ({:.1},{:.1},{:.1})m",
+                                            wp.code,
+                                            wp.element_ref,
+                                            wp.local_x_m,
+                                            wp.local_y_m,
+                                            wp.local_z_m,
+                                        ))
+                                        .size(8.5)
+                                        .monospace()
+                                        .color(theme.text_secondary),
+                                    );
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Compass),
+                                        "Fly",
+                                        universal_canvas.active_waypoint_idx == idx
+                                            && universal_canvas.field_qaqc_overlay_visible,
+                                        theme.accent_blue,
+                                        "Fly 3D Earth camera to this field inspection waypoint",
+                                    )
+                                    .clicked()
+                                    {
+                                        actions.fly_to_waypoint_idx = Some(idx);
+                                    }
+                                });
+                            }
+                        } else {
+                            ui.label(
+                                RichText::new("Toggle '3D QA/QC Overlay' or run /waypoint to anchor ENU pins.")
+                                    .size(8.8)
+                                    .color(theme.text_muted),
+                            );
+                        }
+                    }
                 });
             });
         });

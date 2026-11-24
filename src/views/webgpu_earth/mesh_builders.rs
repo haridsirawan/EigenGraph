@@ -810,8 +810,8 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
     } else {
         0.45
     };
-    let avg_ari = if !input.members.is_empty() {
-        input.members.iter().map(|m| m.ari).fold(1.0_f64, f64::min)
+    let avg_eigengate = if !input.members.is_empty() {
+        input.members.iter().map(|m| m.eigengate).fold(1.0_f64, f64::min)
     } else {
         0.92
     };
@@ -842,9 +842,9 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
                     .unwrap_or(avg_dcr);
                 structural_dcr_color(dcr)
             }
-            EarthBimLens::AriRedundancy => {
-                let ari = member_opt.map(|m| m.ari).unwrap_or(avg_ari);
-                structural_dcr_color(1.0 - ari)
+            EarthBimLens::EigenGateRedundancy => {
+                let eigengate = member_opt.map(|m| m.eigengate).unwrap_or(avg_eigengate);
+                structural_dcr_color(1.0 - eigengate)
             }
             EarthBimLens::MomentStress => {
                 let mom = member_opt
@@ -1751,8 +1751,8 @@ pub fn build_rtc_site_scene_mesh(
             .iter()
             .map(|&[lx, ly]| [cx_m + lx * cr - ly * sr, cy_m + lx * sr + ly * cr])
             .collect();
-        // Subtle ARI/DCR health tint blended into city-builder facade color
-        let health_tint = if b.max_dcr > 1.0 || b.min_ari < 0.70 {
+        // Subtle EigenGate/DCR health tint blended into city-builder facade color
+        let health_tint = if b.max_dcr > 1.0 || b.min_eigengate < 0.70 {
             [0.92_f32, 0.30, 0.30, 1.0]
         } else if b.max_dcr > 0.85 {
             [0.95_f32, 0.65, 0.22, 1.0]
@@ -1867,7 +1867,7 @@ pub fn build_rtc_portfolio_retrofit_mesh(input: &PortfolioGpuOverlayInput<'_>) -
             let shell_col = [crown_col[0], crown_col[1], crown_col[2], 0.22];
             push_extruded_building_prism_enu(&mut verts, &mut idxs, &fp, 0.0, h_m, shell_col, crown_col);
             push_extruded_building_prism_enu(&mut verts, &mut idxs, &fp, h_m, 1.2, crown_col, crown_col);
-        } else if d.pre_min_ari < input.report.config.target_min_ari || d.pre_max_dcr > 0.85 {
+        } else if d.pre_min_eigengate < input.report.config.target_min_eigengate || d.pre_max_dcr > 0.85 {
             let crit_col = [0.94_f32, 0.28, 0.24, 0.45];
             push_extruded_building_prism_enu(&mut verts, &mut idxs, &fp, h_m, 1.1, crit_col, crit_col);
         }
@@ -2531,6 +2531,112 @@ pub fn build_rtc_district_risk_heatmap_mesh(
             [col[0], col[1], col[2], 0.92],
             h.risk_score,
             10.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
+/// GPU input payload for Phase 82 Field Construction QA/QC Waypoints & Pour-Strip Overlays (`material_kind = 11.0`).
+pub struct FieldQaqcGpuInput<'a> {
+    pub report: &'a crate::core::field_fabrication::FieldFabricationReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU Field QA/QC concrete pour-strip volumes, structural ITP hold beacons,
+/// and NCR punch pins (`material_kind = 11.0`, 0% raster) anchored in local ENU meters.
+pub fn build_rtc_field_qaqc_mesh(input: &FieldQaqcGpuInput<'_>) -> GpuMeshPayload {
+    use crate::core::field_fabrication::{FieldInspectionStatus, PourStripStatus};
+
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+
+    let mut verts = Vec::with_capacity(
+        input.report.pour_strips.len() * 24 + input.report.waypoints.len() * 48,
+    );
+    let mut idxs = Vec::with_capacity(
+        input.report.pour_strips.len() * 36 + input.report.waypoints.len() * 64,
+    );
+
+    // 1. Concrete Pour-Strip Volumes over Slab Levels
+    for ps in &input.report.pour_strips {
+        let [r, g, b] = ps.status.color_rgb();
+        let alpha = match ps.status {
+            PourStripStatus::CuredApproved => 0.28_f32,
+            PourStripStatus::PouringScheduled => 0.34_f32,
+            PourStripStatus::HoldPoint => 0.40_f32,
+        };
+        let col = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, alpha];
+        let hw = ps.width_m * 0.5;
+        let hd = ps.depth_m * 0.5;
+        let fp = [
+            rot_xy(ps.center_x_m - hw, ps.center_y_m - hd),
+            rot_xy(ps.center_x_m + hw, ps.center_y_m - hd),
+            rot_xy(ps.center_x_m + hw, ps.center_y_m + hd),
+            rot_xy(ps.center_x_m - hw, ps.center_y_m + hd),
+        ];
+        let z0 = ps.z_m as f32;
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z0 + 0.14, col, 11.0);
+    }
+
+    // 2. Elevated 3D Octahedral QA/QC Waypoint & NCR Beacon Pins + Anchored Stems
+    for wp in &input.report.waypoints {
+        let [r, g, b] = wp.status.badge_color_rgb();
+        let (col, sev, radius, lift_m) = match wp.status {
+            FieldInspectionStatus::NcrOpen => (
+                [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 0.96],
+                1.0_f32,
+                0.56_f32,
+                2.6_f32,
+            ),
+            FieldInspectionStatus::HoldPoint => (
+                [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 0.94],
+                0.65_f32,
+                0.48_f32,
+                2.2_f32,
+            ),
+            FieldInspectionStatus::Cleared => (
+                [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 0.85],
+                0.15_f32,
+                0.38_f32,
+                1.8_f32,
+            ),
+        };
+        let rxy = rot_xy(wp.local_x_m, wp.local_y_m);
+        let z_anchor = wp.local_z_m as f32;
+        let z_beacon = z_anchor + lift_m;
+        let stem_fp = [
+            [rxy[0] - 0.05, rxy[1] - 0.05],
+            [rxy[0] + 0.05, rxy[1] - 0.05],
+            [rxy[0] + 0.05, rxy[1] + 0.05],
+            [rxy[0] - 0.05, rxy[1] + 0.05],
+        ];
+        push_box_prism_enu(
+            &mut verts,
+            &mut idxs,
+            &stem_fp,
+            z_anchor,
+            z_beacon,
+            [col[0], col[1], col[2], 0.72],
+            11.0,
+        );
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [rxy[0] as f32, rxy[1] as f32, z_beacon],
+            radius,
+            col,
+            sev,
+            11.0,
         );
     }
 

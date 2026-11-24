@@ -1,4 +1,4 @@
-//! planning.rs — Pillar 5: 5D Construction Planning, Dynamic RAB, 4D Scheduling & Cost-ARI Trade-Off.
+//! planning.rs — Pillar 5: 5D Construction Planning, Dynamic RAB, 4D Scheduling & Cost-EigenGate Trade-Off.
 //! Automatically calculated and synchronized with PARAMETRIC variables (dimensions, material, stiffness, unit prices).
 
 use egui::{
@@ -40,7 +40,7 @@ pub enum PlanningSubTab {
     TakeoffQto,
     DynamicRab,
     Schedule4d,
-    CostAriTradeoff,
+    CostEigenGateTradeoff,
     StagedErectionSvd,
     WbsHierarchy,
     ScheduleRiskMonteCarlo,
@@ -80,7 +80,7 @@ pub struct PlanningView {
     // Phase 41 (5D-04): Live Bid Leveling & Value Engineering Tender Matrix
     pub ve_outlier_pct: f64,
     pub ve_composite_deck_swap: bool,
-    pub ve_ari_floor: f64,
+    pub ve_eigengate_floor: f64,
     pub ve_selected_bidder_idx: usize,
     // Phase 42: Reactive BIM 4D/5D auto-sync signature
     pub last_bim_sync_sig: (usize, usize, usize),
@@ -127,7 +127,7 @@ impl Default for PlanningView {
             evm_cpi_factor: 0.97,
             ve_outlier_pct: 15.0,
             ve_composite_deck_swap: true,
-            ve_ari_floor: 0.90,
+            ve_eigengate_floor: 0.90,
             ve_selected_bidder_idx: 1,
             last_bim_sync_sig: (usize::MAX, 0, 0),
             site_coupling: crate::core::SiteEnvironmentalCoupling::default(),
@@ -168,16 +168,16 @@ pub struct BidLevelingSummary {
     pub best_bid_total: f64,
     pub outlier_count: usize,
     pub ve_savings_val: f64,
-    pub projected_ari: f64,
-    pub ari_compliant: bool,
+    pub projected_eigengate: f64,
+    pub eigengate_compliant: bool,
 }
 
-/// Computes normalized bid leveling across three tenderers, front-loading outlier flags, and ARI-guarded VE savings.
+/// Computes normalized bid leveling across three tenderers, front-loading outlier flags, and EigenGate-guarded VE savings.
 pub fn compute_bid_leveling_matrix(
     t: &Parametric5DTakeoff,
     outlier_threshold_pct: f64,
     ve_composite_deck_swap: bool,
-    ari_floor: f64,
+    eigengate_floor: f64,
 ) -> BidLevelingSummary {
     let thresh = outlier_threshold_pct.clamp(5.0, 40.0);
     let balance_pkg = (t.grand_total_rab - (t.cost_substructure + t.cost_steel_material + t.cost_workshop_fab + t.cost_erection_crane)).max(0.0);
@@ -251,8 +251,8 @@ pub fn compute_bid_leveling_matrix(
     } else {
         0.0
     };
-    let projected_ari = if ve_composite_deck_swap { 0.935 } else { 0.978 };
-    let ari_compliant = projected_ari >= ari_floor;
+    let projected_eigengate = if ve_composite_deck_swap { 0.935 } else { 0.978 };
+    let eigengate_compliant = projected_eigengate >= eigengate_floor;
 
     BidLevelingSummary {
         lines,
@@ -264,8 +264,8 @@ pub fn compute_bid_leveling_matrix(
         best_bid_total,
         outlier_count,
         ve_savings_val,
-        projected_ari,
-        ari_compliant,
+        projected_eigengate,
+        eigengate_compliant,
     }
 }
 
@@ -346,8 +346,8 @@ pub struct Parametric5DTakeoff {
     pub vat_cost: f64,
     pub grand_total_rab: f64,
 
-    // Safety & ARI indicator
-    pub predicted_system_ari: f64,
+    // Safety & EigenGate indicator
+    pub predicted_system_eigengate: f64,
 }
 
 impl PlanningView {
@@ -651,9 +651,9 @@ impl PlanningView {
         let vat_cost = before_vat * (self.vat_percent as f64 / 100.0);
         let grand_total_rab = before_vat + vat_cost;
 
-        // System ARI indicator derived from live members when populated, else parametric geometry
-        let predicted_system_ari = if !members.is_empty() {
-            (members.iter().map(|m| m.ari).sum::<f64>() / members.len() as f64).clamp(0.0, 0.995)
+        // System EigenGate indicator derived from live members when populated, else parametric geometry
+        let predicted_system_eigengate = if !members.is_empty() {
+            (members.iter().map(|m| m.eigengate).sum::<f64>() / members.len() as f64).clamp(0.0, 0.995)
         } else {
             (0.75 + (height_m / span_m) * 1.25).min(0.965)
         };
@@ -691,7 +691,7 @@ impl PlanningView {
             contingency_cost,
             vat_cost,
             grand_total_rab,
-            predicted_system_ari,
+            predicted_system_eigengate,
         }
     }
 
@@ -741,8 +741,8 @@ impl PlanningView {
                     PlanningSubTab::Schedule4d => {
                         self.render_schedule_4d(ui, theme, &takeoff, bim_project, features)
                     }
-                    PlanningSubTab::CostAriTradeoff => {
-                        self.render_cost_ari_tradeoff(ui, theme, &takeoff)
+                    PlanningSubTab::CostEigenGateTradeoff => {
+                        self.render_cost_eigengate_tradeoff(ui, theme, &takeoff)
                     }
                     PlanningSubTab::StagedErectionSvd => {
                         self.render_staged_erection_svd(ui, theme, &takeoff)
@@ -795,7 +795,7 @@ impl PlanningView {
                 (PlanningSubTab::DynamicRab, "💰 5D BoQ / Cost"),
                 (PlanningSubTab::WbsHierarchy, "📑 5D WBS Explorer"),
                 (PlanningSubTab::TakeoffQto, "📊 QTO"),
-                (PlanningSubTab::CostAriTradeoff, "📈 Cost vs ARI"),
+                (PlanningSubTab::CostEigenGateTradeoff, "📈 Cost vs EigenGate"),
                 (PlanningSubTab::EarnedValueEvm, "📈 Earned Value (EVM)"),
                 (PlanningSubTab::ValueEngineeringBid, "⚖️ VE & Bid Leveling"),
                 (PlanningSubTab::ProcurementContractsClaims, "🧾 Procurement, Claims & VO"),
@@ -1657,11 +1657,11 @@ impl PlanningView {
     }
 
     // -------------------------------------------------------------
-    // SUB-TAB 4: COST VS ARI TRADE-OFF OPTIMIZER
+    // SUB-TAB 4: COST VS EigenGate TRADE-OFF OPTIMIZER
     // -------------------------------------------------------------
-    fn render_cost_ari_tradeoff(&self, ui: &mut Ui, theme: &MacTheme, t: &Parametric5DTakeoff) {
+    fn render_cost_eigengate_tradeoff(&self, ui: &mut Ui, theme: &MacTheme, t: &Parametric5DTakeoff) {
         theme.card_frame().show(ui, |ui| {
-            ui.label(RichText::new("VALUE ENGINEERING: COST SENSITIVITY (BoQ) TO REDUNDANCY INDEX (ARI)").size(13.5).strong().color(theme.accent_blue));
+            ui.label(RichText::new("VALUE ENGINEERING: COST SENSITIVITY (BoQ) TO REDUNDANCY INDEX (EigenGate)").size(13.5).strong().color(theme.accent_blue));
             ui.add_space(4.0);
             ui.label(RichText::new("Comparative analysis to evaluate the incremental investment required to enhance structural progressive collapse resistance:").size(11.5).color(theme.text_secondary));
             ui.add_space(14.0);
@@ -1669,11 +1669,11 @@ impl PlanningView {
             let options = [
                 ("Option 1: Minimum Code Compliance", 0.64, t.grand_total_rab * 0.92, "-8.0%", AppIcon::AlertTriangle, "Vulnerable to Single Failure (1 Member Removed = Collapse)", theme.accent_red),
                 ("Option 2: Baseline Standard Design", 0.78, t.grand_total_rab * 0.97, "-3.0%", AppIcon::Info, "Meets Minimal SNI / AISC Standards", theme.accent_orange),
-                ("Option 3: Redundancy-Optimized Design (Recommended)", t.predicted_system_ari, t.grand_total_rab, "0.0% (Base)", AppIcon::CheckCircle, "Robust Multi-Path (High Reserve Capacity)", theme.accent_green),
+                ("Option 3: Redundancy-Optimized Design (Recommended)", t.predicted_system_eigengate, t.grand_total_rab, "0.0% (Base)", AppIcon::CheckCircle, "Robust Multi-Path (High Reserve Capacity)", theme.accent_green),
                 ("Option 4: Ultra-Redundant (Critical Infrastructure)", 0.965, t.grand_total_rab * 1.075, "+7.5%", AppIcon::Shield, "Dual-Path Collapse Proof (Strategic Bridge)", theme.accent_blue),
             ];
 
-            for (title, ari, cost, diff, desc_icon, desc, badge_color) in options {
+            for (title, eigengate, cost, diff, desc_icon, desc, badge_color) in options {
                 Frame::new()
                     .fill(theme.bg_sidebar)
                     .stroke(Stroke::new(1.0, theme.border_subtle))
@@ -1697,7 +1697,7 @@ impl PlanningView {
                                     .corner_radius(CornerRadius::same(6))
                                     .inner_margin(Margin::symmetric(8, 4))
                                     .show(ui, |ui| {
-                                        ui.label(RichText::new(format!("ARI: {:.3}", ari)).size(12.0).strong().color(badge_color));
+                                        ui.label(RichText::new(format!("EigenGate: {:.3}", eigengate)).size(12.0).strong().color(badge_color));
                                     });
                             });
                         });
@@ -1711,20 +1711,20 @@ impl PlanningView {
 
             ui.horizontal_wrapped(|ui| {
                 icons::icon_label(ui, AppIcon::Sparkles, 13.5, theme.accent_green, "VALUE ENGINEERING CONCLUSION:", 12.0, theme.accent_green, true);
-                ui.label(RichText::new("With only a +3.8% cost increase from baseline standard, the ARI redundancy index jumps significantly by +16.9%, preventing catastrophic collapse mechanisms during earthquakes or vehicular impacts.").size(12.0).color(theme.text_secondary));
+                ui.label(RichText::new("With only a +3.8% cost increase from baseline standard, the EigenGate redundancy index jumps significantly by +16.9%, preventing catastrophic collapse mechanisms during earthquakes or vehicular impacts.").size(12.0).color(theme.text_secondary));
             });
         });
     }
 
     // -------------------------------------------------------------
-    // SUB-TAB 5: Staged Erection SVD & ARI Guard
+    // SUB-TAB 5: Staged Erection SVD & EigenGate Guard
     // -------------------------------------------------------------
     fn render_staged_erection_svd(&self, ui: &mut Ui, theme: &MacTheme, _takeoff: &Parametric5DTakeoff) {
         ui_kit::responsive_grid_n(ui, 4, 210.0, |ui, idx| match idx {
             0 => self.metric_card(ui, theme, "ERECTION STAGES", "5 Stages", "WBS Erection Sequence", theme.accent_blue),
-            1 => self.metric_card(ui, theme, "MOST CRITICAL STAGE", "Stage 2 (WBS 2.2)", "ARI: 0.285 (Shoring Required)", theme.accent_red),
+            1 => self.metric_card(ui, theme, "MOST CRITICAL STAGE", "Stage 2 (WBS 2.2)", "EigenGate: 0.285 (Shoring Required)", theme.accent_red),
             2 => self.metric_card(ui, theme, "CLOSURE STABILITY", "Week 12", "SVD Gate 1 Full Rank", theme.accent_green),
-            _ => self.metric_card(ui, theme, "FINAL OPERATIONAL ARI", "0.942", "Safe Multi-Path System", theme.accent_green),
+            _ => self.metric_card(ui, theme, "FINAL OPERATIONAL EigenGate", "0.942", "Safe Multi-Path System", theme.accent_green),
         });
 
         ui.add_space(16.0);
@@ -2609,7 +2609,7 @@ impl PlanningView {
             t,
             self.ve_outlier_pct,
             self.ve_composite_deck_swap,
-            self.ve_ari_floor,
+            self.ve_eigengate_floor,
         );
         ui_kit::feature_slot_card(
             ui,
@@ -2633,7 +2633,7 @@ impl PlanningView {
                 };
                 let ve_save_str = curr.format_value(sum.ve_savings_val);
                 let award_str = curr.format_value(net_award);
-                let ari_col = if sum.ari_compliant { theme.accent_green } else { theme.accent_red };
+                let eigengate_col = if sum.eigengate_compliant { theme.accent_green } else { theme.accent_red };
                 let outlier_col = if sum.outlier_count == 0 { theme.accent_green } else { theme.accent_orange };
 
                 ui_kit::responsive_grid_n(ui, 4, 185.0, |ui, idx| match idx {
@@ -2664,15 +2664,15 @@ impl PlanningView {
                     _ => ui_kit::stat_card(
                         ui,
                         theme,
-                        "VE REDESIGN & ARI GUARD",
+                        "VE REDESIGN & EigenGate GUARD",
                         &format!("-{}", ve_save_str),
                         &format!(
-                            "ARI = {:.3} (Floor {:.2} — {})",
-                            sum.projected_ari,
-                            self.ve_ari_floor,
-                            if sum.ari_compliant { "PASS" } else { "BREACH" }
+                            "EigenGate = {:.3} (Floor {:.2} — {})",
+                            sum.projected_eigengate,
+                            self.ve_eigengate_floor,
+                            if sum.eigengate_compliant { "PASS" } else { "BREACH" }
                         ),
-                        ari_col,
+                        eigengate_col,
                     ),
                 });
 
@@ -2681,8 +2681,8 @@ impl PlanningView {
                     ui.label(RichText::new("Outlier ±%:").size(11.0).color(theme.text_secondary));
                     ui.add(egui::Slider::new(&mut self.ve_outlier_pct, 8.0..=30.0).suffix("%"));
                     ui.add_space(6.0);
-                    ui.label(RichText::new("ARI Floor:").size(11.0).color(theme.text_secondary));
-                    ui.add(egui::Slider::new(&mut self.ve_ari_floor, 0.85..=0.98).fixed_decimals(2));
+                    ui.label(RichText::new("EigenGate Floor:").size(11.0).color(theme.text_secondary));
+                    ui.add(egui::Slider::new(&mut self.ve_eigengate_floor, 0.85..=0.98).fixed_decimals(2));
                     ui.add_space(6.0);
                     ui.checkbox(&mut self.ve_composite_deck_swap, "Composite Metal Deck VE Swap");
                 });
@@ -2730,15 +2730,15 @@ impl PlanningView {
                     .clicked()
                     {
                         let md = format!(
-                            "# Tender Evaluation & Value Engineering Award Memo\n\n- Selected Tenderer: **{}**\n- Owner Estimate: {}\n- Lowest Compliant Bid: {}\n- Composite Deck VE Savings: -{}\n- Net Contract Award: {}\n- Structural Redundancy Index (ARI): {:.3} (Min {:.2}, {})\n- Flagged Front-Loaded Packages (±{:.0}%): {}\n",
+                            "# Tender Evaluation & Value Engineering Award Memo\n\n- Selected Tenderer: **{}**\n- Owner Estimate: {}\n- Lowest Compliant Bid: {}\n- Composite Deck VE Savings: -{}\n- Net Contract Award: {}\n- Structural Redundancy Index (EigenGate): {:.3} (Min {:.2}, {})\n- Flagged Front-Loaded Packages (±{:.0}%): {}\n",
                             bidder_name,
                             oe_str,
                             curr.format_value(sum.best_bid_total),
                             ve_save_str,
                             award_str,
-                            sum.projected_ari,
-                            self.ve_ari_floor,
-                            if sum.ari_compliant { "COMPLIANT" } else { "NON-COMPLIANT" },
+                            sum.projected_eigengate,
+                            self.ve_eigengate_floor,
+                            if sum.eigengate_compliant { "COMPLIANT" } else { "NON-COMPLIANT" },
                             self.ve_outlier_pct,
                             sum.outlier_count,
                         );
@@ -3177,7 +3177,7 @@ mod tests {
     }
 
     #[test]
-    fn test_value_engineering_bid_leveling_outliers_and_ari() {
+    fn test_value_engineering_bid_leveling_outliers_and_eigengate() {
         let pv = PlanningView::default();
         let takeoff = pv.compute_takeoff(&[]);
         let tight = compute_bid_leveling_matrix(&takeoff, 15.0, true, 0.90);
@@ -3186,7 +3186,7 @@ mod tests {
         assert_eq!(loose.outlier_count, 0);
         assert_eq!(tight.best_bidder_idx, 1);
         assert!(tight.ve_savings_val > 0.0);
-        assert!(tight.ari_compliant);
+        assert!(tight.eigengate_compliant);
     }
 
     #[test]

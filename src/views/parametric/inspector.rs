@@ -5,7 +5,7 @@ use super::*;
 
 impl ParametricView {
     /// Body content for Project Browser: Active Storey Level, View Range, Auto-Bounded Rooms,
-    /// OpenBIM Component Database quick save/open, and Live BIM -> FEM/ARI telemetry.
+    /// OpenBIM Component Database quick save/open, and Live BIM -> FEM/EigenGate telemetry.
     pub(super) fn render_project_levels_body(
         &mut self,
         ui: &mut Ui,
@@ -164,7 +164,7 @@ impl ParametricView {
 
         ui.add_space(6.0);
 
-        // Live BIM -> FEM/ARI Telemetry
+        // Live BIM -> FEM/EigenGate Telemetry
         Frame::new()
             .fill(if theme.is_dark() {
                 Color32::from_rgb(18, 22, 28)
@@ -180,15 +180,15 @@ impl ParametricView {
                     AppIcon::Bolt,
                     12.0,
                     theme.accent_blue,
-                    "LIVE BIM -> FEM/ARI SOLVER",
+                    "LIVE BIM -> FEM/EigenGate SOLVER",
                     10.0,
                     theme.accent_blue,
                     true,
                 );
                 ui.label(
                     RichText::new(format!(
-                        "Global ARI: {:.3} (Safe/Redundant)",
-                        self.live_ari_score
+                        "Global EigenGate: {:.3} (Safe/Redundant)",
+                        self.live_eigengate_score
                     ))
                     .size(10.5)
                     .color(theme.accent_green),
@@ -323,7 +323,7 @@ impl ParametricView {
                     )
                     .clicked()
                     {
-                        self.refresh_live_ari();
+                        self.refresh_live_eigengate();
                         self.save_notification = Some(
                             "Pushed 2D Parametric floor plan & variables to 3D BIM Command Bus."
                                 .to_string(),

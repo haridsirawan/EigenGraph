@@ -22,7 +22,7 @@ use crate::ui_kit;
 /// Top-level engineering discipline groupings organizing the 22 Analysis capabilities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalyzeCategory {
-    CoreFeaAndAri,
+    CoreFeaAndEigenGate,
     SeismicAndDynamics,
     CodeMemberDesign,
     ExtremeHazardsAndResilience,
@@ -31,7 +31,7 @@ pub enum AnalyzeCategory {
 impl AnalyzeCategory {
     pub fn all() -> &'static [AnalyzeCategory] {
         &[
-            Self::CoreFeaAndAri,
+            Self::CoreFeaAndEigenGate,
             Self::SeismicAndDynamics,
             Self::CodeMemberDesign,
             Self::ExtremeHazardsAndResilience,
@@ -40,7 +40,7 @@ impl AnalyzeCategory {
 
     pub fn label(&self) -> &'static str {
         match self {
-            Self::CoreFeaAndAri => "⚡ Core FEA & ARI",
+            Self::CoreFeaAndEigenGate => "⚡ Core FEA & EigenGate",
             Self::SeismicAndDynamics => "🌊 Seismic & Dynamics",
             Self::CodeMemberDesign => "🏗️ Code Member Design",
             Self::ExtremeHazardsAndResilience => "🛡️ Extreme Hazards & Resilience",
@@ -49,7 +49,7 @@ impl AnalyzeCategory {
 
     pub fn default_subtab(&self) -> AnalyzeSubTab {
         match self {
-            Self::CoreFeaAndAri => AnalyzeSubTab::RedundancySvd,
+            Self::CoreFeaAndEigenGate => AnalyzeSubTab::RedundancySvd,
             Self::SeismicAndDynamics => AnalyzeSubTab::ModalDynamics,
             Self::CodeMemberDesign => AnalyzeSubTab::ConcretePmInteraction,
             Self::ExtremeHazardsAndResilience => AnalyzeSubTab::FemaP58LossAssessment,
@@ -58,9 +58,9 @@ impl AnalyzeCategory {
 
     pub fn subtabs(&self) -> &'static [(AnalyzeSubTab, &'static str)] {
         match self {
-            Self::CoreFeaAndAri => &[
+            Self::CoreFeaAndEigenGate => &[
                 (AnalyzeSubTab::RedundancySvd, "⚡ SVD Guard & Redundancy"),
-                (AnalyzeSubTab::MemberCriticality, "🎯 ARI Sensitivity Matrix"),
+                (AnalyzeSubTab::MemberCriticality, "🎯 EigenGate Sensitivity Matrix"),
                 (AnalyzeSubTab::DisplacementForces, "📊 Forces & Deflection"),
                 (AnalyzeSubTab::Frame3dInteraction, "📐 3D Frame P-M-V"),
                 (AnalyzeSubTab::CascadingCollapse, "💥 Cascading Collapse"),
@@ -126,7 +126,7 @@ impl AnalyzeSubTab {
             | Self::DisplacementForces
             | Self::Frame3dInteraction
             | Self::CascadingCollapse
-            | Self::MovingLoadInfluence => AnalyzeCategory::CoreFeaAndAri,
+            | Self::MovingLoadInfluence => AnalyzeCategory::CoreFeaAndEigenGate,
 
             Self::ModalDynamics
             | Self::NonlinearPushover

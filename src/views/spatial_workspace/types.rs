@@ -35,7 +35,7 @@ pub enum SpatialLens {
     #[default]
     Clean,
     DcrHeatmap,
-    AriRedundancy,
+    EigenGateRedundancy,
     AxialForce,
     ShearForce,
     BendingMoment,
@@ -51,7 +51,7 @@ impl SpatialLens {
         match self {
             Self::Clean => "Clean",
             Self::DcrHeatmap => "DCR Utilization",
-            Self::AriRedundancy => "ARI Redundancy",
+            Self::EigenGateRedundancy => "EigenGate Redundancy",
             Self::AxialForce => "Axial NFD",
             Self::ShearForce => "Shear SFD",
             Self::BendingMoment => "Moment BMD",
@@ -193,7 +193,7 @@ pub enum AgentModelChoice {
 impl AgentModelChoice {
     pub fn label(self) -> &'static str {
         match self {
-            Self::EigenAiProFem => "EigenAI Pro (FEM+ARI)",
+            Self::EigenAiProFem => "EigenAI Pro (FEM+EigenGate)",
             Self::Gemini25Flash => "Gemini 2.5 Flash",
             Self::Gemini25Pro => "Gemini 2.5 Pro",
         }
@@ -321,7 +321,7 @@ impl AiContextAttachment {
             Self::EarthSite => "@Earth Site".to_string(),
             Self::WorldPortfolio => "@World Portfolio".to_string(),
             Self::BimGeometry => "@BIM Model".to_string(),
-            Self::FemRedundancy => "@FEM & ARI".to_string(),
+            Self::FemRedundancy => "@FEM & EigenGate".to_string(),
             Self::ScheduleAndCost => "@4D/5D Cost".to_string(),
             Self::VaultWorkspace => "@Vault Folder".to_string(),
             Self::VaultFile { name, .. } => format!("@{name}"),
@@ -372,7 +372,7 @@ pub enum PlannedProposalAction {
         lat: f64,
         lon: f64,
     },
-    ApplyAriLens,
+    ApplyEigenGateLens,
     ResizeColumn {
         column_id: usize,
         width_mm: f64,
@@ -445,6 +445,11 @@ pub enum PlannedProposalAction {
     RunTradeStudy(Option<crate::core::trade_study::TradeStudyObjective>),
     ExportPermitAnnex,
     SyncPeerRelay(Option<String>),
+    // Phase 82: Field Construction QA/QC, 1D Rebar BBS Cut-List, Sheet S-103 & EigenFlow
+    RunBbsOptimize(f64),
+    ToggleQaqc3d,
+    ExportShopSvg,
+    RunEigenFlow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -466,13 +471,13 @@ pub struct PlannedAgentProposal {
 }
 
 /// Structured bracket directive optionally emitted by Gemini API responses
-/// (`[[FLY:...]]`, `[[BIM:...]]`, `[[REPAIR]]`, `[[ARI_AUDIT]]`, `[[RESIZE_COL:...]]`, `[[RESIZE_BEAM:...]]`, `[[ADD_COL:...]]`, `[[APPLY_SITE_SEISMIC]]`, `[[OPEN_SHEET:...]]`, `[[ADD_STORY]]`, `[[ADD_SLAB]]`).
+/// (`[[FLY:...]]`, `[[BIM:...]]`, `[[REPAIR]]`, `[[EIGENGATE_AUDIT]]`, `[[RESIZE_COL:...]]`, `[[RESIZE_BEAM:...]]`, `[[ADD_COL:...]]`, `[[APPLY_SITE_SEISMIC]]`, `[[OPEN_SHEET:...]]`, `[[ADD_STORY]]`, `[[ADD_SLAB]]`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum GeminiDirective {
     Fly { lat: f64, lon: f64, zoom: f64 },
     Bim(String),
     Repair,
-    AriAudit,
+    EigenGateAudit,
     ResizeColumn { id: usize, w_mm: f64, d_mm: f64 },
     ResizeBeam { id: usize, b_mm: f64, h_mm: f64 },
     AddColumn { x_mm: f64, y_mm: f64, w_mm: f64, d_mm: f64 },
@@ -532,6 +537,11 @@ pub enum GeminiDirective {
     RunTradeStudy(Option<crate::core::trade_study::TradeStudyObjective>),
     ExportPermitAnnex,
     SyncPeerRelay(Option<String>),
+    // Phase 82: Field Construction QA/QC, 1D Rebar BBS Cut-List, Sheet S-103 & EigenFlow
+    RunBbsOptimize(f64),
+    ToggleQaqc3d,
+    ExportShopSvg,
+    RunEigenFlow,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -608,8 +618,8 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ApplySiteSeismic);
             } else if upper == "REPAIR" {
                 directives.push(GeminiDirective::Repair);
-            } else if upper == "ARI_AUDIT" || upper == "ARI" {
-                directives.push(GeminiDirective::AriAudit);
+            } else if upper == "EIGENGATE_AUDIT" || upper == "EIGENGATE" || upper == "ARI_AUDIT" || upper == "ARI" {
+                directives.push(GeminiDirective::EigenGateAudit);
             } else if upper.starts_with("OPEN_SHEET:") {
                 let sheet_key = upper[11..].trim();
                 let pillar = if sheet_key.contains("VAULT") || sheet_key.contains("LIBRARY") {
@@ -759,8 +769,8 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                     let k = r.trim();
                     if k.contains("PML") || k.contains("MC") || k.contains("LOSS") {
                         Some(crate::core::ifcx_collab::DistrictRiskMetric::McPml90Loss)
-                    } else if k.contains("ARI") || k.contains("DCR") {
-                        Some(crate::core::ifcx_collab::DistrictRiskMetric::StructuralAri)
+                    } else if k.contains("EIGENGATE") || k.contains("ARI") || k.contains("DCR") {
+                        Some(crate::core::ifcx_collab::DistrictRiskMetric::StructuralEigenGate)
                     } else if k.contains("ISO") || k.contains("EVAC") {
                         Some(crate::core::ifcx_collab::DistrictRiskMetric::EvacuationIsolation)
                     } else if k.contains("COMP") {
@@ -773,8 +783,8 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
             } else if upper == "RUN_TRADE_STUDY" || upper.starts_with("RUN_TRADE_STUDY:") {
                 let obj = upper.split_once(':').and_then(|(_, r)| {
                     let k = r.trim();
-                    if k.contains("SAFETY") || k.contains("ARI") {
-                        Some(crate::core::trade_study::TradeStudyObjective::MaxSafetyAri)
+                    if k.contains("SAFETY") || k.contains("EIGENGATE") || k.contains("ARI") {
+                        Some(crate::core::trade_study::TradeStudyObjective::MaxSafetyEigenGate)
                     } else if k.contains("COST") {
                         Some(crate::core::trade_study::TradeStudyObjective::MinCost)
                     } else if k.contains("CARBON") || k.contains("CO2") {
@@ -794,6 +804,19 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                     .map(|(_, r)| r.trim().to_string())
                     .filter(|s| !s.is_empty());
                 directives.push(GeminiDirective::SyncPeerRelay(url));
+            } else if upper == "RUN_BBS_OPTIMIZE" || upper.starts_with("RUN_BBS_OPTIMIZE:") {
+                let len_m = upper
+                    .split_once(':')
+                    .and_then(|(_, r)| r.trim().trim_end_matches('M').parse::<f64>().ok())
+                    .map(|v| if (v - 6.0).abs() < 1.5 { 6.0 } else { 12.0 })
+                    .unwrap_or(12.0);
+                directives.push(GeminiDirective::RunBbsOptimize(len_m));
+            } else if upper == "TOGGLE_QAQC_3D" {
+                directives.push(GeminiDirective::ToggleQaqc3d);
+            } else if upper == "EXPORT_SHOP_SVG" {
+                directives.push(GeminiDirective::ExportShopSvg);
+            } else if upper == "RUN_EIGENFLOW" || upper == "EIGENFLOW" {
+                directives.push(GeminiDirective::RunEigenFlow);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -920,9 +943,9 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Target,
     },
     SlashCommandSpec {
-        cmd: "/lens ari",
+        cmd: "/lens eigengate",
         category: "Lens",
-        description: "Colorize structural elements by Redundancy Index (ARI)",
+        description: "Colorize structural elements by Redundancy Index (EigenGate)",
         icon: AppIcon::Shield,
     },
     SlashCommandSpec {
@@ -970,7 +993,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/repair",
         category: "AI",
-        description: "Run closed-loop AI auto-repair for critical ARI/DCR members",
+        description: "Run closed-loop AI auto-repair for critical EigenGate/DCR members",
         icon: AppIcon::Wrench,
     },
     SlashCommandSpec {
@@ -1246,7 +1269,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/ai-capture",
         category: "IFCX",
-        description: "Stream AI real-building massing .ifcx onto Earth parcel with auto frame inference & ARI triage",
+        description: "Stream AI real-building massing .ifcx onto Earth parcel with auto frame inference & EigenGate triage",
         icon: AppIcon::Sparkles,
     },
     SlashCommandSpec {
@@ -1258,7 +1281,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/brb",
         category: "AI",
-        description: "Inject 3D Buckling-Restrained Braces (BRB) across low-ARI structural bays",
+        description: "Inject 3D Buckling-Restrained Braces (BRB) across low-EigenGate structural bays",
         icon: AppIcon::Bolt,
     },
     SlashCommandSpec {
@@ -1276,13 +1299,13 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/cascade",
         category: "Analysis",
-        description: "Run Two-Stage ARI v2 + StructGNN-CRC conformal screening & 3D progressive collapse cascade",
+        description: "Run Two-Stage EigenGate v2 + StructGNN-CRC conformal screening & 3D progressive collapse cascade",
         icon: AppIcon::Bolt,
     },
     SlashCommandSpec {
         cmd: "/crc",
         category: "AI",
-        description: "Evaluate Two-Stage ARI v2 + StructGNN-CRC conformal scenario reduction & safety recall",
+        description: "Evaluate Two-Stage EigenGate v2 + StructGNN-CRC conformal scenario reduction & safety recall",
         icon: AppIcon::Shield,
     },
     SlashCommandSpec {
@@ -1348,7 +1371,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/portfolio",
         category: "AI",
-        description: "Run autonomous multi-building district ARI v2 retrofit Pareto optimization",
+        description: "Run autonomous multi-building district EigenGate v2 retrofit Pareto optimization",
         icon: AppIcon::ChartLine,
     },
     SlashCommandSpec {
@@ -1552,7 +1575,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/risk-map",
         category: "Hazard",
-        description: "Toggle 3D Pure WebGPU District Risk Field Heatmap (/risk-map composite|pml90|ari|isolation)",
+        description: "Toggle 3D Pure WebGPU District Risk Field Heatmap (/risk-map composite|pml90|eigengate|isolation)",
         icon: AppIcon::Flame,
     },
     SlashCommandSpec {
@@ -1590,6 +1613,48 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         category: "Collab",
         description: "Synchronize incoming peer IFCX delta via Relay & 3-Way Merge",
         icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/eigengate",
+        category: "Safety",
+        description: "Run Branch 1 EigenGate Linear Pre-Analysis & SVD Kinematic Guard screening",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/eigenflow",
+        category: "Safety",
+        description: "Run Branch 2 EigenFlow Non-Linear Woodbury redistribution & pushover check",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/bbs",
+        category: "Field",
+        description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
+        icon: AppIcon::Wrench,
+    },
+    SlashCommandSpec {
+        cmd: "/cutlist",
+        category: "Field",
+        description: "Open Field QA/QC & Rebar BBS Cut-List visualizer drawer",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/qaqc-3d",
+        category: "Field",
+        description: "Toggle 3D Pure WebGPU Field QA/QC Pour-Strips & NCR Beacon Pins",
+        icon: AppIcon::Target,
+    },
+    SlashCommandSpec {
+        cmd: "/waypoint",
+        category: "Field",
+        description: "Fly 3D Earth camera to next Field QA/QC ITP / NCR spatial waypoint",
+        icon: AppIcon::Compass,
+    },
+    SlashCommandSpec {
+        cmd: "/shop-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-103 Pure-Vector Rebar BBS & Field QA/QC Shop Annex .svg",
+        icon: AppIcon::Printer,
     },
 ];
 
@@ -1666,6 +1731,15 @@ pub struct SpatialHudActions {
     pub connect_collab_relay: Option<String>,
     pub disconnect_collab_relay: bool,
     pub sync_peer_relay_delta: bool,
+    pub run_field_fabrication: Option<f64>,
+    pub toggle_field_qaqc_3d: bool,
+    pub fly_to_waypoint_idx: Option<usize>,
+    pub clear_waypoint_hold: Option<String>,
+    pub log_field_ncr_quick: bool,
+    pub export_shop_drawing_svg: bool,
+    pub export_bbs_csv: bool,
+    pub export_cutlist_csv: bool,
+    pub export_field_qaqc_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.

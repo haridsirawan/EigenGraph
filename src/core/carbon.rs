@@ -70,12 +70,12 @@ impl CarbonEngine {
         model: &StructuralModel,
         route: CarbonSteelRoute,
         transport_distance_km: Option<f64>,
-        system_ari: Option<f64>,
+        system_eigengate: Option<f64>,
     ) -> CarbonLcaReport {
         let steel_tonnage = model.total_steel_tonnage();
         let steel_kg = steel_tonnage * 1000.0;
         let dist_km = transport_distance_km.unwrap_or(65.0); // Default Jakarta-Bandung or regional fabrication distance
-        let ari_val = system_ari.unwrap_or(0.942);
+        let eigengate_val = system_eigengate.unwrap_or(0.942);
 
         // A1-A3 Manufacturing: kg CO2e = kg_steel * factor
         let a1_a3_kg = steel_kg * route.emission_factor_kg_per_kg();
@@ -114,9 +114,9 @@ impl CarbonEngine {
             "Baseline Conventional (Standard Industrial Carbon Footprint)".to_string()
         };
 
-        // Eco-Redundancy Efficiency: System ARI / Total tCO2e
+        // Eco-Redundancy Efficiency: System EigenGate / Total tCO2e
         let eco_efficiency = if total_ton > 1e-6 {
-            ari_val / total_ton
+            eigengate_val / total_ton
         } else {
             0.0
         };

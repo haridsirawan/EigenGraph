@@ -1,13 +1,13 @@
-//! views/analyze/core_fea.rs — Core FEA Stress/Deflection, SVD Kinematic Guard, ARI & Cascading Collapse.
+//! views/analyze/core_fea.rs — Core FEA Stress/Deflection, SVD Kinematic Guard, EigenGate & Cascading Collapse.
 
 use super::*;
 
 impl AnalyzeView {
     // -------------------------------------------------------------
-    // SUB-TAB 1: SVD Guard Stability & ARI Redundancy
+    // SUB-TAB 1: SVD Guard Stability & EigenGate Redundancy
     // -------------------------------------------------------------
     pub(super) fn render_redundancy_and_svd(&self, ui: &mut Ui, theme: &MacTheme, members: &[StructuralMember]) {
-        let (avg_ari_str, min_ari_str, min_sub, svd_str, res_str, global_col, min_col) = if members.is_empty() {
+        let (avg_eigengate_str, min_eigengate_str, min_sub, svd_str, res_str, global_col, min_col) = if members.is_empty() {
             (
                 "0.912".to_string(),
                 "0.308".to_string(),
@@ -18,32 +18,32 @@ impl AnalyzeView {
                 theme.accent_red,
             )
         } else {
-            let sum_ari: f64 = members.iter().map(|m| if m.ari > 0.0 { m.ari } else { m.ari_score }).sum();
-            let avg_ari = sum_ari / members.len() as f64;
+            let sum_eigengate: f64 = members.iter().map(|m| if m.eigengate > 0.0 { m.eigengate } else { m.eigengate_score }).sum();
+            let avg_eigengate = sum_eigengate / members.len() as f64;
             let min_m = members
                 .iter()
-                .min_by(|a, b| a.ari.partial_cmp(&b.ari).unwrap_or(std::cmp::Ordering::Equal))
+                .min_by(|a, b| a.eigengate.partial_cmp(&b.eigengate).unwrap_or(std::cmp::Ordering::Equal))
                 .unwrap();
             let safe_cnt = members.iter().filter(|m| m.svd_margin > 1e-4).count();
             let max_u = members.iter().map(|m| m.utilization).fold(0.0_f64, f64::max).max(0.05);
             let reserve = (1.0 / max_u).min(25.0);
             (
-                format!("{:.3}", avg_ari),
-                format!("{:.3}", min_m.ari),
+                format!("{:.3}", avg_eigengate),
+                format!("{:.3}", min_m.eigengate),
                 format!("E{} ({})", min_m.id, min_m.name),
                 format!("Rank Safe ({}/{})", safe_cnt, members.len()),
                 format!("{:.2}x", reserve),
-                if avg_ari >= 0.75 { theme.accent_green } else if avg_ari >= 0.55 { theme.accent_orange } else { theme.accent_red },
-                if min_m.ari < 0.70 { theme.accent_red } else { theme.accent_green },
+                if avg_eigengate >= 0.75 { theme.accent_green } else if avg_eigengate >= 0.55 { theme.accent_orange } else { theme.accent_red },
+                if min_m.eigengate < 0.70 { theme.accent_red } else { theme.accent_green },
             )
         };
         // 4 KPI Metric Cards
         ui_kit::responsive_grid_n(ui, 4, 190.0, |ui, col_idx| match col_idx {
             0 => {
-                self.metric_card(ui, theme, "GLOBAL REDUNDANCY (ARI)", &avg_ari_str, "Live Model Load Paths", global_col);
+                self.metric_card(ui, theme, "GLOBAL REDUNDANCY (EigenGate)", &avg_eigengate_str, "Live Model Load Paths", global_col);
             }
             1 => {
-                self.metric_card(ui, theme, "MINIMUM MEMBER ARI", &min_ari_str, &min_sub, min_col);
+                self.metric_card(ui, theme, "MINIMUM MEMBER EigenGate", &min_eigengate_str, &min_sub, min_col);
             }
             2 => {
                 self.metric_card(ui, theme, "SVD KINEMATIC GUARD", &svd_str, "0 Singular Mechanisms", theme.accent_blue);
@@ -61,7 +61,7 @@ impl AnalyzeView {
             ui.horizontal_wrapped(|ui| {
                 icons::icon_label(ui, AppIcon::Shield, 14.0, theme.accent_blue, "SVD Kinematic Guard & Sherman-Morrison Engine:", 13.0, theme.text_primary, true);
                 ui.label(RichText::new("rank(K) = ndof - nrigid. Fast perturbation m_e(λ) = 1 - (1-λ)h_e via Sherman-Morrison Rank-1 O(N²) verified safe.").size(12.0).color(theme.text_secondary));
-                icons::pill_badge(ui, AppIcon::CheckCircle, "Gate 1 SVD & ARI v2 Certified", theme.accent_green);
+                icons::pill_badge(ui, AppIcon::CheckCircle, "Gate 1 SVD & EigenGate v2 Certified", theme.accent_green);
             });
 
             ui.add_space(8.0);
@@ -140,7 +140,7 @@ impl AnalyzeView {
                         ui.add_space(30.0);
                         ui.label(RichText::new("Redundancy (RR)").strong().size(12.0).color(theme.text_muted));
                         ui.add_space(30.0);
-                        ui.label(RichText::new("ARI Score").strong().size(12.0).color(theme.text_muted));
+                        ui.label(RichText::new("EigenGate Score").strong().size(12.0).color(theme.text_muted));
                         ui.add_space(30.0);
                         ui.label(RichText::new("Criticality (CI)").strong().size(12.0).color(theme.text_muted));
                         ui.add_space(30.0);
@@ -162,7 +162,7 @@ impl AnalyzeView {
                             ui.add_space(50.0);
                             ui.label(RichText::new(format!("{:.4}", m.rr)).size(12.0).color(theme.accent_blue));
                             ui.add_space(60.0);
-                            ui.label(RichText::new(format!("{:.4}", m.ari)).size(12.0).strong().color(theme.accent_green));
+                            ui.label(RichText::new(format!("{:.4}", m.eigengate)).size(12.0).strong().color(theme.accent_green));
                             ui.add_space(60.0);
                             ui.label(RichText::new(format!("{:.4}", m.ci)).size(12.0).color(if m.is_critical { theme.accent_red } else { theme.text_secondary }));
                             ui.add_space(60.0);
@@ -175,7 +175,7 @@ impl AnalyzeView {
     }
 
     // -------------------------------------------------------------
-    // SUB-TAB 2: Member Sensitivity Matrix (ARI Perturbation)
+    // SUB-TAB 2: Member Sensitivity Matrix (EigenGate Perturbation)
     // -------------------------------------------------------------
     pub(super) fn render_member_criticality(
         &self,
@@ -184,11 +184,11 @@ impl AnalyzeView {
         members: &[StructuralMember],
         bim_project: &crate::core::BimProject,
     ) {
-        let crit_count = members.iter().filter(|m| m.is_critical || m.ari < 0.70).count();
-        let avg_ari_str = if members.is_empty() {
+        let crit_count = members.iter().filter(|m| m.is_critical || m.eigengate < 0.70).count();
+        let avg_eigengate_str = if members.is_empty() {
             "0.884".to_string()
         } else {
-            let sum: f64 = members.iter().map(|m| if m.ari > 0.0 { m.ari } else { m.ari_score }).sum();
+            let sum: f64 = members.iter().map(|m| if m.eigengate > 0.0 { m.eigengate } else { m.eigengate_score }).sum();
             format!("{:.3}", sum / members.len() as f64)
         };
         let min_svd_str = if members.is_empty() {
@@ -202,10 +202,10 @@ impl AnalyzeView {
                 self.metric_card(ui, theme, "TOTAL MEMBERS", &format!("{}", members.len()), "Active BIM & Frame Bars", theme.accent_blue);
             }
             1 => {
-                self.metric_card(ui, theme, "CRITICAL MEMBERS (ARI < 0.7)", &format!("{}", crit_count), "Requires Alternative Load Path", if crit_count > 0 { theme.accent_red } else { theme.accent_green });
+                self.metric_card(ui, theme, "CRITICAL MEMBERS (EigenGate < 0.7)", &format!("{}", crit_count), "Requires Alternative Load Path", if crit_count > 0 { theme.accent_red } else { theme.accent_green });
             }
             2 => {
-                self.metric_card(ui, theme, "AVERAGE ARI", &avg_ari_str, "Live System Redundancy", theme.accent_green);
+                self.metric_card(ui, theme, "AVERAGE EigenGate", &avg_eigengate_str, "Live System Redundancy", theme.accent_green);
             }
             _ => {
                 self.metric_card(ui, theme, "MIN SVD MARGIN", &min_svd_str, "Distance to Mechanism", theme.accent_orange);
@@ -219,7 +219,7 @@ impl AnalyzeView {
             ui.horizontal(|ui| {
                 icons::icon_label(ui, AppIcon::AlertTriangle, 14.0, theme.accent_red, "TOP-5 FRACTURE CRITICAL MEMBERS RANKING (ASCE 7 & UFC 4-023-03)", 13.0, theme.accent_red, true);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("Ranked by Lowest ARI Score").size(11.0).color(theme.text_muted));
+                    ui.label(RichText::new("Ranked by Lowest EigenGate Score").size(11.0).color(theme.text_muted));
                 });
             });
             ui.add_space(4.0);
@@ -227,7 +227,7 @@ impl AnalyzeView {
             ui.add_space(8.0);
 
             let mut sorted_members = members.to_vec();
-            sorted_members.sort_by(|a, b| a.ari.partial_cmp(&b.ari).unwrap_or(std::cmp::Ordering::Equal));
+            sorted_members.sort_by(|a, b| a.eigengate.partial_cmp(&b.eigengate).unwrap_or(std::cmp::Ordering::Equal));
 
             for (rank, m) in sorted_members.iter().take(5).enumerate() {
                 ui.horizontal(|ui| {
@@ -238,14 +238,14 @@ impl AnalyzeView {
                     ui.add_space(20.0);
                     ui.label(RichText::new(format!("Section: {}", m.section)).size(11.5).color(theme.accent_blue));
                     ui.add_space(20.0);
-                    ui.label(RichText::new(format!("ARI: {:.4}", m.ari)).size(12.0).strong().color(if m.ari < 0.70 { theme.accent_red } else { theme.accent_green }));
+                    ui.label(RichText::new(format!("EigenGate: {:.4}", m.eigengate)).size(12.0).strong().color(if m.eigengate < 0.70 { theme.accent_red } else { theme.accent_green }));
                     ui.add_space(20.0);
                     ui.label(RichText::new(format!("CI: {:.4}", m.ci)).size(11.5).color(theme.text_secondary));
                     ui.add_space(20.0);
                     ui.label(RichText::new(format!("SVD Margin: {:.4}", m.svd_margin)).size(11.5).color(theme.accent_orange));
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let (stat_icon, stat_label, stat_color) = if m.ari < 0.70 {
+                        let (stat_icon, stat_label, stat_color) = if m.eigengate < 0.70 {
                             (AppIcon::AlertTriangle, "SINGLE POINT OF FAILURE", theme.accent_red)
                         } else {
                             (AppIcon::CheckCircle, "MODERATE REDUNDANT", theme.accent_blue)
@@ -273,7 +273,7 @@ impl AnalyzeView {
                     ui.add_space(20.0);
                     ui.label(RichText::new("Element Name").strong().size(12.0).color(theme.text_muted));
                     ui.add_space(80.0);
-                    ui.label(RichText::new("ARI Index").strong().size(12.0).color(theme.text_muted));
+                    ui.label(RichText::new("EigenGate Index").strong().size(12.0).color(theme.text_muted));
                     ui.add_space(40.0);
                     ui.label(RichText::new("Reserve Capacity").strong().size(12.0).color(theme.text_muted));
                     ui.add_space(40.0);
@@ -289,13 +289,13 @@ impl AnalyzeView {
                         ui.add_space(24.0);
                         ui.label(RichText::new(&m.name).size(12.0).strong().color(theme.text_primary));
                         ui.add_space(60.0);
-                        ui.label(RichText::new(format!("{:.4}", m.ari)).size(12.0).strong().color(if m.ari < 0.70 { theme.accent_red } else { theme.accent_green }));
+                        ui.label(RichText::new(format!("{:.4}", m.eigengate)).size(12.0).strong().color(if m.eigengate < 0.70 { theme.accent_red } else { theme.accent_green }));
                         ui.add_space(60.0);
                         ui.label(RichText::new(format!("{:.2}x", m.rr)).size(12.0).color(theme.text_secondary));
                         ui.add_space(80.0);
                         ui.label(RichText::new(format!("{:.6}", m.svd_margin)).size(12.0).color(theme.accent_orange));
                         ui.add_space(70.0);
-                        let (icon, stat, col) = if m.is_critical || m.ari < 0.70 {
+                        let (icon, stat, col) = if m.is_critical || m.eigengate < 0.70 {
                             (AppIcon::AlertTriangle, "Critical / Non-Redundant", theme.accent_red)
                         } else {
                             (AppIcon::CheckCircle, "Safe Redundant", theme.accent_green)
@@ -327,7 +327,7 @@ impl AnalyzeView {
                 .size(11.5).color(theme.text_secondary));
             ui.add_space(8.0);
 
-            if let Ok(n2_rep) = crate::core::AriEngine::evaluate_n2_woodbury_fast(&model) {
+            if let Ok(n2_rep) = crate::core::EigenGateEngine::evaluate_n2_woodbury_fast(&model) {
                 ScrollArea::horizontal().id_salt("n2_woodbury_pairs_scroll").show(ui, |ui| {
                     egui::Grid::new("n2_woodbury_pairs_grid")
                         .striped(true)
@@ -337,14 +337,14 @@ impl AnalyzeView {
                             ui.label(RichText::new("Member Pair").size(11.0).strong().color(theme.text_muted));
                             ui.label(RichText::new("Cross-Coupling |h_ab|").size(11.0).strong().color(theme.text_muted));
                             ui.label(RichText::new("Woodbury Determinant").size(11.0).strong().color(theme.text_muted));
-                            ui.label(RichText::new("ARI_ab Score (N-2)").size(11.0).strong().color(theme.text_muted));
+                            ui.label(RichText::new("EigenGate_ab Score (N-2)").size(11.0).strong().color(theme.text_muted));
                             ui.label(RichText::new("N-2 Stability Status").size(11.0).strong().color(theme.text_muted));
                             ui.end_row();
 
                             for pair in n2_rep.pair_results.iter().take(6) {
-                                let col = if pair.is_coupled_mechanism || pair.pair_ari < 0.45 {
+                                let col = if pair.is_coupled_mechanism || pair.pair_eigengate < 0.45 {
                                     theme.accent_red
-                                } else if pair.pair_ari < 0.70 {
+                                } else if pair.pair_eigengate < 0.70 {
                                     theme.accent_orange
                                 } else {
                                     theme.accent_green
@@ -352,7 +352,7 @@ impl AnalyzeView {
                                 ui.label(RichText::new(format!("(E{}, E{})", pair.member_1_id, pair.member_2_id)).size(11.0).strong().color(theme.text_primary));
                                 ui.label(RichText::new(format!("{:.4}", pair.h12_coupling)).size(11.0).color(theme.text_secondary));
                                 ui.label(RichText::new(format!("{:.4}", pair.woodbury_determinant)).size(11.0).color(theme.accent_blue));
-                                ui.label(RichText::new(format!("{:.4}", pair.pair_ari)).size(11.0).strong().color(col));
+                                ui.label(RichText::new(format!("{:.4}", pair.pair_eigengate)).size(11.0).strong().color(col));
                                 let (p_icon, p_lbl) = if pair.is_coupled_mechanism {
                                     (AppIcon::AlertTriangle, "N-2 Mechanism")
                                 } else {
@@ -615,7 +615,7 @@ impl AnalyzeView {
                 ),
             ];
 
-            for (pair_title, rank_info, res_ari, pvi, status, col, note) in n2_pairs {
+            for (pair_title, rank_info, res_eigengate, pvi, status, col, note) in n2_pairs {
                 Frame::new()
                     .fill(theme.bg_card)
                     .stroke(Stroke::new(1.0, col.gamma_multiply(0.4)))
@@ -637,7 +637,7 @@ impl AnalyzeView {
                                     .corner_radius(CornerRadius::same(6))
                                     .inner_margin(Margin::symmetric(8, 4))
                                     .show(ui, |ui| {
-                                        ui.label(RichText::new(format!("Residual ARI: {:.3} | PVI: {:.2}", res_ari, pvi)).size(11.5).strong().color(Color32::WHITE));
+                                        ui.label(RichText::new(format!("Residual EigenGate: {:.3} | PVI: {:.2}", res_eigengate, pvi)).size(11.5).strong().color(Color32::WHITE));
                                     });
                                 ui.add_space(14.0);
                                 ui.label(RichText::new(status).size(11.0).strong().color(col));
@@ -741,7 +741,7 @@ impl AnalyzeView {
                     self.metric_card(ui, theme, "ROBUSTNESS INDEX (R_sys)", &format!("{:.3}", report.robustness_index), &format!("PVI: {:.2}% Collapse", report.pvi * 100.0), if report.robustness_index > 0.7 { theme.accent_green } else { theme.accent_red });
                 }
                 _ => {
-                    self.metric_card(ui, theme, "MAX REDISTRIBUTED DCR", &format!("{:.1}%", report.max_redistributed_dcr * 100.0), &format!("Residual ARI: {:.3}", report.residual_ari), if report.max_redistributed_dcr > 1.0 { theme.accent_red } else { theme.accent_green });
+                    self.metric_card(ui, theme, "MAX REDISTRIBUTED DCR", &format!("{:.1}%", report.max_redistributed_dcr * 100.0), &format!("Residual EigenGate: {:.3}", report.residual_eigengate), if report.max_redistributed_dcr > 1.0 { theme.accent_red } else { theme.accent_green });
                 }
             });
 

@@ -3,7 +3,7 @@
 //!
 //! Evaluates 6 calibrated structural design alternatives side-by-side (`BaselineIntact`,
 //! `DuctileColumnsPlus100`, `LateralBracedCore`, `HighStrengthConcrete`, `LowCarbonHybrid`,
-//! `SeismicBaseIsolated`) across `ARI v2`, LRFD DCR%, inter-story drift, fundamental period `T1`,
+//! `SeismicBaseIsolated`) across `EigenGate v2`, LRFD DCR%, inter-story drift, fundamental period `T1`,
 //! construction cost (USD), embodied carbon (`tCO2e`), and FEMA P-58 PML-90 loss, supporting
 //! 1-click adoption onto `BimProject` and 10-clause building-permit compliance verification.
 
@@ -31,7 +31,8 @@ pub const NS_EG_TRADE_STUDY_MATRIX: &str = ns::EG_TRADE_STUDY_MATRIX;
 pub enum TradeStudyObjective {
     #[default]
     Balanced,
-    MaxSafetyAri,
+    #[serde(alias = "MaxSafetyAri")]
+    MaxSafetyEigenGate,
     MinCost,
     MinCarbon,
 }
@@ -40,7 +41,7 @@ impl TradeStudyObjective {
     pub fn label(self) -> &'static str {
         match self {
             Self::Balanced => "Balanced Multi-Criteria",
-            Self::MaxSafetyAri => "Max Safety & ARI v2",
+            Self::MaxSafetyEigenGate => "Max Safety & EigenGate v2",
             Self::MinCost => "Minimize Capital Cost",
             Self::MinCarbon => "Minimize Embodied Carbon",
         }
@@ -49,7 +50,7 @@ impl TradeStudyObjective {
     pub fn short_label(self) -> &'static str {
         match self {
             Self::Balanced => "Balanced",
-            Self::MaxSafetyAri => "Safety ARI",
+            Self::MaxSafetyEigenGate => "Safety EigenGate",
             Self::MinCost => "Min Cost",
             Self::MinCarbon => "Low Carbon",
         }
@@ -58,17 +59,17 @@ impl TradeStudyObjective {
     pub fn all() -> &'static [Self] {
         &[
             Self::Balanced,
-            Self::MaxSafetyAri,
+            Self::MaxSafetyEigenGate,
             Self::MinCost,
             Self::MinCarbon,
         ]
     }
 
-    /// Convex decision weights `(w_ari, w_dcr_drift, w_cost, w_carbon)` summing to 1.0.
+    /// Convex decision weights `(w_eigengate, w_dcr_drift, w_cost, w_carbon)` summing to 1.0.
     pub fn weights(self) -> (f64, f64, f64, f64) {
         match self {
             Self::Balanced => (0.35, 0.25, 0.22, 0.18),
-            Self::MaxSafetyAri => (0.52, 0.30, 0.10, 0.08),
+            Self::MaxSafetyEigenGate => (0.52, 0.30, 0.10, 0.08),
             Self::MinCost => (0.20, 0.15, 0.52, 0.13),
             Self::MinCarbon => (0.20, 0.15, 0.15, 0.50),
         }
@@ -171,7 +172,8 @@ impl PermitClauseStatus {
 pub struct TradeStudyConfig {
     pub objective: TradeStudyObjective,
     pub include_ssi_coupling: bool,
-    pub target_min_ari: f64,
+    #[serde(alias = "target_min_ari")]
+    pub target_min_eigengate: f64,
 }
 
 impl Default for TradeStudyConfig {
@@ -179,7 +181,7 @@ impl Default for TradeStudyConfig {
         Self {
             objective: TradeStudyObjective::Balanced,
             include_ssi_coupling: true,
-            target_min_ari: 0.70,
+            target_min_eigengate: 0.70,
         }
     }
 }
@@ -189,7 +191,8 @@ impl Default for TradeStudyConfig {
 pub struct TradeStudyScenarioResult {
     pub archetype: TradeScenarioArchetype,
     pub name: String,
-    pub min_ari: f64,
+    #[serde(alias = "min_ari")]
+    pub min_eigengate: f64,
     pub max_dcr_pct: f64,
     pub max_drift_pct: f64,
     pub fundamental_period_s: f64,
@@ -198,7 +201,8 @@ pub struct TradeStudyScenarioResult {
     pub pml90_loss_usd: f64,
     pub weighted_utility_score: f64,
     pub passes_sni_drift: bool,
-    pub passes_ari_gate: bool,
+    #[serde(alias = "passes_ari_gate")]
+    pub passes_eigengate_gate: bool,
     pub is_recommended: bool,
 }
 
@@ -287,9 +291,9 @@ fn estimate_baseline_structural_quantities(
     ssi_opt: Option<&SubsurfaceSsiAnalysisReport>,
     mc_opt: Option<&MonteCarloFragilityReport>,
 ) -> (f64, f64, f64, f64, f64, f64, f64) {
-    let base_ari = members
+    let base_eigengate = members
         .iter()
-        .map(|m| m.ari)
+        .map(|m| m.eigengate)
         .fold(1.0_f64, f64::min)
         .clamp(0.15, 0.99);
     let base_dcr_pct = members
@@ -335,10 +339,10 @@ fn estimate_baseline_structural_quantities(
     let base_carbon_tco2e = total_vol_m3 * 0.415;
     let base_pml90_usd = mc_opt
         .map(|m| m.p90_loss_usd)
-        .unwrap_or_else(|| base_cost_usd * (0.28 * seismic_amp * (1.25 - base_ari).clamp(0.30, 1.40)));
+        .unwrap_or_else(|| base_cost_usd * (0.28 * seismic_amp * (1.25 - base_eigengate).clamp(0.30, 1.40)));
 
     (
-        base_ari,
+        base_eigengate,
         base_dcr_pct,
         base_drift_pct,
         base_t1_s,
@@ -348,7 +352,7 @@ fn estimate_baseline_structural_quantities(
     )
 }
 
-/// Evaluates 6 calibrated design alternatives deterministically against structural safety (`ARI v2`, DCR%,
+/// Evaluates 6 calibrated design alternatives deterministically against structural safety (`EigenGate v2`, DCR%,
 /// drift), dynamic period `T1`, capital cost, embodied carbon, and FEMA P-58 PML-90 loss.
 pub fn run_parametric_trade_study(
     project: &BimProject,
@@ -358,7 +362,7 @@ pub fn run_parametric_trade_study(
     mc_opt: Option<&MonteCarloFragilityReport>,
     config: &TradeStudyConfig,
 ) -> TradeStudyReport {
-    let (base_ari, base_dcr, base_drift, base_t1, base_cost, base_carbon, base_pml90) =
+    let (base_eigengate, base_dcr, base_drift, base_t1, base_cost, base_carbon, base_pml90) =
         estimate_baseline_structural_quantities(project, members, site, ssi_opt, mc_opt);
 
     let ssi_penalty = if config.include_ssi_coupling && ssi_opt.is_some_and(|s| s.is_liquefaction_critical) {
@@ -377,9 +381,9 @@ pub fn run_parametric_trade_study(
 
     let mut scenarios = Vec::with_capacity(6);
     for &arch in TradeScenarioArchetype::all() {
-        let (min_ari, max_dcr_pct, max_drift_pct, t1_s, cost_usd, carbon_t, pml90_usd) = match arch {
+        let (min_eigengate, max_dcr_pct, max_drift_pct, t1_s, cost_usd, carbon_t, pml90_usd) = match arch {
             TradeScenarioArchetype::BaselineIntact => (
-                (base_ari - ssi_penalty).clamp(0.10, 0.99),
+                (base_eigengate - ssi_penalty).clamp(0.10, 0.99),
                 base_dcr,
                 base_drift,
                 base_t1,
@@ -388,7 +392,7 @@ pub fn run_parametric_trade_study(
                 base_pml90,
             ),
             TradeScenarioArchetype::DuctileColumnsPlus100 => (
-                (base_ari + 0.13 - ssi_penalty * 0.5).clamp(0.15, 0.98),
+                (base_eigengate + 0.13 - ssi_penalty * 0.5).clamp(0.15, 0.98),
                 (base_dcr * 0.78).clamp(18.0, 145.0),
                 (base_drift / col_ei_gain.sqrt()).clamp(0.18, 2.40),
                 (base_t1 * 0.86).clamp(0.16, 3.20),
@@ -397,7 +401,7 @@ pub fn run_parametric_trade_study(
                 base_pml90 * 0.68,
             ),
             TradeScenarioArchetype::LateralBracedCore => (
-                (base_ari + 0.17 - ssi_penalty * 0.4).clamp(0.20, 0.99),
+                (base_eigengate + 0.17 - ssi_penalty * 0.4).clamp(0.20, 0.99),
                 (base_dcr * 0.72).clamp(16.0, 140.0),
                 (base_drift * 0.62).clamp(0.15, 2.10),
                 (base_t1 * 0.76).clamp(0.14, 2.80),
@@ -406,7 +410,7 @@ pub fn run_parametric_trade_study(
                 base_pml90 * 0.58,
             ),
             TradeScenarioArchetype::HighStrengthConcrete => (
-                (base_ari + 0.08 - ssi_penalty * 0.6).clamp(0.15, 0.97),
+                (base_eigengate + 0.08 - ssi_penalty * 0.6).clamp(0.15, 0.97),
                 (base_dcr * 0.74).clamp(16.0, 140.0),
                 (base_drift * 0.88).clamp(0.20, 2.70),
                 (base_t1 * 0.93).clamp(0.18, 3.40),
@@ -415,7 +419,7 @@ pub fn run_parametric_trade_study(
                 base_pml90 * 0.79,
             ),
             TradeScenarioArchetype::LowCarbonHybrid => (
-                (base_ari + 0.04 - ssi_penalty * 0.7).clamp(0.15, 0.96),
+                (base_eigengate + 0.04 - ssi_penalty * 0.7).clamp(0.15, 0.96),
                 (base_dcr * 0.96).clamp(20.0, 165.0),
                 (base_drift * 0.98).clamp(0.24, 2.95),
                 (base_t1 * 1.03).clamp(0.20, 3.80),
@@ -424,7 +428,7 @@ pub fn run_parametric_trade_study(
                 base_pml90 * 0.91,
             ),
             TradeScenarioArchetype::SeismicBaseIsolated => (
-                (base_ari + 0.18).clamp(0.25, 0.99),
+                (base_eigengate + 0.18).clamp(0.25, 0.99),
                 (base_dcr * 0.58).clamp(14.0, 120.0),
                 (base_drift * 0.46).clamp(0.12, 1.50),
                 (base_t1 * 1.85).clamp(0.65, 5.20),
@@ -436,7 +440,7 @@ pub fn run_parametric_trade_study(
         scenarios.push(TradeStudyScenarioResult {
             archetype: arch,
             name: arch.label().to_string(),
-            min_ari,
+            min_eigengate,
             max_dcr_pct,
             max_drift_pct,
             fundamental_period_s: t1_s,
@@ -445,12 +449,12 @@ pub fn run_parametric_trade_study(
             pml90_loss_usd: pml90_usd,
             weighted_utility_score: 0.0,
             passes_sni_drift: max_drift_pct <= 2.0,
-            passes_ari_gate: min_ari >= config.target_min_ari,
+            passes_eigengate_gate: min_eigengate >= config.target_min_eigengate,
             is_recommended: false,
         });
     }
 
-    let (w_ari, w_dcr, w_cost, w_carbon) = config.objective.weights();
+    let (w_eigengate, w_dcr, w_cost, w_carbon) = config.objective.weights();
     let max_cost = scenarios.iter().map(|s| s.estimated_cost_usd).fold(1.0_f64, f64::max);
     let min_cost = scenarios.iter().map(|s| s.estimated_cost_usd).fold(max_cost, f64::min);
     let cost_span = (max_cost - min_cost).max(1.0);
@@ -462,14 +466,14 @@ pub fn run_parametric_trade_study(
     let mut best_idx = 0usize;
     let mut best_score = f64::NEG_INFINITY;
     for (idx, s) in scenarios.iter_mut().enumerate() {
-        let ari_norm = ((s.min_ari - 0.35) / 0.65).clamp(0.0, 1.0);
+        let eigengate_norm = ((s.min_eigengate - 0.35) / 0.65).clamp(0.0, 1.0);
         let dcr_norm = (1.0 - (s.max_dcr_pct / 135.0)).clamp(0.0, 1.0);
         let drift_norm = (1.0 - (s.max_drift_pct / 2.6)).clamp(0.0, 1.0);
         let struct_perf = 0.55 * dcr_norm + 0.45 * drift_norm;
         let cost_norm = (1.0 - (s.estimated_cost_usd - min_cost) / cost_span).clamp(0.0, 1.0);
         let carb_norm = (1.0 - (s.embodied_carbon_tco2e - min_carb) / carb_span).clamp(0.0, 1.0);
-        let gate_bonus = if s.passes_ari_gate && s.passes_sni_drift { 0.08 } else { 0.0 };
-        let score = ((w_ari * ari_norm + w_dcr * struct_perf + w_cost * cost_norm + w_carbon * carb_norm + gate_bonus) * 100.0)
+        let gate_bonus = if s.passes_eigengate_gate && s.passes_sni_drift { 0.08 } else { 0.0 };
+        let score = ((w_eigengate * eigengate_norm + w_dcr * struct_perf + w_cost * cost_norm + w_carbon * carb_norm + gate_bonus) * 100.0)
             .clamp(0.0, 100.0);
         s.weighted_utility_score = score;
         if score > best_score {
@@ -483,11 +487,11 @@ pub fn run_parametric_trade_study(
 
     let win = &scenarios[best_idx];
     let summary = format!(
-        "Trade-Study ({}) Winner: {} • Score {:.1}/100 • ARI {:.2} • DCR {:.0}% • Drift {:.2}% • ${:.0}k • {:.1} tCO2e",
+        "Trade-Study ({}) Winner: {} • Score {:.1}/100 • EigenGate {:.2} • DCR {:.0}% • Drift {:.2}% • ${:.0}k • {:.1} tCO2e",
         config.objective.short_label(),
         win.archetype.short_label(),
         win.weighted_utility_score,
-        win.min_ari,
+        win.min_eigengate,
         win.max_dcr_pct,
         win.max_drift_pct,
         win.estimated_cost_usd * 0.001,
@@ -588,7 +592,7 @@ pub fn apply_trade_study_scenario_to_bim(
 }
 
 /// Evaluates 10 deterministic building-permit compliance clauses across SNI 1726, SNI 2847 / AISC 360,
-/// UFC 4-023-03 (`ARI v2`), Spectral SVD Guard, Seed–Idriss Liquefaction, ATC-20, FEMA P-58, & IFC 5 Governance.
+/// UFC 4-023-03 (`EigenGate v2`), Spectral SVD Guard, Seed–Idriss Liquefaction, ATC-20, FEMA P-58, & IFC 5 Governance.
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_permit_compliance_matrix(
     project: &BimProject,
@@ -601,7 +605,7 @@ pub fn evaluate_permit_compliance_matrix(
     mc_opt: Option<&MonteCarloFragilityReport>,
     collab_opt: Option<&IfcxCollabState>,
 ) -> PermitComplianceReport {
-    let (min_ari, max_dcr_pct, drift_pct, _t1, base_cost, _carb, pml90) =
+    let (min_eigengate, max_dcr_pct, drift_pct, _t1, base_cost, _carb, pml90) =
         estimate_baseline_structural_quantities(project, members, site, ssi_opt, mc_opt);
     let min_svd = members
         .iter()
@@ -642,15 +646,15 @@ pub fn evaluate_permit_compliance_matrix(
         notes: "Envelope axial-flexural & shear utilization ratio".to_string(),
     });
 
-    // 3. System Redundancy Index (ARI v2 >= 0.70)
+    // 3. System Redundancy Index (EigenGate v2 >= 0.70)
     clauses.push(PermitComplianceClause {
-        code_ref: "UFC 4-023-03 / ARI v2".to_string(),
-        title: "Minimum Member ARI v2".to_string(),
-        demand_value: format!("{min_ari:.3}"),
+        code_ref: "UFC 4-023-03 / EigenGate v2".to_string(),
+        title: "Minimum Member EigenGate v2".to_string(),
+        demand_value: format!("{min_eigengate:.3}"),
         limit_value: ">= 0.700".to_string(),
-        status: if min_ari >= 0.75 {
+        status: if min_eigengate >= 0.75 {
             PermitClauseStatus::Pass
-        } else if min_ari >= 0.70 {
+        } else if min_eigengate >= 0.70 {
             PermitClauseStatus::Warning
         } else {
             PermitClauseStatus::Fail
@@ -860,9 +864,9 @@ mod tests {
             moment_mz_knm: 28.0,
             is_critical: false,
             is_active: true,
-            ari_score: 0.76,
+            eigengate_score: 0.76,
             svd_sensitivity: 0.14,
-            ari: 0.76,
+            eigengate: 0.76,
             dcr_interaction: 0.78,
             shear_vy_kn: 52.0,
             svd_margin: 0.41,
@@ -876,7 +880,7 @@ mod tests {
             let cfg = TradeStudyConfig {
                 objective: obj,
                 include_ssi_coupling: true,
-                target_min_ari: 0.70,
+                target_min_eigengate: 0.70,
             };
             let rep = run_parametric_trade_study(&proj, &members, &site, None, None, &cfg);
             assert_eq!(rep.scenarios.len(), 6);

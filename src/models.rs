@@ -135,7 +135,7 @@ impl NavigationPillar {
             Self::ResearchConcept => "Interactive GIS map container, site geodetic telemetry HUD (WGS84 / UTM), cadastral zoning, and pusGen seismic hazard spectra.",
             Self::ParametricDED => "AutoCAD-style 2D vector drafting canvas with magnetic snaps + live real-time 3D solid extrusion companion and rebar detailer.",
             Self::GeometryAssembly => "Clean BIM spatial assembly workspace: Multi-level Z-planes, structural grid network (A-B-C, 1-2-3), and component stamping.",
-            Self::AnalysisSimulation => "3D Geo-Structural sandbox on GIS terrain: X-Ray subsurface ground slider, soil bearing capacity, FEA solver, SVD kinematic guard, and ARI index.",
+            Self::AnalysisSimulation => "3D Geo-Structural sandbox on GIS terrain: X-Ray subsurface ground slider, soil bearing capacity, FEA solver, SVD kinematic guard, and EigenGate index.",
             Self::TimeScheduling => "4D Phased erection timeline slider, Critical Path Method (CPM) Gantt schedule, and staged construction simulation.",
             Self::CostBudgeting => "5D 3D Cost Heatmap canvas, dynamic Quantity Take-Off (QTO), and parametric Bill of Quantities (BoQ) financial ledger.",
             Self::SustainabilityEnergy => "6D Solar heliodon sun-path dome, cast shadow tracer, operational energy demand, and embodied carbon gradient (A1–A3).",
@@ -186,8 +186,8 @@ impl ProjectStatus {
             Self::UnderReview => "UNDER REVIEW",
             Self::Approved => "APPROVED",
             Self::Archived => "ARCHIVED",
-            Self::Safe => "SAFE (ARI ≥ 0.70)",
-            Self::ReviewNeeded => "REVIEW NEEDED (ARI < 0.70)",
+            Self::Safe => "SAFE (EigenGate ≥ 0.70)",
+            Self::ReviewNeeded => "REVIEW NEEDED (EigenGate < 0.70)",
         }
     }
 }
@@ -200,7 +200,7 @@ pub struct ProjectItem {
     pub description: String,
     pub elements_count: usize,
     pub nodes_count: usize,
-    pub min_ari: f64,
+    pub min_eigengate: f64,
     pub max_deflection_mm: f64,
     pub status: ProjectStatus,
     pub last_modified: String,
@@ -258,10 +258,11 @@ pub struct StructuralMember {
     pub moment_mz_knm: f64,
     pub is_critical: bool,
     pub is_active: bool,
-    pub ari_score: f64,
+    #[serde(alias = "ari_score")]
+    pub eigengate_score: f64,
     pub svd_sensitivity: f64,
-    #[serde(default)]
-    pub ari: f64,
+    #[serde(default, alias = "ari")]
+    pub eigengate: f64,
     #[serde(default)]
     pub dcr_interaction: f64,
     #[serde(default)]
@@ -287,9 +288,9 @@ impl Default for StructuralMember {
             moment_mz_knm: 0.0,
             is_critical: false,
             is_active: true,
-            ari_score: 1.0,
+            eigengate_score: 1.0,
             svd_sensitivity: 0.0,
-            ari: 1.0,
+            eigengate: 1.0,
             dcr_interaction: 0.0,
             shear_vy_kn: 0.0,
             svd_margin: 1.0,
@@ -374,7 +375,8 @@ pub struct DatabaseComponent {
     pub elements_count: usize,
     pub nodes_count: usize,
     pub est_weight_ton: f64,
-    pub min_system_ari: f64,
+    #[serde(alias = "min_system_ari")]
+    pub min_system_eigengate: f64,
     pub created_at: String,
     #[serde(default)]
     pub variables: Vec<ParametricVariable>,
@@ -395,7 +397,7 @@ impl Default for DatabaseComponent {
             elements_count: 25,
             nodes_count: 14,
             est_weight_ton: 12.8,
-            min_system_ari: 0.942,
+            min_system_eigengate: 0.942,
             created_at: "2026-10-30".to_string(),
             variables: Vec::new(),
         }
@@ -417,7 +419,7 @@ impl DatabaseComponent {
             elements_count: 25,
             nodes_count: 14,
             est_weight_ton: 12.8,
-            min_system_ari: 0.942,
+            min_system_eigengate: 0.942,
             created_at: "2026-10-30".to_string(),
             variables: Vec::new(),
         }
@@ -437,7 +439,7 @@ impl DatabaseComponent {
             elements_count: 33,
             nodes_count: 18,
             est_weight_ton: 18.4,
-            min_system_ari: 0.915,
+            min_system_eigengate: 0.915,
             created_at: "2026-10-30".to_string(),
             variables: Vec::new(),
         }
@@ -457,7 +459,7 @@ impl DatabaseComponent {
             elements_count: 42,
             nodes_count: 20,
             est_weight_ton: 26.5,
-            min_system_ari: 0.968,
+            min_system_eigengate: 0.968,
             created_at: "2026-10-30".to_string(),
             variables: Vec::new(),
         }

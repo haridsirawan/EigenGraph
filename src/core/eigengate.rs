@@ -1,7 +1,7 @@
-//! ari.rs — Adjusted Redundancy Index (ARI) Engine & Spectral Kinematic Guard.
-//! Ported directly from official repository: https://github.com/haridsirawan/Adjusted-Redundancy-Index
-//! Based on Official EigenGraph Formulation:
-//! "Development and Validation of Adjusted Redundancy Index for Pre-Analysis Element Disruption Scenario Screening in Linear-Elastic Structures"
+//! eigengate.rs — EigenGate (Linear Pre-Analysis & Gatekeeper) & Spectral Kinematic Guard.
+//! Ported directly from official repositories:
+//!   - Branch 1 (EigenGate Linear Gatekeeper): https://github.com/haridsirawan/EigenGate
+//!   - Branch 2 (EigenFlow Non-Linear Woodbury): https://github.com/haridsirawan/EigenFlow
 //! By: Harids Irawan, S.T., M.T., EigenGraph Platform, 2026.
 
 use std::collections::{HashMap, HashSet};
@@ -19,24 +19,24 @@ pub const BASELINE_TOL: f64 = 1e-12;  // Baseline score singularity tolerance
 pub const MARGIN_TOL: f64 = 1e-8;     // Sherman-Morrison stability guard boundary tolerance m_e (Eq 4.2)
 pub const RANK_TOL: f64 = 1e-10;      // Gate 1 relative rank solver tolerance
 
-/// Konfigurasi Parameter Analitis ARI (Formulasi EigenGraph Bab II & Bab IV)
+/// Analytical Configuration Parameters for EigenGate (EigenGraph Formulation Ch. II & Ch. IV)
 #[derive(Debug, Clone)]
-pub struct AriConfig {
-    pub alpha_k: f64,       // Koefisien bobot kekakuan elastis (Eq 2.7, default 0.50)
-    pub alpha_r: f64,       // Koefisien bobot kekuatan batas penampang (Eq 2.7, default 0.50)
-    pub gamma: f64,         // Faktor peluruhan geometris lintasan (Eq 2.10, default 1.00 kanonik / 0.50 kalibrasi)
-    pub k_paths: usize,     // Batas jumlah lintasan bebas sisi independen (Eq 2.9, default K = 2)
-    pub beta: f64,          // Lantai pembobotan tumpuan reaksi (Eq 2.12, default 0.10)
-    pub eta: f64,           // Faktor penalti utilisasi beban eksisting (Eq 2.17, default 0.50)
-    pub tau_threshold: f64, // Ambang batas kekritisan operasional (Eq 2.19, default 0.50 / 0.65)
-    pub w_k: f64,           // Bobot kanal kestabilan kinematik pada ARI v2 (Eq 4.13b, default 0.25)
-    pub w_c: f64,           // Bobot kanal kapasitas penampang pada ARI v2 (Eq 4.13b, default 0.45)
-    pub w_d: f64,           // Bobot kanal kontrol deformasi pada ARI v2 (Eq 4.13b, default 0.30)
-    pub z_th: f64,          // Ambang batas aman utilisasi/defleksi sebelum penalti (Eq 4.13c, default 0.70)
-    pub include_geometric_stiffness: bool, // Evaluasi efek tekuk P-Delta & Kg pascadisrupsi (default: true)
+pub struct EigenGateConfig {
+    pub alpha_k: f64,       // Elastic stiffness weighting coefficient (Eq 2.7, default 0.50)
+    pub alpha_r: f64,       // Ultimate section capacity weighting coefficient (Eq 2.7, default 0.50)
+    pub gamma: f64,         // Geometric path decay factor (Eq 2.10, default 1.00 canonical / 0.50 calibrated)
+    pub k_paths: usize,     // Maximum independent edge-disjoint paths (Eq 2.9, default K = 2)
+    pub beta: f64,          // Support reaction weighting floor (Eq 2.12, default 0.10)
+    pub eta: f64,           // Existing load utilization penalty factor (Eq 2.17, default 0.50)
+    pub tau_threshold: f64, // Operational criticality threshold (Eq 2.19, default 0.50 / 0.65)
+    pub w_k: f64,           // Kinematic stability channel weight in EigenGate v2 (Eq 4.13b, default 0.25)
+    pub w_c: f64,           // Section capacity channel weight in EigenGate v2 (Eq 4.13b, default 0.45)
+    pub w_d: f64,           // Deformation control channel weight in EigenGate v2 (Eq 4.13b, default 0.30)
+    pub z_th: f64,          // Safe utilization/deflection threshold before penalty (Eq 4.13c, default 0.70)
+    pub include_geometric_stiffness: bool, // Evaluate post-disruption P-Delta & Kg buckling effects (default: true)
 }
 
-impl Default for AriConfig {
+impl Default for EigenGateConfig {
     fn default() -> Self {
         Self {
             alpha_k: 0.50,
@@ -56,7 +56,7 @@ impl Default for AriConfig {
 }
 
 // -----------------------------------------------------------------------------
-// 1. NORMALISASI SATURASI HIPERBOLIK MICHAELIS-MENTEN (Persamaan 2.6)
+// 1. MICHAELIS-MENTEN HYPERBOLIC SATURATION NORMALIZATION (Eq. 2.6)
 // -----------------------------------------------------------------------------
 
 #[inline]
@@ -88,7 +88,7 @@ pub fn edge_compliance_cost(w_e: f64) -> f64 {
 }
 
 // -----------------------------------------------------------------------------
-// 2. STRUKTUR DATA MULTIGRAF & K-LINTASAN BEBAS SISI (Persamaan 2.9 & 2.10)
+// 2. MULTIGRAPH DATA STRUCTURE & K EDGE-DISJOINT LOAD PATHS (Eqs. 2.9 & 2.10)
 // -----------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -375,7 +375,7 @@ pub fn compute_pair_score(
     source: usize,
     target: usize,
     edge_costs: &HashMap<usize, f64>,
-    config: &AriConfig,
+    config: &EigenGateConfig,
 ) -> (f64, bool) {
     if source == target {
         let om1 = rank_weights(config.k_paths, config.gamma)[0];
@@ -433,7 +433,7 @@ pub fn compute_pair_score(
 }
 
 // -----------------------------------------------------------------------------
-// 3. AGREGASI SKOR GRAF GLOBAL S(G) (Persamaan 2.11 - 2.13)
+// 3. GLOBAL GRAPH SCORE AGGREGATION S(G) (Eqs. 2.11 - 2.13)
 // -----------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -447,7 +447,7 @@ pub fn compute_graph_score(
     graph: &Multigraph,
     edge_costs: &HashMap<usize, f64>,
     pairs: &[LoadSupportPair],
-    config: &AriConfig,
+    config: &EigenGateConfig,
 ) -> (f64, bool) {
     let mut total_s = 0.0;
     for p in pairs {
@@ -461,7 +461,7 @@ pub fn compute_graph_score(
 }
 
 // -----------------------------------------------------------------------------
-// 4. STRUKTUR DATA LAPORAN DIAGNOSTIK
+// 4. DIAGNOSTIC REPORT DATA STRUCTURES
 // -----------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -480,8 +480,8 @@ pub struct KinematicGuardReport {
 pub struct RedundancyAssessment {
     pub kinematic_guard: KinematicGuardReport,
     pub member_results: Vec<MemberRedundancyResult>,
-    pub min_system_ari: f64,
-    pub average_ari: f64,
+    pub min_system_eigengate: f64,
+    pub average_eigengate: f64,
     pub critical_members_count: usize,
 }
 
@@ -493,7 +493,7 @@ pub struct MemberRedundancyResult {
     pub capacity_kn: f64,
     pub utilization_initial: f64,
     pub max_redistribution_utilization: f64,
-    pub ari: f64,
+    pub eigengate: f64,
     pub rr: f64,
     pub ci: f64,
     pub svd_margin: f64,
@@ -513,13 +513,13 @@ pub struct MultiMemberDisruptionReport {
     pub nullspace_dim: usize,
     pub condition_number: f64,
     pub max_redistributed_utilization: f64,
-    pub residual_system_ari: f64,
+    pub residual_system_eigengate: f64,
     pub cascading_failure_triggered: bool,
     pub domino_failed_members: Vec<usize>,
     pub propagation_vulnerability_index: f64,
 }
 
-/// Hasil Penapisan Cepat N-2 (Pasangan 2 Batang) menggunakan Identitas Matriks Woodbury Rank-2
+/// Fast N-2 Pair Screening Result using the Rank-2 Woodbury Matrix Identity
 #[derive(Debug, Clone)]
 pub struct N2PairRedundancyResult {
     pub member_1_id: usize,
@@ -532,26 +532,26 @@ pub struct N2PairRedundancyResult {
     pub woodbury_determinant: f64,
     pub is_coupled_mechanism: bool,
     pub max_redistributed_utilization: f64,
-    pub pair_ari: f64,
+    pub pair_eigengate: f64,
 }
 
-/// Laporan Lengkap Penapisan Kontingensi N-2 Berbasis Identitas Woodbury
+/// Comprehensive N-2 Contingency Screening Report Based on the Woodbury Identity
 #[derive(Debug, Clone)]
 pub struct N2WoodburyScreeningReport {
     pub total_pairs_evaluated: usize,
     pub coupled_mechanism_pairs: usize,
     pub critical_pairs_count: usize,
-    pub min_pair_ari: f64,
+    pub min_pair_eigengate: f64,
     pub pair_results: Vec<N2PairRedundancyResult>,
 }
 
 // -----------------------------------------------------------------------------
-// 5. MESIN ARI RESMI: SHERMAN-MORRISON RANK-1 UPDATE & FAST EVALUATOR
+// 5. OFFICIAL EIGENGATE ENGINE: SHERMAN-MORRISON RANK-1 UPDATE & FAST EVALUATOR
 // -----------------------------------------------------------------------------
 
-pub struct AriEngine;
+pub struct EigenGateEngine;
 
-impl AriEngine {
+impl EigenGateEngine {
     pub fn verify_kinematics(global_k: &Matrix, tol: f64) -> KinematicGuardReport {
         // Compute a single SVD decomposition to derive rank, nullspace modes, and conditioning.
         let (_, s, v) = global_k.svd();
@@ -590,8 +590,8 @@ impl AriEngine {
         }
     }
 
-    /// Evaluasi Redundansi Seketika berbasis Pembaruan Invers Rank-1 Sherman-Morrison (O(N^2))
-    /// Menghindari pemfaktoran ulang matriks O(N^3) berkali-kali (Persamaan 4.13d–4.13g)
+    /// Instant O(N^2) Redundancy Evaluation via Rank-1 Sherman-Morrison Matrix Inverse Update.
+    /// Avoids repeated O(N^3) global stiffness re-factorization (Eqs. 4.13d-4.13g).
     pub fn evaluate_redundancy_fast(model: &StructuralModel) -> Result<RedundancyAssessment, String> {
         let baseline = FemSolver::solve(model)?;
         let kinematic_guard = Self::verify_kinematics(&baseline.k_free, 1e-7);
@@ -689,7 +689,7 @@ impl AriEngine {
                     capacity_kn: cap / 1000.0,
                     utilization_initial: u_init,
                     max_redistribution_utilization: 1.0,
-                    ari: 0.0,
+                    eigengate: 0.0,
                     rr: 0.0,
                     ci: 1.0,
                     svd_margin: 0.0,
@@ -702,7 +702,7 @@ impl AriEngine {
                 continue;
             }
 
-            // GATE 2 & 3: Redistribusi Gaya Eksak Pascagangguan via Sherman-Morrison
+            // GATE 2 & 3: Exact Post-Disruption Force Redistribution via Sherman-Morrison
             // u^(-e) = u_0 + [ D_e^(0) / (1 - h_e) ] * v_e
             let factor = f_init / stability_margin;
             let mut max_redistributed_u: f64 = 0.0;
@@ -712,12 +712,12 @@ impl AriEngine {
 
             for other_idx in 0..model.elements.len() {
                 if other_idx == elem_idx {
-                    continue; // Batang yang dieliminasi memiliki gaya 0
+                    continue; // Eliminated member carries zero axial force
                 }
 
                 let (on1_base, on2_base, ocx, ocy, ocz, k_other, o_l, o_e, o_imin) = elem_geom[other_idx];
 
-                // Hitung delta elongasi tambahan: a_j^T * v_e dalam waktu O(1) (6 lookups)
+                // Compute incremental elongation a_j^T * v_e in O(1) time (6 DOF lookups)
                 let mut delta_v = 0.0;
                 let other_entries = [
                     (on1_base, -ocx),
@@ -774,10 +774,10 @@ impl AriEngine {
 
             let delta_u = (max_redistributed_u - u_init).max(0.0);
             let reserve = (1.0 - u_init).max(0.05);
-            // ARI is penalized by second-order geometric stiffness destabilization
-            let ari_val = ((1.0 - (delta_u / reserve)).clamp(0.0, 1.0) * min_buckling_margin.sqrt()).clamp(0.0, 1.0);
+            // EigenGate is penalized by second-order geometric stiffness destabilization
+            let eigengate_val = ((1.0 - (delta_u / reserve)).clamp(0.0, 1.0) * min_buckling_margin.sqrt()).clamp(0.0, 1.0);
             let rr_val = (1.0 - (max_redistributed_u - u_init).abs()).clamp(0.0, 1.0);
-            let ci_val = 1.0 - ari_val;
+            let ci_val = 1.0 - eigengate_val;
             let effective_stability_margin = stability_margin.min(min_buckling_margin);
 
             member_results.push(MemberRedundancyResult {
@@ -787,11 +787,11 @@ impl AriEngine {
                 capacity_kn: cap / 1000.0,
                 utilization_initial: u_init,
                 max_redistribution_utilization: max_redistributed_u,
-                ari: ari_val,
+                eigengate: eigengate_val,
                 rr: rr_val,
                 ci: ci_val,
                 svd_margin: effective_stability_margin,
-                is_critical: ari_val < 0.70 || max_redistributed_u >= 1.0 || max_second_order_u >= 1.0 || min_buckling_margin < 0.10,
+                is_critical: eigengate_val < 0.70 || max_redistributed_u >= 1.0 || max_second_order_u >= 1.0 || min_buckling_margin < 0.10,
                 euler_buckling_kn: p_euler_init / 1000.0,
                 b1_amplification: governing_b1,
                 buckling_margin: min_buckling_margin,
@@ -799,9 +799,9 @@ impl AriEngine {
             });
         }
 
-        let min_system_ari = member_results.iter().map(|m| m.ari).fold(1.0, f64::min);
-        let average_ari = if !member_results.is_empty() {
-            member_results.iter().map(|m| m.ari).sum::<f64>() / (member_results.len() as f64)
+        let min_system_eigengate = member_results.iter().map(|m| m.eigengate).fold(1.0, f64::min);
+        let average_eigengate = if !member_results.is_empty() {
+            member_results.iter().map(|m| m.eigengate).sum::<f64>() / (member_results.len() as f64)
         } else {
             0.0
         };
@@ -810,18 +810,18 @@ impl AriEngine {
         Ok(RedundancyAssessment {
             kinematic_guard,
             member_results,
-            min_system_ari,
-            average_ari,
+            min_system_eigengate,
+            average_eigengate,
             critical_members_count,
         })
     }
 
-    /// Evaluasi lengkap ARI dengan auto-fallback
+    /// Complete EigenGate evaluation with automatic fallback
     pub fn evaluate_redundancy(model: &StructuralModel) -> Result<RedundancyAssessment, String> {
         Self::evaluate_redundancy_fast(model)
     }
 
-    /// Evaluasi Skenario Disrupsi Jamak N-k (misal N-2 dual-member loss) & Deteksi Runtuh Berantai (Cascading Failure)
+    /// Evaluates N-k multi-member disruption scenarios (e.g., dual-member loss) & cascading collapse propagation
     pub fn evaluate_multi_disruption(
         model: &StructuralModel,
         eliminated_ids: &[usize],
@@ -848,7 +848,7 @@ impl AriEngine {
                     0.0
                 };
 
-                let res_ari = if !guard.is_stable || cascading_triggered {
+                let res_eigengate = if !guard.is_stable || cascading_triggered {
                     0.0
                 } else {
                     (1.0 - (max_u - 0.50).max(0.0)).clamp(0.0, 1.0)
@@ -862,7 +862,7 @@ impl AriEngine {
                     nullspace_dim: guard.nullspace_dimension,
                     condition_number: guard.condition_number,
                     max_redistributed_utilization: max_u,
-                    residual_system_ari: res_ari,
+                    residual_system_eigengate: res_eigengate,
                     cascading_failure_triggered: cascading_triggered,
                     domino_failed_members: domino_failed,
                     propagation_vulnerability_index: pvi,
@@ -877,7 +877,7 @@ impl AriEngine {
                     nullspace_dim: 1,
                     condition_number: f64::INFINITY,
                     max_redistributed_utilization: 1.0,
-                    residual_system_ari: 0.0,
+                    residual_system_eigengate: 0.0,
                     cascading_failure_triggered: true,
                     domino_failed_members: vec![],
                     propagation_vulnerability_index: 1.0,
@@ -886,8 +886,8 @@ impl AriEngine {
         }
     }
 
-    /// Penapisan Cepat Kontingensi N-2 (Dual-Member Loss) menggunakan Identitas Matriks Woodbury Rank-2.
-    /// Mengevaluasi seluruh C(m, 2) pasangan elemen tanpa merakit/memfaktorkan ulang matriks kekakuan.
+    /// Fast N-2 contingency screening (dual-member loss) using the Rank-2 Woodbury Matrix Identity.
+    /// Evaluates all C(m, 2) member pairs without reassembling or refactoring the global stiffness matrix.
     pub fn evaluate_n2_woodbury_fast(model: &StructuralModel) -> Result<N2WoodburyScreeningReport, String> {
         let baseline = FemSolver::solve(model)?;
         let kinematic_guard = Self::verify_kinematics(&baseline.k_free, 1e-7);
@@ -975,7 +975,7 @@ impl AriEngine {
         let mut pair_results = Vec::new();
         let mut coupled_mechanism_pairs = 0;
         let mut critical_pairs_count = 0;
-        let mut min_pair_ari: f64 = 1.0;
+        let mut min_pair_eigengate: f64 = 1.0;
 
         for i in 0..m {
             for j in (i + 1)..m {
@@ -1011,12 +1011,12 @@ impl AriEngine {
                     let u_init_pair = baseline.member_utilizations[i].max(baseline.member_utilizations[j]);
                     let delta_u = (max_redist_u - u_init_pair).max(0.0);
                     let reserve = (1.0 - u_init_pair).max(0.05);
-                    let pair_ari = (1.0 - (delta_u / reserve)).clamp(0.0, 1.0) * det_c.clamp(0.0, 1.0).sqrt();
+                    let pair_eigengate = (1.0 - (delta_u / reserve)).clamp(0.0, 1.0) * det_c.clamp(0.0, 1.0).sqrt();
 
-                    if pair_ari < 0.70 || max_redist_u >= 1.0 {
+                    if pair_eigengate < 0.70 || max_redist_u >= 1.0 {
                         critical_pairs_count += 1;
                     }
-                    min_pair_ari = min_pair_ari.min(pair_ari);
+                    min_pair_eigengate = min_pair_eigengate.min(pair_eigengate);
 
                     pair_results.push(N2PairRedundancyResult {
                         member_1_id: model.elements[i].id,
@@ -1029,13 +1029,13 @@ impl AriEngine {
                         woodbury_determinant: det_c,
                         is_coupled_mechanism: false,
                         max_redistributed_utilization: max_redist_u,
-                        pair_ari,
+                        pair_eigengate,
                     });
                 } else {
                     // Coupled kinematic mechanism (Order-2 Cut Set)
                     coupled_mechanism_pairs += 1;
                     critical_pairs_count += 1;
-                    min_pair_ari = 0.0;
+                    min_pair_eigengate = 0.0;
 
                     pair_results.push(N2PairRedundancyResult {
                         member_1_id: model.elements[i].id,
@@ -1048,7 +1048,7 @@ impl AriEngine {
                         woodbury_determinant: det_c.max(0.0),
                         is_coupled_mechanism: true,
                         max_redistributed_utilization: 1.0,
-                        pair_ari: 0.0,
+                        pair_eigengate: 0.0,
                     });
                 }
             }
@@ -1058,7 +1058,7 @@ impl AriEngine {
             total_pairs_evaluated: pair_results.len(),
             coupled_mechanism_pairs,
             critical_pairs_count,
-            min_pair_ari,
+            min_pair_eigengate,
             pair_results,
         })
     }
@@ -1133,7 +1133,7 @@ impl AriEngine {
                     .map(|d| [d[0], d[1], d[2]])
                     .collect();
 
-                let residual_ari = if is_kinematic_mechanism {
+                let residual_eigengate = if is_kinematic_mechanism {
                     0.0
                 } else {
                     let dcr_penalty = ((post_max_dcr - 0.50).max(0.0) / 0.55).clamp(0.0, 1.0);
@@ -1160,7 +1160,7 @@ impl AriEngine {
                     post_member_moment_knm,
                     post_nodal_displacements,
                     newly_critical_fem_ids,
-                    residual_ari,
+                    residual_eigengate,
                 }
             }
             Err(_) => {
@@ -1210,7 +1210,7 @@ impl AriEngine {
                     post_member_moment_knm: HashMap::new(),
                     post_nodal_displacements: collapse_disp,
                     newly_critical_fem_ids,
-                    residual_ari: 0.0,
+                    residual_eigengate: 0.0,
                 }
             }
         }
@@ -1233,11 +1233,11 @@ pub struct N1SimulationReport {
     pub post_member_moment_knm: HashMap<usize, f64>,
     pub post_nodal_displacements: Vec<[f64; 3]>,
     pub newly_critical_fem_ids: Vec<usize>,
-    pub residual_ari: f64,
+    pub residual_eigengate: f64,
 }
 
 // -----------------------------------------------------------------------------
-// 6. SUITE PENGUJIAN OTOMATIS EIGENGRAPH
+// 6. EIGENGRAPH AUTOMATED VERIFICATION TEST SUITE
 // -----------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -1277,7 +1277,7 @@ mod tests {
         costs.insert(1, edge_compliance_cost(w1));
         costs.insert(2, edge_compliance_cost(w2));
 
-        let cfg = AriConfig {
+        let cfg = EigenGateConfig {
             gamma: 1.0,
             k_paths: 2,
             ..Default::default()
@@ -1300,9 +1300,9 @@ mod tests {
         assert!((rr1 - 7.0 / 17.0).abs() < 1e-3);
 
         let u1_star = 0.50;
-        let ari_1 = rr1 * (1.0 - cfg.eta * u1_star);
-        assert!((ari_1 - 21.0 / 68.0).abs() < 1e-3);
-        let ci_1 = 1.0 - ari_1;
+        let eigengate_1 = rr1 * (1.0 - cfg.eta * u1_star);
+        assert!((eigengate_1 - 21.0 / 68.0).abs() < 1e-3);
+        let ci_1 = 1.0 - eigengate_1;
         assert!((ci_1 - 47.0 / 68.0).abs() < 1e-3);
     }
 
@@ -1329,14 +1329,14 @@ mod tests {
 
         model.add_load(NodalLoad::force_y(1, -30_000.0));
 
-        let assessment = AriEngine::evaluate_redundancy_fast(&model)
+        let assessment = EigenGateEngine::evaluate_redundancy_fast(&model)
             .expect("Fast evaluation should succeed");
 
         assert_eq!(assessment.member_results.len(), 2);
         assert!(assessment.kinematic_guard.is_stable);
         for m in &assessment.member_results {
             assert!(m.svd_margin > 0.0);
-            assert!(m.ari > 0.0);
+            assert!(m.eigengate > 0.0);
         }
     }
 
@@ -1361,7 +1361,7 @@ mod tests {
 
         model.add_load(NodalLoad::force_y(1, -30_000.0));
 
-        let n2_report = AriEngine::evaluate_n2_woodbury_fast(&model)
+        let n2_report = EigenGateEngine::evaluate_n2_woodbury_fast(&model)
             .expect("Woodbury N-2 screening should succeed");
 
         // C(3, 2) = 3 pairs; in a 3-bar parallel system, removing any 2 bars leaves 1 bar intact (no mechanism!)
@@ -1370,7 +1370,7 @@ mod tests {
         for pair in &n2_report.pair_results {
             assert!(!pair.is_coupled_mechanism);
             assert!(pair.woodbury_determinant > 0.0);
-            assert!(pair.pair_ari > 0.0);
+            assert!(pair.pair_eigengate > 0.0);
         }
     }
 
@@ -1392,13 +1392,13 @@ mod tests {
         m2_det.add_element(Element3D::new(2, "Right Diagonal", 1, 2).with_type(ElementType::Truss3D));
         m2_det.add_load(NodalLoad::force_y(2, -40_000.0));
 
-        let res_det = AriEngine::evaluate_redundancy_fast(&m2_det)
+        let res_det = EigenGateEngine::evaluate_redundancy_fast(&m2_det)
             .expect("Determinate V-truss should evaluate");
-        // In a 2-bar determinate truss with 2 free DOFs (ux, uy), removing EITHER bar induces a kinematic mechanism (h_e = 1.0 -> m_e = 0.0, ARI = 0.0)
+        // In a 2-bar determinate truss with 2 free DOFs (ux, uy), removing EITHER bar induces a kinematic mechanism (h_e = 1.0 -> m_e = 0.0, EigenGate = 0.0)
         assert_eq!(res_det.critical_members_count, 2);
         for m in &res_det.member_results {
             assert!(m.svd_margin <= MARGIN_TOL);
-            assert_eq!(m.ari, 0.0);
+            assert_eq!(m.eigengate, 0.0);
             assert!(m.is_critical);
         }
 
@@ -1407,11 +1407,11 @@ mod tests {
         m2_red.add_node(Node3D::new(3, 0.0, 1.0, 0.0).with_fixity(BoundaryFixity::fixed()));
         m2_red.add_element(Element3D::new(3, "Center Vertical Tie", 3, 2).with_type(ElementType::Truss3D));
 
-        let res_red = AriEngine::evaluate_redundancy_fast(&m2_red)
+        let res_red = EigenGateEngine::evaluate_redundancy_fast(&m2_red)
             .expect("Redundant 3-bar truss should evaluate");
         for m in &res_red.member_results {
             assert!(m.svd_margin > 0.10, "Member {} should have positive stability margin", m.member_id);
-            assert!(m.ari > 0.0, "Member {} should have positive ARI", m.member_id);
+            assert!(m.eigengate > 0.0, "Member {} should have positive EigenGate", m.member_id);
         }
     }
 
@@ -1422,7 +1422,7 @@ mod tests {
         let mut model = engine.generate_warren_truss().expect("Warren truss");
         model.add_load(NodalLoad::force_y(3, -50_000.0));
 
-        let fast_report = AriEngine::evaluate_redundancy_fast(&model).unwrap();
+        let fast_report = EigenGateEngine::evaluate_redundancy_fast(&model).unwrap();
 
         // Pick a redundant member (with svd_margin > 0.05) and compare max_redistribution_utilization against full FEM solve of damaged model
         for m_res in &fast_report.member_results {
@@ -1448,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ari_geometric_stiffness_euler_buckling_penalty() {
+    fn test_eigengate_geometric_stiffness_euler_buckling_penalty() {
         let mut model = StructuralModel::new("Parallel Compression Struts");
         model.add_node(Node3D::new(0, 0.0, 0.0, 0.0).with_fixity(BoundaryFixity::fixed()));
         let mut n1_fix = BoundaryFixity::free();
@@ -1473,7 +1473,7 @@ mod tests {
         // Apply compressive load
         model.add_load(NodalLoad::force_y(1, -50_000.0));
 
-        let report = AriEngine::evaluate_redundancy_fast(&model).expect("ARI evaluation");
+        let report = EigenGateEngine::evaluate_redundancy_fast(&model).expect("EigenGate evaluation");
         assert_eq!(report.member_results.len(), 2);
         for m in &report.member_results {
             assert!(m.euler_buckling_kn > 0.0);

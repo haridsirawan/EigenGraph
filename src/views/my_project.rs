@@ -241,7 +241,7 @@ impl MyProjectView {
             });
         });
 
-        // 4. EIGENGRAPH ARI AUDIT DOSSIER MODAL
+        // 4. EIGENGRAPH EigenGate AUDIT DOSSIER MODAL
         if self.show_dossier_modal {
             self.render_dossier_modal(ui, theme);
         }
@@ -268,8 +268,8 @@ impl MyProjectView {
 
         ui.add_space(10.0);
         ui.label(RichText::new(format!(
-            "Elements: {}   •   Nodes: {}   •   Max Disp: {:.2} mm   •   Min ARI: {:.2}",
-            p.elements_count, p.nodes_count, p.max_deflection_mm, p.min_ari
+            "Elements: {}   •   Nodes: {}   •   Max Disp: {:.2} mm   •   Min EigenGate: {:.2}",
+            p.elements_count, p.nodes_count, p.max_deflection_mm, p.min_eigengate
         )).size(12.0).color(theme.text_muted));
 
         ui.add_space(14.0);
@@ -635,7 +635,7 @@ impl MyProjectView {
                             let x0 = lx + t0 * w;
                             let x1 = lx + t1 * w;
                             let xm = 0.5 * (x0 + x1);
-                            let col_diag = if i == 2 && p.min_ari < 0.70 { theme.accent_orange } else { theme.accent_green };
+                            let col_diag = if i == 2 && p.min_eigengate < 0.70 { theme.accent_orange } else { theme.accent_green };
                             painter.line_segment([egui::pos2(x0, by), egui::pos2(xm, ty)], Stroke::new(1.4, col_diag));
                             painter.line_segment([egui::pos2(xm, ty), egui::pos2(x1, by)], Stroke::new(1.4, col_diag));
                             painter.circle_filled(egui::pos2(x0, by), 2.0, Color32::WHITE);
@@ -648,7 +648,7 @@ impl MyProjectView {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(&p.category).size(11.0).color(theme.accent_blue).strong());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let status_col = if p.min_ari >= 0.70 { theme.accent_green } else { theme.accent_orange };
+                    let status_col = if p.min_eigengate >= 0.70 { theme.accent_green } else { theme.accent_orange };
                     ui.label(RichText::new(p.status.badge_label()).size(11.0).strong().color(status_col));
                 });
             });
@@ -664,8 +664,8 @@ impl MyProjectView {
 
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(format!(
-                    "{} El  •  {} Nd  •  ARI: {:.2}",
-                    p.elements_count, p.nodes_count, p.min_ari
+                    "{} El  •  {} Nd  •  EigenGate: {:.2}",
+                    p.elements_count, p.nodes_count, p.min_eigengate
                 )).size(11.5).color(theme.text_muted));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if icons::icon_button(
@@ -882,7 +882,7 @@ impl MyProjectView {
                                 ui.label(RichText::new("ADVANCED STRUCTURAL INTEGRITY & RESILIENCE ENGINE").size(11.0).color(theme.text_secondary));
                                 ui.add_space(4.0);
                                 ui.heading(RichText::new("CERTIFICATE OF STRUCTURAL REDUNDANCY & PROGRESSIVE COLLAPSE RESILIENCE").size(14.0).strong().color(Color32::WHITE));
-                                ui.label(RichText::new("Verification based on Adjusted Redundancy Index (ARI) & SVD Kinematic Mechanism Guard").size(11.0).color(theme.accent_green));
+                                ui.label(RichText::new("Verification based on EigenGate & SVD Kinematic Mechanism Guard").size(11.0).color(theme.accent_green));
                                 ui.add_space(10.0);
                                 ui.separator();
                                 ui.add_space(10.0);
@@ -890,7 +890,7 @@ impl MyProjectView {
 
                             ui.label(RichText::new("AUTHORITY & AUDITOR INFORMATION:").size(11.5).strong().color(theme.text_secondary));
                             ui.label(RichText::new("• Verification Authority: EigenGraph Structural Systems").size(11.5).color(theme.text_primary));
-                            ui.label(RichText::new("• Analysis Framework: Development and Validation of Adjusted Redundancy Index for Pre-Analysis Screening of Element Disruption Scenarios").size(11.0).color(theme.text_secondary));
+                            ui.label(RichText::new("• Analysis Framework: Development and Validation of EigenGate for Pre-Analysis Screening of Element Disruption Scenarios").size(11.0).color(theme.text_secondary));
                             ui.label(RichText::new("• Publication / Verification Year: 2026").size(11.0).color(theme.text_muted));
 
                             ui.add_space(8.0);
@@ -899,7 +899,7 @@ impl MyProjectView {
 
                             ui.label(RichText::new("OFFICIAL AUDIT METRICS FOR ACTIVE MODEL:").size(11.5).strong().color(theme.text_secondary));
                             ui.horizontal_wrapped(|ui| {
-                                ui.label(RichText::new("• Minimum System ARI:").size(11.5).color(theme.text_secondary));
+                                ui.label(RichText::new("• Minimum System EigenGate:").size(11.5).color(theme.text_secondary));
                                 ui.label(RichText::new("0.942 [GRADE A: SAFE MULTI-PATH]").size(11.5).strong().color(theme.accent_green));
                             });
                             ui.horizontal_wrapped(|ui| {
@@ -919,7 +919,7 @@ impl MyProjectView {
                             ui.separator();
                             ui.add_space(8.0);
 
-                            let mock_hash = crate::core::Sha256Hasher::digest_hex(b"EIGENGRAPH_DOSSIER:name=Warren_Truss_24m:nodes=14:elems=25:avg_ari=0.9420:min_ari=0.8840:cond=1.42e3:rank=36");
+                            let mock_hash = crate::core::Sha256Hasher::digest_hex(b"EIGENGRAPH_DOSSIER:name=Warren_Truss_24m:nodes=14:elems=25:avg_eigengate=0.9420:min_eigengate=0.8840:cond=1.42e3:rank=36");
                             Frame::new()
                                 .fill(Color32::from_rgb(12, 16, 22))
                                 .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.5)))
@@ -988,7 +988,7 @@ impl MyProjectView {
                                 ).clicked() {
                                     let mut engine = crate::core::ParametricEngine::new();
                                     if let Ok(model) = engine.generate_warren_truss() {
-                                        let assessment = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                                        let assessment = crate::core::EigenGateEngine::evaluate_redundancy(&model).ok();
                                         let html = crate::core::HtmlViewerExporter::export_standalone_html(&model, assessment.as_ref());
                                         #[cfg(target_arch = "wasm32")]
                                         {
@@ -1022,13 +1022,13 @@ impl MyProjectView {
                                 ).clicked() {
                                     let mut engine = crate::core::ParametricEngine::new();
                                     if let Ok(model) = engine.generate_warren_truss() {
-                                        if let Ok(assessment) = crate::core::AriEngine::evaluate_redundancy(&model) {
+                                        if let Ok(assessment) = crate::core::EigenGateEngine::evaluate_redundancy(&model) {
                                             let spec = crate::core::modal::Sni1726Spectrum::new(crate::core::modal::SiteClass::SD, 1.20, 0.50, 8.0, 1.0);
                                             let modal = crate::core::modal::ModalEngine::analyze(&model, 4, spec).ok();
                                             let pushover = crate::core::nonlinear::NonlinearEngine::run_pushover(&model, 10);
                                             let rates = crate::core::cost::AhspUnitRates::default();
                                             let boq = crate::core::cost::CostEngine::calculate_boq(&model, Some(&rates));
-                                            let lca = crate::core::carbon::CarbonEngine::calculate_lca(&model, crate::core::carbon::CarbonSteelRoute::EafRecycled, Some(65.0), Some(assessment.min_system_ari));
+                                            let lca = crate::core::carbon::CarbonEngine::calculate_lca(&model, crate::core::carbon::CarbonSteelRoute::EafRecycled, Some(65.0), Some(assessment.min_system_eigengate));
 
                                             let full_md = crate::core::DossierExporter::export_comprehensive_dossier(&model, &assessment, modal.as_ref(), Some(&pushover), Some(&boq), Some(&lca));
                                             #[cfg(target_arch = "wasm32")]
@@ -1621,7 +1621,7 @@ impl MyProjectView {
                     AppIcon::Beam,
                     "36m Composite Warren Arch Viaduct",
                     "SNI 1725 / AASHTO LRFD Bridge Spec",
-                    "3×12m spans • W14x90 Chords • HL-93 Moving Load Preset • Baseline ARI 0.94",
+                    "3×12m spans • W14x90 Chords • HL-93 Moving Load Preset • Baseline EigenGate 0.94",
                     "Instantiate Steel Bridge Seed",
                     theme.accent_blue,
                 ),
@@ -1630,7 +1630,7 @@ impl MyProjectView {
                     AppIcon::Building,
                     "24-Storey Dual-System RC Tower",
                     "SNI 2847 / ACI 318 / SNI 1726 KDS-D",
-                    "C45 Coupled Core Shear Walls + SMF Perimeter • Seismic R=7.0 • Baseline ARI 0.91",
+                    "C45 Coupled Core Shear Walls + SMF Perimeter • Seismic R=7.0 • Baseline EigenGate 0.91",
                     "Instantiate RC Tower Seed",
                     theme.accent_green,
                 ),

@@ -49,7 +49,7 @@ impl AnalyzeView {
                 {
                     self.published_to_dossier = true;
                     self.export_status =
-                        Some("Model & ARI Analytics synced to Vault Dossier".to_string());
+                        Some("Model & EigenGate Analytics synced to Vault Dossier".to_string());
                 }
 
                 if icons::icon_button(
@@ -67,9 +67,9 @@ impl AnalyzeView {
                 {
                     let mut engine = crate::core::ParametricEngine::new();
                     if let Ok(model) = engine.generate_warren_truss() {
-                        let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                        let eigengate = crate::core::EigenGateEngine::evaluate_redundancy(&model).ok();
                         let s2k =
-                            crate::core::Sap2000Exporter::export_to_s2k(&model, ari.as_ref());
+                            crate::core::Sap2000Exporter::export_to_s2k(&model, eigengate.as_ref());
                         if let Ok(path) = crate::core::DiskExporter::write_export_file(
                             "EigenGraph_SAP2000.s2k",
                             &s2k,
@@ -95,9 +95,9 @@ impl AnalyzeView {
                 {
                     let mut engine = crate::core::ParametricEngine::new();
                     if let Ok(model) = engine.generate_warren_truss() {
-                        let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                        let eigengate = crate::core::EigenGateEngine::evaluate_redundancy(&model).ok();
                         let dxf =
-                            crate::core::DxfExporter::export_to_dxf(&model, ari.as_ref());
+                            crate::core::DxfExporter::export_to_dxf(&model, eigengate.as_ref());
                         if let Ok(path) = crate::core::DiskExporter::write_export_file(
                             "EigenGraph_3D.dxf",
                             &dxf,
@@ -123,9 +123,9 @@ impl AnalyzeView {
                 {
                     let mut engine = crate::core::ParametricEngine::new();
                     if let Ok(model) = engine.generate_warren_truss() {
-                        let ari = crate::core::AriEngine::evaluate_redundancy(&model).ok();
+                        let eigengate = crate::core::EigenGateEngine::evaluate_redundancy(&model).ok();
                         let ifcx =
-                            crate::core::IfcxExporter::export_to_ifcx(&model, ari.as_ref());
+                            crate::core::IfcxExporter::export_to_ifcx(&model, eigengate.as_ref());
                         if let Ok(path) = crate::core::DiskExporter::write_export_file(
                             "EigenGraph_OpenBIM.ifcx",
                             &ifcx,

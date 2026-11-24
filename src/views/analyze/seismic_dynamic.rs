@@ -348,7 +348,7 @@ impl AnalyzeView {
                             ui.label(RichText::new("•").size(11.0).color(theme.text_muted));
                             ui.label(RichText::new(format!("Ductility Demand μ: {:.2}", woodbury_rep.ductility_demand_mu)).size(11.0).strong().color(Color32::from_rgb(168, 85, 247)));
                             ui.label(RichText::new("•").size(11.0).color(theme.text_muted));
-                            ui.label(RichText::new(format!("Non-Linear ARI: {:.4} (CI: {:.4})", woodbury_rep.non_linear_ari, woodbury_rep.non_linear_ci)).size(11.0).strong().color(theme.accent_green));
+                            ui.label(RichText::new(format!("EigenFlow: {:.4} (CI: {:.4})", woodbury_rep.non_linear_eigenflow, woodbury_rep.non_linear_ci)).size(11.0).strong().color(theme.accent_green));
                         });
                         ui.add_space(6.0);
                         ui.label(RichText::new(&woodbury_rep.prescriptive_recommendation).size(11.5).strong().color(Color32::from_rgb(253, 224, 71)));

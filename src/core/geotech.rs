@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::ari::AriEngine;
+use crate::core::eigengate::EigenGateEngine;
 use crate::core::bim::BimProject;
 use crate::core::ifcx::{ns as ifcx_ns, IfcxDocument, IfcxImport, IfcxNode, UsdGeomMesh};
 use crate::core::lifecycle_ops::SiteEnvironmentalCoupling;
@@ -192,8 +192,8 @@ pub struct SubsurfaceSsiAnalysisReport {
     pub fixed_base_period_t1_s: f64,
     pub ssi_coupled_period_t1_s: f64,
     pub period_lengthening_pct: f64,
-    pub fixed_base_ari: f64,
-    pub ssi_coupled_ari: f64,
+    pub fixed_base_eigengate: f64,
+    pub ssi_coupled_eigengate: f64,
     pub max_foundation_settlement_mm: f64,
     pub ssi_overlay_ifcx: IfcxDocument,
     pub summary: String,
@@ -1199,8 +1199,8 @@ impl GeotechEngine {
         footing_couplings: &[FootingSsiCouplingResult],
         t_fixed: f64,
         t_ssi: f64,
-        ari_fixed: f64,
-        ari_ssi: f64,
+        eigengate_fixed: f64,
+        eigengate_ssi: f64,
     ) -> IfcxDocument {
         let slug = slugify_geotech(&project.project_name);
         let mut doc = IfcxDocument::new(format!("subsurface_ssi_{slug}"));
@@ -1328,8 +1328,8 @@ impl GeotechEngine {
                 json!({
                     "fixedBasePeriodSec": t_fixed,
                     "ssiCoupledPeriodSec": t_ssi,
-                    "fixedBaseAri": ari_fixed,
-                    "ssiCoupledAri": ari_ssi,
+                    "fixedBaseEigenGate": eigengate_fixed,
+                    "ssiCoupledEigenGate": eigengate_ssi,
                     "recommendedPileDepthM": recommended_pile_depth_m,
                     "footings": footing_couplings.iter().map(|f| json!({
                         "id": f.footing_id,
@@ -1346,10 +1346,10 @@ impl GeotechEngine {
                 }),
             )
             .with_attr(
-                ifcx_ns::EG_ARI,
+                ifcx_ns::EG_EIGENGATE,
                 json!({
-                    "ariSystem": ari_ssi,
-                    "ariAverage": ari_ssi,
+                    "eigenGateSystem": eigengate_ssi,
+                    "eigenGateAverage": eigengate_ssi,
                     "isKinematicallyStable": true,
                 }),
             );
@@ -1399,13 +1399,13 @@ pub fn evaluate_coupled_subsurface_ssi_for_bim(
     let t_ssi = modal_ssi.fundamental_period_s.max(t_fixed);
     let period_lengthening_pct = ((t_ssi / t_fixed) - 1.0) * 100.0;
 
-    let (fixed_base_ari, ssi_coupled_ari) =
+    let (fixed_base_eigengate, ssi_coupled_eigengate) =
         if fem_ssi.nodes.len() <= 32 && fem_ssi.elements.len() <= 96 {
-            let fixed = AriEngine::evaluate_redundancy_fast(&fem_fixed)
-                .map(|a| a.average_ari)
+            let fixed = EigenGateEngine::evaluate_redundancy_fast(&fem_fixed)
+                .map(|a| a.average_eigengate)
                 .unwrap_or(0.85);
-            let ssi = AriEngine::evaluate_redundancy_fast(&fem_ssi)
-                .map(|a| a.average_ari)
+            let ssi = EigenGateEngine::evaluate_redundancy_fast(&fem_ssi)
+                .map(|a| a.average_eigengate)
                 .unwrap_or(fixed);
             (fixed, ssi)
         } else {
@@ -1525,8 +1525,8 @@ pub fn evaluate_coupled_subsurface_ssi_for_bim(
         &footing_couplings,
         t_fixed,
         t_ssi,
-        fixed_base_ari,
-        ssi_coupled_ari,
+        fixed_base_eigengate,
+        ssi_coupled_eigengate,
     );
 
     let liq_tag = if is_liquefaction_critical {
@@ -1537,7 +1537,7 @@ pub fn evaluate_coupled_subsurface_ssi_for_bim(
         format!("Non-Liquefiable FS_L={min_liquefaction_fs:.2}")
     };
     let summary = format!(
-        "Subsurface SSI ({}, {site_class:?}, Vs30={vs30_m_s:.0}m/s): T1 {t_fixed:.2}s -> {t_ssi:.2}s (+{period_lengthening_pct:.1}%) | Piles {recommended_pile_depth_m:.1}m | Δf={max_foundation_settlement_mm:.1}mm | ARI={ssi_coupled_ari:.3} | {liq_tag}",
+        "Subsurface SSI ({}, {site_class:?}, Vs30={vs30_m_s:.0}m/s): T1 {t_fixed:.2}s -> {t_ssi:.2}s (+{period_lengthening_pct:.1}%) | Piles {recommended_pile_depth_m:.1}m | Δf={max_foundation_settlement_mm:.1}mm | EigenGate={ssi_coupled_eigengate:.3} | {liq_tag}",
         config.borehole_preset.short_label(),
     );
 
@@ -1556,8 +1556,8 @@ pub fn evaluate_coupled_subsurface_ssi_for_bim(
         fixed_base_period_t1_s: t_fixed,
         ssi_coupled_period_t1_s: t_ssi,
         period_lengthening_pct,
-        fixed_base_ari,
-        ssi_coupled_ari,
+        fixed_base_eigengate,
+        ssi_coupled_eigengate,
         max_foundation_settlement_mm,
         ssi_overlay_ifcx,
         summary,

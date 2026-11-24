@@ -229,7 +229,7 @@ impl BuildView {
     }
 
     fn render_properties_tab(&mut self, ui: &mut Ui, theme: &MacTheme, members: &[StructuralMember]) {
-        ui.label(RichText::new("PROPERTIES INSPECTOR & FRAME 3D ARI").size(12.0).strong().color(theme.text_secondary));
+        ui.label(RichText::new("PROPERTIES INSPECTOR & FRAME 3D EigenGate").size(12.0).strong().color(theme.text_secondary));
         ui.add_space(6.0);
 
         if let Some(mid) = self.selected_member_id {
@@ -240,7 +240,7 @@ impl BuildView {
             let force = m_opt.map(|m| m.force_kn).unwrap_or(48.5);
             let capacity = m_opt.map(|m| m.capacity_kn).unwrap_or(120.0);
             let util = m_opt.map(|m| m.utilization).unwrap_or(0.404);
-            let ari = m_opt.map(|m| m.ari).unwrap_or(0.89);
+            let eigengate = m_opt.map(|m| m.eigengate).unwrap_or(0.89);
             let dcr = m_opt.map(|m| m.dcr_interaction).unwrap_or(0.45);
 
             ui.horizontal(|ui| {
@@ -285,7 +285,7 @@ impl BuildView {
                     ("Axial Force (Pu)", format!("{:.1} kN", force), if force < 0.0 { theme.accent_blue } else { theme.accent_orange }),
                     ("Nominal Capacity (ϕPn)", format!("{:.1} kN", capacity), theme.text_primary),
                     ("Utilization Ratio (DCR)", format!("{:.1}%", util * 100.0), if util > 0.85 { theme.accent_red } else { theme.accent_green }),
-                    ("Redundancy Index (ARI)", format!("{:.3}", ari), if ari >= 0.85 { theme.accent_green } else { theme.accent_orange }),
+                    ("Redundancy Index (EigenGate)", format!("{:.3}", eigengate), if eigengate >= 0.85 { theme.accent_green } else { theme.accent_orange }),
                     ("P-M-V Interaction DCR", format!("{:.3}", dcr), theme.text_secondary),
                 ];
 
@@ -337,11 +337,11 @@ impl BuildView {
         } else {
             // Global System KPI View + Live Self-Learning Surrogate
             let mem = crate::core::InternalVault::load_knowledge_memory();
-            let surrogate_ari = mem.predict_member_ari(62.0, 1.05, 5);
-            let live_min_ari = if members.is_empty() {
+            let surrogate_eigengate = mem.predict_member_eigengate(62.0, 1.05, 5);
+            let live_min_eigengate = if members.is_empty() {
                 1.0
             } else {
-                members.iter().map(|m| m.ari).fold(1.0_f64, f64::min)
+                members.iter().map(|m| m.eigengate).fold(1.0_f64, f64::min)
             };
 
             theme.card_frame().show(ui, |ui| {
@@ -350,8 +350,8 @@ impl BuildView {
 
                 let sys_rows = [
                     ("Selected Model", self.active_model.label().to_string()),
-                    ("Redundancy Index (Global ARI)", format!("{:.3}", live_min_ari)),
-                    ("AI Surrogate Prediction (Memory)", format!("{:.3} ({} Cycles)", surrogate_ari, mem.total_ari_evaluations)),
+                    ("Redundancy Index (Global EigenGate)", format!("{:.3}", live_min_eigengate)),
+                    ("AI Surrogate Prediction (Memory)", format!("{:.3} ({} Cycles)", surrogate_eigengate, mem.total_eigengate_evaluations)),
                     ("Auto-Checkpoints (InternalVault)", format!("{}x Autosaved", mem.total_autosaves_count)),
                     ("Eliminated Members (Disrupted)", format!("N-{}", self.simulated_eliminated_ids.len())),
                 ];
@@ -966,7 +966,7 @@ impl BuildView {
             ui.collapsing("Structural Frame Elements (Active)", |ui| {
                 for m in members {
                     let is_sel = self.selected_member_id == Some(m.id);
-                    let text = format!("{}: {} (ARI: {:.2})", m.name, m.section, m.ari);
+                    let text = format!("{}: {} (EigenGate: {:.2})", m.name, m.section, m.eigengate);
                     if ui.selectable_label(is_sel, text).clicked() {
                         self.selected_member_id = Some(m.id);
                         self.active_sidebar_tab = SidebarTab::Properties;
@@ -1191,7 +1191,7 @@ impl BuildView {
 
         ui.label(RichText::new("3D Color Heatmap by:").size(11.0).strong().color(theme.text_primary));
         let modes = [
-            ("ARI", crate::icons::AppIcon::Palette, "Heatmap Adjusted Redundancy (ARI)"),
+            ("EigenGate", crate::icons::AppIcon::Palette, "Heatmap Adjusted Redundancy (EigenGate)"),
             ("Tension_Compression", crate::icons::AppIcon::Pulse, "Axial Force (Blue=Compression, Red=Tension)"),
             ("Criticality", crate::icons::AppIcon::AlertTriangle, "Top Fracture Critical Members"),
             ("DCR_Stress", crate::icons::AppIcon::Flame, "Yield Capacity Ratio Heatmap (DCR)"),

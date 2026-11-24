@@ -59,7 +59,7 @@ impl FirmRole {
         match self {
             Self::ProjectManager => "Workflow Coordination, Quality Assurance & Milestone Verification",
             Self::SeniorDrafter => "AutoCAD Vector Detailing, Rebar BBS Schedules & 2D/3D Detailing",
-            Self::FeaAnalyst => "Non-Linear Frame Mechanics, SVD Kinematic Guard & ARI Scoring",
+            Self::FeaAnalyst => "Non-Linear Frame Mechanics, SVD Kinematic Guard & EigenGate Scoring",
             Self::QsSpecialist => "5D Dynamic QTO, AHSP Unit Price Book & Parametric BoQ Ledgers",
         }
     }
@@ -226,28 +226,28 @@ pub fn compute_code_compliance_audit(
         status: if dcr_ok { "PASS" } else { "FAIL" },
     });
 
-    // 5. Kinematic Stability & ARI Redundancy Guard
-    let (avg_ari, is_stable) = if !project.is_empty() {
+    // 5. Kinematic Stability & EigenGate Redundancy Guard
+    let (avg_eigengate, is_stable) = if !project.is_empty() {
         project
-            .evaluate_live_ari()
-            .map(|r| (r.average_ari, r.kinematic_guard.is_stable))
+            .evaluate_live_eigengate()
+            .map(|r| (r.average_eigengate, r.kinematic_guard.is_stable))
             .unwrap_or((0.92, true))
     } else if !members.is_empty() {
-        let sum: f64 = members.iter().map(|m| m.ari).sum();
+        let sum: f64 = members.iter().map(|m| m.eigengate).sum();
         (sum / members.len() as f64, true)
     } else {
         (1.0, true)
     };
-    let ari_ok = is_stable && avg_ari >= 0.70;
-    if !ari_ok {
+    let eigengate_ok = is_stable && avg_eigengate >= 0.70;
+    if !eigengate_ok {
         flagged += 1;
     }
     rows.push(ComplianceClauseRow {
-        clause: "GSA 2016 / EigenGraph ARI".to_string(),
+        clause: "GSA 2016 / EigenGraph EigenGate".to_string(),
         description: "Alternative Load Path Redundancy & SVD Stability".to_string(),
-        computed: format!("{:.3} (Stable={})", avg_ari, is_stable),
+        computed: format!("{:.3} (Stable={})", avg_eigengate, is_stable),
         limit: ">= 0.70 & Stable".to_string(),
-        status: if ari_ok { "PASS" } else { "WARN" },
+        status: if eigengate_ok { "PASS" } else { "WARN" },
     });
 
     if include_detailing {
@@ -316,8 +316,8 @@ pub struct AiFirmView {
     // Phase 41: Pareto Multi-Objective NSGA-II Optimizer (AI-05)
     pub pareto_w_cost: f32,
     pub pareto_w_carbon: f32,
-    pub pareto_w_ari: f32,
-    pub pareto_min_ari: f32,
+    pub pareto_w_eigengate: f32,
+    pub pareto_min_eigengate: f32,
     pub pareto_generations: usize,
     pub pareto_front: Vec<crate::core::parametric::ParetoCandidate>,
     pub selected_pareto_id: Option<usize>,
@@ -373,8 +373,8 @@ impl Default for AiFirmView {
             last_audit_report: None,
             pareto_w_cost: 0.40,
             pareto_w_carbon: 0.35,
-            pareto_w_ari: 0.25,
-            pareto_min_ari: 0.85,
+            pareto_w_eigengate: 0.25,
+            pareto_min_eigengate: 0.85,
             pareto_generations: 50,
             pareto_front: crate::core::parametric::solve_nsga2_structural_pareto(
                 0.40, 0.35, 0.25, 0.85, 50,
@@ -1358,7 +1358,7 @@ impl AiFirmView {
                 ui.add_space(16.0);
 
                 let kpis = [
-                    ("ARI Redundancy", "0.942", "Grade A (Safe)", theme.accent_green),
+                    ("EigenGate Redundancy", "0.942", "Grade A (Safe)", theme.accent_green),
                     ("SVD Condition κ", "1.42e3", "Well-Conditioned", theme.accent_blue),
                     ("BoQ Accuracy", "99.8%", "AHSP Synchronized", theme.accent_green),
                     ("Directives Cleared", "18 / 18", "100% Resolved", theme.text_primary),
@@ -1544,12 +1544,12 @@ impl AiFirmView {
                     ui.add_space(6.0);
                     dirty |= ui.add(egui::Slider::new(&mut self.pareto_w_cost, 0.05..=1.0).text("Weight Cost (5D Capex)")).changed();
                     dirty |= ui.add(egui::Slider::new(&mut self.pareto_w_carbon, 0.05..=1.0).text("Weight Embodied Carbon (CO2e)")).changed();
-                    dirty |= ui.add(egui::Slider::new(&mut self.pareto_w_ari, 0.05..=1.0).text("Weight Redundancy (ARI Min)")).changed();
-                    dirty |= ui.add(egui::Slider::new(&mut self.pareto_min_ari, 0.70..=0.95).text("Min ARI Constraint")).changed();
+                    dirty |= ui.add(egui::Slider::new(&mut self.pareto_w_eigengate, 0.05..=1.0).text("Weight Redundancy (EigenGate Min)")).changed();
+                    dirty |= ui.add(egui::Slider::new(&mut self.pareto_min_eigengate, 0.70..=0.95).text("Min EigenGate Constraint")).changed();
                     ui.add_space(6.0);
                     ui.label(RichText::new(format!(
-                        "Constraints: ARI >= {:.2} | Drift <= h/500 | DCR <= 0.90 | Rank-0 Non-Dominated: {}",
-                        self.pareto_min_ari,
+                        "Constraints: EigenGate >= {:.2} | Drift <= h/500 | DCR <= 0.90 | Rank-0 Non-Dominated: {}",
+                        self.pareto_min_eigengate,
                         self.pareto_front.len()
                     )).size(10.5).color(theme.text_secondary));
                     ui.add_space(8.0);
@@ -1593,8 +1593,8 @@ impl AiFirmView {
                                 let span_mm = (sol.bay_span_m * 1000.0).round();
                                 self.pending_bim_nl_command = Some(format!("add column at {},{}", span_mm, span_mm));
                                 self.pareto_status = Some(format!(
-                                    "Applied Pareto Solution #{} (Bay {:.1}m, Col {:.0}mm, Beam {:.0}mm, fc {:.0} MPa, ARI {:.3}) to BIM Queue.",
-                                    sol.id, sol.bay_span_m, sol.col_size_mm, sol.beam_depth_mm, sol.fc_mpa, sol.ari_score
+                                    "Applied Pareto Solution #{} (Bay {:.1}m, Col {:.0}mm, Beam {:.0}mm, fc {:.0} MPa, EigenGate {:.3}) to BIM Queue.",
+                                    sol.id, sol.bay_span_m, sol.col_size_mm, sol.beam_depth_mm, sol.fc_mpa, sol.eigengate_score
                                 ));
                             }
                         }
@@ -1634,7 +1634,7 @@ impl AiFirmView {
                                     c.id,
                                     egui::Pos2::new(plot.left() + nx * plot.width(), plot.bottom() - ny * plot.height()),
                                     c.is_knee,
-                                    c.ari_score,
+                                    c.eigengate_score,
                                 )
                             })
                             .collect();
@@ -1653,7 +1653,7 @@ impl AiFirmView {
                             }
                         }
                         let sel_id = self.selected_pareto_id;
-                        for (cid, pt, is_knee, ari) in &screen_pts {
+                        for (cid, pt, is_knee, eigengate) in &screen_pts {
                             let is_sel = sel_id == Some(*cid);
                             let col = if *is_knee {
                                 theme.accent_green
@@ -1673,7 +1673,7 @@ impl AiFirmView {
                                 painter.text(
                                     egui::Pos2::new(pt.x + 20.0, pt.y - 6.0),
                                     egui::Align2::LEFT_BOTTOM,
-                                    format!("#{} (ARI {:.3})", cid, ari),
+                                    format!("#{} (EigenGate {:.3})", cid, eigengate),
                                     egui::FontId::proportional(10.0),
                                     col,
                                 );
@@ -1694,8 +1694,8 @@ impl AiFirmView {
                 self.pareto_front = crate::core::parametric::solve_nsga2_structural_pareto(
                     self.pareto_w_cost,
                     self.pareto_w_carbon,
-                    self.pareto_w_ari,
-                    self.pareto_min_ari,
+                    self.pareto_w_eigengate,
+                    self.pareto_min_eigengate,
                     self.pareto_generations,
                 );
             }
@@ -1711,7 +1711,7 @@ impl AiFirmView {
                     .striped(true)
                     .spacing([14.0, 4.0])
                     .show(ui, |ui| {
-                        for h in ["SOL #", "BAY (m)", "COL (mm)", "BEAM (mm)", "fc (MPa)", "CAPEX (IDR B)", "CARBON (tCO2e)", "ARI", "DCR"] {
+                        for h in ["SOL #", "BAY (m)", "COL (mm)", "BEAM (mm)", "fc (MPa)", "CAPEX (IDR B)", "CARBON (tCO2e)", "EigenGate", "DCR"] {
                             ui.label(RichText::new(h).size(10.0).strong().color(theme.text_muted));
                         }
                         ui.end_row();
@@ -1726,7 +1726,7 @@ impl AiFirmView {
                             ui.label(RichText::new(format!("{:.0}", c.fc_mpa)).size(10.5));
                             ui.label(RichText::new(format!("{:.2}", c.capex_idr_b)).size(10.5).color(theme.accent_blue));
                             ui.label(RichText::new(format!("{:.1}", c.carbon_tco2e)).size(10.5).color(theme.accent_orange));
-                            ui.label(RichText::new(format!("{:.3}", c.ari_score)).size(10.5).color(theme.accent_green));
+                            ui.label(RichText::new(format!("{:.3}", c.eigengate_score)).size(10.5).color(theme.accent_green));
                             ui.label(RichText::new(format!("{:.2}", c.max_dcr)).size(10.5));
                             ui.end_row();
                         }

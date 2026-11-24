@@ -639,13 +639,13 @@ impl PredictionView {
                 ).clicked() {
                     let mut engine = crate::core::ParametricEngine::new();
                     if let Ok(model) = engine.generate_warren_truss() {
-                        let min_ari = crate::core::AriEngine::evaluate_redundancy(&model)
-                            .map(|r| r.min_system_ari)
+                        let min_eigengate = crate::core::EigenGateEngine::evaluate_redundancy(&model)
+                            .map(|r| r.min_system_eigengate)
                             .unwrap_or(0.912);
                         if let Ok(rep) = crate::core::ReliabilityEngine::evaluate_full_reliability(
                             &model,
                             self.target_reliability_beta as f64,
-                            min_ari,
+                            min_eigengate,
                         ) {
                             self.simulation_status = Some(format!(
                                 "FOSM & FEMA P-58 Evaluation Complete: System β_min = {:.2} (Pf = {:.2e}), Spatial Clashes = {}.",
@@ -792,7 +792,7 @@ impl PredictionView {
                 ("Stage 0: Full Gravity Load State", "Intact structure under nominal elastic condition. Maximum DCR 0.58 at mid-span chord.", "NORMAL", theme.accent_green),
                 ("Stage 1: Sudden Member Removal", stage_1_desc.as_str(), "DISRUPTED", theme.accent_orange),
                 ("Stage 2: Alternative Load Path Formation", "Gravity loads transferred to flanking diagonal members via Vierendeel/truss mechanism.", "REDISTRIBUTE", theme.accent_blue),
-                ("Stage 3: New Static Equilibrium", "Deformation stabilized at 28.4 mm (< 150 mm collapse limit). System proven redundant (ARI > 0.70).", "STABLE SAFE", theme.accent_green),
+                ("Stage 3: New Static Equilibrium", "Deformation stabilized at 28.4 mm (< 150 mm collapse limit). System proven redundant (EigenGate > 0.70).", "STABLE SAFE", theme.accent_green),
             ];
 
             for (title, desc, badge, color) in stages {
@@ -855,12 +855,12 @@ impl PredictionView {
             let year = self.service_years as f32;
             let total_loss_mm = year * self.corrosion_rate_mm_yr;
             let remaining_capacity_pct = (100.0 - total_loss_mm * 4.2).max(60.0);
-            let degraded_ari = (0.942 * (remaining_capacity_pct / 100.0)).max(0.60);
+            let degraded_eigengate = (0.942 * (remaining_capacity_pct / 100.0)).max(0.60);
 
             let life_cards = [
                 ("Total Plate Thickness Reduction", format!("{:.2} mm", total_loss_mm), "Estimated effective section loss", theme.accent_orange),
                 ("Residual Structural Capacity", format!("{:.1}%", remaining_capacity_pct), "Adequate for nominal design loads", theme.accent_blue),
-                ("Predicted Adjusted Redundancy Index", format!("{:.4}", degraded_ari), "Remains above critical threshold of 0.70", theme.accent_green),
+                ("Predicted EigenGate", format!("{:.4}", degraded_eigengate), "Remains above critical threshold of 0.70", theme.accent_green),
             ];
             ui_kit::responsive_grid_n(ui, life_cards.len(), 210.0, |ui, idx| {
                 let (title, val, sub, col) = &life_cards[idx];
@@ -1031,18 +1031,18 @@ impl PredictionView {
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    crate::icons::icon_label(ui, crate::icons::AppIcon::ChartLine, 12.0, theme.accent_blue, "ARI(t) DEGRADATION EVOLUTION CURVE OVER SERVICE LIFE (ISO 9223)", 11.5, theme.text_primary, true);
+                    crate::icons::icon_label(ui, crate::icons::AppIcon::ChartLine, 12.0, theme.accent_blue, "EigenGate(t) DEGRADATION EVOLUTION CURVE OVER SERVICE LIFE (ISO 9223)", 11.5, theme.text_primary, true);
                     ui.horizontal_wrapped(|ui| {
                         let (rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), egui::Sense::hover());
                         ui.painter().rect_filled(rect, CornerRadius::same(2), theme.accent_green);
-                        ui.label(RichText::new("ARI(t) Curve").size(10.0).color(theme.text_secondary));
+                        ui.label(RichText::new("EigenGate(t) Curve").size(10.0).color(theme.text_secondary));
                         ui.add_space(8.0);
                         let (line_rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 8.0), egui::Sense::hover());
                         ui.painter().line_segment(
                             [line_rect.left_center(), line_rect.right_center()],
                             Stroke::new(1.5, Color32::from_rgb(245, 85, 85)),
                         );
-                        ui.label(RichText::new("Safe Redundancy Threshold ARI = 0.70").size(10.0).color(theme.text_secondary));
+                        ui.label(RichText::new("Safe Redundancy Threshold EigenGate = 0.70").size(10.0).color(theme.text_secondary));
                     });
                 });
                 ui.add_space(6.0);
@@ -1061,7 +1061,7 @@ impl PredictionView {
                 let x0 = rect.left() + pad_l;
                 let y0 = rect.bottom() - pad_b;
 
-                // Critical ARI = 0.70 threshold line (mapped onto y range [0.50, 1.00])
+                // Critical EigenGate = 0.70 threshold line (mapped onto y range [0.50, 1.00])
                 let thresh_frac = (0.70 - 0.50) / 0.50;
                 let thresh_y = y0 - thresh_frac * plot_h;
                 painter.line_segment(
@@ -1076,9 +1076,9 @@ impl PredictionView {
                     let yr = frac * max_yr;
                     let loss_mm = yr * self.corrosion_rate_mm_yr;
                     let rem_cap = (100.0 - loss_mm * 4.2).max(55.0);
-                    let ari_t = (0.942 * (rem_cap / 100.0)).clamp(0.50, 1.00);
+                    let eigengate_t = (0.942 * (rem_cap / 100.0)).clamp(0.50, 1.00);
                     let px = x0 + frac * plot_w;
-                    let py = y0 - ((ari_t - 0.50) / 0.50) * plot_h;
+                    let py = y0 - ((eigengate_t - 0.50) / 0.50) * plot_h;
                     pts.push(Pos2::new(px, py));
                 }
                 for w in pts.windows(2) {

@@ -67,7 +67,7 @@ pub struct WorldBuildingProxy {
     pub story_count: usize,
     pub member_count: usize,
     pub max_dcr: f64,
-    pub min_ari: f64,
+    pub min_eigengate: f64,
     #[serde(default)]
     pub source: GeoPlacementSource,
     #[serde(default)]
@@ -112,7 +112,7 @@ impl WorldBuildingProxy {
     }
 
     pub fn is_critical(&self) -> bool {
-        self.max_dcr >= 0.90 || self.min_ari < 0.70
+        self.max_dcr >= 0.90 || self.min_eigengate < 0.70
     }
 
     /// Builds a proxy directly from an in-memory `BimProject` and structural `members` slice.
@@ -180,10 +180,10 @@ impl WorldBuildingProxy {
             .map(|m| m.utilization)
             .fold(0.0_f64, f64::max)
             .clamp(0.0, 2.5);
-        let min_ari = if members.is_empty() {
+        let min_eigengate = if members.is_empty() {
             0.92
         } else {
-            members.iter().map(|m| m.ari).fold(1.0_f64, f64::min).clamp(0.0, 1.0)
+            members.iter().map(|m| m.eigengate).fold(1.0_f64, f64::min).clamp(0.0, 1.0)
         };
 
         let display_name = if bim.project_name.trim().is_empty() {
@@ -206,7 +206,7 @@ impl WorldBuildingProxy {
             story_count,
             member_count: bim.element_count().max(members.len()),
             max_dcr,
-            min_ari,
+            min_eigengate,
             source,
             address_hint,
         }
@@ -221,7 +221,7 @@ pub struct WorldClusterBeacon {
     pub count: usize,
     pub unlocated_count: usize,
     pub max_dcr: f64,
-    pub min_ari: f64,
+    pub min_eigengate: f64,
     pub label: String,
     pub primary_rel_path: String,
 }
@@ -479,7 +479,7 @@ impl WorldSpatialIndex {
                 bb.max_dcr
                     .partial_cmp(&ba.max_dcr)
                     .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| ba.min_ari.partial_cmp(&bb.min_ari).unwrap_or(std::cmp::Ordering::Equal))
+                    .then_with(|| ba.min_eigengate.partial_cmp(&bb.min_eigengate).unwrap_or(std::cmp::Ordering::Equal))
             });
         }
         if let Some(cur) = after_rel {
@@ -674,7 +674,7 @@ impl WorldSpatialIndex {
             count: usize,
             unlocated_count: usize,
             max_dcr: f64,
-            min_ari: f64,
+            min_eigengate: f64,
             first_name: String,
             first_path: String,
             hint: String,
@@ -699,7 +699,7 @@ impl WorldSpatialIndex {
                 count: 0,
                 unlocated_count: 0,
                 max_dcr: 0.0,
-                min_ari: 1.0,
+                min_eigengate: 1.0,
                 first_name: b.name.clone(),
                 first_path: b.rel_path.clone(),
                 hint: b.address_hint.clone(),
@@ -711,7 +711,7 @@ impl WorldSpatialIndex {
                 entry.unlocated_count += 1;
             }
             entry.max_dcr = entry.max_dcr.max(b.max_dcr);
-            entry.min_ari = entry.min_ari.min(b.min_ari);
+            entry.min_eigengate = entry.min_eigengate.min(b.min_eigengate);
             if entry.hint.is_empty() && !b.address_hint.is_empty() {
                 entry.hint = b.address_hint.clone();
             }
@@ -735,7 +735,7 @@ impl WorldSpatialIndex {
                     count: a.count,
                     unlocated_count: a.unlocated_count,
                     max_dcr: a.max_dcr,
-                    min_ari: a.min_ari,
+                    min_eigengate: a.min_eigengate,
                     label,
                     primary_rel_path: a.first_path,
                 }
@@ -796,7 +796,7 @@ mod tests {
                     story_count: 5 + (i % 20),
                     member_count: 120,
                     max_dcr: 0.45 + (i % 5) as f64 * 0.12,
-                    min_ari: 0.92 - (i % 4) as f64 * 0.08,
+                    min_eigengate: 0.92 - (i % 4) as f64 * 0.08,
                     source: src,
                     address_hint: hint,
                 },
@@ -848,7 +848,7 @@ mod tests {
     #[test]
     fn test_phase58_world_index_filtering_cycle_summary_and_heading_update() {
         let mut idx = WorldSpatialIndex::default();
-        for (i, (name, path, dcr, ari, src, city)) in [
+        for (i, (name, path, dcr, eigengate, src, city)) in [
             ("LowRisk", "Projects/Jakarta/A.ifc", 0.55, 0.94, GeoPlacementSource::FileNativeGeo, "Jakarta"),
             ("HighDcr", "Projects/Bandung/B.ifc", 1.12, 0.75, GeoPlacementSource::AddressOrFolderHint, "Bandung"),
             ("StagedOne", "Projects/Bandung/C.ifc", 0.92, 0.62, GeoPlacementSource::StagingCampusAuto, ""),
@@ -871,7 +871,7 @@ mod tests {
                     story_count: 5,
                     member_count: 40,
                     max_dcr: dcr,
-                    min_ari: ari,
+                    min_eigengate: eigengate,
                     source: src,
                     address_hint: city.to_string(),
                 },

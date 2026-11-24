@@ -9,14 +9,14 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::ari::{AriEngine, MARGIN_TOL};
+use crate::core::eigengate::{EigenGateEngine, MARGIN_TOL};
 use crate::core::bim::{BimElementKind, BimProject};
 use crate::core::lifecycle_ops::SiteEnvironmentalCoupling;
-use crate::core::ifcx::{ns, sanitize_slug, IfcxAriOverlay, IfcxDocument, IfcxImport, IfcxNode};
+use crate::core::ifcx::{ns, sanitize_slug, IfcxEigenGateOverlay, IfcxDocument, IfcxImport, IfcxNode};
 use crate::core::model::StructuralModel;
 use crate::core::solver::FemSolver;
 
-/// Custom IFCX namespace storing Two-Stage `ARI v2 + StructGNN-CRC` & Progressive Collapse metadata.
+/// Custom IFCX namespace storing Two-Stage `EigenGate v2 + StructGNN-CRC` & Progressive Collapse metadata.
 pub const NS_EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
 
 /// Status of the cascading progressive collapse simulation
@@ -50,15 +50,15 @@ pub struct CascadingCollapseReport {
     pub steps_count: usize,
     pub pvi: f64,
     pub robustness_index: f64,
-    pub residual_ari: f64,
+    pub residual_eigengate: f64,
     pub max_redistributed_dcr: f64,
     pub chronology: Vec<CollapseStep>,
 }
 
-/// Risk tier assigned by the Two-Stage `ARI v2 + StructGNN-CRC` Conformal Screening Pipeline.
+/// Risk tier assigned by the Two-Stage `EigenGate v2 + StructGNN-CRC` Conformal Screening Pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CrcRiskTier {
-    /// Stage 1 `ARI v2` mathematically certified safe (0% collapse risk under Sherman-Morrison guard).
+    /// Stage 1 `EigenGate v2` mathematically certified safe (0% collapse risk under Sherman-Morrison guard).
     SafePruned,
     /// Forwarded past Stage 1; moderate conformal collapse bound evaluated by `StructGNN-CRC`.
     ConformalWatch,
@@ -84,14 +84,14 @@ impl CrcRiskTier {
     }
 }
 
-/// Per-member scenario evaluation record produced by Two-Stage `ARI v2 + StructGNN-CRC`.
+/// Per-member scenario evaluation record produced by Two-Stage `EigenGate v2 + StructGNN-CRC`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StructGnnCrcScenario {
     pub fem_id: usize,
     pub bim_kind: Option<BimElementKind>,
     pub bim_id: Option<usize>,
     pub element_name: String,
-    pub ari_v2_score: f64,
+    pub eigengate_v2_score: f64,
     /// Convex weight $w_k = 0.25$: kinematic stiffness / spectral stability reserve.
     pub kinematic_channel_wk: f64,
     /// Convex weight $w_c = 0.45$: post-disruption cross-section capacity reserve.
@@ -105,7 +105,7 @@ pub struct StructGnnCrcScenario {
     pub risk_tier: CrcRiskTier,
 }
 
-/// Full Two-Stage `ARI v2 + StructGNN-CRC` Conformal Screening & 3D Progressive Collapse Report.
+/// Full Two-Stage `EigenGate v2 + StructGNN-CRC` Conformal Screening & 3D Progressive Collapse Report.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TwoStageCrcCascadeReport {
     pub project_name: String,
@@ -125,7 +125,7 @@ pub struct TwoStageCrcCascadeReport {
     pub total_steps: usize,
     pub pvi: f64,
     pub robustness_index: f64,
-    pub residual_ari: f64,
+    pub residual_eigengate: f64,
     pub step_failed_bim_elements: Vec<Vec<(BimElementKind, usize)>>,
     pub all_collapsed_bim_elements: Vec<(BimElementKind, usize)>,
     pub scenarios: Vec<StructGnnCrcScenario>,
@@ -329,11 +329,11 @@ impl CascadingSimulator {
         let pvi = (total_failed_count as f64 / initial_elem_count as f64).clamp(0.0, 1.0);
         let robustness = (1.0 - pvi).clamp(0.0, 1.0);
 
-        let residual_ari = if final_status == CollapseStatus::CatastrophicCollapse {
+        let residual_eigengate = if final_status == CollapseStatus::CatastrophicCollapse {
             0.0
         } else {
-            AriEngine::evaluate_redundancy_fast(&active_model)
-                .map(|r| r.average_ari)
+            EigenGateEngine::evaluate_redundancy_fast(&active_model)
+                .map(|r| r.average_eigengate)
                 .unwrap_or(0.0)
         };
 
@@ -345,7 +345,7 @@ impl CascadingSimulator {
             steps_count: chronology.len(),
             pvi,
             robustness_index: robustness,
-            residual_ari,
+            residual_eigengate,
             max_redistributed_dcr: max_dcr_recorded,
             chronology,
         })
@@ -362,7 +362,7 @@ fn bim_element_label(project: &BimProject, kind: BimElementKind, id: usize) -> O
     }
 }
 
-/// Runs the Dissertation Two-Stage Pairwise `ARI v2 + StructGNN-CRC` Conformal Screening
+/// Runs the Dissertation Two-Stage Pairwise `EigenGate v2 + StructGNN-CRC` Conformal Screening
 /// pipeline ($w_k=0.25, w_c=0.45, w_d=0.30$, $\alpha=0.05$) coupled with full 3D progressive
 /// collapse cascade chronology and emits a non-destructive `.ifcx` analysis overlay.
 pub fn run_two_stage_crc_and_cascade_for_bim(
@@ -376,11 +376,11 @@ pub fn run_two_stage_crc_and_cascade_for_bim(
     }
     let (fem, fem_map, _) = project.to_structural_model_with_site_loads(site_coupling);
     if fem.elements.is_empty() {
-        return Err("No analytical 3D frame elements available for Two-Stage ARI v2 + StructGNN-CRC screening.".to_string());
+        return Err("No analytical 3D frame elements available for Two-Stage EigenGate v2 + StructGNN-CRC screening.".to_string());
     }
 
     let fea = FemSolver::solve(&fem)?;
-    let ari_eval = AriEngine::evaluate_redundancy_fast(&fem)?;
+    let eigengate_eval = EigenGateEngine::evaluate_redundancy_fast(&fem)?;
 
     let mut fem_to_bim: HashMap<usize, (BimElementKind, usize)> =
         HashMap::with_capacity(fem_map.len());
@@ -405,11 +405,11 @@ pub fn run_two_stage_crc_and_cascade_for_bim(
     let q_conformal = (1.0_f64 / conformal_alpha).ln() / (2.0 * 300.0);
     let q_conformal = q_conformal.sqrt(); // ~0.0706 conservative CRC coverage padding
 
-    let mut scenarios: Vec<StructGnnCrcScenario> = Vec::with_capacity(ari_eval.member_results.len());
+    let mut scenarios: Vec<StructGnnCrcScenario> = Vec::with_capacity(eigengate_eval.member_results.len());
     let mut safe_candidate_indices: Vec<usize> = Vec::new();
     let mut any_critical_forwarded = false;
 
-    for m_res in &ari_eval.member_results {
+    for m_res in &eigengate_eval.member_results {
         let bim_pair = fem_to_bim.get(&m_res.member_id).copied();
         let elem_name = bim_pair
             .and_then(|(k, bid)| bim_element_label(project, k, bid))
@@ -437,15 +437,15 @@ pub fn run_two_stage_crc_and_cascade_for_bim(
             (0.5 * m_res.buckling_margin + 0.5 * m_res.rr).clamp(0.0, 1.0)
         };
 
-        // Dissertation Three-Channel Convex ARI v2 Formula (w_k = 0.25, w_c = 0.45, w_d = 0.30)
+        // Dissertation Three-Channel Convex EigenGate v2 Formula (w_k = 0.25, w_c = 0.45, w_d = 0.30)
         let convex_v2 = (0.25 * kinematic_channel_wk
             + 0.45 * capacity_channel_wc
             + 0.30 * deformation_channel_wd)
             .clamp(0.0, 1.0);
-        let ari_v2_score = if svd_mechanism {
+        let eigengate_v2_score = if svd_mechanism {
             0.0
         } else {
-            (0.5 * m_res.ari + 0.5 * convex_v2).clamp(0.0, 1.0)
+            (0.5 * m_res.eigengate + 0.5 * convex_v2).clamp(0.0, 1.0)
         };
 
         // Physics-informed StructGNN-CRC surrogate collapse probability + finite-sample conformal bound
@@ -455,7 +455,7 @@ pub fn run_two_stage_crc_and_cascade_for_bim(
         let gnn_prob = if svd_mechanism {
             0.96
         } else {
-            (0.35 * (1.0 - ari_v2_score) + 0.35 * overload_term + 0.15 * h_e + 0.15 * buckle_term)
+            (0.35 * (1.0 - eigengate_v2_score) + 0.35 * overload_term + 0.15 * h_e + 0.15 * buckle_term)
                 .clamp(0.01, 0.99)
         };
         let crc_upper_bound = (gnn_prob + q_conformal).clamp(0.0, 1.0);
@@ -463,7 +463,7 @@ pub fn run_two_stage_crc_and_cascade_for_bim(
         let is_forced_trigger = forced_trigger_fem == Some(m_res.member_id);
         let passes_stage1_certificate = !svd_mechanism
             && !m_res.is_critical
-            && ari_v2_score >= 0.72
+            && eigengate_v2_score >= 0.72
             && post_u < 0.92
             && m_res.buckling_margin >= 0.12
             && !is_forced_trigger;
@@ -477,7 +477,7 @@ pub fn run_two_stage_crc_and_cascade_for_bim(
 
         let risk_tier = if passes_stage1_certificate {
             CrcRiskTier::SafePruned
-        } else if svd_mechanism || crc_upper_bound >= 0.55 || ari_v2_score < 0.65 || is_forced_trigger {
+        } else if svd_mechanism || crc_upper_bound >= 0.55 || eigengate_v2_score < 0.65 || is_forced_trigger {
             CrcRiskTier::CriticalCollapseForward
         } else {
             CrcRiskTier::ConformalWatch
@@ -488,7 +488,7 @@ pub fn run_two_stage_crc_and_cascade_for_bim(
             bim_kind: bim_pair.map(|p| p.0),
             bim_id: bim_pair.map(|p| p.1),
             element_name: elem_name,
-            ari_v2_score,
+            eigengate_v2_score,
             kinematic_channel_wk,
             capacity_channel_wc,
             deformation_channel_wd,
@@ -507,7 +507,7 @@ pub fn run_two_stage_crc_and_cascade_for_bim(
         let mut worst_score = f64::NEG_INFINITY;
         for &idx in &safe_candidate_indices {
             let s = &scenarios[idx];
-            let rank_score = s.crc_upper_bound + (1.0 - s.ari_v2_score);
+            let rank_score = s.crc_upper_bound + (1.0 - s.eigengate_v2_score);
             if rank_score > worst_score {
                 worst_score = rank_score;
                 worst_safe_idx = idx;
@@ -521,7 +521,7 @@ pub fn run_two_stage_crc_and_cascade_for_bim(
     scenarios.sort_by(|a, b| {
         b.crc_upper_bound
             .total_cmp(&a.crc_upper_bound)
-            .then_with(|| a.ari_v2_score.total_cmp(&b.ari_v2_score))
+            .then_with(|| a.eigengate_v2_score.total_cmp(&b.eigengate_v2_score))
     });
 
     let total_scenarios = scenarios.len();
@@ -613,15 +613,15 @@ pub fn run_two_stage_crc_and_cascade_for_bim(
         eff_daf,
         status_lbl,
         &cascade_report,
-        &ari_eval.min_system_ari,
-        &ari_eval.average_ari,
-        ari_eval.critical_members_count,
-        !ari_eval.kinematic_guard.is_stable,
+        &eigengate_eval.min_system_eigengate,
+        &eigengate_eval.average_eigengate,
+        eigengate_eval.critical_members_count,
+        !eigengate_eval.kinematic_guard.is_stable,
         &scenarios,
     );
 
     let summary = format!(
-        "ARI v2 + StructGNN-CRC: {stage1_pruned_count}/{total_scenarios} pruned ({scenario_reduction_pct:.1}% reduction, 100% recall, -{compute_time_saved_pct:.1}% CPU, -{green_ai_co2_saved_g:.1}g CO2) | Trigger '{}' @ DAF {eff_daf:.2}x -> {status_lbl} ({} steps, PVI {:.2}, Rsys {:.2})",
+        "EigenGate v2 + StructGNN-CRC: {stage1_pruned_count}/{total_scenarios} pruned ({scenario_reduction_pct:.1}% reduction, 100% recall, -{compute_time_saved_pct:.1}% CPU, -{green_ai_co2_saved_g:.1}g CO2) | Trigger '{}' @ DAF {eff_daf:.2}x -> {status_lbl} ({} steps, PVI {:.2}, Rsys {:.2})",
         trigger_name,
         cascade_report.steps_count,
         cascade_report.pvi,
@@ -646,7 +646,7 @@ pub fn run_two_stage_crc_and_cascade_for_bim(
         total_steps: cascade_report.steps_count,
         pvi: cascade_report.pvi,
         robustness_index: cascade_report.robustness_index,
-        residual_ari: cascade_report.residual_ari,
+        residual_eigengate: cascade_report.residual_eigengate,
         step_failed_bim_elements,
         all_collapsed_bim_elements,
         scenarios,
@@ -672,8 +672,8 @@ fn build_crc_cascade_overlay_ifcx(
     daf: f64,
     status_lbl: &str,
     cascade: &CascadingCollapseReport,
-    min_ari: &f64,
-    avg_ari: &f64,
+    min_eigengate: &f64,
+    avg_eigengate: &f64,
     critical_count: usize,
     has_mechanism: bool,
     scenarios: &[StructGnnCrcScenario],
@@ -690,7 +690,7 @@ fn build_crc_cascade_overlay_ifcx(
         json!({
             "value": {
                 "dataType": "Object",
-                "spec": "EigenGraph Two-Stage ARI v2 + StructGNN-CRC Conformal Screening & Cascade Overlay"
+                "spec": "EigenGraph Two-Stage EigenGate v2 + StructGNN-CRC Conformal Screening & Cascade Overlay"
             }
         }),
     );
@@ -703,20 +703,20 @@ fn build_crc_cascade_overlay_ifcx(
     let mut bldg_node = IfcxNode::new(&bldg_path).with_class("IfcBuilding");
     bldg_node.children.insert("analysis".to_string(), analysis_path.clone());
 
-    let ari_overlay = IfcxAriOverlay {
-        ari_system: *min_ari,
-        ari_average: *avg_ari,
+    let eigengate_overlay = IfcxEigenGateOverlay {
+        eigengate_system: *min_eigengate,
+        eigengate_average: *avg_eigengate,
         critical_members_count: critical_count,
         max_dcr_pct: (cascade.max_redistributed_dcr * 100.0).min(999.0),
         svd_rank_deficiency: usize::from(has_mechanism),
         is_kinematically_stable: !has_mechanism,
     };
-    if let Ok(v) = serde_json::to_value(&ari_overlay) {
-        bldg_node.attributes.insert(ns::EG_ARI.to_string(), v);
+    if let Ok(v) = serde_json::to_value(&eigengate_overlay) {
+        bldg_node.attributes.insert(ns::EG_EIGENGATE.to_string(), v);
     }
 
     let crc_payload = json!({
-        "pipeline": "Two-Stage ARI v2 (wk=0.25, wc=0.45, wd=0.30) + StructGNN-CRC",
+        "pipeline": "Two-Stage EigenGate v2 (wk=0.25, wc=0.45, wd=0.30) + StructGNN-CRC",
         "conformalAlpha": conformal_alpha,
         "totalScenarios": total_scenarios,
         "stage1PrunedCount": stage1_pruned_count,
@@ -732,11 +732,11 @@ fn build_crc_cascade_overlay_ifcx(
         "stepsCount": cascade.steps_count,
         "pvi": cascade.pvi,
         "robustnessIndex": cascade.robustness_index,
-        "residualAri": cascade.residual_ari,
+        "residualEigenGate": cascade.residual_eigengate,
         "topScenarios": scenarios.iter().take(12).map(|s| json!({
             "femId": s.fem_id,
             "name": s.element_name,
-            "ariV2": s.ari_v2_score,
+            "eigenGateV2": s.eigengate_v2_score,
             "wk": s.kinematic_channel_wk,
             "wc": s.capacity_channel_wc,
             "wd": s.deformation_channel_wd,
@@ -760,7 +760,7 @@ fn build_crc_cascade_overlay_ifcx(
     let mut crc_node = IfcxNode::new(&crc_path)
         .with_class("IfcTask")
         .with_prop(
-            "Two-Stage ARI v2 + StructGNN-CRC Screening",
+            "Two-Stage EigenGate v2 + StructGNN-CRC Screening",
             status_lbl,
             &format!(
                 "{stage1_pruned_count}/{total_scenarios} pruned ({scenario_reduction_pct:.1}%), PVI={:.2}, Rsys={:.2}, DAF={daf:.2}x",
@@ -768,8 +768,8 @@ fn build_crc_cascade_overlay_ifcx(
             ),
         )
         .with_attr(NS_EG_CASCADE_CRC, crc_payload);
-    if let Ok(v) = serde_json::to_value(&ari_overlay) {
-        crc_node.attributes.insert(ns::EG_ARI.to_string(), v);
+    if let Ok(v) = serde_json::to_value(&eigengate_overlay) {
+        crc_node.attributes.insert(ns::EG_EIGENGATE.to_string(), v);
     }
     doc.add_node(crc_node);
     doc
@@ -798,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn phase70_two_stage_ari_v2_crc_screening_and_cascade_chronology() {
+    fn phase70_two_stage_eigengate_v2_crc_screening_and_cascade_chronology() {
         let proj = BimProject::sample_bimcraft_building();
         let site = SiteEnvironmentalCoupling::default();
         let report = run_two_stage_crc_and_cascade_for_bim(&proj, &site, None, 1.50)
@@ -825,7 +825,7 @@ mod tests {
         assert!(final_failed.len() >= step1_failed.len());
 
         for s in &report.scenarios {
-            assert!((0.0..=1.0).contains(&s.ari_v2_score));
+            assert!((0.0..=1.0).contains(&s.eigengate_v2_score));
             assert!((0.0..=1.0).contains(&s.crc_upper_bound));
             if s.svd_mechanism {
                 assert!(!s.stage1_pruned, "Zero SVD mechanisms may ever be Stage-1 pruned");

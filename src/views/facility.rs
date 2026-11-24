@@ -451,8 +451,8 @@ impl FacilityView {
         // Top Real-time Sensor Status Row (Responsive)
         let strain_str = format!("{:.0} µε", self.simulated_strain_micro);
         let freq_str = format!("{:.2} Hz", self.simulated_freq_hz);
-        let ari_live = (1.0 - (self.simulated_strain_micro / 2400.0).clamp(0.0, 0.45) - (self.simulated_degradation_pct / 100.0)).clamp(0.35, 0.99);
-        let ari_str = format!("{ari_live:.3}");
+        let eigengate_live = (1.0 - (self.simulated_strain_micro / 2400.0).clamp(0.0, 0.45) - (self.simulated_degradation_pct / 100.0)).clamp(0.35, 0.99);
+        let eigengate_str = format!("{eigengate_live:.3}");
         let health_label = if self.simulated_strain_micro > 600.0 {
             "ALERT"
         } else {
@@ -471,7 +471,7 @@ impl FacilityView {
         let cards = [
             ("STRAIN GAUGE SG-01", strain_str.as_str(), "Member E1 Strain (Safe < 600 µε)", theme.accent_green),
             ("NATURAL FREQUENCY (ACC-01)", freq_str.as_str(), "Mode 1 Transverse (Resonance Free)", theme.accent_blue),
-            ("LIVE ARI RESILIENCE", ari_str.as_str(), "Real-Time ARI(t) Dynamic Rating", theme.accent_green),
+            ("LIVE EigenGate RESILIENCE", eigengate_str.as_str(), "Real-Time EigenGate(t) Dynamic Rating", theme.accent_green),
             ("HEALTH STATUS (SHM)", health_label, health_sub.as_str(), health_col),
         ];
         ui_kit::responsive_grid_n(ui, cards.len(), 200.0, |ui, idx| {
@@ -1019,7 +1019,7 @@ impl FacilityView {
 
                 let work_orders = [
                     ("WO-2026-088", "Visual Inspection & Torque Verification of Gusset Joint J-04 Bolts", "Bi-annual Routine", "Scheduled: Apr 15, 2027", AppIcon::Clock, "Planned", theme.accent_blue),
-                    ("WO-2026-089", "NDT Ultrasonic Testing of Critical Tension Member E1 (Bottom Chord)", "Based on ARI Sensitivity (CI=0.42)", "Scheduled: Oct 10, 2027", AppIcon::CheckCircle, "Ready to Execute", theme.accent_green),
+                    ("WO-2026-089", "NDT Ultrasonic Testing of Critical Tension Member E1 (Bottom Chord)", "Based on EigenGate Sensitivity (CI=0.42)", "Scheduled: Oct 10, 2027", AppIcon::CheckCircle, "Ready to Execute", theme.accent_green),
                     ("WO-2026-090", "Drainage Channel Cleaning & Bearing Expansion Clearing", "Prevent Chloride/Moisture Corrosion", "Scheduled: Dec 01, 2026", AppIcon::AlertTriangle, "Upcoming", theme.text_secondary),
                 ];
 
@@ -1078,7 +1078,7 @@ impl FacilityView {
                 let lcc_cards = [
                     ("INITIAL CAPITAL (CAPEX)", "$3.84 M", "Initial Construction Verified via 5D BoQ", theme.text_primary),
                     ("ESTIMATED OPEX (30 YRS)", "$645 K", "Routine Maintenance & SHM Sensors", theme.accent_blue),
-                    ("EARLY ARI SAVINGS", "$1.45 M", "Catastrophic Failure Avoidance", theme.accent_green),
+                    ("EARLY EigenGate SAVINGS", "$1.45 M", "Catastrophic Failure Avoidance", theme.accent_green),
                 ];
                 ui_kit::responsive_grid_n(ui, lcc_cards.len(), 200.0, |ui, idx| {
                     let (title, val, sub, col) = lcc_cards[idx];

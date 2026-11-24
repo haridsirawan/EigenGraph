@@ -130,10 +130,10 @@ pub struct ConnectionReport {
 pub struct MemberConnectionDesign {
     pub element_id: usize,
     pub axial_force_kn: f64,
-    pub member_ari: f64,
-    /// Overstrength factor Omega_ARI = 1.0 + 0.35 * (1.0 - ARI_e)
+    pub member_eigengate: f64,
+    /// Overstrength factor Omega_EigenGate = 1.0 + 0.35 * (1.0 - EigenGate_e)
     pub overstrength_omega: f64,
-    /// Design connection force Pu_conn = max(Omega_ARI * |N_e|, 0.35 * phi_Pn) in kN
+    /// Design connection force Pu_conn = max(Omega_EigenGate * |N_e|, 0.35 * phi_Pn) in kN
     pub design_demand_kn: f64,
     pub bolt_grade: BoltGrade,
     pub bolt_count: usize,
@@ -164,7 +164,7 @@ impl ConnectionEngine {
     /// Evaluates SNI 1729:2020 Bab J bolted/welded gusset connections for all members in a model.
     pub fn evaluate_model_connections(
         model: &crate::core::model::StructuralModel,
-        ari_report: Option<&crate::core::ari::RedundancyAssessment>,
+        eigengate_report: Option<&crate::core::eigengate::RedundancyAssessment>,
     ) -> Result<ConnectionAuditReport, String> {
         let fem = crate::core::solver::FemSolver::solve(model)?;
         let mut member_connections = Vec::with_capacity(model.elements.len());
@@ -181,12 +181,12 @@ impl ConnectionEngine {
             let axial_force_kn = force_n / 1000.0;
             let member_yield_kn = (elem.section.area * elem.material.yield_strength) / 1000.0;
 
-            let member_ari = ari_report
+            let member_eigengate = eigengate_report
                 .and_then(|r| r.member_results.iter().find(|m| m.member_id == elem.id))
-                .map(|m| m.ari)
+                .map(|m| m.eigengate)
                 .unwrap_or(0.85);
 
-            let overstrength_omega = 1.0 + 0.35 * (1.0 - member_ari.clamp(0.0, 1.0));
+            let overstrength_omega = 1.0 + 0.35 * (1.0 - member_eigengate.clamp(0.0, 1.0));
             let base_demand_kn = overstrength_omega * axial_force_kn;
             let min_cap_demand_kn = 0.25 * member_yield_kn;
             let design_demand_kn = base_demand_kn.max(min_cap_demand_kn).max(45.0);
@@ -253,7 +253,7 @@ impl ConnectionEngine {
             member_connections.push(MemberConnectionDesign {
                 element_id: elem.id,
                 axial_force_kn,
-                member_ari,
+                member_eigengate,
                 overstrength_omega,
                 design_demand_kn,
                 bolt_grade,

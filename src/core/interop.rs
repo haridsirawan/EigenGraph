@@ -1,14 +1,14 @@
 //! interop.rs — Industrial AEC Interoperability & Export Engine for EigenGraph.
 //! Provides CSI SAP2000 (.s2k), AutoCAD DXF 3D, OpenBIM IFC 4.3, and Dissertation Calculation Dossier Exporters.
 
-use crate::core::ari::RedundancyAssessment;
+use crate::core::eigengate::RedundancyAssessment;
 use crate::core::model::{ElementType, StructuralModel};
 
 /// CSI SAP2000 & ETABS .s2k Text Data File Exporter
 pub struct Sap2000Exporter;
 
 impl Sap2000Exporter {
-    /// Generates a valid CSI SAP2000 V14+ / V20+ .s2k text file representing the structural model and its ARI analysis
+    /// Generates a valid CSI SAP2000 V14+ / V20+ .s2k text file representing the structural model and its EigenGate analysis
     pub fn export_to_s2k(model: &StructuralModel, assessment: Option<&RedundancyAssessment>) -> String {
         let mut s = String::new();
 
@@ -141,13 +141,13 @@ impl Sap2000Exporter {
             s.push_str("\n");
         }
 
-        // 11. Custom Table: Adjusted Redundancy Index (ARI) Metrics
+        // 11. Custom Table: EigenGate Metrics
         if let Some(res) = assessment {
-            s.push_str("$ TABLE:  \"ADJUSTED REDUNDANCY INDEX - ARI SCORES\"\n");
+            s.push_str("$ TABLE:  \"ADJUSTED REDUNDANCY INDEX - EigenGate SCORES\"\n");
             s.push_str(&format!(
-                "   GlobalARI={:.4}   MinMemberARI={:.4}   SvdCondition={:.3e}   SvdRank={}/{}   CriticalCount={}\n",
-                res.average_ari,
-                res.min_system_ari,
+                "   GlobalEigenGate={:.4}   MinMemberEigenGate={:.4}   SvdCondition={:.3e}   SvdRank={}/{}   CriticalCount={}\n",
+                res.average_eigengate,
+                res.min_system_eigengate,
                 res.kinematic_guard.condition_number,
                 res.kinematic_guard.rank,
                 res.kinematic_guard.active_dofs,
@@ -156,13 +156,13 @@ impl Sap2000Exporter {
             for m in &res.member_results {
                 let status = if m.is_critical { "FRACTURE_CRITICAL" } else { "REDUNDANT_SAFE" };
                 s.push_str(&format!(
-                    "   Frame={}   Force_kN={:.2}   Capacity_kN={:.2}   Util={:.2}%   RR={:.4}   ARI={:.4}   CI={:.4}   SvdMargin={:.6}   Status={}\n",
+                    "   Frame={}   Force_kN={:.2}   Capacity_kN={:.2}   Util={:.2}%   RR={:.4}   EigenGate={:.4}   CI={:.4}   SvdMargin={:.6}   Status={}\n",
                     m.member_id,
                     m.force_kn,
                     m.capacity_kn,
                     m.utilization_initial * 100.0,
                     m.rr,
-                    m.ari,
+                    m.eigengate,
                     m.ci,
                     m.svd_margin,
                     status
@@ -180,15 +180,15 @@ impl Sap2000Exporter {
 pub struct DxfExporter;
 
 impl DxfExporter {
-    /// Exports the structural wireframe to AutoCAD R12/2000 ASCII DXF with color-coded layers by ARI score
+    /// Exports the structural wireframe to AutoCAD R12/2000 ASCII DXF with color-coded layers by EigenGate score
     pub fn export_to_dxf(model: &StructuralModel, assessment: Option<&RedundancyAssessment>) -> String {
         let mut s = String::new();
 
         s.push_str("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n0\nENDSEC\n");
         s.push_str("0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n3\n");
-        s.push_str("0\nLAYER\n2\nARI_SAFE\n70\n0\n62\n3\n6\nCONTINUOUS\n");
-        s.push_str("0\nLAYER\n2\nARI_MODERATE\n70\n0\n62\n2\n6\nCONTINUOUS\n");
-        s.push_str("0\nLAYER\n2\nARI_CRITICAL\n70\n0\n62\n1\n6\nCONTINUOUS\n");
+        s.push_str("0\nLAYER\n2\nEigenGate_SAFE\n70\n0\n62\n3\n6\nCONTINUOUS\n");
+        s.push_str("0\nLAYER\n2\nEigenGate_MODERATE\n70\n0\n62\n2\n6\nCONTINUOUS\n");
+        s.push_str("0\nLAYER\n2\nEigenGate_CRITICAL\n70\n0\n62\n1\n6\nCONTINUOUS\n");
         s.push_str("0\nENDTAB\n0\nENDSEC\n");
         s.push_str("0\nSECTION\n2\nENTITIES\n");
 
@@ -199,18 +199,18 @@ impl DxfExporter {
             if let (Some(n1), Some(n2)) = (n1, n2) {
                 let layer = if let Some(res) = assessment {
                     if let Some(m) = res.member_results.iter().find(|r| r.member_id == elem.id) {
-                        if m.is_critical || m.ari < 0.50 {
-                            "ARI_CRITICAL"
-                        } else if m.ari < 0.70 {
-                            "ARI_MODERATE"
+                        if m.is_critical || m.eigengate < 0.50 {
+                            "EigenGate_CRITICAL"
+                        } else if m.eigengate < 0.70 {
+                            "EigenGate_MODERATE"
                         } else {
-                            "ARI_SAFE"
+                            "EigenGate_SAFE"
                         }
                     } else {
-                        "ARI_SAFE"
+                        "EigenGate_SAFE"
                     }
                 } else {
-                    "ARI_SAFE"
+                    "EigenGate_SAFE"
                 };
 
                 s.push_str("0\nLINE\n");
@@ -229,7 +229,7 @@ impl DxfExporter {
 pub struct IfcxExporter;
 
 impl IfcxExporter {
-    /// Generates a pure-JSON `.ifcx` document representing 3D structural elements and optional ARI v2 metrics.
+    /// Generates a pure-JSON `.ifcx` document representing 3D structural elements and optional EigenGate v2 metrics.
     pub fn export_to_ifcx(
         model: &StructuralModel,
         assessment: Option<&RedundancyAssessment>,
@@ -250,7 +250,7 @@ impl DossierExporter {
         md.push_str("> **Analytical Platform:** EigenGraph WebAssembly Engine (Rust / Pure WebGPU WGSL)\n");
         md.push_str("> **Theoretical Foundation:** EigenGraph Structural Redundancy Framework (2026)\n");
         md.push_str("> **Verification Authority:** EigenGraph Structural Systems\n");
-        md.push_str("> **Technical Dossier:** *Formulation & Validation of Adjusted Redundancy Index for Pre-Analysis Disruption Screening in Linear-Elastic Structures*\n\n");
+        md.push_str("> **Technical Dossier:** *Formulation & Validation of EigenGate for Pre-Analysis Disruption Screening in Linear-Elastic Structures*\n\n");
 
         md.push_str("---\n\n");
 
@@ -275,23 +275,23 @@ impl DossierExporter {
 
         md.push_str("---\n\n");
 
-        md.push_str("## 3. Global Redundancy Metrics Summary (ARI System Metrics)\n\n");
+        md.push_str("## 3. Global Redundancy Metrics Summary (EigenGate System Metrics)\n\n");
         md.push_str("| Metric Indicator | Numerical Value | EigenGraph / ASCE 7 Standard Threshold |\n");
         md.push_str("| :--- | :---: | :--- |\n");
-        md.push_str(&format!("| **Average Global Redundancy Index ($\\overline{{\\text{{ARI}}}}$)** | `{:.4}` | $\\ge 0.70$ (Multi-Path Recommended) |\n", assessment.average_ari));
-        md.push_str(&format!("| **Minimum Element Redundancy Index ($\\text{{ARI}}_{{\\min}}$)** | `{:.4}` | FCM Threshold $\\tau = 0.50$ |\n", assessment.min_system_ari));
-        md.push_str(&format!("| **Critical Members Count (FCM, ARI < 0.70)** | `{}` | Target EigenGraph: Zero Miss at Threshold $\\tau$ |\n\n", assessment.critical_members_count));
+        md.push_str(&format!("| **Average Global Redundancy Index ($\\overline{{\\text{{EigenGate}}}}$)** | `{:.4}` | $\\ge 0.70$ (Multi-Path Recommended) |\n", assessment.average_eigengate));
+        md.push_str(&format!("| **Minimum Element Redundancy Index ($\\text{{EigenGate}}_{{\\min}}$)** | `{:.4}` | FCM Threshold $\\tau = 0.50$ |\n", assessment.min_system_eigengate));
+        md.push_str(&format!("| **Critical Members Count (FCM, EigenGate < 0.70)** | `{}` | Target EigenGraph: Zero Miss at Threshold $\\tau$ |\n\n", assessment.critical_members_count));
 
         md.push_str("---\n\n");
 
         md.push_str("## 4. Member-by-Member Screening Evaluation Table\n\n");
-        md.push_str("| ID | Member Name | Axial Force $N_e$ [kN] | Capacity [kN] | $U_e^*$ | $RR_e$ | ARI | CI | SVD Margin $m_e$ | Status Classification |\n");
+        md.push_str("| ID | Member Name | Axial Force $N_e$ [kN] | Capacity [kN] | $U_e^*$ | $RR_e$ | EigenGate | CI | SVD Margin $m_e$ | Status Classification |\n");
         md.push_str("| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n");
 
         for m in &assessment.member_results {
-            let status_tag = if m.is_critical || m.ari < 0.50 {
+            let status_tag = if m.is_critical || m.eigengate < 0.50 {
                 "🔴 **FRACTURE CRITICAL (UNSAFE)**"
-            } else if m.ari < 0.70 {
+            } else if m.eigengate < 0.70 {
                 "🟡 MODERATE (MONITOR)"
             } else {
                 "🟢 REDUNDANT (SAFE)"
@@ -305,7 +305,7 @@ impl DossierExporter {
                 m.capacity_kn,
                 m.utilization_initial * 100.0,
                 m.rr,
-                m.ari,
+                m.eigengate,
                 m.ci,
                 m.svd_margin,
                 status_tag
@@ -315,7 +315,7 @@ impl DossierExporter {
         md.push_str("\n---\n\n");
 
         md.push_str("## 5. Structural Compliance Certification Statement\n\n");
-        md.push_str("Based on the Adjusted Redundancy Index formulation (Eqs. 2.5a–2.19) and Sherman-Morrison Kinematic Guard (Eqs. 4.1–4.7), this model has been evaluated for disproportionate progressive collapse vulnerability. All parameters remain within verified analytical safe bounds compliant with AISC 360-16 / SNI 1729:2020 and DoD UFC 4-023-03.\n\n");
+        md.push_str("Based on the EigenGate formulation (Eqs. 2.5a–2.19) and Sherman-Morrison Kinematic Guard (Eqs. 4.1–4.7), this model has been evaluated for disproportionate progressive collapse vulnerability. All parameters remain within verified analytical safe bounds compliant with AISC 360-16 / SNI 1729:2020 and DoD UFC 4-023-03.\n\n");
         md.push_str("*This dossier was generated automatically by EigenGraph Analysis & BIM Lifecycle Platform.*\n");
 
         md
@@ -392,11 +392,11 @@ impl DossierExporter {
             md.push_str(&format!("* **Total Embodied Carbon Footprint (A1–A5):** `{:.2} tCO2e`\n", lca.total_embodied_carbon_ton));
             md.push_str(&format!("* **Steel Fabrication Route:** {}\n", lca.route.display_name()));
             md.push_str(&format!("* **Green Building Rating Prediction (GBCI / LEED):** `{}`\n", lca.greenship_leed_tier));
-            md.push_str(&format!("* **Eco-Redundancy Efficiency Index ($\\eta_{{eco}}$):** `{:.4} ARI / tCO2e`\n\n", lca.eco_redundancy_efficiency));
+            md.push_str(&format!("* **Eco-Redundancy Efficiency Index ($\\eta_{{eco}}$):** `{:.4} EigenGate / tCO2e`\n\n", lca.eco_redundancy_efficiency));
         }
 
         // Section 9: NIST FIPS 180-4 SHA-256 Cryptographic Seal
-        let hash = Sha256Hasher::hash_model_and_ari(model, assessment);
+        let hash = Sha256Hasher::hash_model_and_eigengate(model, assessment);
         md.push_str("\n---\n\n");
         md.push_str("## 9. Digital Cryptographic Audit Seal (NIST FIPS 180-4 SHA-256 Tamper-Proof)\n\n");
         md.push_str("```\n");
@@ -510,14 +510,14 @@ impl Sha256Hasher {
         Self::digest_hex(payload.as_bytes())
     }
 
-    pub fn hash_model_and_ari(model: &StructuralModel, assessment: &RedundancyAssessment) -> String {
+    pub fn hash_model_and_eigengate(model: &StructuralModel, assessment: &RedundancyAssessment) -> String {
         let payload = format!(
-            "EIGENGRAPH_DOSSIER:name={}:nodes={}:elems={}:avg_ari={:.6}:min_ari={:.6}:cond={:.6}:rank={}",
+            "EIGENGRAPH_DOSSIER:name={}:nodes={}:elems={}:avg_eigengate={:.6}:min_eigengate={:.6}:cond={:.6}:rank={}",
             model.name,
             model.nodes.len(),
             model.elements.len(),
-            assessment.average_ari,
-            assessment.min_system_ari,
+            assessment.average_eigengate,
+            assessment.min_system_eigengate,
             assessment.kinematic_guard.condition_number,
             assessment.kinematic_guard.rank
         );
@@ -621,7 +621,7 @@ impl DstvExporter {
 
 /// Standalone Interactive HTML5 Vector Dossier Exporter.
 /// Generates a single, self-contained HTML5 file with an embedded 3D canvas viewport,
-/// mouse orbit/pan/zoom, member click inspection, ARI gradient contouring, and cryptographic audit seal.
+/// mouse orbit/pan/zoom, member click inspection, EigenGate gradient contouring, and cryptographic audit seal.
 pub struct HtmlViewerExporter;
 
 impl HtmlViewerExporter {
@@ -629,8 +629,8 @@ impl HtmlViewerExporter {
         model: &StructuralModel,
         assessment: Option<&RedundancyAssessment>,
     ) -> String {
-        let avg_ari = assessment.map(|a| a.average_ari).unwrap_or(0.942);
-        let min_ari = assessment.map(|a| a.min_system_ari).unwrap_or(0.884);
+        let avg_eigengate = assessment.map(|a| a.average_eigengate).unwrap_or(0.942);
+        let min_eigengate = assessment.map(|a| a.min_system_eigengate).unwrap_or(0.884);
         let crit_count = assessment.map(|a| a.critical_members_count).unwrap_or(0);
         let total_tonnage = model.total_steel_tonnage();
         let digital_seal = Sha256Hasher::compute_model_hash(model);
@@ -649,23 +649,23 @@ impl HtmlViewerExporter {
         }
         nodes_json.push(']');
 
-        // Serialize members with ARI and internal forces to JSON array
+        // Serialize members with EigenGate and internal forces to JSON array
         let mut members_json = String::from("[\n");
         for (i, elem) in model.elements.iter().enumerate() {
             let m_res = assessment.and_then(|a| a.member_results.iter().find(|m| m.member_id == elem.id));
             let force = m_res.map(|m| m.force_kn).unwrap_or(45.0);
             let capacity = m_res.map(|m| m.capacity_kn).unwrap_or(120.0);
             let util = m_res.map(|m| m.utilization_initial).unwrap_or(0.40);
-            let ari = m_res.map(|m| m.ari).unwrap_or(0.92);
+            let eigengate = m_res.map(|m| m.eigengate).unwrap_or(0.92);
             let ci = m_res.map(|m| m.ci).unwrap_or(0.08);
-            let is_critical = m_res.map(|m| m.is_critical).unwrap_or(ari < 0.70);
+            let is_critical = m_res.map(|m| m.is_critical).unwrap_or(eigengate < 0.70);
             let my = (force.abs() * 0.18).clamp(2.0, 85.0);
             let vy = (force.abs() * 0.25).clamp(1.5, 65.0);
 
             members_json.push_str(&format!(
-                "  {{\"id\": {}, \"name\": \"{}\", \"start\": {}, \"end\": {}, \"section\": \"{}\", \"force\": {:.2}, \"capacity\": {:.2}, \"util\": {:.3}, \"ari\": {:.4}, \"ci\": {:.4}, \"critical\": {}, \"my\": {:.2}, \"vy\": {:.2}}}{}\n",
+                "  {{\"id\": {}, \"name\": \"{}\", \"start\": {}, \"end\": {}, \"section\": \"{}\", \"force\": {:.2}, \"capacity\": {:.2}, \"util\": {:.3}, \"eigengate\": {:.4}, \"ci\": {:.4}, \"critical\": {}, \"my\": {:.2}, \"vy\": {:.2}}}{}\n",
                 elem.id, elem.name, elem.start_node, elem.end_node, elem.section.name,
-                force, capacity, util, ari, ci, is_critical, my, vy,
+                force, capacity, util, eigengate, ci, is_critical, my, vy,
                 if i + 1 < model.elements.len() { "," } else { "" }
             ));
         }
@@ -884,8 +884,8 @@ impl HtmlViewerExporter {
             <div class="stat-pill">Nodes: <span class="stat-val">{nodes_count}</span></div>
             <div class="stat-pill">Members: <span class="stat-val">{elems_count}</span></div>
             <div class="stat-pill">Steel Weight: <span class="stat-val">{total_tonnage:.2} Tonnes</span></div>
-            <div class="stat-pill">Avg ARI: <span class="stat-val" style="color: #38bdf8;">{avg_ari:.4}</span></div>
-            <div class="stat-pill">Min System ARI: <span class="stat-val" style="color: {min_ari_color};">{min_ari:.4}</span></div>
+            <div class="stat-pill">Avg EigenGate: <span class="stat-val" style="color: #38bdf8;">{avg_eigengate:.4}</span></div>
+            <div class="stat-pill">Min System EigenGate: <span class="stat-val" style="color: {min_eigengate_color};">{min_eigengate:.4}</span></div>
             <div class="stat-pill">Critical: <span class="stat-val" style="color: {crit_color};">{crit_count}</span></div>
             <div class="stat-pill">SVD Guard: <span class="stat-val" style="color: #34d399;">STABLE ZERO MECHANISM</span></div>
         </div>
@@ -905,10 +905,10 @@ impl HtmlViewerExporter {
         <canvas id="glcanvas"></canvas>
 
         <div class="hud-legend" id="hud-legend">
-            <div class="legend-item"><div class="legend-dot" style="background: #34d399;"></div> ARI &ge; 0.85 (Safe)</div>
-            <div class="legend-item"><div class="legend-dot" style="background: #38bdf8;"></div> ARI 0.70 - 0.85</div>
-            <div class="legend-item"><div class="legend-dot" style="background: #fbbf24;"></div> ARI 0.50 - 0.70 (Review Needed)</div>
-            <div class="legend-item"><div class="legend-dot" style="background: #f87171;"></div> ARI &lt; 0.50 (Fracture Critical)</div>
+            <div class="legend-item"><div class="legend-dot" style="background: #34d399;"></div> EigenGate &ge; 0.85 (Safe)</div>
+            <div class="legend-item"><div class="legend-dot" style="background: #38bdf8;"></div> EigenGate 0.70 - 0.85</div>
+            <div class="legend-item"><div class="legend-dot" style="background: #fbbf24;"></div> EigenGate 0.50 - 0.70 (Review Needed)</div>
+            <div class="legend-item"><div class="legend-dot" style="background: #f87171;"></div> EigenGate &lt; 0.50 (Fracture Critical)</div>
         </div>
 
         <div class="seal-badge">
@@ -927,7 +927,7 @@ impl HtmlViewerExporter {
             <div class="inspector-row"><span>Bending Moment (My):</span><strong id="insp-moment">24.5 kNm</strong></div>
             <div class="inspector-row"><span>Capacity (ϕPn):</span><strong id="insp-cap">120.0 kN</strong></div>
             <div class="inspector-row"><span>Demand/Capacity Ratio (DCR):</span><strong id="insp-util">37.6%</strong></div>
-            <div class="inspector-row"><span>Redundancy (ARI):</span><strong id="insp-ari" style="color: #34d399;">0.9400</strong></div>
+            <div class="inspector-row"><span>Redundancy (EigenGate):</span><strong id="insp-eigengate" style="color: #34d399;">0.9400</strong></div>
             <div class="inspector-row"><span>Criticality Index (CI):</span><strong id="insp-ci">0.0600</strong></div>
             <div class="inspector-row"><span>Member Status:</span><strong id="insp-status" style="color: #34d399;">SAFE REDUNDANT</strong></div>
         </div>
@@ -1073,7 +1073,7 @@ impl HtmlViewerExporter {
                     ctx.fill();
                     ctx.stroke();
                 }} else if (mode === 'solid') {{
-                    let color = m.ari >= 0.85 ? '#34d399' : m.ari >= 0.70 ? '#38bdf8' : m.ari >= 0.50 ? '#fbbf24' : '#f87171';
+                    let color = m.eigengate >= 0.85 ? '#34d399' : m.eigengate >= 0.70 ? '#38bdf8' : m.eigengate >= 0.50 ? '#fbbf24' : '#f87171';
                     if (isSel) color = '#ffffff';
                     const w = isSel ? 7 : 5;
 
@@ -1089,7 +1089,7 @@ impl HtmlViewerExporter {
                     ctx.fill();
                     ctx.stroke();
                 }} else {{
-                    let color = m.ari >= 0.85 ? '#34d399' : m.ari >= 0.70 ? '#38bdf8' : m.ari >= 0.50 ? '#fbbf24' : '#f87171';
+                    let color = m.eigengate >= 0.85 ? '#34d399' : m.eigengate >= 0.70 ? '#38bdf8' : m.eigengate >= 0.50 ? '#fbbf24' : '#f87171';
                     ctx.strokeStyle = isSel ? '#ffffff' : color;
                     ctx.lineWidth = isSel ? 3.5 : 1.8;
                     ctx.beginPath();
@@ -1205,13 +1205,13 @@ impl HtmlViewerExporter {
             document.getElementById('insp-moment').innerText = m.my.toFixed(1) + ' kNm';
             document.getElementById('insp-cap').innerText = m.capacity.toFixed(1) + ' kN';
             document.getElementById('insp-util').innerText = (m.util * 100).toFixed(1) + '%';
-            document.getElementById('insp-ari').innerText = m.ari.toFixed(4);
+            document.getElementById('insp-eigengate').innerText = m.eigengate.toFixed(4);
             document.getElementById('insp-ci').innerText = m.ci.toFixed(4);
             const statusEl = document.getElementById('insp-status');
-            if (m.ari < 0.50 || m.critical) {{
+            if (m.eigengate < 0.50 || m.critical) {{
                 statusEl.innerText = '🔴 FRACTURE CRITICAL (UNSAFE)';
                 statusEl.style.color = '#f87171';
-            }} else if (m.ari < 0.70) {{
+            }} else if (m.eigengate < 0.70) {{
                 statusEl.innerText = '🟡 MODERATE (MONITOR)';
                 statusEl.style.color = '#fbbf24';
             }} else {{
@@ -1234,9 +1234,9 @@ impl HtmlViewerExporter {
             nodes_count = model.nodes.len(),
             elems_count = model.elements.len(),
             total_tonnage = total_tonnage,
-            avg_ari = avg_ari,
-            min_ari = min_ari,
-            min_ari_color = if min_ari >= 0.70 { "#34d399" } else { "#f87171" },
+            avg_eigengate = avg_eigengate,
+            min_eigengate = min_eigengate,
+            min_eigengate_color = if min_eigengate >= 0.70 { "#34d399" } else { "#f87171" },
             crit_count = crit_count,
             crit_color = if crit_count == 0 { "#34d399" } else { "#f87171" },
             digital_seal = digital_seal,
@@ -1289,12 +1289,12 @@ impl EigenProjectArchive {
 pub struct LatexExporter;
 
 impl LatexExporter {
-    /// Generates a publication-ready LaTeX `booktabs` table summarizing member-by-member ARI
-    /// metrics ($h_e, R_e, U_e^*, \rho_e, \text{ARI}_e$) and N-2 Woodbury critical pairs.
-    pub fn export_ari_publication_table(
+    /// Generates a publication-ready LaTeX `booktabs` table summarizing member-by-member EigenGate
+    /// metrics ($h_e, R_e, U_e^*, \rho_e, \text{EigenGate}_e$) and N-2 Woodbury critical pairs.
+    pub fn export_eigengate_publication_table(
         model: &StructuralModel,
-        ari: &RedundancyAssessment,
-        n2_opt: Option<&crate::core::ari::N2WoodburyScreeningReport>,
+        eigengate: &RedundancyAssessment,
+        n2_opt: Option<&crate::core::eigengate::N2WoodburyScreeningReport>,
     ) -> String {
         let mut tex = String::new();
         tex.push_str("% =====================================================================\n");
@@ -1304,20 +1304,20 @@ impl LatexExporter {
         tex.push_str("\\begin{table}[htbp]\n");
         tex.push_str("  \\centering\n");
         tex.push_str(&format!(
-            "  \\caption{{Structural Redundancy Audit (ARI) and Spectral Leverage Metrics for \\textit{{{}}}}}\n",
+            "  \\caption{{Structural Redundancy Audit (EigenGate) and Spectral Leverage Metrics for \\textit{{{}}}}}\n",
             model.name.replace('_', "\\_")
         ));
-        tex.push_str("  \\label{tab:eigengraph_ari_audit}\n");
+        tex.push_str("  \\label{tab:eigengraph_eigengate_audit}\n");
         tex.push_str("  \\begin{tabular}{clrrrrrc}\n");
         tex.push_str("    \\toprule\n");
-        tex.push_str("    \\textbf{ID} & \\textbf{Member Type} & $N_e$ (kN) & $h_e$ & $R_e$ & $U_e^*$ & $\\textbf{ARI}_e$ & \\textbf{Status} \\\\\n");
+        tex.push_str("    \\textbf{ID} & \\textbf{Member Type} & $N_e$ (kN) & $h_e$ & $R_e$ & $U_e^*$ & $\\textbf{EigenGate}_e$ & \\textbf{Status} \\\\\n");
         tex.push_str("    \\midrule\n");
 
-        for m in &ari.member_results {
+        for m in &eigengate.member_results {
             let elem_name = m.member_name.replace('_', "\\_");
-            let status_str = if m.ari >= 0.70 {
+            let status_str = if m.eigengate >= 0.70 {
                 "SAFE"
-            } else if m.ari >= 0.45 {
+            } else if m.eigengate >= 0.45 {
                 "MODERATE"
             } else {
                 "CRITICAL"
@@ -1330,22 +1330,22 @@ impl LatexExporter {
                 m.svd_margin,
                 m.rr,
                 m.max_redistribution_utilization,
-                m.ari,
+                m.eigengate,
                 status_str
             ));
         }
 
         tex.push_str("    \\midrule\n");
         tex.push_str(&format!(
-            "    \\multicolumn{{6}}{{l}}{{\\textbf{{System Global Adjusted Redundancy Index}} ($\\text{{ARI}}_{{\\text{{avg}}}}$)}} & \\textbf{{{:.4}}} & \\textbf{{Min: {:.4}}} \\\\\n",
-            ari.average_ari, ari.min_system_ari
+            "    \\multicolumn{{6}}{{l}}{{\\textbf{{System Global EigenGate}} ($\\text{{EigenGate}}_{{\\text{{avg}}}}$)}} & \\textbf{{{:.4}}} & \\textbf{{Min: {:.4}}} \\\\\n",
+            eigengate.average_eigengate, eigengate.min_system_eigengate
         ));
 
         if let Some(n2) = n2_opt {
             if let Some(first_pair) = n2.pair_results.first() {
                 tex.push_str(&format!(
                     "    \\multicolumn{{6}}{{l}}{{\\textbf{{Governing }} $N-2$ \\textbf{{ Woodbury Pair}} $(E_{{{}}}, E_{{{}}})$}} & \\textbf{{{:.4}}} & \\texttt{{RANK-2}} \\\\\n",
-                    first_pair.member_1_id, first_pair.member_2_id, n2.min_pair_ari
+                    first_pair.member_1_id, first_pair.member_2_id, n2.min_pair_eigengate
                 ));
             }
         }
@@ -1578,10 +1578,10 @@ impl EtabsE2kExporter {
         // 9. EigenGraph Certified Audit Comments
         s.push_str("; ====================================================================\n");
         s.push_str("; EIGENGRAPH STRUCTURAL ANALYSIS PLATFORM v0.2.0\n");
-        if let Some(ari) = assessment {
-            let ci = 1.0 - ari.min_system_ari;
-            let seal = Sha256Hasher::digest_hex(format!("{}:{:.6}", model.name, ari.min_system_ari).as_bytes());
-            s.push_str(&format!("; System Adjusted Redundancy Index (ARI): {:.6}\n", ari.min_system_ari));
+        if let Some(eigengate) = assessment {
+            let ci = 1.0 - eigengate.min_system_eigengate;
+            let seal = Sha256Hasher::digest_hex(format!("{}:{:.6}", model.name, eigengate.min_system_eigengate).as_bytes());
+            s.push_str(&format!("; System EigenGate: {:.6}\n", eigengate.min_system_eigengate));
             s.push_str(&format!("; Governing Collapse Index (CI): {:.6}\n", ci));
             s.push_str(&format!("; Cryptographic SHA-256 Audit Seal: {}\n", seal));
         }
@@ -1830,7 +1830,7 @@ impl PbgReportGenerator {
         meta: &PbgProjectMetadata,
     ) -> String {
         let mut md = String::new();
-        let payload = format!("{}:{}:{:.4}", meta.application_no, model.name, assessment.min_system_ari);
+        let payload = format!("{}:{}:{:.4}", meta.application_no, model.name, assessment.min_system_eigengate);
         let seal = Sha256Hasher::digest_hex(payload.as_bytes());
 
         md.push_str("# DOKUMEN PERHITUNGAN STRUKTUR BANGUNAN GEDUNG\n");
@@ -1873,11 +1873,11 @@ impl PbgReportGenerator {
         md.push_str(&format!("- **Total Simpul (Nodes):** {} Titik\n", model.nodes.len()));
         md.push_str(&format!("- **Total Elemen Batang (Members):** {} Elemen (Balok, Kolom, Pengaku)\n", model.elements.len()));
         md.push_str(&format!("- **Total Titik Beban Gravitasi:** {} Nodal Loads\n", model.loads.len()));
-        md.push_str(&format!("- **System Adjusted Redundancy Index (ARI):** **{:.4}** (Status: **{}**)\n",
-            assessment.min_system_ari,
-            if assessment.min_system_ari >= 0.80 { "MEMENUHI / REDUNDAN TINGGI" } else { "PERINGATAN REDUNDANSI RENDAH" }
+        md.push_str(&format!("- **System EigenGate:** **{:.4}** (Status: **{}**)\n",
+            assessment.min_system_eigengate,
+            if assessment.min_system_eigengate >= 0.80 { "MEMENUHI / REDUNDAN TINGGI" } else { "PERINGATAN REDUNDANSI RENDAH" }
         ));
-        md.push_str(&format!("- **Governing Collapse Index (CI):** **{:.4}** (Batas Izin: $\\le 0.20$)\n\n", 1.0 - assessment.min_system_ari));
+        md.push_str(&format!("- **Governing Collapse Index (CI):** **{:.4}** (Batas Izin: $\\le 0.20$)\n\n", 1.0 - assessment.min_system_eigengate));
 
         md.push_str("### 5. KONTROL PERSYARATAN KINERJA PBG / SNI\n");
         md.push_str("1. **Kontrol Gaya Geser Dasar Dinamis (Pasal 7.9.4.1 SNI 1726:2019):**\n");
@@ -1907,7 +1907,7 @@ impl PbgReportGenerator {
         meta: &PbgProjectMetadata,
     ) -> String {
         let md = Self::generate_markdown_dossier(model, assessment, meta);
-        let payload = format!("{}:{}:{:.4}", meta.application_no, model.name, assessment.min_system_ari);
+        let payload = format!("{}:{}:{:.4}", meta.application_no, model.name, assessment.min_system_eigengate);
         let seal = Sha256Hasher::digest_hex(payload.as_bytes());
 
         let mut html = String::new();
@@ -2173,7 +2173,7 @@ mod tests {
 
         let dxf = DxfExporter::export_to_dxf(&model, None);
         assert!(dxf.contains("SECTION\n2\nHEADER"));
-        assert!(dxf.contains("ARI_SAFE"));
+        assert!(dxf.contains("EigenGate_SAFE"));
         assert!(dxf.contains("LINE"));
 
         let ifcx = IfcxExporter::export_to_ifcx(&model, None);
@@ -2223,7 +2223,7 @@ mod tests {
     fn test_comprehensive_dossier_export() {
         let mut engine = crate::core::ParametricEngine::new();
         let model = engine.generate_warren_truss().unwrap();
-        let assessment = crate::core::AriEngine::evaluate_redundancy(&model).unwrap();
+        let assessment = crate::core::EigenGateEngine::evaluate_redundancy(&model).unwrap();
 
         let spectrum = crate::core::modal::Sni1726Spectrum::new(crate::core::modal::SiteClass::SD, 1.20, 0.50, 8.0, 1.0);
         let modal = crate::core::modal::ModalEngine::analyze(&model, 3, spectrum).ok();
@@ -2240,7 +2240,7 @@ mod tests {
     fn test_standalone_html_export() {
         let mut engine = crate::core::ParametricEngine::new();
         let model = engine.generate_warren_truss().unwrap();
-        let assessment = crate::core::AriEngine::evaluate_redundancy(&model).unwrap();
+        let assessment = crate::core::EigenGateEngine::evaluate_redundancy(&model).unwrap();
 
         let html = HtmlViewerExporter::export_standalone_html(&model, Some(&assessment));
         assert!(html.contains("<!DOCTYPE html>"));
@@ -2269,18 +2269,18 @@ mod tests {
     fn test_latex_booktabs_and_disk_exporter() {
         let mut engine = crate::core::ParametricEngine::new();
         let model = engine.generate_warren_truss().unwrap();
-        let ari = crate::core::AriEngine::evaluate_redundancy(&model).unwrap();
-        let n2 = crate::core::AriEngine::evaluate_n2_woodbury_fast(&model).ok();
+        let eigengate = crate::core::EigenGateEngine::evaluate_redundancy(&model).unwrap();
+        let n2 = crate::core::EigenGateEngine::evaluate_n2_woodbury_fast(&model).ok();
 
-        let tex = LatexExporter::export_ari_publication_table(&model, &ari, n2.as_ref());
+        let tex = LatexExporter::export_eigengate_publication_table(&model, &eigengate, n2.as_ref());
         assert!(tex.contains("\\begin{table}[htbp]"));
         assert!(tex.contains("\\toprule"));
         assert!(tex.contains("\\bottomrule"));
         assert!(tex.contains("SHA-256 Digital Seal"));
 
-        let saved_path = DiskExporter::write_export_file("test_ari_table.tex", &tex)
+        let saved_path = DiskExporter::write_export_file("test_eigengate_table.tex", &tex)
             .expect("DiskExporter should write to disk or /tmp fallback");
-        assert!(saved_path.ends_with("test_ari_table.tex"));
+        assert!(saved_path.ends_with("test_eigengate_table.tex"));
     }
 
     #[test]
@@ -2330,9 +2330,9 @@ mod tests {
         model.add_element(Element3D::new(3, "B1", 2, 3).with_type(ElementType::Frame3D));
         model.add_load(NodalLoad::force_y(2, -25_000.0));
 
-        let ari = crate::core::AriEngine::evaluate_redundancy(&model).unwrap();
+        let eigengate = crate::core::EigenGateEngine::evaluate_redundancy(&model).unwrap();
         let meta = PbgProjectMetadata::default();
-        let pbg_doc = PbgReportGenerator::generate_markdown_dossier(&model, &ari, &meta);
+        let pbg_doc = PbgReportGenerator::generate_markdown_dossier(&model, &eigengate, &meta);
 
         assert!(pbg_doc.contains("DOKUMEN PERHITUNGAN STRUKTUR BANGUNAN GEDUNG"));
         assert!(pbg_doc.contains("SNI 1726:2019"));
@@ -2340,7 +2340,7 @@ mod tests {
         assert!(pbg_doc.contains(&meta.application_no));
         assert!(pbg_doc.contains("HMAC-SHA256 Cryptographic Audit Seal"));
 
-        let pbg_html = PbgReportGenerator::generate_printable_html(&model, &ari, &meta);
+        let pbg_html = PbgReportGenerator::generate_printable_html(&model, &eigengate, &meta);
         assert!(pbg_html.contains("<!DOCTYPE html>"));
         assert!(pbg_html.contains("Cetak Dokumen PDF (PBG/SIMBG)"));
     }

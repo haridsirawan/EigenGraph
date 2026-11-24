@@ -1,6 +1,6 @@
 //! views/build/mod.rs — Pillar 5 (3D BIM): Clean BIM Spatial Assembly & 360-deg CSG B-Rep Viewport.
 //! Features a True 360° Interactive 3D Turntable/Orbit Viewport, Solid Profile Extrusions,
-//! Depth-Sorted Shaded Rendering (Painter's Algorithm), and Stress/ARI Gradient Contours.
+//! Depth-Sorted Shaded Rendering (Painter's Algorithm), and Stress/EigenGate Gradient Contours.
 
 pub mod bottom_deck;
 pub mod clash_bcf;
@@ -329,7 +329,7 @@ impl Default for BuildView {
             perspective: true,
             selected_member_id: None,
             simulated_eliminated_ids: Vec::new(),
-            color_mode: "ARI".to_string(),
+            color_mode: "EigenGate".to_string(),
             show_grid: true,
             show_axes: true,
             show_node_labels: true,

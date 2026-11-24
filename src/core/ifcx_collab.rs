@@ -2,14 +2,14 @@
 //! Cryptographically Chained Checkpoints, Deterministic Three-Way Merge, & Coupled District Risk Field.
 //!
 //! Provides:
-//! - Tamper-evident SHA-256 checkpoint chain (`IfcxCheckpointRecord`) linking base BIM, FEM/ARI v2,
+//! - Tamper-evident SHA-256 checkpoint chain (`IfcxCheckpointRecord`) linking base BIM, FEM/EigenGate v2,
 //!   Geotechnical SSI, SHM/ATC-20, Evacuation, and Monte Carlo IFCX layers across disciplines
 //! - Formal engineering sign-off workflow (`Draft` -> `InReview` -> `Approved` / `Superseded`)
 //! - Portable `.ifcx-bundle.json` team handover package with end-to-end integrity verification
 //! - Deterministic Three-Way IFCX Node & Attribute Merge (`Base`, `Local`, `Incoming`) with
 //!   per-conflict resolution (`KeepLocal`, `KeepIncoming`, `KeepBothLayered`)
 //! - Non-destructive governance overlay (`eigengraph::governance::checkpoint_seal`)
-//! - Spatial Inverse-Distance-Weighted (IDW) District Risk Field evaluator uniting ARI v2, ATC-20,
+//! - Spatial Inverse-Distance-Weighted (IDW) District Risk Field evaluator uniting EigenGate v2, ATC-20,
 //!   FEMA P-58 PML-90, Seed–Idriss liquefaction, and A* evacuation isolation over `IfcSite` TIN terrain.
 
 use std::collections::BTreeMap;
@@ -167,7 +167,8 @@ pub enum DistrictRiskMetric {
     #[default]
     CompositeRisk,
     McPml90Loss,
-    StructuralAri,
+    #[serde(alias = "StructuralAri")]
+    StructuralEigenGate,
     EvacuationIsolation,
 }
 
@@ -176,7 +177,7 @@ impl DistrictRiskMetric {
         match self {
             Self::CompositeRisk => "Composite Multi-Hazard Risk",
             Self::McPml90Loss => "FEMA P-58 PML-90 Loss Density",
-            Self::StructuralAri => "Structural ARI v2 Vulnerability",
+            Self::StructuralEigenGate => "Structural EigenGate v2 Vulnerability",
             Self::EvacuationIsolation => "Post-Quake Isolation & ATC-20 Cordon",
         }
     }
@@ -185,7 +186,7 @@ impl DistrictRiskMetric {
         match self {
             Self::CompositeRisk => "Composite",
             Self::McPml90Loss => "PML-90",
-            Self::StructuralAri => "ARI Risk",
+            Self::StructuralEigenGate => "EigenGate Risk",
             Self::EvacuationIsolation => "Isolation",
         }
     }
@@ -194,7 +195,7 @@ impl DistrictRiskMetric {
         match self {
             Self::CompositeRisk => "0-100% Index",
             Self::McPml90Loss => "kUSD PML-90",
-            Self::StructuralAri => "ARI Deficit %",
+            Self::StructuralEigenGate => "EigenGate Deficit %",
             Self::EvacuationIsolation => "Isolation %",
         }
     }
@@ -203,7 +204,7 @@ impl DistrictRiskMetric {
         &[
             Self::CompositeRisk,
             Self::McPml90Loss,
-            Self::StructuralAri,
+            Self::StructuralEigenGate,
             Self::EvacuationIsolation,
         ]
     }
@@ -212,7 +213,8 @@ impl DistrictRiskMetric {
 /// Engineering KPI snapshot frozen inside every signed IFCX checkpoint.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct IfcxCheckpointKpi {
-    pub min_ari: f64,
+    #[serde(alias = "min_ari")]
+    pub min_eigengate: f64,
     pub max_dcr_pct: f64,
     pub atc20_placard: String,
     pub mc_pml90_usd: f64,
@@ -465,7 +467,7 @@ pub struct DistrictRiskHotspot {
     pub north_m: f32,
     pub risk_score: f32,
     pub metric_value: f64,
-    pub min_ari: f64,
+    pub min_eigengate: f64,
     pub max_dcr: f64,
     pub pml90_usd: f64,
     pub atc20_tag: String,
@@ -1127,13 +1129,13 @@ struct BuildingRiskSource {
     lon: f64,
     east_m: f32,
     north_m: f32,
-    min_ari: f64,
+    min_eigengate: f64,
     max_dcr: f64,
     pml90_usd: f64,
     atc20_tag: String,
     risk_composite: f32,
     risk_pml90: f32,
-    risk_ari: f32,
+    risk_eigengate: f32,
     risk_isolation: f32,
 }
 
@@ -1146,7 +1148,7 @@ fn placard_severity_01(placard: Atc20Placard) -> f32 {
 }
 
 /// Evaluates an Inverse-Distance-Weighted (IDW) spatial District Risk Field draped over `IfcSite` TIN
-/// relief, coupling ARI v2, ATC-20 placards, FEMA P-58 Monte Carlo PML-90, Seed–Idriss liquefaction,
+/// relief, coupling EigenGate v2, ATC-20 placards, FEMA P-58 Monte Carlo PML-90, Seed–Idriss liquefaction,
 /// and A* evacuation isolation across the active BIM asset and surrounding `WorldSpatialIndex` buildings.
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_district_risk_field(
@@ -1161,9 +1163,9 @@ pub fn evaluate_district_risk_field(
     mc_opt: Option<&MonteCarloFragilityReport>,
     evac_opt: Option<&EvacuationLifelineReport>,
 ) -> DistrictRiskFieldReport {
-    let active_min_ari = members
+    let active_min_eigengate = members
         .iter()
-        .map(|m| m.ari)
+        .map(|m| m.eigengate)
         .fold(1.0_f64, f64::min)
         .clamp(0.0, 1.0);
     let active_max_dcr = members
@@ -1188,9 +1190,9 @@ pub fn evaluate_district_risk_field(
 
     let active_placard = shm_opt
         .map(|s| s.atc20_placard)
-        .unwrap_or(if active_min_ari < 0.65 || active_max_dcr > 1.05 {
+        .unwrap_or(if active_min_eigengate < 0.65 || active_max_dcr > 1.05 {
             Atc20Placard::UnsafeRed
-        } else if active_min_ari < 0.80 || active_max_dcr > 0.85 {
+        } else if active_min_eigengate < 0.80 || active_max_dcr > 0.85 {
             Atc20Placard::RestrictedYellow
         } else {
             Atc20Placard::InspectedGreen
@@ -1200,14 +1202,14 @@ pub fn evaluate_district_risk_field(
         .map(|mc| mc.p90_loss_usd)
         .unwrap_or_else(|| {
             let elem_est = (bim_project.columns.len() + bim_project.runs.len()).max(8) as f64;
-            elem_est * 9_500.0 * (1.25 - active_min_ari).clamp(0.30, 1.50)
+            elem_est * 9_500.0 * (1.25 - active_min_eigengate).clamp(0.30, 1.50)
         });
     let active_pml90_01 = ((active_pml90 / 850_000.0).clamp(0.05, 1.0)) as f32;
-    let active_ari_risk = ((1.0 - active_min_ari).clamp(0.0, 1.0) * 0.68
+    let active_eigengate_risk = ((1.0 - active_min_eigengate).clamp(0.0, 1.0) * 0.68
         + (active_max_dcr / 1.35).clamp(0.0, 1.0) * 0.32) as f32;
     let active_iso_risk =
         (evac_isolation_global * 0.60 + placard_severity_01(active_placard) * 0.40).clamp(0.05, 1.0);
-    let active_comp = (active_ari_risk * 0.36
+    let active_comp = (active_eigengate_risk * 0.36
         + placard_severity_01(active_placard) * 0.22
         + active_pml90_01 * 0.18
         + active_iso_risk * 0.14
@@ -1226,13 +1228,13 @@ pub fn evaluate_district_risk_field(
         lon: origin_lat_lon.1,
         east_m: 0.0,
         north_m: 0.0,
-        min_ari: active_min_ari,
+        min_eigengate: active_min_eigengate,
         max_dcr: active_max_dcr,
         pml90_usd: active_pml90,
         atc20_tag: active_placard.short_label().to_string(),
         risk_composite: active_comp,
         risk_pml90: active_pml90_01,
-        risk_ari: active_ari_risk,
+        risk_eigengate: active_eigengate_risk,
         risk_isolation: active_iso_risk,
     });
 
@@ -1249,17 +1251,17 @@ pub fn evaluate_district_risk_field(
         let b_placard = shm_opt
             .and_then(|s| s.district_placards.iter().find(|d| d.rel_path == b.rel_path))
             .map(|d| d.placard)
-            .unwrap_or(if b.min_ari < 0.68 || b.max_dcr > 1.0 {
+            .unwrap_or(if b.min_eigengate < 0.68 || b.max_dcr > 1.0 {
                 Atc20Placard::UnsafeRed
-            } else if b.min_ari < 0.82 || b.max_dcr > 0.85 {
+            } else if b.min_eigengate < 0.82 || b.max_dcr > 0.85 {
                 Atc20Placard::RestrictedYellow
             } else {
                 Atc20Placard::InspectedGreen
             });
-        let b_ari_risk = ((1.0 - b.min_ari).clamp(0.0, 1.0) * 0.65
+        let b_eigengate_risk = ((1.0 - b.min_eigengate).clamp(0.0, 1.0) * 0.65
             + (b.max_dcr / 1.35).clamp(0.0, 1.0) * 0.35) as f32;
         let b_pml90 = (b.total_height_m.max(8.0) * 18_500.0)
-            * (1.35 - b.min_ari).clamp(0.25, 1.6);
+            * (1.35 - b.min_eigengate).clamp(0.25, 1.6);
         let b_pml90_01 = ((b_pml90 / 850_000.0).clamp(0.05, 1.0)) as f32;
         let cordon_prox = evac_opt
             .map(|e| {
@@ -1275,7 +1277,7 @@ pub fn evaluate_district_risk_field(
             })
             .unwrap_or_else(|| placard_severity_01(b_placard) * 0.72);
         let b_iso = (cordon_prox * 0.65 + placard_severity_01(b_placard) * 0.35).clamp(0.05, 0.99);
-        let b_comp = (b_ari_risk * 0.36
+        let b_comp = (b_eigengate_risk * 0.36
             + placard_severity_01(b_placard) * 0.22
             + b_pml90_01 * 0.18
             + b_iso * 0.14
@@ -1288,13 +1290,13 @@ pub fn evaluate_district_risk_field(
             lon: b.lon,
             east_m: ex,
             north_m: ny,
-            min_ari: b.min_ari,
+            min_eigengate: b.min_eigengate,
             max_dcr: b.max_dcr,
             pml90_usd: b_pml90,
             atc20_tag: b_placard.short_label().to_string(),
             risk_composite: b_comp,
             risk_pml90: b_pml90_01,
-            risk_ari: b_ari_risk,
+            risk_eigengate: b_eigengate_risk,
             risk_isolation: b_iso,
         });
     }
@@ -1307,16 +1309,16 @@ pub fn evaluate_district_risk_field(
             ("South Transit Depot", 44.0, -58.0, 0.89, 0.62, Atc20Placard::InspectedGreen),
             ("West Substation Yard", -64.0, -42.0, 0.79, 0.81, Atc20Placard::RestrictedYellow),
         ];
-        for (name, ex, ny, ari, dcr, plac) in synthetic_offsets {
+        for (name, ex, ny, eigengate, dcr, plac) in synthetic_offsets {
             let ll = SlippyMapState::world_mm_to_lat_lon(
                 origin_lat_lon,
                 [ex as f64 * 1000.0, ny as f64 * 1000.0],
             );
-            let s_ari = ((1.0 - ari) * 0.65 + (dcr / 1.35) * 0.35) as f32;
-            let s_pml = 320_000.0 * (1.3 - ari).clamp(0.3, 1.4);
+            let s_eigengate = ((1.0 - eigengate) * 0.65 + (dcr / 1.35) * 0.35) as f32;
+            let s_pml = 320_000.0 * (1.3 - eigengate).clamp(0.3, 1.4);
             let s_pml01 = ((s_pml / 850_000.0).clamp(0.08, 1.0)) as f32;
             let s_iso = (placard_severity_01(plac) * 0.60 + evac_isolation_global * 0.40).clamp(0.08, 0.96);
-            let s_comp = (s_ari * 0.36
+            let s_comp = (s_eigengate * 0.36
                 + placard_severity_01(plac) * 0.22
                 + s_pml01 * 0.18
                 + s_iso * 0.14
@@ -1329,13 +1331,13 @@ pub fn evaluate_district_risk_field(
                 lon: ll.1,
                 east_m: ex,
                 north_m: ny,
-                min_ari: ari,
+                min_eigengate: eigengate,
                 max_dcr: dcr,
                 pml90_usd: s_pml,
                 atc20_tag: plac.short_label().to_string(),
                 risk_composite: s_comp,
                 risk_pml90: s_pml01,
-                risk_ari: s_ari,
+                risk_eigengate: s_eigengate,
                 risk_isolation: s_iso,
             });
         }
@@ -1359,7 +1361,7 @@ pub fn evaluate_district_risk_field(
         match config.risk_metric {
             DistrictRiskMetric::CompositeRisk => s.risk_composite,
             DistrictRiskMetric::McPml90Loss => s.risk_pml90,
-            DistrictRiskMetric::StructuralAri => s.risk_ari,
+            DistrictRiskMetric::StructuralEigenGate => s.risk_eigengate,
             DistrictRiskMetric::EvacuationIsolation => s.risk_isolation,
         }
     };
@@ -1427,7 +1429,7 @@ pub fn evaluate_district_risk_field(
             let raw_val = match config.risk_metric {
                 DistrictRiskMetric::CompositeRisk => (r_score * 100.0) as f64,
                 DistrictRiskMetric::McPml90Loss => s.pml90_usd * 0.001,
-                DistrictRiskMetric::StructuralAri => (1.0 - s.min_ari).clamp(0.0, 1.0) * 100.0,
+                DistrictRiskMetric::StructuralEigenGate => (1.0 - s.min_eigengate).clamp(0.0, 1.0) * 100.0,
                 DistrictRiskMetric::EvacuationIsolation => (s.risk_isolation * 100.0) as f64,
             };
             DistrictRiskHotspot {
@@ -1439,7 +1441,7 @@ pub fn evaluate_district_risk_field(
                 north_m: s.north_m,
                 risk_score: r_score,
                 metric_value: raw_val,
-                min_ari: s.min_ari,
+                min_eigengate: s.min_eigengate,
                 max_dcr: s.max_dcr,
                 pml90_usd: s.pml90_usd,
                 atc20_tag: s.atc20_tag.clone(),
@@ -1497,7 +1499,7 @@ mod tests {
 
         let mut collab = IfcxCollabState::default();
         let kpi1 = IfcxCheckpointKpi {
-            min_ari: 0.74,
+            min_eigengate: 0.74,
             max_dcr_pct: 92.0,
             atc20_placard: "YELLOW".to_string(),
             mc_pml90_usd: 215_000.0,

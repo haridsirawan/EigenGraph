@@ -525,7 +525,7 @@ mod tests {
                 neighbor_lat: -6.2089,
                 neighbor_lon: 106.8458,
                 neighbor_height_m: 28.0,
-                neighbor_min_ari: 0.62,
+                neighbor_min_eigengate: 0.62,
                 clear_gap_m: 0.25,
                 required_gap_m: 0.60,
                 severity: PoundingSeverity::PoundingRisk,

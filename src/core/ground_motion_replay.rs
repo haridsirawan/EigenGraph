@@ -3,7 +3,7 @@
 //! Couples active 3D OpenBIM (`BimProject`), 6-DOF FEM + Modal eigenperiods, Subsurface SSI
 //! period lengthening ($\tilde{T}_1$), ASCE 7-22 / SNI 1726 HHT-$\alpha$ nonlinear time-history
 //! integration (NL-THA), dynamic ASCE 41-17 / FEMA 356 plastic hinge formation, and Two-Stage
-//! `ARI v2 + StructGNN-CRC` conformal screening inside a non-blocking background worker pipeline
+//! `EigenGate v2 + StructGNN-CRC` conformal screening inside a non-blocking background worker pipeline
 //! (OS worker thread on Native, inline Blob WebWorker + cooperative time-sliced Rust fallback on WASM).
 
 use std::collections::HashMap;
@@ -13,12 +13,12 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::ari::{AriEngine, MARGIN_TOL};
+use crate::core::eigengate::{EigenGateEngine, MARGIN_TOL};
 use crate::core::bim::{BimElementKind, BimProject, RunCategory};
 use crate::core::cascade::{CrcRiskTier, StructGnnCrcScenario};
 use crate::core::fema_p58::{FemaP58Engine, ReplayFemaP58Synthesis};
 use crate::core::geotech::SubsurfaceSsiAnalysisReport;
-use crate::core::ifcx::{ns, sanitize_slug, IfcxAriOverlay, IfcxDocument, IfcxImport, IfcxNode};
+use crate::core::ifcx::{ns, sanitize_slug, IfcxEigenGateOverlay, IfcxDocument, IfcxImport, IfcxNode};
 use crate::core::lifecycle_ops::SiteEnvironmentalCoupling;
 use crate::core::modal::{ModalEngine, SiteClass, Sni1726Spectrum};
 use crate::core::nonlinear::PlasticHingeState;
@@ -320,7 +320,7 @@ pub struct GroundMotionReplayFrame {
     pub count_mechanism: usize,
 }
 
-/// Async Two-Stage `ARI v2 + StructGNN-CRC` Conformal Screening telemetry coupled to NL-THA demand.
+/// Async Two-Stage `EigenGate v2 + StructGNN-CRC` Conformal Screening telemetry coupled to NL-THA demand.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AsyncCrcReplayTelemetry {
     pub total_scenarios: usize,
@@ -527,8 +527,8 @@ struct PreparedReplayContext {
     sorted_level_elevs_m: Vec<f64>,
     joints: Vec<BimJointDescriptor>,
     base_scenarios: Vec<BaseCrcScenarioInput>,
-    min_ari: f64,
-    avg_ari: f64,
+    min_eigengate: f64,
+    avg_eigengate: f64,
     has_mechanism: bool,
 }
 
@@ -538,8 +538,8 @@ struct BaseCrcScenarioInput {
     bim_kind: Option<BimElementKind>,
     bim_id: Option<usize>,
     name: String,
-    #[serde(rename = "ariV2")]
-    ari_v2: f64,
+    #[serde(rename = "eigenGateV2")]
+    eigengate_v2: f64,
     wk: f64,
     wc: f64,
     wd: f64,
@@ -701,7 +701,7 @@ fn prepare_replay_context(
     }
 
     let fea = FemSolver::solve(&fem)?;
-    let ari_eval = AriEngine::evaluate_redundancy_fast(&fem)?;
+    let eigengate_eval = EigenGateEngine::evaluate_redundancy_fast(&fem)?;
 
     let site_class = SiteClass::from_soil_label(&site.recommended_soil_label_or_default());
     let spectrum = Sni1726Spectrum::new(
@@ -821,8 +821,8 @@ fn prepare_replay_context(
         });
     }
 
-    let mut base_scenarios = Vec::with_capacity(ari_eval.member_results.len());
-    for m_res in &ari_eval.member_results {
+    let mut base_scenarios = Vec::with_capacity(eigengate_eval.member_results.len());
+    for m_res in &eigengate_eval.member_results {
         let bim_pair = fem_to_bim.get(&m_res.member_id).copied();
         let name = bim_pair
             .and_then(|(k, bid)| match k {
@@ -850,17 +850,17 @@ fn prepare_replay_context(
             (0.5 * m_res.buckling_margin + 0.5 * m_res.rr).clamp(0.0, 1.0)
         };
         let convex_v2 = (0.25 * wk + 0.45 * wc + 0.30 * wd).clamp(0.0, 1.0);
-        let ari_v2 = if svd_mech {
+        let eigengate_v2 = if svd_mech {
             0.0
         } else {
-            (0.5 * m_res.ari + 0.5 * convex_v2).clamp(0.0, 1.0)
+            (0.5 * m_res.eigengate + 0.5 * convex_v2).clamp(0.0, 1.0)
         };
         base_scenarios.push(BaseCrcScenarioInput {
             fem_id: m_res.member_id,
             bim_kind: bim_pair.map(|p| p.0),
             bim_id: bim_pair.map(|p| p.1),
             name,
-            ari_v2,
+            eigengate_v2,
             wk,
             wc,
             wd,
@@ -886,9 +886,9 @@ fn prepare_replay_context(
         sorted_level_elevs_m: level_elevs,
         joints,
         base_scenarios,
-        min_ari: ari_eval.min_system_ari,
-        avg_ari: ari_eval.average_ari,
-        has_mechanism: !ari_eval.kinematic_guard.is_stable,
+        min_eigengate: eigengate_eval.min_system_eigengate,
+        avg_eigengate: eigengate_eval.average_eigengate,
+        has_mechanism: !eigengate_eval.kinematic_guard.is_stable,
     })
 }
 
@@ -1351,7 +1351,7 @@ fn assemble_replay_report(
         }
     }
 
-    // Two-Stage ARI v2 + StructGNN-CRC Conformal Screening coupled with dynamic peak drift demand
+    // Two-Stage EigenGate v2 + StructGNN-CRC Conformal Screening coupled with dynamic peak drift demand
     let conformal_alpha = 0.05_f64;
     let q_conformal = ((1.0_f64 / conformal_alpha).ln() / (2.0 * 300.0)).sqrt();
     let drift_amp = 1.0 + 0.35 * (peak_interstory_drift_ratio / 0.020);
@@ -1366,17 +1366,17 @@ fn assemble_replay_report(
         let gnn_prob = if sc.svd_mech {
             0.96
         } else {
-            (0.35 * (1.0 - sc.ari_v2) + 0.35 * ov_t + 0.15 * h_e + 0.15 * bk_t).clamp(0.01, 0.99)
+            (0.35 * (1.0 - sc.eigengate_v2) + 0.35 * ov_t + 0.15 * h_e + 0.15 * bk_t).clamp(0.01, 0.99)
         };
         let crc_upper_bound = (gnn_prob + q_conformal).clamp(0.0, 1.0);
         let stage1_pruned = !sc.svd_mech
             && !sc.is_critical
-            && sc.ari_v2 >= 0.72
+            && sc.eigengate_v2 >= 0.72
             && dyn_u < 0.92
             && sc.buckling_margin >= 0.12;
         let risk_tier = if stage1_pruned {
             CrcRiskTier::SafePruned
-        } else if sc.svd_mech || crc_upper_bound >= 0.55 || sc.ari_v2 < 0.65 {
+        } else if sc.svd_mech || crc_upper_bound >= 0.55 || sc.eigengate_v2 < 0.65 {
             CrcRiskTier::CriticalCollapseForward
         } else {
             CrcRiskTier::ConformalWatch
@@ -1386,7 +1386,7 @@ fn assemble_replay_report(
             bim_kind: sc.bim_kind,
             bim_id: sc.bim_id,
             element_name: sc.name.clone(),
-            ari_v2_score: sc.ari_v2,
+            eigengate_v2_score: sc.eigengate_v2,
             kinematic_channel_wk: sc.wk,
             capacity_channel_wc: sc.wc,
             deformation_channel_wd: sc.wd,
@@ -1400,7 +1400,7 @@ fn assemble_replay_report(
     crc_scenarios.sort_by(|a, b| {
         b.crc_upper_bound
             .total_cmp(&a.crc_upper_bound)
-            .then_with(|| a.ari_v2_score.total_cmp(&b.ari_v2_score))
+            .then_with(|| a.eigengate_v2_score.total_cmp(&b.eigengate_v2_score))
     });
     let total_scenarios = crc_scenarios.len();
     let stage1_pruned = crc_scenarios.iter().filter(|s| s.stage1_pruned).count();
@@ -1723,9 +1723,9 @@ fn build_replay_overlay_ifcx(
         })).collect::<Vec<_>>(),
     });
 
-    let ari_overlay = IfcxAriOverlay {
-        ari_system: ctx.min_ari,
-        ari_average: ctx.avg_ari,
+    let eigengate_overlay = IfcxEigenGateOverlay {
+        eigengate_system: ctx.min_eigengate,
+        eigengate_average: ctx.avg_eigengate,
         critical_members_count: async_crc.stage2_evaluated,
         max_dcr_pct: (peak_interstory_drift_ratio / 0.020 * 100.0).min(999.0),
         svd_rank_deficiency: usize::from(ctx.has_mechanism),
@@ -1739,8 +1739,8 @@ fn build_replay_overlay_ifcx(
     bldg_node
         .attributes
         .insert(NS_EG_TIME_HISTORY_REPLAY.to_string(), payload.clone());
-    if let Ok(v) = serde_json::to_value(&ari_overlay) {
-        bldg_node.attributes.insert(ns::EG_ARI.to_string(), v);
+    if let Ok(v) = serde_json::to_value(&eigengate_overlay) {
+        bldg_node.attributes.insert(ns::EG_EIGENGATE.to_string(), v);
     }
     doc.add_node(bldg_node);
 
@@ -1765,8 +1765,8 @@ fn build_replay_overlay_ifcx(
             ),
         )
         .with_attr(NS_EG_TIME_HISTORY_REPLAY, payload);
-    if let Ok(v) = serde_json::to_value(&ari_overlay) {
-        replay_node.attributes.insert(ns::EG_ARI.to_string(), v);
+    if let Ok(v) = serde_json::to_value(&eigengate_overlay) {
+        replay_node.attributes.insert(ns::EG_EIGENGATE.to_string(), v);
     }
     doc.add_node(replay_node);
     doc

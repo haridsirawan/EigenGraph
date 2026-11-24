@@ -2,7 +2,7 @@
 //!
 //! Synthesizes an archival A3 landscape (`1600 x 1131`) pure-vector drafting & engineering sheet
 //! uniting structural framing plans, storey elevation + 3D subsurface borehole stratigraphy,
-//! ARI v2 / LRFD DCR% governing charts, coupled multi-physics scorecards, multi-layer IFCX
+//! EigenGate v2 / LRFD DCR% governing charts, coupled multi-physics scorecards, multi-layer IFCX
 //! diff manifests, and a SHA-256 verification seal — strictly 0% raster pixels and 0 `<image>` tags.
 
 use std::fmt::Write as _;
@@ -461,12 +461,12 @@ fn draw_elevation_ssi_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
     }
 }
 
-fn draw_dcr_ari_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
+fn draw_dcr_eigengate_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
     let (px, py, pw, ph) = (1064.0, 56.0, 504.0, 554.0);
-    let min_ari = input
+    let min_eigengate = input
         .members
         .iter()
-        .map(|m| m.ari)
+        .map(|m| m.eigengate)
         .fold(1.0_f64, f64::min);
     draw_panel_chrome(
         svg,
@@ -474,14 +474,14 @@ fn draw_dcr_ari_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
         py,
         pw,
         ph,
-        "3. ARI v2 & LRFD DCR% GOVERNING AUDIT",
-        &format!("ARI_min={min_ari:.3}"),
+        "3. EigenGate v2 & LRFD DCR% GOVERNING AUDIT",
+        &format!("EigenGate_min={min_eigengate:.3}"),
     );
 
     let mut sorted: Vec<(&str, f64, f64)> = input
         .members
         .iter()
-        .map(|m| (m.name.as_str(), m.dcr_interaction.max(m.utilization), m.ari))
+        .map(|m| (m.name.as_str(), m.dcr_interaction.max(m.utilization), m.eigengate))
         .collect();
     sorted.sort_by(|a, b| b.1.total_cmp(&a.1));
 
@@ -513,12 +513,12 @@ fn draw_dcr_ari_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
     if sorted.is_empty() {
         let _ = writeln!(
             svg,
-            r##"<text x="{:.1}" y="{:.1}" font-size="11" text-anchor="middle" fill="#64748b">Run Sync 3D BIM -> FEM to populate member DCR% &amp; ARI bars.</text>"##,
+            r##"<text x="{:.1}" y="{:.1}" font-size="11" text-anchor="middle" fill="#64748b">Run Sync 3D BIM -> FEM to populate member DCR% &amp; EigenGate bars.</text>"##,
             px + pw * 0.5,
             py + ph * 0.5,
         );
     } else {
-        for (i, (name, dcr, ari)) in sorted.iter().take(14).enumerate() {
+        for (i, (name, dcr, eigengate)) in sorted.iter().take(14).enumerate() {
             let by = py + 58.0 + (i as f64) * 31.0;
             let bw = ((dcr / max_dcr) * chart_w).clamp(3.0, chart_w);
             let col = dcr_hex_color(*dcr);
@@ -527,14 +527,14 @@ fn draw_dcr_ari_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
                 r##"<text x="{:.1}" y="{:.1}" font-size="9.5" text-anchor="end" fill="#0f172a">{}</text>
 <rect x="{chart_x:.1}" y="{by:.1}" width="{chart_w:.1}" height="17" rx="3" fill="#e2e8f0"/>
 <rect x="{chart_x:.1}" y="{by:.1}" width="{bw:.1}" height="17" rx="3" fill="{col}"/>
-<text x="{:.1}" y="{:.1}" font-size="9" font-family="monospace" fill="#0f172a">{:.0}% | ARI {:.2}</text>"##,
+<text x="{:.1}" y="{:.1}" font-size="9" font-family="monospace" fill="#0f172a">{:.0}% | EigenGate {:.2}</text>"##,
                 chart_x - 8.0,
                 by + 12.0,
                 escape_xml(&truncate_clean(name, 14)),
                 chart_x + chart_w + 6.0,
                 by + 12.0,
                 dcr * 100.0,
-                ari,
+                eigengate,
             );
         }
     }
@@ -594,10 +594,10 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
 
     let ret_line = if let Some(r) = input.retrofit_report {
         format!(
-            "{:?} | ARI {:.2} -> {:.2} | DCR {:.0}% -> {:.0}% | ${:.0}",
+            "{:?} | EigenGate {:.2} -> {:.2} | DCR {:.0}% -> {:.0}% | ${:.0}",
             r.strategy,
-            r.before_min_ari,
-            r.after_min_ari,
+            r.before_min_eigengate,
+            r.after_min_eigengate,
             r.before_max_dcr_pct,
             r.after_max_dcr_pct,
             r.estimated_cost_usd
@@ -605,11 +605,11 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
     } else if let Some(pt) = input.portfolio_report.and_then(|p| p.active_frontier()) {
         let port = input.portfolio_report.unwrap();
         format!(
-            "District {}/{} bldgs | ARI {:.2}->{:.2} | ${:.0}k | {:.1}tCO2e",
+            "District {}/{} bldgs | EigenGate {:.2}->{:.2} | ${:.0}k | {:.1}tCO2e",
             pt.retrofitted_buildings,
             pt.total_buildings,
-            port.pre_district_avg_ari,
-            pt.district_avg_ari_after,
+            port.pre_district_avg_eigengate,
+            pt.district_avg_eigengate_after,
             pt.total_cost_usd / 1000.0,
             pt.total_carbon_kg_co2e / 1000.0
         )
@@ -751,7 +751,7 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
         ("WGS84 Geodetic Anchor", format!("{:.5} deg, {:.5} deg | Elev {:.1} m", input.lat_lon.0, input.lat_lon.1, input.site.elevation_m)),
         ("SNI 1726 Seismic & Wind", format!("Ss={:.2}g | S1={:.2}g | Wind={:.1} m/s | {}", input.site.seismic_pga_ss_g, input.site.seismic_pga_s1_g, input.site.design_wind_ms, input.site.site_label)),
         ("6-DOF Winkler SSI & Soil", ssi_line),
-        ("ARI v2 + StructGNN-CRC", crc_line),
+        ("EigenGate v2 + StructGNN-CRC", crc_line),
         ("Automated Retrofit Delta", ret_line),
         (sixth_label, haz_line),
     ];
@@ -912,7 +912,7 @@ fn draw_title_block_panel(svg: &mut String, input: &VectorDossierInput<'_>, plac
         ("DRAWING SHEET", input.sheet_code),
         ("REVISION & STATUS", input.revision),
         ("DESIGN STANDARDS", "SNI 1726:2019 • SNI 2847:2019 • ASCE 7-22 • AISC 360-16 • UFC 4-023-03"),
-        ("METHODOLOGY", "Adjusted Redundancy Index (ARI v2) + Spectral SVD + 6-DOF Winkler SSI"),
+        ("METHODOLOGY", "EigenGate v2 + Spectral SVD + 6-DOF Winkler SSI"),
     ];
     for (i, (k, v)) in meta.iter().enumerate() {
         let my = py + 144.0 + (i as f64) * 50.0;
@@ -964,7 +964,7 @@ fn draw_title_block_panel(svg: &mut String, input: &VectorDossierInput<'_>, plac
 }
 
 /// Generates a publication-grade 100% Pure-Vector SVG engineering dossier containing plan,
-/// elevation/stratigraphy, ARI v2 / LRFD DCR% charts, multi-physics telemetry, IFCX diff,
+/// elevation/stratigraphy, EigenGate v2 / LRFD DCR% charts, multi-physics telemetry, IFCX diff,
 /// and ISO Title Block with cryptographic SHA-256 verification seal.
 pub fn build_pure_vector_engineering_dossier_svg(
     input: &VectorDossierInput<'_>,
@@ -985,7 +985,7 @@ pub fn build_pure_vector_engineering_dossier_svg(
 
     draw_plan_panel(&mut svg, input);
     draw_elevation_ssi_panel(&mut svg, input);
-    draw_dcr_ari_panel(&mut svg, input);
+    draw_dcr_eigengate_panel(&mut svg, input);
     draw_telemetry_panel(&mut svg, input);
     draw_diff_or_schedule_panel(&mut svg, input);
     draw_title_block_panel(&mut svg, input, seal_token);
@@ -1103,7 +1103,7 @@ pub fn build_permit_compliance_annex_svg(
     );
     let _ = writeln!(
         svg,
-        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#2b4963">SCENARIO              ARI   DCR%  DRIFT  T1(s)  COST($k)  CO2(t)  SCORE</text>"##,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#2b4963">SCENARIO              EigenGate   DCR%  DRIFT  T1(s)  COST($k)  CO2(t)  SCORE</text>"##,
         p2x + 18.0,
         p2y + 48.0,
     );
@@ -1123,7 +1123,7 @@ pub fn build_permit_compliance_annex_svg(
                 ry + 26.0,
                 escape_xml(&truncate_clean(s.archetype.short_label(), 18)),
                 badge,
-                s.min_ari,
+                s.min_eigengate,
                 s.max_dcr_pct,
                 s.max_drift_pct,
                 s.fundamental_period_s,
@@ -1134,7 +1134,7 @@ pub fn build_permit_compliance_annex_svg(
         }
     }
 
-    // Panel 3: Pure-Vector Trade-Study Utility & ARI Chart (Middle Right)
+    // Panel 3: Pure-Vector Trade-Study Utility & EigenGate Chart (Middle Right)
     let (p3x, p3y, p3w, p3h) = (808.0, 484.0, 760.0, 324.0);
     draw_panel_chrome(
         &mut svg,
@@ -1156,14 +1156,14 @@ pub fn build_permit_compliance_annex_svg(
                 svg,
                 r##"<text x="{:.1}" y="{:.1}" font-size="9.5" font-weight="bold" text-anchor="end" fill="#0f172a">{}</text>
 <rect x="{bar_x0:.1}" y="{by:.1}" width="{bw:.1}" height="24" rx="4" fill="{col}"/>
-<text x="{:.1}" y="{:.1}" font-size="9" font-family="monospace" fill="#0f172a">{:.1}/100 (ARI {:.2})</text>"##,
+<text x="{:.1}" y="{:.1}" font-size="9" font-family="monospace" fill="#0f172a">{:.1}/100 (EigenGate {:.2})</text>"##,
                 bar_x0 - 10.0,
                 by + 16.0,
                 escape_xml(s.archetype.short_label()),
                 bar_x0 + bw + 8.0,
                 by + 16.0,
                 s.weighted_utility_score,
-                s.min_ari,
+                s.min_eigengate,
             );
         }
     }
@@ -1236,6 +1236,283 @@ pub fn build_permit_compliance_annex_svg(
     }
 }
 
+/// Phase 82 (`v0.8.2`): Generates an archival A3 landscape (`1600 x 1131`, 0% raster pixels)
+/// Pure-Vector Rebar BBS, 1D Master Stock Cut-List & Field QA/QC Shop-Drawing Annex SVG (`S-103`).
+pub fn build_fabrication_bbs_shop_svg(
+    project: &BimProject,
+    report: &crate::core::field_fabrication::FieldFabricationReport,
+    collab_state: Option<&crate::core::ifcx_collab::IfcxCollabState>,
+    sheet_code: &str,
+    revision: &str,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(22_000);
+    let seal_token = "__EIGENGRAPH_SHOP_BBS_SHA256__";
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#5b92a5" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH REBAR BBS, 1D CUT-LIST &amp; FIELD QA/QC SHOP ANNEX — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#2b4963">SHEET {} • {} • EigenGate + EigenFlow • 100% PURE VECTOR</text>"##,
+        escape_xml(&project.project_name),
+        escape_xml(sheet_code),
+        escape_xml(revision),
+    );
+
+    // Panel 1: Bar Bending Schedule (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 560.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. SNI 2847 / BS 8666 BAR BENDING SCHEDULE (BBS)",
+        &format!(
+            "{} Marks • {:.0} kg Total • {}",
+            report.bbs_items.len(),
+            report.total_rebar_weight_kg,
+            escape_xml(&report.source_mode)
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#2b4963">MARK        ELEMENT                 DIA   GRADE       SHAPE                      QTY   CUT(mm)   MASS(kg)</text>"##,
+        p1x + 16.0,
+        p1y + 46.0,
+    );
+    for (idx, b) in report.bbs_items.iter().take(12).enumerate() {
+        let ry = p1y + 56.0 + (idx as f64) * 39.0;
+        let fill = if idx % 2 == 0 { "#f8fafc" } else { "#ffffff" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="32" rx="3" fill="{fill}" stroke="#e2e8f0" stroke-width="0.8"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#0f172a">{:<10}  {:<22} D{:<3.0} {:<10}  {:<24} {:>4}   {:>6.0}    {:>7.1}</text>"##,
+            p1x + 12.0,
+            p1w - 24.0,
+            p1x + 18.0,
+            ry + 20.0,
+            escape_xml(&truncate_clean(&b.mark, 10)),
+            escape_xml(&truncate_clean(&b.element, 22)),
+            b.bar_size_mm,
+            escape_xml(&truncate_clean(&b.grade, 10)),
+            escape_xml(&truncate_clean(&b.shape_code, 24)),
+            b.count,
+            b.cut_length_mm,
+            b.total_weight_kg,
+        );
+    }
+
+    // Panel 2: 1D Master Stock Bar Cutting-Pattern Diagram (Bottom Left)
+    let (p2x, p2y, p2w, p2h) = (32.0, 632.0, 760.0, 466.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. 1D MASTER STOCK BAR CUTTING-STOCK PATTERNS (BFD)",
+        &format!(
+            "Yield {:.1}% • Scrap {:.1}% • {} x {:.0}m Bars • Est Savings ${:.0}",
+            report.cso_report.material_yield_pct,
+            report.cso_report.scrap_waste_pct,
+            report.cso_report.master_bars_used,
+            report.cso_report.stock_length_m,
+            report.estimated_savings_usd
+        ),
+    );
+    let diag_x0 = p2x + 76.0;
+    let diag_w = p2w - 150.0;
+    let stock_m = report.cso_report.stock_length_m.max(1.0);
+    let cut_palette = ["#1d4ed8", "#0284c7", "#0f766e", "#2563eb", "#0369a1"];
+    for (idx, bar) in report.cso_report.bars.iter().take(11).enumerate() {
+        let by = p2y + 46.0 + (idx as f64) * 35.0;
+        let _ = writeln!(
+            svg,
+            r##"<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" font-weight="bold" fill="#1e293b">Bar #{:<2}</text>
+<rect x="{diag_x0:.1}" y="{by:.1}" width="{diag_w:.1}" height="22" rx="3" fill="#f1f5f9" stroke="#94a3b8" stroke-width="0.9"/>"##,
+            p2x + 14.0,
+            by + 14.5,
+            bar.bar_index,
+        );
+        for (c_idx, cut) in bar.cuts.iter().enumerate() {
+            let cx = diag_x0 + (cut.start_m / stock_m).clamp(0.0, 1.0) * diag_w;
+            let cw = ((cut.length_m / stock_m).clamp(0.01, 1.0) * diag_w).max(2.0);
+            let fill = cut_palette[c_idx % cut_palette.len()];
+            let _ = writeln!(
+                svg,
+                r##"<rect x="{cx:.1}" y="{:.1}" width="{cw:.1}" height="18" rx="2" fill="{fill}"/>"##,
+                by + 2.0,
+            );
+            if cw >= 34.0 {
+                let _ = writeln!(
+                    svg,
+                    r##"<text x="{:.1}" y="{:.1}" font-size="7.4" font-family="monospace" text-anchor="middle" fill="#ffffff">{:.2}m</text>"##,
+                    cx + cw * 0.5,
+                    by + 14.0,
+                    cut.length_m,
+                );
+            }
+        }
+        if bar.remainder_m > 0.02 {
+            let rx = diag_x0 + (bar.used_length_m / stock_m).clamp(0.0, 1.0) * diag_w;
+            let rw = ((bar.remainder_m / stock_m) * diag_w).clamp(1.0, diag_w);
+            let r_fill = if bar.is_reusable_offcut { "#22d3ee" } else { "#f97316" };
+            let _ = writeln!(
+                svg,
+                r##"<rect x="{rx:.1}" y="{:.1}" width="{rw:.1}" height="18" rx="2" fill="{r_fill}"/>"##,
+                by + 2.0,
+            );
+        }
+        let _ = writeln!(
+            svg,
+            r##"<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#0f172a">{:.1}%</text>"##,
+            diag_x0 + diag_w + 8.0,
+            by + 14.5,
+            bar.yield_pct,
+        );
+    }
+
+    // Panel 3: Field QA/QC Scorecard & Spatial Waypoint Register (Top Right)
+    let (p3x, p3y, p3w, p3h) = (808.0, 56.0, 760.0, 750.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. FIELD QA/QC SCORECARD, POUR-STRIPS & SPATIAL ENU WAYPOINTS",
+        &format!(
+            "f'c Pass {:.0}% • ITP {}/{} • Open NCR {}",
+            report.fc_pass_rate_pct,
+            report.itp_cleared_count,
+            report.itp_total_count,
+            report.open_ncr_count
+        ),
+    );
+    for (idx, wp) in report.waypoints.iter().take(9).enumerate() {
+        let ry = p3y + 48.0 + (idx as f64) * 56.0;
+        let [br, bg, bb] = wp.status.badge_color_rgb();
+        let hex = format!("#{br:02x}{bg:02x}{bb:02x}");
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="48" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<rect x="{:.1}" y="{:.1}" width="54" height="20" rx="4" fill="{hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" text-anchor="middle" fill="#ffffff">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="10" font-weight="bold" fill="#0f172a">{} — {} ({})</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#475569">ENU ({:.1}, {:.1}, {:.1})m • {}</text>"##,
+            p3x + 14.0,
+            p3w - 28.0,
+            p3x + 22.0,
+            ry + 8.0,
+            p3x + 49.0,
+            ry + 21.5,
+            wp.status.short_label(),
+            p3x + 86.0,
+            ry + 21.5,
+            escape_xml(&wp.code),
+            escape_xml(&truncate_clean(&wp.title, 44)),
+            escape_xml(&wp.element_ref),
+            p3x + 22.0,
+            ry + 39.0,
+            wp.local_x_m,
+            wp.local_y_m,
+            wp.local_z_m,
+            escape_xml(&truncate_clean(&wp.notes, 54)),
+        );
+    }
+    let ps_y0 = p3y + 566.0;
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{ps_y0:.1}" font-size="9.5" font-weight="bold" fill="#2b4963">CONCRETE POUR-STRIP &amp; 28-DAY CYLINDER TRACKER</text>"##,
+        p3x + 16.0,
+    );
+    for (idx, ps) in report.pour_strips.iter().take(4).enumerate() {
+        let ry = ps_y0 + 12.0 + (idx as f64) * 38.0;
+        let [pr, pg, pb] = ps.status.color_rgb();
+        let hex = format!("#{pr:02x}{pg:02x}{pb:02x}");
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="31" rx="3" fill="#f8fafc" stroke="{hex}" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#0f172a">{:<34} | Target {:.0} MPa -> 28d {:.1} MPa | {:.1} m3 | {}</text>"##,
+            p3x + 14.0,
+            p3w - 28.0,
+            p3x + 22.0,
+            ry + 20.0,
+            escape_xml(&truncate_clean(&ps.label, 34)),
+            ps.target_fc_mpa,
+            ps.measured_28d_mpa,
+            ps.concrete_volume_m3,
+            escape_xml(ps.status.label()),
+        );
+    }
+
+    // Panel 4: Fabrication Seal & IFCX Governance Stamp (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 824.0, 760.0, 274.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. SHOP-DRAWING CERTIFICATION & SHA-256 GOVERNANCE SEAL",
+        &format!("REV {} • EigenGate + EigenFlow", revision),
+    );
+    let gov_line = collab_state
+        .and_then(|cs| cs.active_checkpoint())
+        .map(|cp| {
+            format!(
+                "CHECKPOINT: {} [{}] ({}) • Chain SHA {}",
+                cp.checkpoint_id,
+                cp.approval_status.short_label(),
+                cp.discipline.short_label(),
+                cp.short_sha256(),
+            )
+        })
+        .unwrap_or_else(|| "CHECKPOINT: Live Local Engineering Baseline".to_string());
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="202" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.2"/>
+<text x="{:.1}" y="{:.1}" font-size="12" font-weight="bold" fill="#065f46">EIGENGRAPH FIELD FABRICATION &amp; QA/QC CERTIFICATION (SHEET S-103)</text>
+<text x="{:.1}" y="{:.1}" font-size="9.5" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-family="monospace" fill="#065f46">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#047857">SHA-256: {seal_token}</text>"##,
+        p4x + 16.0,
+        p4y + 48.0,
+        p4w - 32.0,
+        p4x + 30.0,
+        p4y + 84.0,
+        p4x + 30.0,
+        p4y + 118.0,
+        escape_xml(&truncate_clean(&report.summary, 94)),
+        p4x + 30.0,
+        p4y + 152.0,
+        escape_xml(&gov_line),
+        p4x + 30.0,
+        p4y + 188.0,
+    );
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_SHOP_BBS_S103");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = report.bbs_items.len() + report.waypoints.len();
+    let summary = format!(
+        "Exported Fabrication BBS & Field QA/QC Shop Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1284,9 +1561,9 @@ mod tests {
             moment_mz_knm: 32.0,
             is_critical: false,
             is_active: true,
-            ari_score: 0.84,
+            eigengate_score: 0.84,
             svd_sensitivity: 0.1,
-            ari: 0.84,
+            eigengate: 0.84,
             dcr_interaction: 0.78,
             shear_vy_kn: 55.0,
             svd_margin: 0.42,
@@ -1469,5 +1746,28 @@ mod tests {
         assert!(annex.svg_content.contains("PERMIT COMPLIANCE"));
         assert!(annex.svg_content.contains("TRADE-STUDY"));
         assert_eq!(annex.sha256_seal.len(), 64);
+
+        let mut field_proj = BimProject::sample_bimcraft_building();
+        field_proj.reinforce_all_concrete(&crate::core::bim::RebarPreset::default());
+        let ledger = crate::core::lifecycle_ops::FieldQualityControlLedger::default();
+        let fab = crate::core::field_fabrication::evaluate_field_fabrication(
+            &field_proj,
+            &ledger,
+            &crate::core::field_fabrication::FieldFabricationConfig::default(),
+        );
+        let shop = build_fabrication_bbs_shop_svg(
+            &field_proj,
+            &fab,
+            Some(&collab),
+            "S-103",
+            "REV 01",
+        );
+        assert!(shop.svg_content.starts_with("<svg"));
+        assert!(shop.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(shop.svg_content.contains("SHEET S-103"));
+        assert!(shop.svg_content.contains("EigenGate + EigenFlow"));
+        assert!(!shop.svg_content.contains("<image"));
+        assert!(!shop.svg_content.contains("ARI"));
+        assert_eq!(shop.sha256_seal.len(), 64);
     }
 }

@@ -1054,7 +1054,7 @@ impl SpatialWorkspaceState {
                         let vy_kn = fem_member.map(|m| m.shear_vy_kn).unwrap_or(0.0);
                         let util = fem_member.map(|m| m.utilization).unwrap_or(0.29);
                         let dcr_pmv = fem_member.map(|m| m.dcr_interaction).unwrap_or(util);
-                        let ari = fem_member.map(|m| m.ari).unwrap_or(0.90);
+                        let eigengate = fem_member.map(|m| m.eigengate).unwrap_or(0.90);
                         let ci = fem_member.map(|m| m.ci).unwrap_or(0.10);
                         let svd_m = fem_member.map(|m| m.svd_margin).unwrap_or(0.95);
                         let r_min_mm = (col.width_mm.min(col.depth_mm) * 0.289).max(1.0);
@@ -1098,9 +1098,9 @@ impl SpatialWorkspaceState {
                         Self::render_kv_row(
                             ui,
                             theme,
-                            "Redundancy Index (ARI / CI)",
-                            &format!("{:.3} / {:.3}", ari, ci),
-                            if ari >= 0.70 { theme.accent_green } else { theme.accent_orange },
+                            "Redundancy Index (EigenGate / CI)",
+                            &format!("{:.3} / {:.3}", eigengate, ci),
+                            if eigengate >= 0.70 { theme.accent_green } else { theme.accent_orange },
                         );
                         Self::render_kv_row(
                             ui,
@@ -1367,7 +1367,7 @@ impl SpatialWorkspaceState {
                         let mz_knm = fem_member.map(|m| m.moment_mz_knm).unwrap_or(0.0);
                         let vy_kn = fem_member.map(|m| m.shear_vy_kn).unwrap_or(0.0);
                         let util = fem_member.map(|m| m.utilization).unwrap_or(0.36);
-                        let ari = fem_member.map(|m| m.ari).unwrap_or(0.88);
+                        let eigengate = fem_member.map(|m| m.eigengate).unwrap_or(0.88);
                         let span_depth = (len_m * 1000.0) / run.depth_mm.max(100.0);
 
                         Self::render_kv_row(ui, theme, "Clear Span (L) / L/h", &format!("{len_m:.2} m / {span_depth:.1}"), theme.text_primary);
@@ -1376,8 +1376,8 @@ impl SpatialWorkspaceState {
                         Self::render_kv_row(
                             ui,
                             theme,
-                            "P-M-V DCR / ARI / ϕPn",
-                            &format!("{:.1}% / {:.3} / {:.0}kN", util * 100.0, ari, cap_kn),
+                            "P-M-V DCR / EigenGate / ϕPn",
+                            &format!("{:.1}% / {:.3} / {:.0}kN", util * 100.0, eigengate, cap_kn),
                             if util > 0.85 { theme.accent_red } else { theme.accent_green },
                         );
                         if let Some(fid) = fem_id {
@@ -1579,8 +1579,8 @@ impl SpatialWorkspaceState {
                             Self::render_kv_row(
                                 ui,
                                 theme,
-                                "Shear Strut DCR / ARI",
-                                &format!("{:.1}% / {:.3}", m.utilization * 100.0, m.ari),
+                                "Shear Strut DCR / EigenGate",
+                                &format!("{:.1}% / {:.3}", m.utilization * 100.0, m.eigengate),
                                 if m.utilization > 0.85 { theme.accent_red } else { theme.accent_green },
                             );
                         }
@@ -1865,7 +1865,7 @@ impl SpatialWorkspaceState {
         fem_member: Option<&StructuralMember>,
     ) {
         let dcr = fem_member.map(|m| m.utilization * 100.0).unwrap_or(42.0);
-        let ari = fem_member.map(|m| m.ari).unwrap_or(0.89);
+        let eigengate = fem_member.map(|m| m.eigengate).unwrap_or(0.89);
         let force = fem_member.map(|m| m.force_kn).unwrap_or(-420.0);
         let dcr_col = if dcr > 85.0 {
             theme.accent_red
@@ -1874,7 +1874,7 @@ impl SpatialWorkspaceState {
         } else {
             theme.accent_green
         };
-        let ari_col = if ari >= 0.70 {
+        let eigengate_col = if eigengate >= 0.70 {
             theme.accent_green
         } else {
             theme.accent_orange
@@ -1882,7 +1882,7 @@ impl SpatialWorkspaceState {
 
         ui.columns(3, |cols| {
             Self::kpi_chip(&mut cols[0], theme, "DCR", &format!("{dcr:.1}%"), dcr_col);
-            Self::kpi_chip(&mut cols[1], theme, "ARI", &format!("{ari:.3}"), ari_col);
+            Self::kpi_chip(&mut cols[1], theme, "EigenGate", &format!("{eigengate:.3}"), eigengate_col);
             Self::kpi_chip(&mut cols[2], theme, "FORCE", &format!("{force:.0}kN"), theme.accent_blue);
         });
     }
@@ -1939,7 +1939,7 @@ impl SpatialWorkspaceState {
             .map(|rb| rb.diameter_mm)
             .unwrap_or(if is_column { 19.0 } else { 16.0 });
         let default_util = if is_column { 0.42 } else { 0.36 };
-        let default_ari = if is_column { 0.89 } else { 0.88 };
+        let default_eigengate = if is_column { 0.89 } else { 0.88 };
         Self::render_rc_cross_section_preview(
             ui,
             theme,
@@ -1949,12 +1949,12 @@ impl SpatialWorkspaceState {
             rebar_bars,
             bar_dia_mm,
             fem_member.map(|m| m.utilization).unwrap_or(default_util),
-            fem_member.map(|m| m.ari).unwrap_or(default_ari),
+            fem_member.map(|m| m.eigengate).unwrap_or(default_eigengate),
         );
     }
 
     /// Renders a live 2D reinforced-concrete cross-section & rebar cage mini-canvas alongside
-    /// LRFD DCR% and ARI redundancy gauges inside the Smart Element Pop-Up.
+    /// LRFD DCR% and EigenGate redundancy gauges inside the Smart Element Pop-Up.
     #[allow(clippy::too_many_arguments)]
     pub fn render_rc_cross_section_preview(
         ui: &mut Ui,
@@ -1965,7 +1965,7 @@ impl SpatialWorkspaceState {
         rebar_bars: usize,
         bar_dia_mm: f64,
         util_ratio: f64,
-        ari_score: f64,
+        eigengate_score: f64,
     ) {
         let avail_w = ui.available_width().max(150.0);
         Frame::new()
@@ -2104,33 +2104,33 @@ impl SpatialWorkspaceState {
                         ui.painter().rect_filled(dcr_fill, CornerRadius::same(3), dcr_col);
 
                         ui.add_space(3.0);
-                        let ari_frac = (ari_score as f32).clamp(0.0, 1.0);
-                        let ari_col = if ari_score >= 0.70 {
+                        let eigengate_frac = (eigengate_score as f32).clamp(0.0, 1.0);
+                        let eigengate_col = if eigengate_score >= 0.70 {
                             theme.accent_green
-                        } else if ari_score >= 0.60 {
+                        } else if eigengate_score >= 0.60 {
                             theme.accent_orange
                         } else {
                             theme.accent_red
                         };
                         ui.label(
-                            RichText::new(format!("ARI: {:.3} (Target ≥ 0.70)", ari_score))
+                            RichText::new(format!("EigenGate: {:.3} (Target ≥ 0.70)", eigengate_score))
                                 .size(9.2)
                                 .monospace()
-                                .color(ari_col),
+                                .color(eigengate_col),
                         );
-                        let (ari_bar, _) =
+                        let (eigengate_bar, _) =
                             ui.allocate_exact_size(Vec2::new(gauge_w, 7.0), egui::Sense::hover());
-                        ui.painter().rect_filled(ari_bar, CornerRadius::same(3), theme.bg_card);
-                        let ari_fill = Rect::from_min_size(
-                            ari_bar.min,
-                            Vec2::new((ari_bar.width() * ari_frac).max(2.0), ari_bar.height()),
+                        ui.painter().rect_filled(eigengate_bar, CornerRadius::same(3), theme.bg_card);
+                        let eigengate_fill = Rect::from_min_size(
+                            eigengate_bar.min,
+                            Vec2::new((eigengate_bar.width() * eigengate_frac).max(2.0), eigengate_bar.height()),
                         );
-                        ui.painter().rect_filled(ari_fill, CornerRadius::same(3), ari_col);
-                        let target_x = ari_bar.left() + ari_bar.width() * 0.70;
+                        ui.painter().rect_filled(eigengate_fill, CornerRadius::same(3), eigengate_col);
+                        let target_x = eigengate_bar.left() + eigengate_bar.width() * 0.70;
                         ui.painter().line_segment(
                             [
-                                egui::pos2(target_x, ari_bar.top() - 1.0),
-                                egui::pos2(target_x, ari_bar.bottom() + 1.0),
+                                egui::pos2(target_x, eigengate_bar.top() - 1.0),
+                                egui::pos2(target_x, eigengate_bar.bottom() + 1.0),
                             ],
                             Stroke::new(1.3, Color32::WHITE),
                         );
@@ -2419,13 +2419,13 @@ impl SpatialWorkspaceState {
     }
 
     /// Renders a compact lens colorbar legend inside Dynamic Island whenever a structural
-    /// visualization lens (`DCR%`, `ARI`, `Moment/Force`, `Deformed`, `Modal`, `4D`) is active.
+    /// visualization lens (`DCR%`, `EigenGate`, `Moment/Force`, `Deformed`, `Modal`, `4D`) is active.
     pub(super) fn render_active_lens_colorbar_strip(
         &self,
         ui: &mut Ui,
         theme: &MacTheme,
         max_dcr: f64,
-        min_ari: f64,
+        min_eigengate: f64,
         fem_cache: &crate::views::universal_canvas::EarthStructuralRenderCache,
         active_modal_mode: usize,
         panel_w: f32,
@@ -2465,9 +2465,9 @@ impl SpatialWorkspaceState {
                                     .color(theme.text_primary),
                             );
                         }
-                        SpatialLens::AriRedundancy => {
+                        SpatialLens::EigenGateRedundancy => {
                             ui.label(
-                                RichText::new("ARI Legend:")
+                                RichText::new("EigenGate Legend:")
                                     .size(9.3)
                                     .strong()
                                     .color(theme.text_secondary),
@@ -2481,7 +2481,7 @@ impl SpatialWorkspaceState {
                                 ui.colored_label(col, RichText::new(format!("■ {lbl}")).size(9.2));
                             }
                             ui.label(
-                                RichText::new(format!("Min {min_ari:.2}"))
+                                RichText::new(format!("Min {min_eigengate:.2}"))
                                     .size(9.3)
                                     .monospace()
                                     .color(theme.text_primary),
@@ -2636,8 +2636,8 @@ impl SpatialWorkspaceState {
     ) {
         let prompts = [
             (
-                format!("Audit @{elem_name} DCR & ARI"),
-                format!("screen ari and p-m-v interaction for @{elem_name}"),
+                format!("Audit @{elem_name} DCR & EigenGate"),
+                format!("screen eigengate and p-m-v interaction for @{elem_name}"),
             ),
             (
                 format!("Check N-1 Collapse Risk"),
@@ -2645,7 +2645,7 @@ impl SpatialWorkspaceState {
             ),
             (
                 format!("Recommend Bracing / Repair"),
-                "recommend ari bracing".to_string(),
+                "recommend eigengate bracing".to_string(),
             ),
         ];
         for (btn_lbl, query) in prompts {

@@ -75,7 +75,7 @@ pub enum FeatureId {
     PointCloudAsBuiltDeviation,
 
     // 6. Analysis & Multi-Hazard Simulation
-    LinearFemAndSvdAri,
+    LinearFemAndSvdEigenGate,
     SeismicModalPushoverNltha,
     MemberCodeDesignSuite,
     ExtremeBlastFireFemaP58,
@@ -272,7 +272,7 @@ impl FeatureRegistry {
                 pillar: NavigationPillar::AiAgent,
                 code: "AI-05",
                 title: "NSGA-II Multi-Objective Pareto Optimizer",
-                description: "Simultaneous trade-off optimization across 5D Capex, A1–A3 Embodied Carbon, and global ARI redundancy.",
+                description: "Simultaneous trade-off optimization across 5D Capex, A1–A3 Embodied Carbon, and global EigenGate redundancy.",
                 status: Active,
                 module_hint: "src/views/ai_firm.rs + src/core/parametric.rs",
                 prioritized: false,
@@ -474,10 +474,10 @@ impl FeatureRegistry {
             // 6. Analysis & Multi-Hazard Simulation (4 Active + 4 Locked = 8)
             // =================================================================
             FeatureEntry {
-                id: FeatureId::LinearFemAndSvdAri,
+                id: FeatureId::LinearFemAndSvdEigenGate,
                 pillar: NavigationPillar::AnalysisSimulation,
                 code: "SIM-01",
-                title: "Linear 3D FEA, SVD Kinematic Guard & ARI Matrix",
+                title: "Linear 3D FEA, SVD Kinematic Guard & EigenGate Matrix",
                 description: "Sherman-Morrison/Woodbury N-1 & N-2 redundancy screening, SVD rank verification, and cascading collapse.",
                 status: Active,
                 module_hint: "src/views/analyze/core_fea.rs",
@@ -605,8 +605,8 @@ impl FeatureRegistry {
                 id: FeatureId::Parametric5DRabMultiCurrency,
                 pillar: NavigationPillar::CostBudgeting,
                 code: "5D-01",
-                title: "5D Dynamic RAB, Multi-Currency WBS & Cost-ARI",
-                description: "Parametric AHSP pricing across IDR/USD/EUR/SGD, MasterFormat WBS ledger, and Cost-vs-ARI trade-off.",
+                title: "5D Dynamic RAB, Multi-Currency WBS & Cost-EigenGate",
+                description: "Parametric AHSP pricing across IDR/USD/EUR/SGD, MasterFormat WBS ledger, and Cost-vs-EigenGate trade-off.",
                 status: Active,
                 module_hint: "src/views/planning.rs",
                 prioritized: false,

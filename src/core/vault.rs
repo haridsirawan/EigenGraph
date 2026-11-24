@@ -9,7 +9,7 @@
 //!    - Automatically written at Vault root so users and cleaning utilities never treat it as disposable cache.
 //! 3. Dynamic Auto-Taxonomy Routing:
 //!    - Items are dynamically routed into dedicated category subfolders (e.g., `Columns/`, `Beams/`,
-//!      `Slabs/`, `Walls/`, `Footings/`, `Rebar/`, `Materials/`, `Hydraulic_Structures/`, `ARI_Analyses/`, `Projects/`).
+//!      `Slabs/`, `Walls/`, `Footings/`, `Rebar/`, `Materials/`, `Hydraulic_Structures/`, `EigenGate_Analyses/`, `Projects/`).
 //! 4. Clean Architecture:
 //!    - All fake fictional demo files are removed. Projects and components reflect authentic civil engineering standards.
 
@@ -80,27 +80,29 @@ pub struct VaultConnectionStatus {
     pub error_msg: String,
 }
 
-/// Persistent self-learning memory stored inside `<Vault>/KnowledgeBase/ari_learning_memory.json`
+/// Persistent self-learning memory stored inside `<Vault>/KnowledgeBase/eigengate_learning_memory.json`
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AriKnowledgeMemory {
+pub struct EigenGateKnowledgeMemory {
     pub active_master_dataset: String,
     pub total_autosaves_count: usize,
-    pub total_ari_evaluations: usize,
+    #[serde(alias = "total_ari_evaluations")]
+    pub total_eigengate_evaluations: usize,
     pub total_parametric_mutations: usize,
-    pub best_recorded_system_ari: f64,
+    #[serde(alias = "best_recorded_system_ari")]
+    pub best_recorded_system_eigengate: f64,
     pub learned_optimal_sections: Vec<String>,
     pub recent_audit_log: Vec<String>,
     pub custom_export_dir: Option<String>,
 }
 
-impl Default for AriKnowledgeMemory {
+impl Default for EigenGateKnowledgeMemory {
     fn default() -> Self {
         Self {
             active_master_dataset: "EigenGraph Blank Workspace Vault".to_string(),
             total_autosaves_count: 0,
-            total_ari_evaluations: 0,
+            total_eigengate_evaluations: 0,
             total_parametric_mutations: 0,
-            best_recorded_system_ari: 0.0,
+            best_recorded_system_eigengate: 0.0,
             learned_optimal_sections: Vec::new(),
             recent_audit_log: vec![
                 "Blank Engineering Vault ready (zero demo files loaded)".to_string(),
@@ -119,8 +121,8 @@ pub struct MultiLodStageMetrics {
     pub elements_count: usize,
     pub static_indeterminacy_dsi: i32,
     pub condition_number_kappa: f64,
-    pub avg_ari: f64,
-    pub min_system_ari: f64,
+    pub avg_eigengate: f64,
+    pub min_system_eigengate: f64,
     pub critical_members_count: usize,
 }
 
@@ -129,21 +131,21 @@ pub struct MultiLodStageMetrics {
 pub struct MultiLodConvergenceReport {
     pub building_name: String,
     pub stages: Vec<MultiLodStageMetrics>,
-    pub ari_gain_lod100_to_lod300_pct: f64,
+    pub eigengate_gain_lod100_to_lod300_pct: f64,
     pub kappa_reduction_ratio: f64,
     pub convergence_verdict: String,
 }
 
-impl AriKnowledgeMemory {
-    /// Heuristic Self-Learning ARI Predictor calibrated by accumulated historical evaluations
-    pub fn predict_member_ari(
+impl EigenGateKnowledgeMemory {
+    /// Heuristic Self-Learning EigenGate Predictor calibrated by accumulated historical evaluations
+    pub fn predict_member_eigengate(
         &self,
         slenderness_l_over_r: f64,
         relative_stiffness: f64,
         connectivity_degree: usize,
     ) -> f64 {
         let learning_confidence =
-            (self.total_ari_evaluations as f64 / (self.total_ari_evaluations as f64 + 10.0)).clamp(0.45, 0.98);
+            (self.total_eigengate_evaluations as f64 / (self.total_eigengate_evaluations as f64 + 10.0)).clamp(0.45, 0.98);
         let slenderness_factor = (1.0 / (1.0 + (slenderness_l_over_r / 140.0).powi(2))).clamp(0.35, 0.99);
         let connectivity_factor =
             ((connectivity_degree as f64 - 2.0).max(0.5) / 6.0).clamp(0.40, 1.0);
@@ -151,7 +153,7 @@ impl AriKnowledgeMemory {
             (1.0 - (relative_stiffness - 1.0).abs() * 0.18).clamp(0.55, 0.99);
 
         let raw_est = 0.45 * slenderness_factor + 0.35 * connectivity_factor + 0.20 * stiffness_balance;
-        let calibrated = learning_confidence * (0.65 * raw_est + 0.35 * self.best_recorded_system_ari)
+        let calibrated = learning_confidence * (0.65 * raw_est + 0.35 * self.best_recorded_system_eigengate)
             + (1.0 - learning_confidence) * raw_est;
         calibrated.clamp(0.25, 0.985)
     }
@@ -1037,12 +1039,12 @@ impl InternalVault {
             || cat_lower.contains("bendung")
         {
             "Hydraulic_Structures".to_string()
-        } else if cat_lower.contains("ari")
+        } else if cat_lower.contains("eigengate")
             || cat_lower.contains("redundancy")
             || cat_lower.contains("analisis")
             || cat_lower.contains("predict")
         {
-            "ARI_Analyses".to_string()
+            "EigenGate_Analyses".to_string()
         } else if cat_lower.contains("proj") || cat_lower.contains("proyek") {
             "Projects".to_string()
         } else if cat_lower.contains("python") || cat_lower.contains("script") {
@@ -1299,7 +1301,7 @@ impl InternalVault {
                     story_count: entry.node_count.max(1),
                     member_count: entry.member_count,
                     max_dcr: 0.45,
-                    min_ari: 0.92,
+                    min_eigengate: 0.92,
                     source: src,
                     address_hint: hint,
                 },
@@ -1579,8 +1581,8 @@ impl InternalVault {
         }
 
         summary.push_str(&format!(
-            "• Accumulated AI Learning: {} ARI evaluations, {} parametric mutations (Best System ARI: {:.4})\n• AI Recommended Profiles: {}",
-            mem.total_ari_evaluations, mem.total_parametric_mutations, mem.best_recorded_system_ari,
+            "• Accumulated AI Learning: {} EigenGate evaluations, {} parametric mutations (Best System EigenGate: {:.4})\n• AI Recommended Profiles: {}",
+            mem.total_eigengate_evaluations, mem.total_parametric_mutations, mem.best_recorded_system_eigengate,
             mem.learned_optimal_sections.join(", ")
         ));
 
@@ -1855,7 +1857,7 @@ impl InternalVault {
                                 description: format!("User project from Vault: {} elements, {} nodes.", model.elements.len(), model.nodes.len()),
                                 elements_count: model.elements.len(),
                                 nodes_count: model.nodes.len(),
-                                min_ari: 0.942,
+                                min_eigengate: 0.942,
                                 max_deflection_mm: 3.5,
                                 status: ProjectStatus::Safe,
                                 last_modified: "Saved in Vault".to_string(),
@@ -1956,38 +1958,45 @@ impl InternalVault {
         Ok(target.display().to_string())
     }
 
-    pub fn load_knowledge_memory() -> AriKnowledgeMemory {
+    pub fn load_knowledge_memory() -> EigenGateKnowledgeMemory {
         #[cfg(target_arch = "wasm32")]
         {
-            if let Some(content) = crate::core::web_bridge::vault_read_file("KnowledgeBase/ari_learning_memory.json") {
-                if let Ok(mem) = serde_json::from_str::<AriKnowledgeMemory>(&content) {
-                    return mem;
+            for key in [
+                "KnowledgeBase/eigengate_learning_memory.json",
+                "KnowledgeBase/ari_learning_memory.json",
+            ] {
+                if let Some(content) = crate::core::web_bridge::vault_read_file(key) {
+                    if let Ok(mem) = serde_json::from_str::<EigenGateKnowledgeMemory>(&content) {
+                        return mem;
+                    }
                 }
             }
-            return AriKnowledgeMemory::default();
+            return EigenGateKnowledgeMemory::default();
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let path = Self::knowledge_dir().join("ari_learning_memory.json");
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(mem) = serde_json::from_str::<AriKnowledgeMemory>(&content) {
-                    return mem;
+            for fname in ["eigengate_learning_memory.json", "ari_learning_memory.json"] {
+                let path = Self::knowledge_dir().join(fname);
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Ok(mem) = serde_json::from_str::<EigenGateKnowledgeMemory>(&content) {
+                        return mem;
+                    }
                 }
             }
-            AriKnowledgeMemory::default()
+            EigenGateKnowledgeMemory::default()
         }
     }
 
-    pub fn save_knowledge_memory(mem: &AriKnowledgeMemory) -> Result<String, String> {
+    pub fn save_knowledge_memory(mem: &EigenGateKnowledgeMemory) -> Result<String, String> {
         let json = serde_json::to_string_pretty(mem).map_err(|e| e.to_string())?;
         #[cfg(target_arch = "wasm32")]
         {
-            crate::core::web_bridge::vault_write_file("KnowledgeBase/ari_learning_memory.json", &json);
-            return Ok("browser://KnowledgeBase/ari_learning_memory.json".to_string());
+            crate::core::web_bridge::vault_write_file("KnowledgeBase/eigengate_learning_memory.json", &json);
+            return Ok("browser://KnowledgeBase/eigengate_learning_memory.json".to_string());
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let path = Self::knowledge_dir().join("ari_learning_memory.json");
+            let path = Self::knowledge_dir().join("eigengate_learning_memory.json");
             std::fs::write(&path, json).map_err(|e| e.to_string())?;
             Ok(path.display().to_string())
         }
@@ -2002,17 +2011,17 @@ impl InternalVault {
     pub fn record_live_checkpoint(
         action_desc: &str,
         active_disruptions: usize,
-        current_min_ari: f64,
+        current_min_eigengate: f64,
     ) -> String {
         let mut mem = Self::load_knowledge_memory();
         mem.total_autosaves_count += 1;
-        mem.total_ari_evaluations += 1;
-        if current_min_ari > mem.best_recorded_system_ari && active_disruptions == 0 {
-            mem.best_recorded_system_ari = current_min_ari;
+        mem.total_eigengate_evaluations += 1;
+        if current_min_eigengate > mem.best_recorded_system_eigengate && active_disruptions == 0 {
+            mem.best_recorded_system_eigengate = current_min_eigengate;
         }
         let log_entry = format!(
-            "[Auto-Checkpoint #{}] {} (N-{}, Min ARI={:.3})",
-            mem.total_autosaves_count, action_desc, active_disruptions, current_min_ari
+            "[Auto-Checkpoint #{}] {} (N-{}, Min EigenGate={:.3})",
+            mem.total_autosaves_count, action_desc, active_disruptions, current_min_eigengate
         );
         mem.recent_audit_log.push(log_entry);
         if mem.recent_audit_log.len() > 25 {
@@ -2020,7 +2029,7 @@ impl InternalVault {
         }
         Self::save_knowledge_memory(&mem).unwrap_or_else(|_| {
             Self::knowledge_dir()
-                .join("ari_learning_memory.json")
+                .join("eigengate_learning_memory.json")
                 .display()
                 .to_string()
         })
@@ -2195,9 +2204,9 @@ impl InternalVault {
         ss_g: f64,
         wind_ms: f64,
     ) -> String {
-        let min_ari = members.iter().map(|m| m.ari).fold(1.0_f64, f64::min);
+        let min_eigengate = members.iter().map(|m| m.eigengate).fold(1.0_f64, f64::min);
         let max_dcr = members.iter().map(|m| m.utilization * 100.0).fold(0.0_f64, f64::max);
-        let crit_cnt = members.iter().filter(|m| m.is_critical || m.ari < 0.70).count();
+        let crit_cnt = members.iter().filter(|m| m.is_critical || m.eigengate < 0.70).count();
         let mut out = format!(
             "# Engineering Structural & Earth Audit: {}\n\n\
              ## 1. Site & Geohazard Telemetry\n\
@@ -2207,7 +2216,7 @@ impl InternalVault {
              - Design Wind Speed: {wind_ms:.1} m/s\n\n\
              ## 2. BIM & FEM Summary\n\
              - Levels: {} | Columns: {} | Beams: {} | Walls: {} | Slabs: {} | Footings: {}\n\
-             - Active FEM Members: {} | Max DCR: {:.1}% | Min ARI: {:.3} | Critical Elements: {}\n\n\
+             - Active FEM Members: {} | Max DCR: {:.1}% | Min EigenGate: {:.3} | Critical Elements: {}\n\n\
              ## 3. Priority Member Diagnostics\n",
             project.project_name,
             project.levels.len(),
@@ -2218,19 +2227,19 @@ impl InternalVault {
             project.footings.len(),
             members.len(),
             max_dcr,
-            min_ari,
+            min_eigengate,
             crit_cnt,
         );
         let mut sorted: Vec<&StructuralMember> = members.iter().collect();
         sorted.sort_by(|a, b| b.utilization.total_cmp(&a.utilization));
         for m in sorted.into_iter().take(8) {
             out.push_str(&format!(
-                "- **{}** ({}) — DCR {:.1}%, ARI {:.3}{}\n",
+                "- **{}** ({}) — DCR {:.1}%, EigenGate {:.3}{}\n",
                 m.name,
                 m.section,
                 m.utilization * 100.0,
-                m.ari,
-                if m.is_critical || m.ari < 0.70 { " [CRITICAL]" } else { "" }
+                m.eigengate,
+                if m.is_critical || m.eigengate < 0.70 { " [CRITICAL]" } else { "" }
             ));
         }
         out
@@ -2421,7 +2430,7 @@ mod tests {
             elements_count: 1,
             nodes_count: 2,
             est_weight_ton: 1.5,
-            min_system_ari: 0.95,
+            min_system_eigengate: 0.95,
             created_at: "User".to_string(),
             variables: vec![ParametricVariable {
                 name: "B".to_string(),
@@ -2437,11 +2446,11 @@ mod tests {
 
         // Verify Self-Learning Surrogate Predictor & Live Checkpoint
         let mem = InternalVault::load_knowledge_memory();
-        let pred_stocky = mem.predict_member_ari(45.0, 1.0, 6);
-        let pred_slender = mem.predict_member_ari(180.0, 1.8, 2);
+        let pred_stocky = mem.predict_member_eigengate(45.0, 1.0, 6);
+        let pred_slender = mem.predict_member_eigengate(180.0, 1.8, 2);
         assert!(pred_stocky > pred_slender);
         let cp = InternalVault::record_live_checkpoint("Unit test live checkpoint", 1, 0.942);
-        assert!(cp.ends_with("ari_learning_memory.json"));
+        assert!(cp.ends_with("eigengate_learning_memory.json"));
 
         InternalVault::reset_runtime_vault_dir();
         let _ = std::fs::remove_dir_all(&temp_vault);

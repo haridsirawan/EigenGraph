@@ -211,7 +211,7 @@ impl ParametricView {
                         Ok(msg) => {
                             self.command_history.push(msg.clone());
                             self.save_notification = Some(msg);
-                            self.refresh_live_ari();
+                            self.refresh_live_eigengate();
                         }
                         Err(e) => {
                             self.save_notification = Some(e);

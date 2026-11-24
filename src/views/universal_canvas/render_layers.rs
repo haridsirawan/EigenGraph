@@ -435,11 +435,11 @@ impl UniversalCanvasState {
                                 theme.accent_green
                             }
                         }
-                        EarthBimLens::AriRedundancy => {
-                            let ari = mem_opt.map(|m| m.ari).unwrap_or(0.95);
-                            if ari < 0.70 {
+                        EarthBimLens::EigenGateRedundancy => {
+                            let eigengate = mem_opt.map(|m| m.eigengate).unwrap_or(0.95);
+                            if eigengate < 0.70 {
                                 theme.accent_red
-                            } else if ari < 0.85 {
+                            } else if eigengate < 0.85 {
                                 theme.accent_orange
                             } else {
                                 Color32::from_rgb(16, 185, 129)
@@ -1507,7 +1507,7 @@ impl UniversalCanvasState {
                 let is_staging = cl.unlocated_count > 0 && cl.unlocated_count == cl.count;
                 let col = if is_staging {
                     theme.accent_orange
-                } else if cl.min_ari < 0.72 || cl.max_dcr >= 0.90 {
+                } else if cl.min_eigengate < 0.72 || cl.max_dcr >= 0.90 {
                     theme.accent_red
                 } else {
                     theme.accent_blue
@@ -1613,10 +1613,10 @@ impl UniversalCanvasState {
                                 theme.accent_green
                             }
                         }
-                        EarthBimLens::AriRedundancy => {
-                            if b.min_ari < 0.70 {
+                        EarthBimLens::EigenGateRedundancy => {
+                            if b.min_eigengate < 0.70 {
                                 theme.accent_red
-                            } else if b.min_ari < 0.85 {
+                            } else if b.min_eigengate < 0.85 {
                                 theme.accent_orange
                             } else {
                                 Color32::from_rgb(16, 185, 129)
@@ -1692,12 +1692,12 @@ impl UniversalCanvasState {
                         b.address_hint.clone()
                     };
                     let tip = format!(
-                        "{} • {} • {}F • DCR {:.0}% • ARI {:.2} [Click to Edit]",
+                        "{} • {} • {}F • DCR {:.0}% • EigenGate {:.2} [Click to Edit]",
                         b.name,
                         city_tag,
                         b.story_count,
                         b.max_dcr * 100.0,
-                        b.min_ari
+                        b.min_eigengate
                     );
                     let tip_pos = Pos2::new(rc.x, rc.y - 12.0);
                     let galley = clip_painter.layout_no_wrap(
@@ -2200,7 +2200,7 @@ impl UniversalCanvasState {
                         Color32::from_rgba_unmultiplied(30, 224, 158, 72),
                         theme.accent_green,
                     )
-                } else if d.pre_min_ari < rep.config.target_min_ari || d.pre_max_dcr > 0.85 {
+                } else if d.pre_min_eigengate < rep.config.target_min_eigengate || d.pre_max_dcr > 0.85 {
                     (
                         Color32::from_rgba_unmultiplied(240, 72, 62, 62),
                         theme.accent_red,
@@ -2648,6 +2648,92 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Pure-vector CPU fallback rendering Phase 82 Field QA/QC Pour-Strips & Spatial Waypoint Beacons.
+    pub(super) fn paint_cpu_field_qaqc_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.field_qaqc_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_field_fab_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |lx_m: f64, ly_m: f64, lz_m: f64| -> Option<Pos2> {
+            let ex = lx_m * cr - ly_m * sr;
+            let ny = lx_m * sr + ly_m * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, lz_m)
+                .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
+        };
+
+        for ps in &report.pour_strips {
+            let hw = ps.width_m * 0.5;
+            let hd = ps.depth_m * 0.5;
+            let corners = [
+                (ps.center_x_m - hw, ps.center_y_m - hd),
+                (ps.center_x_m + hw, ps.center_y_m - hd),
+                (ps.center_x_m + hw, ps.center_y_m + hd),
+                (ps.center_x_m - hw, ps.center_y_m + hd),
+            ];
+            let pts: Vec<Pos2> = corners
+                .iter()
+                .filter_map(|&(x, y)| proj_enu(x, y, ps.z_m))
+                .collect();
+            if pts.len() == 4 {
+                let [r, g, b] = ps.status.color_rgb();
+                clip.add(egui::Shape::convex_polygon(
+                    pts,
+                    Color32::from_rgba_unmultiplied(r, g, b, 58),
+                    Stroke::new(1.2, Color32::from_rgb(r, g, b)),
+                ));
+            }
+        }
+
+        for (idx, wp) in report.waypoints.iter().enumerate() {
+            if let (Some(base_p), Some(top_p)) = (
+                proj_enu(wp.local_x_m, wp.local_y_m, wp.local_z_m),
+                proj_enu(wp.local_x_m, wp.local_y_m, wp.local_z_m + 2.2),
+            ) {
+                let [r, g, b] = wp.status.badge_color_rgb();
+                let col = Color32::from_rgb(r, g, b);
+                let is_sel = idx == self.active_waypoint_idx;
+                clip.line_segment([base_p, top_p], Stroke::new(1.4, col));
+                clip.circle_filled(top_p, if is_sel { 7.0 } else { 5.2 }, col);
+                if is_sel {
+                    clip.circle_stroke(top_p, 10.5, Stroke::new(1.5, Color32::WHITE));
+                }
+                clip.text(
+                    top_p + Vec2::new(0.0, -9.0),
+                    Align2::CENTER_BOTTOM,
+                    format!("{} [{}]", wp.code, wp.status.short_label()),
+                    egui::FontId::monospace(8.8),
+                    Color32::WHITE,
+                );
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(
@@ -2744,10 +2830,10 @@ impl UniversalCanvasState {
                 );
             }
             NavigationPillar::AnalysisSimulation => {
-                let avg_ari = if members.is_empty() {
+                let avg_eigengate = if members.is_empty() {
                     0.942
                 } else {
-                    members.iter().map(|m| m.ari_score).sum::<f64>() / members.len() as f64
+                    members.iter().map(|m| m.eigengate_score).sum::<f64>() / members.len() as f64
                 };
                 for col in &bim_project.columns {
                     let cp = to_screen([col.pos.0, col.pos.1]);
@@ -2761,7 +2847,7 @@ impl UniversalCanvasState {
                 clip_painter.text(
                     p,
                     Align2::CENTER_BOTTOM,
-                    format!("FEA Overlay • Mean ARI {:.3} • SVD Guard Active", avg_ari),
+                    format!("FEA Overlay • Mean EigenGate {:.3} • SVD Guard Active", avg_eigengate),
                     egui::FontId::monospace(10.0),
                     theme.accent_green,
                 );

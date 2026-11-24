@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL + @compute Particles/Monte Carlo, Parametric Trade-Study Matrix & SNI/ASCE Permit Annex, Signed Collaborative IFCX Relay & 3D District Risk Heatmap, 6-DOF FEM & ARI v2, SHM Watchdog, ATC-20 Triage, Evacuation Lifelines & Width-First Dynamic Island)",
+                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL + @compute Particles/Monte Carlo, Field QA/QC Spatial Waypoints & 1D Rebar BBS Cut-List, Sheet S-103 Shop Annex, Parametric Trade-Study & SNI/ASCE Permit Annex, Signed Collaborative IFCX Relay & 3D District Risk Heatmap, 6-DOF FEM + EigenGate Linear & EigenFlow Non-Linear Woodbury Engines, SHM Watchdog, ATC-20 Triage, Evacuation Lifelines & Width-First Dynamic Island)",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)
@@ -719,18 +719,24 @@ impl SettingsView {
             ui.separator();
             ui.add_space(6.0);
 
-            let releases: [(&str, bool, &str, &str); 12] = [
+            let releases: [(&str, bool, &str, &str); 13] = [
+                (
+                    "v0.8.2",
+                    true,
+                    "Field QA/QC Spatial Waypoints, 1D Rebar BBS Cut-List, Sheet S-103 & EigenGate/EigenFlow",
+                    "Couples active BIM rebar & structural bays with Best-Fit Decreasing (BFD) 1D master stock bar cutting optimization (12m/6m), spatial 3D Pure WebGPU WGSL concrete pour-strips & ITP/NCR beacon pins (material_kind 11.0), eigengraph::construction::field_qaqc_bbs IFCX overlay, A3 Sheet S-103 Pure-Vector Shop-Drawing Annex SVG + BBS/Cut-List CSV exports, and complete platform migration to EigenGate (Branch 1 Linear) & EigenFlow (Branch 2 Non-Linear Woodbury).",
+                ),
                 (
                     "v0.8.1",
-                    true,
+                    false,
                     "Parametric Trade-Study Matrix, SNI/ASCE Permit Annex & Peer IFCX Sync Relay",
-                    "Evaluates 6 structural design alternatives (Baseline, Ductile Cols +100mm, Braced Core, HSC fc'+25%, Low-Carbon Hybrid, Base-Isolated) across ARI v2, DCR%, drift, T1, cost & embodied carbon with 1-click BIM adoption + eigengraph::analysis::trade_study_matrix IFCX overlay, 10-clause automated SNI/ASCE/UFC/FEMA Permit Compliance Matrix & Sheet S-102 Pure-Vector SVG Annex exporter, .ifcx-bundle.json import verification, and WebSocket Peer IFCX Delta Sync Relay.",
+                    "Evaluates 6 structural design alternatives (Baseline, Ductile Cols +100mm, Braced Core, HSC fc'+25%, Low-Carbon Hybrid, Base-Isolated) across EigenGate v2, DCR%, drift, T1, cost & embodied carbon with 1-click BIM adoption + eigengraph::analysis::trade_study_matrix IFCX overlay, 10-clause automated SNI/ASCE/UFC/FEMA Permit Compliance Matrix & Sheet S-102 Pure-Vector SVG Annex exporter, .ifcx-bundle.json import verification, and WebSocket Peer IFCX Delta Sync Relay.",
                 ),
                 (
                     "v0.8.0",
                     false,
                     "Collaborative IFCX Governance, Signed Checkpoints & 3D WebGPU District Risk Heatmap",
-                    "SHA-256 tamper-proof checkpoint chain across engineering disciplines, formal Approval sign-off sealed into A3 Pure-Vector SVG dossiers & eigengraph::governance::checkpoint_seal IFCX overlays, deterministic 3-Way Peer IFCX Merge with conflict resolver, .ifcx-bundle.json handover export, and terrain-draped Pure WebGPU WGSL iso-contour District Risk Field Heatmap uniting ARI v2, ATC-20, PML-90, liquefaction & evacuation isolation.",
+                    "SHA-256 tamper-proof checkpoint chain across engineering disciplines, formal Approval sign-off sealed into A3 Pure-Vector SVG dossiers & eigengraph::governance::checkpoint_seal IFCX overlays, deterministic 3-Way Peer IFCX Merge with conflict resolver, .ifcx-bundle.json handover export, and terrain-draped Pure WebGPU WGSL iso-contour District Risk Field Heatmap uniting EigenGate v2, ATC-20, PML-90, liquefaction & evacuation isolation.",
                 ),
                 (
                     "v0.7.9",
@@ -771,8 +777,8 @@ impl SettingsView {
                 (
                     "v0.7.3",
                     false,
-                    "Autonomous District Portfolio ARI v2 Pareto Retrofit Optimizer",
-                    "Multi-objective Cost vs. Embodied Carbon vs. District ARI v2 Pareto frontier synthesis with 3D district retrofit crowns.",
+                    "Autonomous District Portfolio EigenGate v2 Pareto Retrofit Optimizer",
+                    "Multi-objective Cost vs. Embodied Carbon vs. District EigenGate v2 Pareto frontier synthesis with 3D district retrofit crowns.",
                 ),
                 (
                     "v0.7.2",
@@ -789,7 +795,7 @@ impl SettingsView {
                 (
                     "v0.7.0",
                     false,
-                    "Two-Stage ARI v2 + StructGNN-CRC Conformal Screening & Collapse Cascade",
+                    "Two-Stage EigenGate v2 + StructGNN-CRC Conformal Screening & Collapse Cascade",
                     "Spectral kinematic guard + conformal risk calibration (alpha = 0.05) driving UFC 4-023-03 3D domino progressive collapse visualization.",
                 ),
             ];
@@ -856,7 +862,7 @@ impl SettingsView {
             );
             ui.label(
                 RichText::new(
-                    "• Linear Adjusted Redundancy Index (ARI) with Sherman-Morrison O(N^2) fast update\n\
+                    "• Linear EigenGate with Sherman-Morrison O(N^2) fast update\n\
                      • Woodbury Rank-2 (N-2) simultaneous multi-element disruption screening\n\
                      • Euler elastic buckling & AISC 360-16 B1 moment amplification geometric stiffness guard\n\
                      • SVD Kinematic Mechanism Guard (m_e = 1 - h_e) for instant singularity detection\n\

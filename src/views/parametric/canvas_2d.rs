@@ -190,13 +190,13 @@ impl ParametricView {
                     DraftingViewMode::VisualNodeGraphDynamo => "Dynamo Node Graph".to_string(),
                 };
                 let counts_txt = format!(
-                    "{} • {}W / {}C / {}B / {}Rm • ARI {:.3}",
+                    "{} • {}W / {}C / {}B / {}Rm • EigenGate {:.3}",
                     active_mode_name,
                     self.bim_bus.project.walls.len(),
                     self.bim_bus.project.columns.len(),
                     self.bim_bus.project.runs.len(),
                     self.bim_bus.project.rooms.len(),
-                    self.live_ari_score,
+                    self.live_eigengate_score,
                 );
                 let mode_txt = format!(
                     "Ortho(F8): {} • OSNAP(F3): {} • {} Ink",
@@ -459,11 +459,11 @@ impl ParametricView {
                 return default_col;
             }
             if let Some(m) = member_opt {
-                if m.utilization >= 0.85 || m.ari < 0.55 {
+                if m.utilization >= 0.85 || m.eigengate < 0.55 {
                     Color32::from_rgb(239, 68, 68)
-                } else if m.utilization >= 0.65 || m.ari < 0.70 {
+                } else if m.utilization >= 0.65 || m.eigengate < 0.70 {
                     Color32::from_rgb(245, 158, 11)
-                } else if m.ari >= 0.85 {
+                } else if m.eigengate >= 0.85 {
                     Color32::from_rgb(26, 188, 120)
                 } else {
                     Color32::from_rgb(56, 189, 248)
@@ -473,7 +473,7 @@ impl ParametricView {
             }
         };
 
-        // 5. Structural Beams / Runs (Projected Axis + Optional 2D FEM/ARI Heatmap)
+        // 5. Structural Beams / Runs (Projected Axis + Optional 2D FEM/EigenGate Heatmap)
         for (idx, run) in self.bim_bus.project.runs.iter().enumerate() {
             let p0 = to_screen(run.start);
             let p1 = to_screen(run.end);
@@ -565,17 +565,17 @@ impl ParametricView {
             }
         }
 
-        // 7. Structural Columns in Solid Poché + Optional 2D ARI/DCR Heatmap Ring
+        // 7. Structural Columns in Solid Poché + Optional 2D EigenGate/DCR Heatmap Ring
         for (idx, col) in self.bim_bus.project.columns.iter().enumerate() {
             let cpts: Vec<Pos2> = col.footprint_ring().into_iter().map(to_screen).collect();
             let m_opt = members.get(idx);
             let fill = if self.show_structural_heatmap_2d {
                 if let Some(m) = m_opt {
-                    if m.utilization >= 0.85 || m.ari < 0.55 {
+                    if m.utilization >= 0.85 || m.eigengate < 0.55 {
                         Color32::from_rgb(239, 68, 68)
-                    } else if m.utilization >= 0.65 || m.ari < 0.70 {
+                    } else if m.utilization >= 0.65 || m.eigengate < 0.70 {
                         Color32::from_rgb(245, 158, 11)
-                    } else if m.ari >= 0.85 {
+                    } else if m.eigengate >= 0.85 {
                         Color32::from_rgb(26, 188, 120)
                     } else {
                         Color32::from_rgb(56, 189, 248)
@@ -597,7 +597,7 @@ impl ParametricView {
                     painter.text(
                         s_center - Vec2::new(0.0, 12.0),
                         Align2::CENTER_BOTTOM,
-                        format!("ARI {:.2}", m.ari),
+                        format!("EigenGate {:.2}", m.eigengate),
                         egui::FontId::monospace(8.5),
                         fill,
                     );
@@ -803,7 +803,7 @@ impl ParametricView {
                                     is_structural: true,
                                 }) {
                                     self.command_history.push(msg);
-                                    self.refresh_live_ari();
+                                    self.refresh_live_eigengate();
                                 }
                                 self.pending_start_pt = Some(snap_hit.point);
                             }
@@ -825,7 +825,7 @@ impl ParametricView {
                                     profile_name: "WF 400x200x8x13".to_string(),
                                 }) {
                                     self.command_history.push(msg);
-                                    self.refresh_live_ari();
+                                    self.refresh_live_eigengate();
                                 }
                                 self.pending_start_pt = None;
                             }
@@ -844,7 +844,7 @@ impl ParametricView {
                             profile_name: "WF 400x200x8x13".to_string(),
                         }) {
                             self.command_history.push(msg);
-                            self.refresh_live_ari();
+                            self.refresh_live_eigengate();
                         }
                     }
                     BimAuthoringTool::PlaceDoor | BimAuthoringTool::PlaceWindow => {
@@ -1263,7 +1263,7 @@ impl ParametricView {
             format!("• Structural Elements: {} Walls, {} Columns, {} Beams, {} Rooms", self.bim_bus.project.walls.len(), self.bim_bus.project.columns.len(), self.bim_bus.project.runs.len(), self.bim_bus.project.rooms.len()),
             format!("• Volume & Reinforcement: Rebar {:.1} kg | Concrete Grade fc' 30 MPa | Steel ASTM A992", self.bim_bus.project.total_rebar_weight_kg()),
             format!("• SVD Kinematic Guard: rank(K) = Full | dim(Null) = 0 | Condition: STABLE / MECHANISM-FREE"),
-            format!("• Adjusted Redundancy Index: Min System ARI = {:.4} [GRADE A SAFE] | SNI 1729 / AISC 360", self.live_ari_score),
+            format!("• EigenGate: Min System EigenGate = {:.4} [GRADE A SAFE] | SNI 1729 / AISC 360", self.live_eigengate_score),
         ];
         for (i, line) in sched_lines.iter().enumerate() {
             painter.text(

@@ -125,7 +125,7 @@ pub struct UniversalCanvasState {
     pub last_retrofit_report: Option<crate::core::retrofit::StructuralRetrofitReport>,
     pub pre_retrofit_baseline: Option<BimProject>,
     pub viewing_pre_retrofit_baseline: bool,
-    // Phase 70: Two-Stage `ARI v2 + StructGNN-CRC` Screening & Animated Progressive Collapse Cascade
+    // Phase 70: Two-Stage `EigenGate v2 + StructGNN-CRC` Screening & Animated Progressive Collapse Cascade
     pub last_crc_cascade_report: Option<crate::core::cascade::TwoStageCrcCascadeReport>,
     pub active_cascade_step: usize,
     pub cascade_daf: f64,
@@ -139,7 +139,7 @@ pub struct UniversalCanvasState {
     pub ifcx_diff_overlay_active: bool,
     pub ifcx_diff_filter: crate::core::ifcx::IfcxDiffLayerFilter,
     pub last_vector_dossier_seal: Option<String>,
-    // Phase 73: Autonomous Portfolio-Scale `ARI v2` Retrofit Optimization & Pareto Overlay
+    // Phase 73: Autonomous Portfolio-Scale `EigenGate v2` Retrofit Optimization & Pareto Overlay
     pub portfolio_retrofit_config: crate::core::portfolio_retrofit::PortfolioRetrofitConfig,
     pub last_portfolio_retrofit_report: Option<crate::core::portfolio_retrofit::DistrictPortfolioRetrofitReport>,
     // Phase 74: Real-Time Async `StructGNN-CRC` & Live 60 FPS Earthquake Ground-Motion Replay
@@ -166,6 +166,12 @@ pub struct UniversalCanvasState {
     pub trade_study_config: crate::core::trade_study::TradeStudyConfig,
     pub last_trade_study_report: Option<crate::core::trade_study::TradeStudyReport>,
     pub last_permit_report: Option<crate::core::trade_study::PermitComplianceReport>,
+    // Phase 82: Field Construction QA/QC Spatial Waypoints, Pour-Strip Tracker & 1D Rebar BBS Cut-List
+    pub field_qaqc_overlay_visible: bool,
+    pub field_fab_config: crate::core::field_fabrication::FieldFabricationConfig,
+    pub field_qaqc_ledger: crate::core::lifecycle_ops::FieldQualityControlLedger,
+    pub last_field_fab_report: Option<crate::core::field_fabrication::FieldFabricationReport>,
+    pub active_waypoint_idx: usize,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -296,6 +302,11 @@ impl Default for UniversalCanvasState {
             trade_study_config: crate::core::trade_study::TradeStudyConfig::default(),
             last_trade_study_report: None,
             last_permit_report: None,
+            field_qaqc_overlay_visible: false,
+            field_fab_config: crate::core::field_fabrication::FieldFabricationConfig::default(),
+            field_qaqc_ledger: crate::core::lifecycle_ops::FieldQualityControlLedger::default(),
+            last_field_fab_report: None,
+            active_waypoint_idx: 0,
         }
     }
 }
@@ -547,7 +558,7 @@ impl UniversalCanvasState {
         }
     }
 
-    /// Evaluates autonomous multi-building portfolio `ARI v2` retrofit Pareto optimization.
+    /// Evaluates autonomous multi-building portfolio `EigenGate v2` retrofit Pareto optimization.
     pub fn refresh_portfolio_retrofit(
         &mut self,
         bim_project: &BimProject,
@@ -735,7 +746,7 @@ impl UniversalCanvasState {
         label: &str,
     ) -> String {
         let doc = self.build_active_layered_ifcx(bim_project, members);
-        let min_ari = members.iter().map(|m| m.ari).fold(1.0_f64, f64::min);
+        let min_eigengate = members.iter().map(|m| m.eigengate).fold(1.0_f64, f64::min);
         let max_dcr_pct = members.iter().map(|m| m.utilization * 100.0).fold(0.0_f64, f64::max);
         let atc20_placard = self
             .last_shm_twin_report
@@ -753,7 +764,7 @@ impl UniversalCanvasState {
             .map(|e| e.network_connectivity_pct)
             .unwrap_or(100.0);
         let kpi = crate::core::ifcx_collab::IfcxCheckpointKpi {
-            min_ari,
+            min_eigengate,
             max_dcr_pct,
             atc20_placard,
             mc_pml90_usd,
@@ -821,7 +832,7 @@ impl UniversalCanvasState {
         msg
     }
 
-    /// Evaluates the 6-scenario Parametric Trade-Study Matrix (`ARI v2`, DCR%, Drift, Cost, CO2, PML-90).
+    /// Evaluates the 6-scenario Parametric Trade-Study Matrix (`EigenGate v2`, DCR%, Drift, Cost, CO2, PML-90).
     pub fn run_trade_study_analysis(
         &mut self,
         bim_project: &BimProject,
@@ -863,6 +874,20 @@ impl UniversalCanvasState {
             Some(&self.collab_state),
         );
         self.last_permit_report = Some(rep.clone());
+        rep
+    }
+
+    /// Evaluates Rebar BBS Cut-List Optimization (1D BFD) and Field QA/QC spatial waypoints.
+    pub fn run_field_fabrication_audit(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::field_fabrication::FieldFabricationReport {
+        let rep = crate::core::field_fabrication::evaluate_field_fabrication(
+            bim_project,
+            &self.field_qaqc_ledger,
+            &self.field_fab_config,
+        );
+        self.last_field_fab_report = Some(rep.clone());
         rep
     }
 
@@ -1866,6 +1891,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let field_qaqc_gpu_input = if self.field_qaqc_overlay_visible {
+                self.last_field_fab_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::FieldQaqcGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -1895,6 +1931,7 @@ impl UniversalCanvasState {
                 shm_gpu_input,
                 evacuation_gpu_input,
                 risk_heatmap_gpu_input,
+                field_qaqc_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -1949,6 +1986,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.collab_state.config.risk_heatmap_visible {
                 self.paint_cpu_district_risk_heatmap_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.field_qaqc_overlay_visible {
+                self.paint_cpu_field_qaqc_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

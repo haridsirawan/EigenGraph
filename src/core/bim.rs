@@ -6,10 +6,10 @@
 //! - Parametric Concrete Reinforcement (`rebar` & `reinforce` for Beams, Columns, Footings + Bar Schedule)
 //! - Revit-Style Object Snaps (`SE, SM, SI, SC, SP, SN`), Angular Guides, and Graduated Ruler
 //! - Transactional Command Bus (`BimCommand`) with JSON execution and Unlimited Undo/Redo
-//! - Dual Physical-to-Analytical FEM & Live ARI Synchronization (`to_structural_model` + `AriEngine`)
+//! - Dual Physical-to-Analytical FEM & Live EigenGate Synchronization (`to_structural_model` + `EigenGateEngine`)
 //! - Multi-View Projection (Floor Plan View Range, Live Section Cut Poché, Vector Sheet SVG/PDF & Pure IFCX).
 
-use crate::core::ari::{AriEngine, RedundancyAssessment};
+use crate::core::eigengate::{EigenGateEngine, RedundancyAssessment};
 use crate::core::csg::{
     csg_subtract, extrude_box_run_mesh, extrude_ring_mesh, extrude_tube_mesh,
     extrude_wf_section_mesh, slice_mesh_with_plane, Bvh3D, CsgMeter, P3,
@@ -1978,7 +1978,7 @@ impl BimProject {
     }
 
     /// Dual Physical–Analytical Synchronization: converts the physical BIM building into a 3D
-    /// Finite Element `StructuralModel` (coordinates in metres) for immediate `FemSolver` & `AriEngine` audit.
+    /// Finite Element `StructuralModel` (coordinates in metres) for immediate `FemSolver` & `EigenGateEngine` audit.
     /// Converts physical BIM elements into a 3D FEM `StructuralModel` alongside deterministic
     /// `(fem_element_id, BimElementKind, bim_element_id)` linkage records.
     pub fn to_structural_model_with_map(&self) -> (StructuralModel, Vec<(usize, BimElementKind, usize)>) {
@@ -2594,14 +2594,14 @@ impl BimProject {
             .map(|(_, k, bid)| (k, bid))
     }
 
-    /// Evaluates live Adjusted Redundancy Index (ARI) and SVD Kinematic Guard on the BIM building.
-    pub fn evaluate_live_ari(&self) -> Result<RedundancyAssessment, String> {
+    /// Evaluates live EigenGate and SVD Kinematic Guard on the BIM building.
+    pub fn evaluate_live_eigengate(&self) -> Result<RedundancyAssessment, String> {
         let struct_model = self.to_structural_model();
-        AriEngine::evaluate_redundancy_fast(&struct_model)
+        EigenGateEngine::evaluate_redundancy_fast(&struct_model)
     }
 
     /// Exports an architectural/structural Drawing Sheet (`A3` Title Block containing Floor Plan,
-    /// Section Cut A-A, Structural ARI & Rebar Schedule, and Title Block) as a crisp scalable Vector **SVG** document.
+    /// Section Cut A-A, Structural EigenGate & Rebar Schedule, and Title Block) as a crisp scalable Vector **SVG** document.
     pub fn export_sheet_svg(&self, sheet_number: &str, sheet_title: &str) -> String {
         let mut svg = String::with_capacity(16384);
         svg.push_str(
@@ -2741,7 +2741,7 @@ impl BimProject {
 <rect x="790" y="322" width="330" height="16" fill="#64748b" stroke="#0f172a" stroke-width="1.2"/>"##,
         );
 
-        // 4. VIEWPORT 3: Bill of Quantities & Structural ARI Audit Schedule (Left Lower: x=40..720, y=600..808)
+        // 4. VIEWPORT 3: Bill of Quantities & Structural EigenGate Audit Schedule (Left Lower: x=40..720, y=600..808)
         svg.push_str(
             r##"<rect x="40" y="600" width="670" height="208" fill="#ffffff" stroke="#94a3b8" stroke-width="1.0" rx="4"/>
 <text x="55" y="624" font-size="13" font-weight="bold" fill="#0f172a">SCHEDULE: BILL OF QUANTITIES &amp; STRUCTURAL REDUNDANCY AUDIT</text>
@@ -2754,7 +2754,7 @@ impl BimProject {
 <text x="60" y="658" font-size="10" font-weight="bold" fill="#334155">ELEMENT CATEGORY</text>
 <text x="230" y="658" font-size="10" font-weight="bold" fill="#334155">COUNT / VOL</text>
 <text x="370" y="658" font-size="10" font-weight="bold" fill="#334155">REBAR MASS</text>
-<text x="510" y="658" font-size="10" font-weight="bold" fill="#334155">ARI REDUNDANCY STATUS</text>"##,
+<text x="510" y="658" font-size="10" font-weight="bold" fill="#334155">EigenGate REDUNDANCY STATUS</text>"##,
         );
 
         // Table Rows
@@ -2765,7 +2765,7 @@ impl BimProject {
                 "RC Walls (Shear Wall)",
                 format!("{} walls", self.walls.len()),
                 format!("{:.1} kg", total_rebar * 0.45),
-                "ARI = 0.94 (ROBUST REDUNDANT)",
+                "EigenGate = 0.94 (ROBUST REDUNDANT)",
                 "#16a34a",
             ),
             (
@@ -2836,7 +2836,7 @@ impl BimProject {
 <text x="960" y="650" font-size="10" fill="#64748b">STATUS / DISCIPLINE:</text>
 <text x="960" y="675" font-size="12" font-weight="bold" fill="#16a34a">ISSUED FOR CONSTRUCTION</text>
 
-<text x="745" y="732" font-size="9.5" fill="#475569">Lead Structural Engineer: ARI Automated Solver Engine</text>
+<text x="745" y="732" font-size="9.5" fill="#475569">Lead Structural Engineer: EigenGate Automated Solver Engine</text>
 <text x="745" y="750" font-size="9.5" fill="#475569">Verification: AISC 360-16 / Sherman-Morrison Sherman-Kahan Exact O(N²)</text>
 <text x="745" y="768" font-size="9.5" fill="#475569">Geometric Stiffness: Kg(P) Buckling Margin Active</text>
 <text x="745" y="792" font-size="9" fill="#94a3b8">© 2026 EigenGraph CAD/BIM Platform • Confidential &amp; Proprietary</text>"##,
@@ -2951,7 +2951,7 @@ impl BimProject {
         stream.push_str(&format!("0 -16 Td (Structural Columns: {} units | 400x400 C30/37 | Kg(P) Buckling Margin: SAFE) Tj\n", self.columns.len()));
         stream.push_str(&format!("0 -16 Td (Beams & Framing: {} runs | Sherman-Morrison Fast O(N2) Verified) Tj\n", self.runs.len()));
         stream.push_str(&format!("0 -16 Td (Total Building Rebar: {:.1} kg | Kinematic Guard Deficit = 0) Tj\n", total_rebar));
-        stream.push_str("0 -16 Td (Overall Redundancy Index: ARI = 0.942 | Structural Robustness: HIGH) Tj\n");
+        stream.push_str("0 -16 Td (Overall Redundancy Index: EigenGate = 0.942 | Structural Robustness: HIGH) Tj\n");
         stream.push_str("ET\n");
 
         // 5. Official Title Block Box (Right Lower: x=510, y=30, w=312, h=220)
@@ -2982,7 +2982,7 @@ impl BimProject {
 
         stream.push_str("BT /F1 7.5 Tf 0.4 0.45 0.5 rg\n");
         stream.push_str("522 74 Td (Design Standard: AISC 360-16 / ACI 318-19 / SNI 1726) Tj\n");
-        stream.push_str("0 -13 Td (Solver: Fast Sherman-Morrison ARI + Kg Buckling Guard) Tj\n");
+        stream.push_str("0 -13 Td (Solver: Fast Sherman-Morrison EigenGate + Kg Buckling Guard) Tj\n");
         stream.push_str("0 -13 Td (Certification: EigenGraph Universal 2 Structural Kernel) Tj\n");
         stream.push_str("ET\n");
 
@@ -4229,9 +4229,9 @@ impl BimCommandBus {
         }
     }
 
-    /// Closed-loop autonomous structural hardening: identifies lowest-ARI / highest-DCR
+    /// Closed-loop autonomous structural hardening: identifies lowest-EigenGate / highest-DCR
     /// members from live FEA results, upsizes weak sections and injects alternate-path bracing
-    /// inside one transactional undo snapshot, then re-solves AriEngine to verify improvement.
+    /// inside one transactional undo snapshot, then re-solves EigenGateEngine to verify improvement.
     pub fn repair_critical_members(
         &mut self,
         members: &[crate::models::StructuralMember],
@@ -4246,13 +4246,13 @@ impl BimCommandBus {
         if before_fem.elements.is_empty() {
             return Err("No analytical 3D frame elements available to optimize.".to_string());
         }
-        let before_eval = AriEngine::evaluate_redundancy(&before_fem)?;
-        let before_min_ari = before_eval
+        let before_eval = EigenGateEngine::evaluate_redundancy(&before_fem)?;
+        let before_min_eigengate = before_eval
             .member_results
             .iter()
-            .map(|r| r.ari)
+            .map(|r| r.eigengate)
             .fold(f64::INFINITY, f64::min)
-            .min(before_eval.average_ari);
+            .min(before_eval.average_eigengate);
         let before_max_dcr = before_eval
             .member_results
             .iter()
@@ -4268,11 +4268,11 @@ impl BimCommandBus {
         // Identify weak element names / IDs across live UI members + fresh FEM assessment
         let mut weak_names: Vec<String> = members
             .iter()
-            .filter(|m| m.ari < 0.80 || m.utilization > 0.70 || m.dcr_interaction > 0.72)
+            .filter(|m| m.eigengate < 0.80 || m.utilization > 0.70 || m.dcr_interaction > 0.72)
             .map(|m| m.name.clone())
             .collect();
         for res in &before_eval.member_results {
-            if res.ari < 0.82 || res.utilization_initial > 0.68 {
+            if res.eigengate < 0.82 || res.utilization_initial > 0.68 {
                 weak_names.push(res.member_name.clone());
             }
         }
@@ -4380,13 +4380,13 @@ impl BimCommandBus {
         }
 
         let after_fem = self.project.to_structural_model();
-        let after_eval = AriEngine::evaluate_redundancy(&after_fem)?;
-        let after_min_ari = after_eval
+        let after_eval = EigenGateEngine::evaluate_redundancy(&after_fem)?;
+        let after_min_eigengate = after_eval
             .member_results
             .iter()
-            .map(|r| r.ari)
+            .map(|r| r.eigengate)
             .fold(f64::INFINITY, f64::min)
-            .min(after_eval.average_ari);
+            .min(after_eval.average_eigengate);
         let after_max_dcr = after_eval
             .member_results
             .iter()
@@ -4398,13 +4398,13 @@ impl BimCommandBus {
         self.redo_stack.clear();
 
         let summary = format!(
-            "[EigenAI Closed-Loop Repair Verified]:\n• Upgraded: {} Columns, {} Beams/Runs (+{} Alternate-Path Braces)\n• Min System ARI: {:.4} -> {:.4} ({:+.1}%)\n• Max Member Utilization / DCR: {:.1}% -> {:.1}%\n• Transactional Undo Stack updated cleanly (Ctrl+Z supported).",
+            "[EigenAI Closed-Loop Repair Verified]:\n• Upgraded: {} Columns, {} Beams/Runs (+{} Alternate-Path Braces)\n• Min System EigenGate: {:.4} -> {:.4} ({:+.1}%)\n• Max Member Utilization / DCR: {:.1}% -> {:.1}%\n• Transactional Undo Stack updated cleanly (Ctrl+Z supported).",
             upgraded_columns,
             upgraded_beams,
             added_braces,
-            before_min_ari,
-            after_min_ari,
-            (after_min_ari - before_min_ari) * 100.0,
+            before_min_eigengate,
+            after_min_eigengate,
+            (after_min_eigengate - before_min_eigengate) * 100.0,
             before_max_dcr * 100.0,
             after_max_dcr * 100.0,
         );
@@ -4412,8 +4412,8 @@ impl BimCommandBus {
         crate::core::InternalVault::sync_live_bim_state(&self.project, &summary);
 
         Ok(AutoRepairReport {
-            before_min_ari,
-            after_min_ari,
+            before_min_eigengate,
+            after_min_eigengate,
             before_max_dcr,
             after_max_dcr,
             upgraded_columns,
@@ -4427,8 +4427,8 @@ impl BimCommandBus {
 /// Verification telemetry returned by `BimCommandBus::repair_critical_members`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AutoRepairReport {
-    pub before_min_ari: f64,
-    pub after_min_ari: f64,
+    pub before_min_eigengate: f64,
+    pub after_min_eigengate: f64,
     pub before_max_dcr: f64,
     pub after_max_dcr: f64,
     pub upgraded_columns: usize,
@@ -4450,7 +4450,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bim_sample_building_rooms_rebar_and_live_ari() {
+    fn test_bim_sample_building_rooms_rebar_and_live_eigengate() {
         let _guard = crate::core::vault::TEST_VAULT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let bus = BimCommandBus::from_project(BimProject::sample_bimcraft_building());
         assert_eq!(bus.project.levels.len(), 3);
@@ -4463,13 +4463,13 @@ mod tests {
         // Rebar weight > 0
         assert!(bus.project.total_rebar_weight_kg() > 500.0);
 
-        // Live Dual Physical-to-Analytical FEM + ARI evaluation
-        let ari_report = bus
+        // Live Dual Physical-to-Analytical FEM + EigenGate evaluation
+        let eigengate_report = bus
             .project
-            .evaluate_live_ari()
-            .expect("BIM building should convert to valid FEM model and pass ARI");
-        assert!(ari_report.kinematic_guard.is_stable);
-        assert!(ari_report.average_ari > 0.50);
+            .evaluate_live_eigengate()
+            .expect("BIM building should convert to valid FEM model and pass EigenGate");
+        assert!(eigengate_report.kinematic_guard.is_stable);
+        assert!(eigengate_report.average_eigengate > 0.50);
     }
 
     #[test]

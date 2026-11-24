@@ -11,7 +11,7 @@ use crate::theme::MacTheme;
             "/iso",
             "/top",
             "/lens dcr",
-            "/lens ari",
+            "/lens eigengate",
             "/lens moment",
             "/lens 4d",
             "/vault",
@@ -255,7 +255,7 @@ use crate::theme::MacTheme;
         assert_eq!(chips.len(), 3);
         assert!(traces.iter().any(|t| t.contains("Selected Element")));
         assert!(markdown.contains("spec_notes.md"));
-        assert!(markdown.contains("FEM & ARI"));
+        assert!(markdown.contains("FEM & EigenGate"));
 
         let _ = spatial.execute_spatial_input(
             "audit attached column and spec",
@@ -535,7 +535,7 @@ use crate::theme::MacTheme;
 
     #[test]
     fn test_phase49_gemini_response_and_directive_parsing() {
-        let raw = "Recommended 2-bay ductile moment frame aligned to seismic zone. [[FLY:-6.2088,106.8456,15.5]] [[BIM:portal 2x2 @6m 2floors]] [[ARI_AUDIT]]";
+        let raw = "Recommended 2-bay ductile moment frame aligned to seismic zone. [[FLY:-6.2088,106.8456,15.5]] [[BIM:portal 2x2 @6m 2floors]] [[EIGENGATE_AUDIT]]";
         let (clean, dirs) = parse_gemini_action_directives(raw);
         assert_eq!(
             clean,
@@ -554,7 +554,7 @@ use crate::theme::MacTheme;
             dirs[1],
             GeminiDirective::Bim("portal 2x2 @6m 2floors".to_string())
         );
-        assert_eq!(dirs[2], GeminiDirective::AriAudit);
+        assert_eq!(dirs[2], GeminiDirective::EigenGateAudit);
 
         let api_json = r#"{
             "candidates": [{
@@ -1151,15 +1151,15 @@ use crate::theme::MacTheme;
         critical.id = target_fem_id;
         critical.name = format!("Col #{target_col_id}");
         critical.utilization = 1.18;
-        critical.ari = 0.42;
+        critical.eigengate = 0.42;
         critical.is_critical = true;
         let members = vec![critical];
 
-        let (worst, max_dcr, min_ari, crit_cnt) =
+        let (worst, max_dcr, min_eigengate, crit_cnt) =
             spatial.structural_health_summary(&build.bim_bus.project, &members);
         assert_eq!(worst, Some(SmartSelectionTarget::Column(target_col_id)));
         assert!((max_dcr - 118.0).abs() < 0.2);
-        assert!((min_ari - 0.42).abs() < 1e-3);
+        assert!((min_eigengate - 0.42).abs() < 1e-3);
         assert_eq!(crit_cnt, 1);
         assert!(!spatial.hover_more_tools_open);
 
@@ -1227,12 +1227,12 @@ use crate::theme::MacTheme;
         let mut m = StructuralMember::default();
         m.id = fem_id;
         m.utilization = 1.05;
-        m.ari = 0.65;
+        m.eigengate = 0.65;
         let members = vec![m];
         let ctx_str = SpatialWorkspaceState::format_critical_bim_context(&build.bim_bus.project, &members);
         assert!(ctx_str.contains(&format!("Column #{col_id}")));
         assert!(ctx_str.contains("DCR=105.0%"));
-        assert!(ctx_str.contains("ARI=0.650"));
+        assert!(ctx_str.contains("EigenGate=0.650"));
 
         let (cleaned, dirs) =
             parse_gemini_action_directives("Expand podium [[ADD_STORY]] [[ADD_SLAB]]");
@@ -1343,7 +1343,7 @@ use crate::theme::MacTheme;
         m.id = 1;
         m.name = "Column C1".to_string();
         m.utilization = 0.82;
-        m.ari = 0.91;
+        m.eigengate = 0.91;
         let audit = crate::core::InternalVault::build_engineering_audit_markdown(
             &build.bim_bus.project,
             &[m],
@@ -1356,7 +1356,7 @@ use crate::theme::MacTheme;
         assert!(audit.contains("# Engineering Structural & Earth Audit"));
         assert!(audit.contains("(-6.2088 deg, 106.8456 deg)"));
         assert!(audit.contains("DCR 82.0%"));
-        assert!(audit.contains("ARI 0.910"));
+        assert!(audit.contains("EigenGate 0.910"));
 
         let ifcx = build.bim_bus.project.export_ifcx_spatial();
         assert!(ifcx.contains("\"ifcxVersion\""));
@@ -1629,7 +1629,7 @@ use crate::theme::MacTheme;
                     story_count: 8,
                     member_count: 64,
                     max_dcr: 0.62,
-                    min_ari: 0.88,
+                    min_eigengate: 0.88,
                     source: if is_staging {
                         GeoPlacementSource::StagingCampusAuto
                     } else {
@@ -1769,7 +1769,7 @@ use crate::theme::MacTheme;
                 story_count: 9,
                 member_count: 140,
                 max_dcr: 1.08,
-                min_ari: 0.64,
+                min_eigengate: 0.64,
                 source: crate::core::gis::GeoPlacementSource::UserPinnedOnEarth,
                 address_hint: "Bandung".to_string(),
             },
@@ -1845,7 +1845,7 @@ use crate::theme::MacTheme;
                 story_count: 4,
                 member_count: 40,
                 max_dcr: 0.72,
-                min_ari: 0.85,
+                min_eigengate: 0.85,
                 source: crate::core::gis::GeoPlacementSource::StagingCampusAuto,
                 address_hint: String::new(),
             },
@@ -1868,7 +1868,7 @@ use crate::theme::MacTheme;
                 story_count: 10,
                 member_count: 150,
                 max_dcr: 0.94,
-                min_ari: 0.65,
+                min_eigengate: 0.65,
                 source: crate::core::gis::GeoPlacementSource::UserPinnedOnEarth,
                 address_hint: "Jakarta".to_string(),
             },
@@ -1938,7 +1938,7 @@ use crate::theme::MacTheme;
     }
 
     #[test]
-    fn test_phase60_revision_hash_sparse_ari_section_cut_colorbar_and_rebar_popup() {
+    fn test_phase60_revision_hash_sparse_eigengate_section_cut_colorbar_and_rebar_popup() {
         let mut spatial = SpatialWorkspaceState::default();
         let mut canvas = UniversalCanvasState::default();
         let mut build = BuildView::default();
@@ -2025,12 +2025,12 @@ use crate::theme::MacTheme;
         assert!(build.bim_bus.redo().is_some());
         assert_eq!(build.bim_bus.project.content_revision_hash(), h_ft_after);
 
-        // 2. Single-SVD verify_kinematics + sparse 6-DOF Sherman-Morrison ARI evaluation
+        // 2. Single-SVD verify_kinematics + sparse 6-DOF Sherman-Morrison EigenGate evaluation
         let fem = build.bim_bus.project.to_structural_model();
-        let assessment = crate::core::AriEngine::evaluate_redundancy(&fem).expect("ARI evaluation");
+        let assessment = crate::core::EigenGateEngine::evaluate_redundancy(&fem).expect("EigenGate evaluation");
         assert!(assessment.kinematic_guard.is_stable);
         assert!(!assessment.member_results.is_empty());
-        assert!(assessment.average_ari > 0.50);
+        assert!(assessment.average_eigengate > 0.50);
 
         let members: Vec<StructuralMember> = assessment
             .member_results
@@ -2043,8 +2043,8 @@ use crate::theme::MacTheme;
                 utilization: r.utilization_initial,
                 moment_my_knm: (r.force_kn.abs() * 0.18 + r.utilization_initial * 65.0).max(8.0),
                 shear_vy_kn: (r.force_kn.abs() * 0.35 + r.utilization_initial * 42.0).max(12.0),
-                ari: r.ari,
-                ari_score: r.ari,
+                eigengate: r.eigengate,
+                eigengate_score: r.eigengate,
                 svd_margin: r.svd_margin,
                 is_critical: r.is_critical,
                 ..Default::default()
@@ -2348,7 +2348,7 @@ use crate::theme::MacTheme;
             .map(|&(fid, _, _)| fid)
             .expect("column FEM id");
         let n1_rep =
-            crate::core::AriEngine::simulate_single_member_removal(&fem_hi, &fea, first_col_fid);
+            crate::core::EigenGateEngine::simulate_single_member_removal(&fem_hi, &fea, first_col_fid);
         assert_eq!(n1_rep.removed_fem_id, first_col_fid);
         assert!(n1_rep.post_max_disp_mm >= n1_rep.baseline_max_disp_mm * 0.99);
         assert_eq!(n1_rep.post_nodal_displacements.len(), fem_hi.nodes.len());
@@ -2368,9 +2368,9 @@ use crate::theme::MacTheme;
         );
         cant.add_load(crate::core::NodalLoad::force_y(1, -100_000.0));
         let cant_base = crate::core::FemSolver::solve(&cant).expect("cantilever solves intact");
-        let cant_n1 = crate::core::AriEngine::simulate_single_member_removal(&cant, &cant_base, 1);
+        let cant_n1 = crate::core::EigenGateEngine::simulate_single_member_removal(&cant, &cant_base, 1);
         assert!(cant_n1.is_kinematic_mechanism);
-        assert_eq!(cant_n1.residual_ari, 0.0);
+        assert_eq!(cant_n1.residual_eigengate, 0.0);
     }
 
     #[test]
@@ -2387,7 +2387,7 @@ use crate::theme::MacTheme;
             id: 1,
             name: "C10".to_string(),
             utilization: 0.72,
-            ari: 0.84,
+            eigengate: 0.84,
             ..Default::default()
         }];
         let hit = uc
@@ -4127,9 +4127,9 @@ use crate::theme::MacTheme;
             moment_mz_knm: 19.0,
             is_critical: false,
             is_active: true,
-            ari_score: 0.86,
+            eigengate_score: 0.86,
             svd_sensitivity: 0.08,
-            ari: 0.86,
+            eigengate: 0.86,
             dcr_interaction: 0.68,
             shear_vy_kn: 42.0,
             svd_margin: 0.45,
@@ -4247,9 +4247,9 @@ use crate::theme::MacTheme;
             moment_mz_knm: 26.0,
             is_critical: false,
             is_active: true,
-            ari_score: 0.81,
+            eigengate_score: 0.81,
             svd_sensitivity: 0.14,
-            ari: 0.81,
+            eigengate: 0.81,
             dcr_interaction: 0.76,
             shear_vy_kn: 50.0,
             svd_margin: 0.44,
@@ -4339,7 +4339,7 @@ use crate::theme::MacTheme;
         assert!(act_bundle.export_collab_bundle_ifcx);
 
         let (clean_txt, dirs) = parse_gemini_action_directives(
-            "Governance update [[CREATE_CHECKPOINT:Peer Handover]] [[APPROVE_CHECKPOINT]] [[TOGGLE_RISK_HEATMAP:ARI]]",
+            "Governance update [[CREATE_CHECKPOINT:Peer Handover]] [[APPROVE_CHECKPOINT]] [[TOGGLE_RISK_HEATMAP:EigenGate]]",
         );
         assert_eq!(clean_txt, "Governance update");
         assert_eq!(
@@ -4348,7 +4348,7 @@ use crate::theme::MacTheme;
                 GeminiDirective::CreateCheckpoint("Peer Handover".to_string()),
                 GeminiDirective::ApproveCheckpoint,
                 GeminiDirective::ToggleRiskHeatmap(Some(
-                    crate::core::ifcx_collab::DistrictRiskMetric::StructuralAri
+                    crate::core::ifcx_collab::DistrictRiskMetric::StructuralEigenGate
                 )),
             ]
         );
@@ -4405,9 +4405,9 @@ use crate::theme::MacTheme;
             moment_mz_knm: 26.0,
             is_critical: false,
             is_active: true,
-            ari_score: 0.81,
+            eigengate_score: 0.81,
             svd_sensitivity: 0.14,
-            ari: 0.81,
+            eigengate: 0.81,
             dcr_interaction: 0.76,
             shear_vy_kn: 50.0,
             svd_margin: 0.44,
@@ -4499,7 +4499,7 @@ use crate::theme::MacTheme;
             dirs,
             vec![
                 GeminiDirective::RunTradeStudy(Some(
-                    crate::core::trade_study::TradeStudyObjective::MaxSafetyAri
+                    crate::core::trade_study::TradeStudyObjective::MaxSafetyEigenGate
                 )),
                 GeminiDirective::ExportPermitAnnex,
                 GeminiDirective::SyncPeerRelay(Some(
@@ -4538,6 +4538,152 @@ use crate::theme::MacTheme;
                 assert!(
                     r.right() <= win_w + 1.0 && r.left() >= -1.0,
                     "Phase 81 Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn phase82_field_qaqc_bbs_drawer_responsive_and_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus.project = BimProject::sample_bimcraft_building();
+        build
+            .bim_bus
+            .project
+            .reinforce_all_concrete(&crate::core::bim::RebarPreset::default());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        for cmd in [
+            "/bbs",
+            "/cutlist",
+            "/qaqc-3d",
+            "/waypoint",
+            "/shop-svg",
+            "/eigengate",
+            "/eigenflow",
+        ] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|s| s.cmd == cmd),
+                "Missing Phase 82 slash command {cmd}"
+            );
+        }
+
+        let act_bbs = spatial.execute_spatial_input(
+            "/bbs 6",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(act_bbs.run_field_fabrication, Some(6.0));
+        assert!(spatial.field_qaqc_drawer_open);
+        assert_eq!(spatial.field_qaqc_drawer_tab, 0);
+        let _ = canvas.run_field_fabrication_audit(&build.bim_bus.project);
+
+        let act_3d = spatial.execute_spatial_input(
+            "/qaqc-3d",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_3d.toggle_field_qaqc_3d);
+        assert_eq!(spatial.field_qaqc_drawer_tab, 1);
+
+        let act_wp = spatial.execute_spatial_input(
+            "/waypoint 2",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(act_wp.fly_to_waypoint_idx, Some(1));
+
+        let act_svg = spatial.execute_spatial_input(
+            "/shop-svg",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_svg.export_shop_drawing_svg);
+
+        let _ = spatial.execute_spatial_input(
+            "/ari",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        let _ = spatial.execute_spatial_input(
+            "/eigenflow",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Shop ready [[RUN_BBS_OPTIMIZE:6m]] [[TOGGLE_QAQC_3D]] [[EXPORT_SHOP_SVG]] [[RUN_EIGENFLOW]]",
+        );
+        assert_eq!(clean, "Shop ready");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunBbsOptimize(6.0),
+                GeminiDirective::ToggleQaqc3d,
+                GeminiDirective::ExportShopSvg,
+                GeminiDirective::RunEigenFlow,
+            ]
+        );
+
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_field_qaqc_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 82 Field QA/QC Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
                 );
             }
         }

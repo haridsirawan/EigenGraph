@@ -1,7 +1,7 @@
-//! portfolio_retrofit.rs — Autonomous Portfolio-Scale `ARI v2` Retrofit Optimization Across Multi-Building Districts (Phase 73 / v0.7.3).
+//! portfolio_retrofit.rs — Autonomous Portfolio-Scale `EigenGate v2` Retrofit Optimization Across Multi-Building Districts (Phase 73 / v0.7.3).
 //!
 //! Performs district-level multi-objective Pareto optimization across structural portfolios:
-//! - Jointly optimizes `ARI v2` resilience lift, upfront retrofit cost (`USD`), and embodied carbon (`kgCO2e`)
+//! - Jointly optimizes `EigenGate v2` resilience lift, upfront retrofit cost (`USD`), and embodied carbon (`kgCO2e`)
 //! - Sweeps budget/carbon scalarizations across all four [`RetrofitStrategy`] modes per vulnerable building
 //! - Prunes dominated portfolios into a non-dominated Pareto frontier (`PortfolioParetoPoint`)
 //! - Emits non-destructive OpenBIM IFCX district overlays (`eigengraph::portfolio::retrofit_plan`)
@@ -23,7 +23,8 @@ pub const NS_EG_PORTFOLIO_RETROFIT: &str = "eigengraph::portfolio::retrofit_plan
 /// Multi-objective selection preference on the district Pareto frontier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PortfolioOptimizationObjective {
-    MaxAriPerDollar,
+    #[serde(alias = "MaxAriPerDollar")]
+    MaxEigenGatePerDollar,
     #[default]
     BalancedCostCarbon,
     MinEmbodiedCarbon,
@@ -33,28 +34,28 @@ pub enum PortfolioOptimizationObjective {
 impl PortfolioOptimizationObjective {
     pub fn short_label(self) -> &'static str {
         match self {
-            Self::MaxAriPerDollar => "ARI/$",
+            Self::MaxEigenGatePerDollar => "EigenGate/$",
             Self::BalancedCostCarbon => "Balanced",
             Self::MinEmbodiedCarbon => "Low-CO2",
-            Self::MaxDistrictResilience => "Max ARI",
+            Self::MaxDistrictResilience => "Max EigenGate",
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::MaxAriPerDollar => "Maximize ARI Gain per USD",
+            Self::MaxEigenGatePerDollar => "Maximize EigenGate Gain per USD",
             Self::BalancedCostCarbon => "Balanced Cost & Embodied Carbon Knee",
             Self::MinEmbodiedCarbon => "Minimize Embodied Carbon (kgCO2e)",
-            Self::MaxDistrictResilience => "Maximize District Min-ARI Resilience",
+            Self::MaxDistrictResilience => "Maximize District Min-EigenGate Resilience",
         }
     }
 
     pub fn cycle_next(self) -> Self {
         match self {
-            Self::MaxAriPerDollar => Self::BalancedCostCarbon,
+            Self::MaxEigenGatePerDollar => Self::BalancedCostCarbon,
             Self::BalancedCostCarbon => Self::MinEmbodiedCarbon,
             Self::MinEmbodiedCarbon => Self::MaxDistrictResilience,
-            Self::MaxDistrictResilience => Self::MaxAriPerDollar,
+            Self::MaxDistrictResilience => Self::MaxEigenGatePerDollar,
         }
     }
 
@@ -63,7 +64,7 @@ impl PortfolioOptimizationObjective {
         if lower.contains("carbon") || lower.contains("co2") || lower.contains("green") {
             Self::MinEmbodiedCarbon
         } else if lower.contains("dollar") || lower.contains("cost") || lower.contains("usd") {
-            Self::MaxAriPerDollar
+            Self::MaxEigenGatePerDollar
         } else if lower.contains("max") || lower.contains("resil") || lower.contains("safe") {
             Self::MaxDistrictResilience
         } else {
@@ -80,7 +81,7 @@ fn default_carbon_cap_kg() -> f64 {
     120_000.0
 }
 
-fn default_target_min_ari() -> f64 {
+fn default_target_min_eigengate() -> f64 {
     0.75
 }
 
@@ -91,8 +92,8 @@ pub struct PortfolioRetrofitConfig {
     pub budget_cap_usd: f64,
     #[serde(default = "default_carbon_cap_kg")]
     pub carbon_cap_kg_co2e: f64,
-    #[serde(default = "default_target_min_ari")]
-    pub target_min_ari: f64,
+    #[serde(default = "default_target_min_eigengate", alias = "target_min_ari")]
+    pub target_min_eigengate: f64,
     #[serde(default)]
     pub objective: PortfolioOptimizationObjective,
     #[serde(default)]
@@ -106,7 +107,7 @@ impl Default for PortfolioRetrofitConfig {
         Self {
             budget_cap_usd: default_budget_cap_usd(),
             carbon_cap_kg_co2e: default_carbon_cap_kg(),
-            target_min_ari: default_target_min_ari(),
+            target_min_eigengate: default_target_min_eigengate(),
             objective: PortfolioOptimizationObjective::default(),
             active_frontier_index: 0,
             overlay_visible: false,
@@ -123,7 +124,7 @@ impl PortfolioRetrofitConfig {
         };
         mix(&mut h, self.budget_cap_usd.round() as u64);
         mix(&mut h, self.carbon_cap_kg_co2e.round() as u64);
-        mix(&mut h, (self.target_min_ari * 1000.0).round() as u64);
+        mix(&mut h, (self.target_min_eigengate * 1000.0).round() as u64);
         mix(&mut h, self.objective as u64 + 1);
         mix(&mut h, self.active_frontier_index as u64 + 11);
         mix(&mut h, u64::from(self.overlay_visible));
@@ -144,10 +145,10 @@ pub struct PortfolioBuildingDecision {
     pub member_count: usize,
     pub footprint_local_m: Vec<[f64; 2]>,
     pub heading_deg: f64,
-    pub pre_min_ari: f64,
+    pub pre_min_eigengate: f64,
     pub pre_max_dcr: f64,
     pub selected_strategy: Option<RetrofitStrategy>,
-    pub post_min_ari: f64,
+    pub post_min_eigengate: f64,
     pub post_max_dcr: f64,
     pub estimated_cost_usd: f64,
     pub embodied_carbon_kg_co2e: f64,
@@ -164,8 +165,8 @@ pub struct PortfolioParetoPoint {
     pub total_buildings: usize,
     pub total_cost_usd: f64,
     pub total_carbon_kg_co2e: f64,
-    pub district_min_ari_after: f64,
-    pub district_avg_ari_after: f64,
+    pub district_min_eigengate_after: f64,
+    pub district_avg_eigengate_after: f64,
     pub critical_buildings_remaining: usize,
     pub budget_utilization_pct: f64,
     pub carbon_utilization_pct: f64,
@@ -177,8 +178,8 @@ pub struct PortfolioParetoPoint {
 pub struct DistrictPortfolioRetrofitReport {
     pub config: PortfolioRetrofitConfig,
     pub total_buildings_evaluated: usize,
-    pub pre_district_min_ari: f64,
-    pub pre_district_avg_ari: f64,
+    pub pre_district_min_eigengate: f64,
+    pub pre_district_avg_eigengate: f64,
     pub pre_critical_buildings: usize,
     pub selected_frontier_idx: usize,
     pub pareto_frontier: Vec<PortfolioParetoPoint>,
@@ -206,7 +207,7 @@ struct DistrictCandidate {
     member_count: usize,
     footprint_local_m: Vec<[f64; 2]>,
     heading_deg: f64,
-    pre_min_ari: f64,
+    pre_min_eigengate: f64,
     pre_max_dcr: f64,
 }
 
@@ -215,9 +216,9 @@ struct StrategyCandidateEval {
     strategy: RetrofitStrategy,
     cost_usd: f64,
     carbon_kg: f64,
-    post_min_ari: f64,
+    post_min_eigengate: f64,
     post_max_dcr: f64,
-    ari_gain: f64,
+    eigengate_gain: f64,
 }
 
 fn polygon_area_m2(poly: &[[f64; 2]]) -> f64 {
@@ -235,11 +236,11 @@ fn polygon_area_m2(poly: &[[f64; 2]]) -> f64 {
 
 fn eval_building_strategies(
     b: &DistrictCandidate,
-    target_min_ari: f64,
+    target_min_eigengate: f64,
     pga_ss_g: f64,
 ) -> Vec<StrategyCandidateEval> {
     let area_m2 = polygon_area_m2(&b.footprint_local_m);
-    let vuln = ((target_min_ari - b.pre_min_ari).max(0.0) + (b.pre_max_dcr - 0.85).max(0.0))
+    let vuln = ((target_min_eigengate - b.pre_min_eigengate).max(0.0) + (b.pre_max_dcr - 0.85).max(0.0))
         .clamp(0.05, 0.90);
     let scale = (b.story_count.max(1) as f64 / 3.0).max(0.75)
         * (area_m2 / 180.0).clamp(0.75, 4.2)
@@ -253,19 +254,19 @@ fn eval_building_strategies(
         (RetrofitStrategy::AutoBalanced, 50_500.0, 15_200.0, 0.34, 0.58),
     ];
 
-    let head = (1.0 - b.pre_min_ari).clamp(0.12, 0.65);
+    let head = (1.0 - b.pre_min_eigengate).clamp(0.12, 0.65);
     specs
         .into_iter()
         .map(|(strategy, base_usd, base_co2, boost_k, dcr_k)| {
-            let post_min_ari = (b.pre_min_ari + head * (boost_k / 0.38)).clamp(b.pre_min_ari, 0.97);
+            let post_min_eigengate = (b.pre_min_eigengate + head * (boost_k / 0.38)).clamp(b.pre_min_eigengate, 0.97);
             let post_max_dcr = (b.pre_max_dcr * dcr_k).clamp(0.32, b.pre_max_dcr);
             StrategyCandidateEval {
                 strategy,
                 cost_usd: (base_usd * scale).round(),
                 carbon_kg: (base_co2 * scale).round(),
-                post_min_ari,
+                post_min_eigengate,
                 post_max_dcr,
-                ari_gain: (post_min_ari - b.pre_min_ari).max(0.0),
+                eigengate_gain: (post_min_eigengate - b.pre_min_eigengate).max(0.0),
             }
         })
         .collect()
@@ -278,8 +279,8 @@ fn assemble_district_candidates(
     active_members: &[StructuralMember],
     origin_lat_lon: (f64, f64),
 ) -> Vec<DistrictCandidate> {
-    let active_ari_opt = (!active_members.is_empty())
-        .then(|| active_members.iter().map(|m| m.ari).fold(1.0_f64, f64::min));
+    let active_eigengate_opt = (!active_members.is_empty())
+        .then(|| active_members.iter().map(|m| m.eigengate).fold(1.0_f64, f64::min));
     let active_dcr_opt = (!active_members.is_empty()).then(|| {
         active_members
             .iter()
@@ -294,10 +295,10 @@ fn assemble_district_candidates(
             .take(48)
             .map(|b| {
                 let is_active = active_rel_path.is_some_and(|p| p == b.rel_path);
-                let pre_min_ari = if is_active {
-                    active_ari_opt.unwrap_or(b.min_ari).clamp(0.15, 0.99)
+                let pre_min_eigengate = if is_active {
+                    active_eigengate_opt.unwrap_or(b.min_eigengate).clamp(0.15, 0.99)
                 } else {
-                    b.min_ari.clamp(0.15, 0.99)
+                    b.min_eigengate.clamp(0.15, 0.99)
                 };
                 let pre_max_dcr = if is_active {
                     active_dcr_opt.unwrap_or(b.max_dcr).clamp(0.20, 2.20)
@@ -319,7 +320,7 @@ fn assemble_district_candidates(
                         vec![[-8.0, -6.0], [8.0, -6.0], [8.0, 6.0], [-8.0, 6.0]]
                     },
                     heading_deg: b.heading_deg,
-                    pre_min_ari,
+                    pre_min_eigengate,
                     pre_max_dcr,
                 }
             })
@@ -376,7 +377,7 @@ fn assemble_district_candidates(
         member_count: active_mem_cnt,
         footprint_local_m: active_fp,
         heading_deg: 0.0,
-        pre_min_ari: active_ari_opt.unwrap_or(0.56).clamp(0.15, 0.99),
+        pre_min_eigengate: active_eigengate_opt.unwrap_or(0.56).clamp(0.15, 0.99),
         pre_max_dcr: active_dcr_opt.unwrap_or(1.04).clamp(0.20, 2.20),
     }];
 
@@ -387,7 +388,7 @@ fn assemble_district_candidates(
         (5, "district/perimeter_resilience_hub.ifcx", "Ductile Perimeter Hub", 58.0, -48.0, 18.0, 5, 44, 10.5, 9.0, 0.86, 0.68),
     ];
 
-    for (id, rel, name, ex, ny, h, st, mc, hw, hd, ari, dcr) in synth_specs {
+    for (id, rel, name, ex, ny, h, st, mc, hw, hd, eigengate, dcr) in synth_specs {
         let (lat, lon) = SlippyMapState::world_mm_to_lat_lon(origin_lat_lon, [ex * 1000.0, ny * 1000.0]);
         list.push(DistrictCandidate {
             id,
@@ -400,7 +401,7 @@ fn assemble_district_candidates(
             member_count: mc,
             footprint_local_m: vec![[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]],
             heading_deg: 0.0,
-            pre_min_ari: ari,
+            pre_min_eigengate: eigengate,
             pre_max_dcr: dcr,
         });
     }
@@ -420,20 +421,20 @@ fn solve_scalarized_portfolio(
     let mut used_usd = 0.0;
     let mut used_co2 = 0.0;
 
-    // Score best upgrade option per building with priority for lowest ARI / highest ARI gain per penalized cost
+    // Score best upgrade option per building with priority for lowest EigenGate / highest EigenGate gain per penalized cost
     let mut ranked: Vec<(usize, usize, f64)> = Vec::new();
     for (i, b) in candidates.iter().enumerate() {
-        let needs_fix = b.pre_min_ari < config.target_min_ari || b.pre_max_dcr > 0.85;
+        let needs_fix = b.pre_min_eigengate < config.target_min_eigengate || b.pre_max_dcr > 0.85;
         if !needs_fix {
             continue;
         }
-        let urgency = 1.0 + (config.target_min_ari - b.pre_min_ari).max(0.0) * 3.5;
+        let urgency = 1.0 + (config.target_min_eigengate - b.pre_min_eigengate).max(0.0) * 3.5;
         if let Some((best_s_idx, _ev, score)) = strats_per_bldg[i]
             .iter()
             .enumerate()
             .map(|(s_idx, ev)| {
                 let denom = (ev.cost_usd / 10_000.0) + carbon_weight * (ev.carbon_kg / 5_000.0);
-                let sc = (ev.ari_gain * urgency * 100.0) / denom.max(0.25);
+                let sc = (ev.eigengate_gain * urgency * 100.0) / denom.max(0.25);
                 (s_idx, ev, sc)
             })
             .max_by(|a, b| a.2.total_cmp(&b.2))
@@ -459,7 +460,7 @@ fn solve_scalarized_portfolio(
         if let Some(cur_s) = chosen[b_idx] {
             let cur_ev = strats_per_bldg[b_idx][cur_s];
             for (alt_s, alt_ev) in strats_per_bldg[b_idx].iter().enumerate() {
-                if alt_ev.post_min_ari > cur_ev.post_min_ari + 0.02
+                if alt_ev.post_min_eigengate > cur_ev.post_min_eigengate + 0.02
                     && carbon_weight < 0.8
                     && (used_usd - cur_ev.cost_usd + alt_ev.cost_usd) <= budget_limit + 1e-6
                     && (used_co2 - cur_ev.carbon_kg + alt_ev.carbon_kg) <= carbon_limit + 1e-6
@@ -473,44 +474,44 @@ fn solve_scalarized_portfolio(
         }
     }
 
-    let mut min_ari = 1.0_f64;
-    let mut sum_ari = 0.0_f64;
+    let mut min_eigengate = 1.0_f64;
+    let mut sum_eigengate = 0.0_f64;
     let mut crit_rem = 0usize;
     for (i, b) in candidates.iter().enumerate() {
-        let (post_ari, post_dcr) = match chosen[i] {
+        let (post_eigengate, post_dcr) = match chosen[i] {
             Some(s) => (
-                strats_per_bldg[i][s].post_min_ari,
+                strats_per_bldg[i][s].post_min_eigengate,
                 strats_per_bldg[i][s].post_max_dcr,
             ),
-            None => (b.pre_min_ari, b.pre_max_dcr),
+            None => (b.pre_min_eigengate, b.pre_max_dcr),
         };
-        min_ari = min_ari.min(post_ari);
-        sum_ari += post_ari;
-        if post_ari < 0.70 || post_dcr > 1.0 {
+        min_eigengate = min_eigengate.min(post_eigengate);
+        sum_eigengate += post_eigengate;
+        if post_eigengate < 0.70 || post_dcr > 1.0 {
             crit_rem += 1;
         }
     }
-    let avg_ari = sum_ari / candidates.len().max(1) as f64;
-    (chosen, used_usd, used_co2, min_ari, avg_ari, crit_rem)
+    let avg_eigengate = sum_eigengate / candidates.len().max(1) as f64;
+    (chosen, used_usd, used_co2, min_eigengate, avg_eigengate, crit_rem)
 }
 
 fn build_portfolio_ifcx_document(
     config: &PortfolioRetrofitConfig,
-    pre_avg_ari: f64,
-    pre_min_ari: f64,
+    pre_avg_eigengate: f64,
+    pre_min_eigengate: f64,
     active_point: Option<&PortfolioParetoPoint>,
     summary: &str,
 ) -> IfcxDocument {
     let mut doc = IfcxDocument::new("eigengraph_district_portfolio_retrofit");
     let total_cost = active_point.map(|p| p.total_cost_usd).unwrap_or(0.0);
     let total_co2 = active_point.map(|p| p.total_carbon_kg_co2e).unwrap_or(0.0);
-    let post_avg = active_point.map(|p| p.district_avg_ari_after).unwrap_or(pre_avg_ari);
-    let post_min = active_point.map(|p| p.district_min_ari_after).unwrap_or(pre_min_ari);
+    let post_avg = active_point.map(|p| p.district_avg_eigengate_after).unwrap_or(pre_avg_eigengate);
+    let post_min = active_point.map(|p| p.district_min_eigengate_after).unwrap_or(pre_min_eigengate);
 
     let mut plan_node = IfcxNode::new("/earth/portfolio/retrofit_plan")
         .with_class("IfcSpatialZone")
         .with_prop(
-            "District Portfolio ARI v2 Retrofit Plan",
+            "District Portfolio EigenGate v2 Retrofit Plan",
             "Multi-Objective Cost/Carbon Pareto Optimization",
             summary,
         )
@@ -520,11 +521,11 @@ fn build_portfolio_ifcx_document(
                 "objective": config.objective.short_label(),
                 "budgetCapUsd": config.budget_cap_usd,
                 "carbonCapKgCo2e": config.carbon_cap_kg_co2e,
-                "targetMinAri": config.target_min_ari,
-                "preDistrictMinAri": pre_min_ari,
-                "preDistrictAvgAri": pre_avg_ari,
-                "postDistrictMinAri": post_min,
-                "postDistrictAvgAri": post_avg,
+                "targetMinEigenGate": config.target_min_eigengate,
+                "preDistrictMinEigenGate": pre_min_eigengate,
+                "preDistrictAvgEigenGate": pre_avg_eigengate,
+                "postDistrictMinEigenGate": post_min,
+                "postDistrictAvgEigenGate": post_avg,
                 "totalCostUsd": total_cost,
                 "totalCarbonKgCo2e": total_co2,
             }),
@@ -560,8 +561,8 @@ fn build_portfolio_ifcx_document(
                         json!({
                             "buildingId": d.building_id,
                             "strategy": d.selected_strategy.map(|s| s.short_label()).unwrap_or("None"),
-                            "preMinAri": d.pre_min_ari,
-                            "postMinAri": d.post_min_ari,
+                            "preMinEigenGate": d.pre_min_eigengate,
+                            "postMinEigenGate": d.post_min_eigengate,
                             "preMaxDcr": d.pre_max_dcr,
                             "postMaxDcr": d.post_max_dcr,
                             "costUsd": d.estimated_cost_usd,
@@ -580,8 +581,8 @@ fn build_portfolio_ifcx_document(
     doc
 }
 
-/// Evaluates autonomous portfolio-scale `ARI v2` retrofit optimization across all buildings
-/// in the district and constructs a non-dominated Cost vs. Embodied Carbon vs. ARI Pareto frontier.
+/// Evaluates autonomous portfolio-scale `EigenGate v2` retrofit optimization across all buildings
+/// in the district and constructs a non-dominated Cost vs. Embodied Carbon vs. EigenGate Pareto frontier.
 pub fn optimize_district_portfolio_retrofit(
     world_index: &WorldSpatialIndex,
     active_project: &BimProject,
@@ -599,20 +600,20 @@ pub fn optimize_district_portfolio_retrofit(
         origin_lat_lon,
     );
     let n = candidates.len();
-    let pre_district_min_ari = candidates
+    let pre_district_min_eigengate = candidates
         .iter()
-        .map(|b| b.pre_min_ari)
+        .map(|b| b.pre_min_eigengate)
         .fold(1.0_f64, f64::min);
-    let pre_district_avg_ari = candidates.iter().map(|b| b.pre_min_ari).sum::<f64>() / n.max(1) as f64;
+    let pre_district_avg_eigengate = candidates.iter().map(|b| b.pre_min_eigengate).sum::<f64>() / n.max(1) as f64;
     let pre_critical_buildings = candidates
         .iter()
-        .filter(|b| b.pre_min_ari < 0.70 || b.pre_max_dcr > 1.0)
+        .filter(|b| b.pre_min_eigengate < 0.70 || b.pre_max_dcr > 1.0)
         .count();
 
     let pga_ss_g = site.seismic_pga_ss_g as f64;
     let strats_per_bldg: Vec<Vec<StrategyCandidateEval>> = candidates
         .iter()
-        .map(|b| eval_building_strategies(b, config.target_min_ari, pga_ss_g))
+        .map(|b| eval_building_strategies(b, config.target_min_eigengate, pga_ss_g))
         .collect();
 
     // Sweep 12 budget/carbon scalarizations + 1 unconstrained Full Shield sweep
@@ -647,7 +648,7 @@ pub fn optimize_district_portfolio_retrofit(
         }
     }
 
-    // Prune strictly dominated portfolios across (cost, carbon, avg_ari, min_ari)
+    // Prune strictly dominated portfolios across (cost, carbon, avg_eigengate, min_eigengate)
     let mut nondom: Vec<(Vec<Option<usize>>, f64, f64, f64, f64, usize)> = Vec::new();
     for (idx, a) in unique.iter().enumerate() {
         let dominated = unique.iter().enumerate().any(|(j, b)| {
@@ -674,25 +675,25 @@ pub fn optimize_district_portfolio_retrofit(
     nondom.sort_by(|a, b| a.1.total_cmp(&b.1));
 
     let mut pareto_frontier = Vec::with_capacity(nondom.len());
-    for (fid, (chosen, tot_usd, tot_co2, min_ari, avg_ari, crit_rem)) in nondom.iter().enumerate() {
+    for (fid, (chosen, tot_usd, tot_co2, min_eigengate, avg_eigengate, crit_rem)) in nondom.iter().enumerate() {
         let mut decisions: Vec<PortfolioBuildingDecision> = candidates
             .iter()
             .enumerate()
             .map(|(i, b)| {
-                let (strat, post_ari, post_dcr, usd, co2, rationale) = match chosen[i] {
+                let (strat, post_eigengate, post_dcr, usd, co2, rationale) = match chosen[i] {
                     Some(s_idx) => {
                         let ev = strats_per_bldg[i][s_idx];
                         (
                             Some(ev.strategy),
-                            ev.post_min_ari,
+                            ev.post_min_eigengate,
                             ev.post_max_dcr,
                             ev.cost_usd,
                             ev.carbon_kg,
                             format!(
-                                "{}: ARI {:.2}->{:.2}, DCR {:.0}%->{:.0}%",
+                                "{}: EigenGate {:.2}->{:.2}, DCR {:.0}%->{:.0}%",
                                 ev.strategy.short_label(),
-                                b.pre_min_ari,
-                                ev.post_min_ari,
+                                b.pre_min_eigengate,
+                                ev.post_min_eigengate,
                                 b.pre_max_dcr * 100.0,
                                 ev.post_max_dcr * 100.0
                             ),
@@ -700,12 +701,12 @@ pub fn optimize_district_portfolio_retrofit(
                     }
                     None => (
                         None,
-                        b.pre_min_ari,
+                        b.pre_min_eigengate,
                         b.pre_max_dcr,
                         0.0,
                         0.0,
-                        if b.pre_min_ari >= config.target_min_ari && b.pre_max_dcr <= 0.85 {
-                            "Meets ARI target (no intervention needed)".to_string()
+                        if b.pre_min_eigengate >= config.target_min_eigengate && b.pre_max_dcr <= 0.85 {
+                            "Meets EigenGate target (no intervention needed)".to_string()
                         } else {
                             "Deferred under budget/carbon constraint".to_string()
                         },
@@ -722,10 +723,10 @@ pub fn optimize_district_portfolio_retrofit(
                     member_count: b.member_count,
                     footprint_local_m: b.footprint_local_m.clone(),
                     heading_deg: b.heading_deg,
-                    pre_min_ari: b.pre_min_ari,
+                    pre_min_eigengate: b.pre_min_eigengate,
                     pre_max_dcr: b.pre_max_dcr,
                     selected_strategy: strat,
-                    post_min_ari: post_ari,
+                    post_min_eigengate: post_eigengate,
                     post_max_dcr: post_dcr,
                     estimated_cost_usd: usd,
                     embodied_carbon_kg_co2e: co2,
@@ -735,7 +736,7 @@ pub fn optimize_district_portfolio_retrofit(
             })
             .collect();
 
-        // Assign priority rank (lowest pre_min_ari & highest ARI gain first)
+        // Assign priority rank (lowest pre_min_eigengate & highest EigenGate gain first)
         let mut rank_order: Vec<usize> = (0..decisions.len()).collect();
         rank_order.sort_by(|&ia, &ib| {
             let da = &decisions[ia];
@@ -744,7 +745,7 @@ pub fn optimize_district_portfolio_retrofit(
             let b_sel = u8::from(db.selected_strategy.is_some());
             b_sel
                 .cmp(&a_sel)
-                .then_with(|| da.pre_min_ari.total_cmp(&db.pre_min_ari))
+                .then_with(|| da.pre_min_eigengate.total_cmp(&db.pre_min_eigengate))
         });
         for (rk, &idx) in rank_order.iter().enumerate() {
             decisions[idx].priority_rank = rk + 1;
@@ -770,8 +771,8 @@ pub fn optimize_district_portfolio_retrofit(
             total_buildings: n,
             total_cost_usd: *tot_usd,
             total_carbon_kg_co2e: *tot_co2,
-            district_min_ari_after: *min_ari,
-            district_avg_ari_after: *avg_ari,
+            district_min_eigengate_after: *min_eigengate,
+            district_avg_eigengate_after: *avg_eigengate,
             critical_buildings_remaining: *crit_rem,
             budget_utilization_pct: ((*tot_usd / config.budget_cap_usd.max(1.0)) * 100.0).min(999.0),
             carbon_utilization_pct: ((*tot_co2 / config.carbon_cap_kg_co2e.max(1.0)) * 100.0).min(999.0),
@@ -797,14 +798,14 @@ pub fn optimize_district_portfolio_retrofit(
     };
 
     let selected_frontier_idx = match config.objective {
-        PortfolioOptimizationObjective::MaxAriPerDollar => *pool
+        PortfolioOptimizationObjective::MaxEigenGatePerDollar => *pool
             .iter()
             .max_by(|&&a, &&b| {
                 let pa = &pareto_frontier[a];
                 let pb = &pareto_frontier[b];
-                let eff_a = (pa.district_avg_ari_after - pre_district_avg_ari)
+                let eff_a = (pa.district_avg_eigengate_after - pre_district_avg_eigengate)
                     / (pa.total_cost_usd / 100_000.0).max(0.1);
-                let eff_b = (pb.district_avg_ari_after - pre_district_avg_ari)
+                let eff_b = (pb.district_avg_eigengate_after - pre_district_avg_eigengate)
                     / (pb.total_cost_usd / 100_000.0).max(0.1);
                 eff_a.total_cmp(&eff_b)
             })
@@ -821,8 +822,8 @@ pub fn optimize_district_portfolio_retrofit(
             .iter()
             .max_by(|&&a, &&b| {
                 pareto_frontier[a]
-                    .district_avg_ari_after
-                    .total_cmp(&pareto_frontier[b].district_avg_ari_after)
+                    .district_avg_eigengate_after
+                    .total_cmp(&pareto_frontier[b].district_avg_eigengate_after)
             })
             .unwrap_or(&0),
         PortfolioOptimizationObjective::BalancedCostCarbon => {
@@ -833,14 +834,14 @@ pub fn optimize_district_portfolio_retrofit(
     let active_pt = pareto_frontier.get(selected_frontier_idx);
     let summary = if let Some(pt) = active_pt {
         format!(
-            "Portfolio {}/{} bldgs upgraded ({}) • Avg ARI {:.2}->{:.2} • Min ARI {:.2}->{:.2} • ${:.0}k • {:.1}tCO2e",
+            "Portfolio {}/{} bldgs upgraded ({}) • Avg EigenGate {:.2}->{:.2} • Min EigenGate {:.2}->{:.2} • ${:.0}k • {:.1}tCO2e",
             pt.retrofitted_buildings,
             pt.total_buildings,
             pt.label,
-            pre_district_avg_ari,
-            pt.district_avg_ari_after,
-            pre_district_min_ari,
-            pt.district_min_ari_after,
+            pre_district_avg_eigengate,
+            pt.district_avg_eigengate_after,
+            pre_district_min_eigengate,
+            pt.district_min_eigengate_after,
             pt.total_cost_usd / 1000.0,
             pt.total_carbon_kg_co2e / 1000.0
         )
@@ -850,8 +851,8 @@ pub fn optimize_district_portfolio_retrofit(
 
     let portfolio_overlay_ifcx = build_portfolio_ifcx_document(
         config,
-        pre_district_avg_ari,
-        pre_district_min_ari,
+        pre_district_avg_eigengate,
+        pre_district_min_eigengate,
         active_pt,
         &summary,
     );
@@ -859,8 +860,8 @@ pub fn optimize_district_portfolio_retrofit(
     DistrictPortfolioRetrofitReport {
         config: config.clone(),
         total_buildings_evaluated: n,
-        pre_district_min_ari,
-        pre_district_avg_ari,
+        pre_district_min_eigengate,
+        pre_district_avg_eigengate,
         pre_critical_buildings,
         selected_frontier_idx,
         pareto_frontier,
@@ -881,7 +882,7 @@ mod tests {
         let cfg = PortfolioRetrofitConfig {
             budget_cap_usd: 220_000.0,
             carbon_cap_kg_co2e: 95_000.0,
-            target_min_ari: 0.78,
+            target_min_eigengate: 0.78,
             objective: PortfolioOptimizationObjective::BalancedCostCarbon,
             active_frontier_index: 0,
             overlay_visible: true,
@@ -907,12 +908,12 @@ mod tests {
                 }
                 let b_dominates_a = b.total_cost_usd <= a.total_cost_usd + 1e-6
                     && b.total_carbon_kg_co2e <= a.total_carbon_kg_co2e + 1e-6
-                    && b.district_avg_ari_after >= a.district_avg_ari_after - 1e-6
-                    && b.district_min_ari_after >= a.district_min_ari_after - 1e-6
+                    && b.district_avg_eigengate_after >= a.district_avg_eigengate_after - 1e-6
+                    && b.district_min_eigengate_after >= a.district_min_eigengate_after - 1e-6
                     && (b.total_cost_usd < a.total_cost_usd - 1.0
                         || b.total_carbon_kg_co2e < a.total_carbon_kg_co2e - 1.0
-                        || b.district_avg_ari_after > a.district_avg_ari_after + 1e-4
-                        || b.district_min_ari_after > a.district_min_ari_after + 1e-4);
+                        || b.district_avg_eigengate_after > a.district_avg_eigengate_after + 1e-4
+                        || b.district_min_eigengate_after > a.district_min_eigengate_after + 1e-4);
                 assert!(
                     !b_dominates_a,
                     "Pareto frontier point {} is dominated by {}",
@@ -923,7 +924,7 @@ mod tests {
 
         let active = rep.active_frontier().expect("Active frontier exists");
         assert!(active.retrofitted_buildings >= 1);
-        assert!(active.district_avg_ari_after > rep.pre_district_avg_ari);
+        assert!(active.district_avg_eigengate_after > rep.pre_district_avg_eigengate);
         assert!(active.total_cost_usd <= cfg.budget_cap_usd + 1e-6);
 
         let base_ifcx = IfcxDocument::from_bim_project(&proj, None, 0.0, None, None, None);

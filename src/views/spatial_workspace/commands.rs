@@ -90,16 +90,16 @@ impl SpatialWorkspaceState {
                     out.anchor_and_build_site = Some((*lat, *lon));
                     self.push_trace(format!("Anchored BIM Site @ {lat:.3}°, {lon:.3}°"), true);
                 }
-                PlannedProposalAction::ApplyAriLens => {
+                PlannedProposalAction::ApplyEigenGateLens => {
                     self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
                     universal_canvas.globe_mode = true;
                     self.apply_lens_to_views(
-                        SpatialLens::AriRedundancy,
+                        SpatialLens::EigenGateRedundancy,
                         build_view,
                         universal_canvas,
                     );
                     out.sync_fem_and_earth = true;
-                    self.push_trace("Applied ARI Redundancy Heatmap Lens on Earth 3D", true);
+                    self.push_trace("Applied EigenGate Redundancy Heatmap Lens on Earth 3D", true);
                 }
                 PlannedProposalAction::ResizeColumn {
                     column_id,
@@ -504,6 +504,23 @@ impl SpatialWorkspaceState {
                     }
                     out.sync_peer_relay_delta = true;
                 }
+                PlannedProposalAction::RunBbsOptimize(stock_m) => {
+                    universal_canvas.field_fab_config.stock_length_m = *stock_m;
+                    self.open_field_qaqc_drawer(0);
+                    out.run_field_fabrication = Some(*stock_m);
+                }
+                PlannedProposalAction::ToggleQaqc3d => {
+                    self.open_field_qaqc_drawer(1);
+                    out.toggle_field_qaqc_3d = true;
+                }
+                PlannedProposalAction::ExportShopSvg => {
+                    self.open_field_qaqc_drawer(0);
+                    out.export_shop_drawing_svg = true;
+                }
+                PlannedProposalAction::RunEigenFlow => {
+                    self.open_ground_motion_drawer();
+                    self.push_trace("Queued Branch 2 EigenFlow Non-Linear Woodbury check", true);
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -639,7 +656,7 @@ impl SpatialWorkspaceState {
                             },
                             GeminiDirective::Bim(cmd) => PlannedProposalAction::ExecuteBimNl(cmd.clone()),
                             GeminiDirective::Repair => PlannedProposalAction::AutoRepair,
-                            GeminiDirective::AriAudit => PlannedProposalAction::ApplyAriLens,
+                            GeminiDirective::EigenGateAudit => PlannedProposalAction::ApplyEigenGateLens,
                             GeminiDirective::ResizeColumn { id, w_mm, d_mm } => {
                                 PlannedProposalAction::ResizeColumn {
                                     column_id: *id,
@@ -748,6 +765,12 @@ impl SpatialWorkspaceState {
                             GeminiDirective::SyncPeerRelay(url) => {
                                 PlannedProposalAction::SyncPeerRelay(url.clone())
                             }
+                            GeminiDirective::RunBbsOptimize(len_m) => {
+                                PlannedProposalAction::RunBbsOptimize(*len_m)
+                            }
+                            GeminiDirective::ToggleQaqc3d => PlannedProposalAction::ToggleQaqc3d,
+                            GeminiDirective::ExportShopSvg => PlannedProposalAction::ExportShopSvg,
+                            GeminiDirective::RunEigenFlow => PlannedProposalAction::RunEigenFlow,
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -765,7 +788,7 @@ impl SpatialWorkspaceState {
                             GeminiDirective::Fly { lat, lon, .. } => format!("Fly({lat:.2},{lon:.2})"),
                             GeminiDirective::Bim(c) => format!("BIM:{c}"),
                             GeminiDirective::Repair => "AutoRepair".to_string(),
-                            GeminiDirective::AriAudit => "ARI_Lens".to_string(),
+                            GeminiDirective::EigenGateAudit => "EigenGate_Lens".to_string(),
                             GeminiDirective::ResizeColumn { id, w_mm, d_mm } => {
                                 format!("ResizeCol#{id}({w_mm:.0}x{d_mm:.0})")
                             }
@@ -832,6 +855,12 @@ impl SpatialWorkspaceState {
                                 "SyncPeerRelay({})",
                                 url.as_deref().unwrap_or("Active")
                             ),
+                            GeminiDirective::RunBbsOptimize(len_m) => {
+                                format!("RunBbsOptimize({len_m:.0}m)")
+                            }
+                            GeminiDirective::ToggleQaqc3d => "ToggleQaqc3D".to_string(),
+                            GeminiDirective::ExportShopSvg => "ExportShopSvg(S-103)".to_string(),
+                            GeminiDirective::RunEigenFlow => "RunEigenFlow(Woodbury)".to_string(),
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -926,12 +955,12 @@ impl SpatialWorkspaceState {
                         .iter()
                         .map(|b| {
                             format!(
-                                "{} @ ({:.3}°,{:.3}°) DCR={:.0}% ARI={:.2}",
+                                "{} @ ({:.3}°,{:.3}°) DCR={:.0}% EigenGate={:.2}",
                                 b.name,
                                 b.lat,
                                 b.lon,
                                 b.max_dcr * 100.0,
-                                b.min_ari
+                                b.min_eigengate
                             )
                         })
                         .collect::<Vec<_>>()
@@ -964,10 +993,10 @@ impl SpatialWorkspaceState {
                     ));
                 }
                 AiContextAttachment::FemRedundancy => {
-                    let crit = members.iter().filter(|m| m.is_critical || m.ari < 0.70).count();
-                    let min_ari = members
+                    let crit = members.iter().filter(|m| m.is_critical || m.eigengate < 0.70).count();
+                    let min_eigengate = members
                         .iter()
-                        .map(|m| m.ari)
+                        .map(|m| m.eigengate)
                         .fold(1.0_f64, f64::min);
                     let max_dcr = members
                         .iter()
@@ -984,21 +1013,21 @@ impl SpatialWorkspaceState {
                         .as_ref()
                         .map(|s| {
                             format!(
-                                " | Active N-1 Removed '{}': {}, Post Max DCR={:.0}%, Post Δ={:.1}mm, Res ARI={:.2}",
+                                " | Active N-1 Removed '{}': {}, Post Max DCR={:.0}%, Post Δ={:.1}mm, Res EigenGate={:.2}",
                                 s.removed_name,
                                 if s.report.is_kinematic_mechanism { "MECHANISM" } else { "Stable" },
                                 s.report.post_max_dcr * 100.0,
                                 s.report.post_max_disp_mm,
-                                s.report.residual_ari
+                                s.report.residual_eigengate
                             )
                         })
                         .unwrap_or_default();
-                    step_traces.push("Inspected FEM & ARI 6-DOF + Modal Redundancy".to_string());
+                    step_traces.push("Inspected FEM & EigenGate 6-DOF + Modal Redundancy".to_string());
                     sections.push(format!(
-                        "[FEM & ARI 6-DOF Matrix]: {} members, Max DCR={:.1}%, Min ARI={:.3}, Critical (<0.70)={crit}, Δmax={:.1}mm, Drift={:.2}%, V_seismic={:.0}kN, {modal_tag}{n1_tag}. Bottlenecks: {}",
+                        "[FEM & EigenGate 6-DOF Matrix]: {} members, Max DCR={:.1}%, Min EigenGate={:.3}, Critical (<0.70)={crit}, Δmax={:.1}mm, Drift={:.2}%, V_seismic={:.0}kN, {modal_tag}{n1_tag}. Bottlenecks: {}",
                         members.len(),
                         max_dcr,
-                        min_ari,
+                        min_eigengate,
                         fc.max_disp_mm,
                         fc.max_story_drift_ratio * 100.0,
                         fc.seismic_base_shear_kn,
@@ -1088,12 +1117,12 @@ impl SpatialWorkspaceState {
                 universal_canvas.show_domain_overlay = true;
                 universal_canvas.earth_bim_author.active_lens = EarthBimLens::DcrHeatmap;
             }
-            SpatialLens::AriRedundancy => {
+            SpatialLens::EigenGateRedundancy => {
                 build_view.render_mode = Render3DMode::SolidShaded;
-                build_view.color_mode = "ARI".to_string();
+                build_view.color_mode = "EigenGate".to_string();
                 build_view.highlight_4d_erection = false;
                 universal_canvas.show_domain_overlay = true;
-                universal_canvas.earth_bim_author.active_lens = EarthBimLens::AriRedundancy;
+                universal_canvas.earth_bim_author.active_lens = EarthBimLens::EigenGateRedundancy;
             }
             SpatialLens::AxialForce => {
                 build_view.render_mode = Render3DMode::AxialForceNFD;
@@ -1258,8 +1287,8 @@ impl SpatialWorkspaceState {
                     let arg_l = arg.to_lowercase();
                     let next_lens = if arg_l.contains("dcr") || arg_l.contains("util") {
                         SpatialLens::DcrHeatmap
-                    } else if arg_l.contains("ari") || arg_l.contains("red") {
-                        SpatialLens::AriRedundancy
+                    } else if arg_l.contains("eigengate") || arg_l.contains("ari") || arg_l.contains("red") {
+                        SpatialLens::EigenGateRedundancy
                     } else if arg_l.contains("mom") || arg_l.contains("bmd") {
                         SpatialLens::BendingMoment
                     } else if arg_l.contains("shear") || arg_l.contains("sfd") {
@@ -1341,8 +1370,8 @@ impl SpatialWorkspaceState {
                             members
                                 .iter()
                                 .max_by(|a, b| {
-                                    let sa = a.utilization + (1.0 - a.ari).max(0.0);
-                                    let sb = b.utilization + (1.0 - b.ari).max(0.0);
+                                    let sa = a.utilization + (1.0 - a.eigengate).max(0.0);
+                                    let sb = b.utilization + (1.0 - b.eigengate).max(0.0);
                                     sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
                                 })
                                 .map(|m| m.id)
@@ -2232,9 +2261,9 @@ impl SpatialWorkspaceState {
                         universal_canvas.collab_state.config.risk_metric =
                             crate::core::ifcx_collab::DistrictRiskMetric::McPml90Loss;
                         universal_canvas.collab_state.config.risk_heatmap_visible = true;
-                    } else if low.contains("ari") || low.contains("dcr") {
+                    } else if low.contains("eigengate") || low.contains("dcr") {
                         universal_canvas.collab_state.config.risk_metric =
-                            crate::core::ifcx_collab::DistrictRiskMetric::StructuralAri;
+                            crate::core::ifcx_collab::DistrictRiskMetric::StructuralEigenGate;
                         universal_canvas.collab_state.config.risk_heatmap_visible = true;
                     } else if low.contains("iso") || low.contains("evac") {
                         universal_canvas.collab_state.config.risk_metric =
@@ -2270,8 +2299,8 @@ impl SpatialWorkspaceState {
                 }
                 "/trade-study" => {
                     let low = arg.trim().to_ascii_lowercase();
-                    let obj = if low.contains("safe") || low.contains("ari") {
-                        crate::core::trade_study::TradeStudyObjective::MaxSafetyAri
+                    let obj = if low.contains("safe") || low.contains("eigengate") {
+                        crate::core::trade_study::TradeStudyObjective::MaxSafetyEigenGate
                     } else if low.contains("cost") {
                         crate::core::trade_study::TradeStudyObjective::MinCost
                     } else if low.contains("carb") || low.contains("co2") {
@@ -2320,6 +2349,39 @@ impl SpatialWorkspaceState {
                     self.open_collab_drawer(0);
                     actions.sync_peer_relay_delta = true;
                     self.push_trace("Syncing peer IFCX delta via Relay + 3-Way Merge...", true);
+                }
+                "/bbs" | "/cutlist" => {
+                    let stock_m = if arg.trim().contains('6') { 6.0 } else { 12.0 };
+                    universal_canvas.field_fab_config.stock_length_m = stock_m;
+                    self.open_field_qaqc_drawer(0);
+                    actions.run_field_fabrication = Some(stock_m);
+                    self.push_trace(format!("Optimizing 1D Rebar BBS Cut-List ({stock_m:.0}m stock)..."), true);
+                }
+                "/qaqc-3d" => {
+                    self.open_field_qaqc_drawer(1);
+                    actions.toggle_field_qaqc_3d = true;
+                }
+                "/waypoint" => {
+                    self.open_field_qaqc_drawer(1);
+                    let total = universal_canvas
+                        .last_field_fab_report
+                        .as_ref()
+                        .map(|r| r.waypoints.len())
+                        .unwrap_or_else(|| {
+                            let lp = &universal_canvas.field_qaqc_ledger;
+                            lp.itps.len() + lp.ncrs.len()
+                        })
+                        .max(1);
+                    let next_idx = if let Ok(one_based) = arg.trim().parse::<usize>() {
+                        one_based.saturating_sub(1) % total
+                    } else {
+                        (universal_canvas.active_waypoint_idx + 1) % total
+                    };
+                    actions.fly_to_waypoint_idx = Some(next_idx);
+                }
+                "/shop-svg" => {
+                    self.open_field_qaqc_drawer(0);
+                    actions.export_shop_drawing_svg = true;
                 }
                 "/section" | "/cut" => {
                     let elev_opt = arg
@@ -2385,16 +2447,41 @@ impl SpatialWorkspaceState {
                     self.command_bar_expanded = true;
                     self.push_trace("Executed Closed-Loop AI Repair", true);
                 }
-                "/svd" | "/ari" => {
+                "/svd" | "/eigengate" | "/ari" => {
                     self.command_bar_expanded = true;
                     ai_assistant.execute_prompt(
-                        "check svd mechanism and screen ari",
+                        "check svd mechanism and screen eigengate",
                         NavigationPillar::AnalysisSimulation,
                         members,
                         projects,
                         db_components,
                     );
-                    self.push_trace("Ran SVD Kinematic Guard & ARI Audit", true);
+                    self.push_trace("Ran SVD Kinematic Guard & EigenGate Linear Screening", true);
+                }
+                "/eigenflow" | "/woodbury" => {
+                    self.command_bar_expanded = true;
+                    let bim_model = build_view.bim_bus.project.to_structural_model();
+                    let target_id = bim_model.elements.first().map(|e| e.id).unwrap_or(1);
+                    let rep = crate::core::nonlinear::NonlinearEngine::evaluate_woodbury_disruption(
+                        &bim_model,
+                        target_id,
+                        0.0,
+                    );
+                    ai_assistant.chat_history.push(crate::models::ChatMessage {
+                        is_user: false,
+                        message: format!(
+                            "[EigenFlow Woodbury Non-Linear (Element #{})]: m_s={:.3}, ΔN={:.1} kN -> P2={:?}, RRR={:.2}, μ={:.2} | {}",
+                            rep.disrupted_element_id,
+                            rep.stability_margin_ms,
+                            rep.redistributed_force_delta_n_kn,
+                            rep.alternate_path,
+                            rep.residual_reserve_ratio_rrr,
+                            rep.ductility_demand_mu,
+                            rep.prescriptive_recommendation,
+                        ),
+                        time: crate::core::web_bridge::unix_timestamp_label(),
+                    });
+                    self.push_trace("Ran Branch 2 EigenFlow Woodbury Non-Linear Screening", true);
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {
@@ -2553,7 +2640,7 @@ impl SpatialWorkspaceState {
             actions.run_crc_cascade_screening = Some(universal_canvas.cascade_daf);
             self.push_trace(
                 format!(
-                    "Queued Two-Stage ARI v2 + StructGNN-CRC Cascade (DAF {:.2}x)",
+                    "Queued Two-Stage EigenGate v2 + StructGNN-CRC Cascade (DAF {:.2}x)",
                     universal_canvas.cascade_daf
                 ),
                 true,
@@ -2571,7 +2658,7 @@ impl SpatialWorkspaceState {
         } else if lower.contains("portfolio") && (lower.contains("audit") || lower.contains("summary") || lower.contains("ringkas")) {
             let sum = universal_canvas.world_index.portfolio_summary();
             let msg = format!(
-                "Planetary Portfolio Audit: {} indexed Vault models (GPS Verified: {}, City Hint: {}, User Pinned: {}, Unlocated Staging: {}, Critical Risk DCR>=90%/ARI<0.70: {}). Top Regions: {}",
+                "Planetary Portfolio Audit: {} indexed Vault models (GPS Verified: {}, City Hint: {}, User Pinned: {}, Unlocated Staging: {}, Critical Risk DCR>=90%/EigenGate<0.70: {}). Top Regions: {}",
                 sum.total_buildings,
                 sum.gps_verified_count,
                 sum.city_hint_count,
@@ -2627,7 +2714,7 @@ impl SpatialWorkspaceState {
             && !lower.contains("col")
             && !lower.contains("beam")
             && !lower.contains("repair")
-            && !lower.contains("ari")
+            && !lower.contains("eigengate")
             && !lower.contains("svd")
             && !lower.contains("cost")
         {
@@ -2769,12 +2856,12 @@ impl SpatialWorkspaceState {
             let site = compute_site_environmental_coupling(lat, lon, &universal_canvas.earth_world);
             let crit_ctx = Self::format_critical_bim_context(&build_view.bim_bus.project, members);
             let sys_prompt = format!(
-                "You are EigenAI inside EigenGraph (Geospatial Earth + Structural BIM/FEM & Adjusted Redundancy Index ARI platform). \
+                "You are EigenAI inside EigenGraph (Geospatial Earth + Structural BIM/FEM & EigenGate EigenGate platform). \
                  Respond concisely in professional civil & structural engineering English. \
                  Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s. \
                  Active BIM elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}. \
                  To propose workspace actions, you may append bracket directives: \
-                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[ADD_STORY]], [[ADD_SLAB]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[ARI_AUDIT]], [[BATCH_PIN_CITY:keyword,city]], [[PIN_ACTIVE:lat,lon,heading]], [[AUDIT_NEIGHBORHOOD]], [[TOGGLE_TOPO]], [[TOGGLE_VECTOR]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
+                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[ADD_STORY]], [[ADD_SLAB]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[EIGENGATE_AUDIT]], [[BATCH_PIN_CITY:keyword,city]], [[PIN_ACTIVE:lat,lon,heading]], [[AUDIT_NEIGHBORHOOD]], [[TOGGLE_TOPO]], [[TOGGLE_VECTOR]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
                 site.elevation_m,
                 site.seismic_pga_ss_g,
                 site.design_wind_ms,
@@ -2878,7 +2965,7 @@ impl SpatialWorkspaceState {
             ai_assistant.pending_bim_nl_command = None;
             if self.agent_mode == AgentExecutionMode::Planning {
                 self.queue_planning_proposal(
-                    "Auto-Repair Critical ARI Members",
+                    "Auto-Repair Critical EigenGate Members",
                     "Planning Mode detected repair request. Click Apply Changes to upgrade low-redundancy / overstressed elements cleanly via undoable BimCommand.",
                     "BimCommand::AutoRepairCritical",
                     vec![PlannedProposalAction::AutoRepair],
@@ -2937,10 +3024,10 @@ impl SpatialWorkspaceState {
                             .and_then(|fid| members.iter().find(|m| m.id == fid))
                     });
                 let dcr = fem_m.map(|m| m.utilization * 100.0).unwrap_or(42.0);
-                let ari = fem_m.map(|m| m.ari).unwrap_or(0.89);
+                let eigengate = fem_m.map(|m| m.eigengate).unwrap_or(0.89);
                 Some(format!(
-                    "Column {} ({:.0}x{:.0}mm, {}), DCR={:.1}%, ARI={:.3}",
-                    col.name, col.width_mm, col.depth_mm, col.profile_name, dcr, ari
+                    "Column {} ({:.0}x{:.0}mm, {}), DCR={:.1}%, EigenGate={:.3}",
+                    col.name, col.width_mm, col.depth_mm, col.profile_name, dcr, eigengate
                 ))
             }
             SmartSelectionTarget::Beam(id) => {
@@ -2954,10 +3041,10 @@ impl SpatialWorkspaceState {
                             .and_then(|fid| members.iter().find(|m| m.id == fid))
                     });
                 let dcr = fem_m.map(|m| m.utilization * 100.0).unwrap_or(45.0);
-                let ari = fem_m.map(|m| m.ari).unwrap_or(0.87);
+                let eigengate = fem_m.map(|m| m.eigengate).unwrap_or(0.87);
                 Some(format!(
-                    "Beam {} ({:.0}x{:.0}mm), DCR={:.1}%, ARI={:.3}",
-                    r.name, r.width_mm, r.depth_mm, dcr, ari
+                    "Beam {} ({:.0}x{:.0}mm), DCR={:.1}%, EigenGate={:.3}",
+                    r.name, r.width_mm, r.depth_mm, dcr, eigengate
                 ))
             }
             SmartSelectionTarget::Wall(id) => {

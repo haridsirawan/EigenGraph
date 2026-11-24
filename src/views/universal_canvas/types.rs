@@ -386,7 +386,7 @@ pub enum EarthBimLens {
     #[default]
     Clean,
     DcrHeatmap,
-    AriRedundancy,
+    EigenGateRedundancy,
     MomentStress,
     DeformedShape,
     ModalVibration,
@@ -452,7 +452,7 @@ pub struct EarthN1OverlayState {
     pub removed_bim_id: usize,
     pub removed_fem_id: usize,
     pub removed_name: String,
-    pub report: crate::core::ari::N1SimulationReport,
+    pub report: crate::core::eigengate::N1SimulationReport,
 }
 
 /// Phase 63: O(1) cached BIM-to-FEM lookup tables, true 6-DOF displacements, dynamic eigenmodes,
@@ -611,7 +611,7 @@ impl EarthStructuralRenderCache {
         let eff_scale = if lens == EarthBimLens::DeformedShape {
             deform_scale.clamp(1.0, 150.0)
         } else {
-            // Subtle readable deflection overlay when N-1 is active on DCR/ARI/Clean lenses
+            // Subtle readable deflection overlay when N-1 is active on DCR/EigenGate/Clean lenses
             (deform_scale * 0.45).clamp(4.0, 45.0)
         };
         let dx_m = (raw[0] * eff_scale).clamp(-max_visual_m, max_visual_m);

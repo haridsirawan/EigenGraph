@@ -1,7 +1,7 @@
 //! Phase 76: Live SHM Digital Twin, Modal Fingerprint Identification & Post-Earthquake ATC-20 Placard Triage.
 //!
 //! Couples real-time or streamed triaxial accelerometer, inclinometer, and base strain telemetry with the
-//! active 3D BIM 6-DOF Finite Element stiffness/mass model (`FemSolver`, `ModalEngine`, `AriEngine`).
+//! active 3D BIM 6-DOF Finite Element stiffness/mass model (`FemSolver`, `ModalEngine`, `EigenGateEngine`).
 //! Computes baseline vs. observed natural frequencies (`f_1..f_3`), Modal Assurance Criterion (`MAC_1..MAC_3`),
 //! Welch-style Power Spectral Density (`PSD`), per-story residual stiffness retention & anomaly Z-scores,
 //! automated ATC-20 Rapid/Detailed post-earthquake safety placards (`Green`/`Yellow`/`Red`), district portfolio
@@ -12,12 +12,12 @@ use std::f64::consts::PI;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::ari::AriEngine;
+use crate::core::eigengate::EigenGateEngine;
 use crate::core::bim::BimProject;
 use crate::core::geotech::{SubsurfaceSsiAnalysisReport, SubsurfaceSsiConfig};
 use crate::core::gis::WorldSpatialIndex;
 use crate::core::ground_motion_replay::GroundMotionReplayReport;
-use crate::core::ifcx::{ns, IfcxAriOverlay, IfcxDocument, IfcxImport, IfcxNode};
+use crate::core::ifcx::{ns, IfcxEigenGateOverlay, IfcxDocument, IfcxImport, IfcxNode};
 use crate::core::lifecycle_ops::SiteEnvironmentalCoupling;
 use crate::core::modal::{ModalEngine, SiteClass, Sni1726Spectrum};
 use crate::core::solver::FemSolver;
@@ -112,7 +112,7 @@ impl ShmFaultScenario {
         match self {
             Self::NominalIntact => "Micro-ambient excitation (~1 mg RMS) verifying intact design frequency and >0.98 MAC.",
             Self::SoftStoryFirstFloor => "Simulates stiffness loss in the target lower/first story, shifting f1 downward and kinking Mode 1.",
-            Self::ColumnLossFault => "Simulates perimeter column degradation lowering both local flexural rigidity and system ARI redundancy.",
+            Self::ColumnLossFault => "Simulates perimeter column degradation lowering both local flexural rigidity and system EigenGate redundancy.",
             Self::SoilLiquefactionShift => "Models foundation rocking and soil softening lengthening T1 and lowering lateral natural frequency.",
             Self::SeismicDamageFromReplay => "Feeds Phase 74/75 Nonlinear Time-History plastic hinges & story drifts directly into SHM triage.",
             Self::CustomTelemetryStream => "Identifies dominant frequency shift and floor acceleration/drift directly from uploaded CSV/JSON sensor logs.",
@@ -370,7 +370,7 @@ pub struct DistrictBuildingPlacard {
     pub estimated_drift_pct: f64,
     pub estimated_stiffness_loss_pct: f64,
     pub max_dcr: f64,
-    pub min_ari: f64,
+    pub min_eigengate: f64,
     pub placard: Atc20Placard,
     pub rationale: String,
 }
@@ -399,8 +399,8 @@ pub struct ShmDigitalTwinReport {
     pub global_stiffness_retention_pct: f64,
     pub damping_ratio_baseline_pct: f64,
     pub damping_ratio_observed_pct: f64,
-    pub baseline_ari: f64,
-    pub residual_ari: f64,
+    pub baseline_eigengate: f64,
+    pub residual_eigengate: f64,
     pub max_transient_drift_pct: f64,
     pub max_residual_drift_pct: f64,
     pub story_health: Vec<StoryShmHealth>,
@@ -694,8 +694,8 @@ pub fn evaluate_shm_digital_twin_for_bim(
         return Err("No 3D structural frame elements available for SHM Digital Twin analysis.".to_string());
     }
     let _fea_base = FemSolver::solve(&fem_base)?;
-    let ari_eval = AriEngine::evaluate_redundancy_fast(&fem_base)?;
-    let baseline_ari = ari_eval.min_system_ari.clamp(0.0, 1.0);
+    let eigengate_eval = EigenGateEngine::evaluate_redundancy_fast(&fem_base)?;
+    let baseline_eigengate = eigengate_eval.min_system_eigengate.clamp(0.0, 1.0);
 
     let soil_label = if site.recommended_soil_class.trim().is_empty() {
         "SD"
@@ -738,7 +738,7 @@ pub fn evaluate_shm_digital_twin_for_bim(
     let mut story_transient_drift_pct = vec![0.04_f64; num_stories];
     let mut story_residual_drift_pct = vec![0.0_f64; num_stories];
     let mut story_floor_accel_g = vec![0.002_f64; num_stories];
-    let mut residual_ari = baseline_ari;
+    let mut residual_eigengate = baseline_eigengate;
 
     let scenario = effective_fault_scenario(config, replay_report);
     match scenario {
@@ -765,7 +765,7 @@ pub fn evaluate_shm_digital_twin_for_bim(
                 story_residual_drift_pct[s] = (story_transient_drift_pct[s] * 0.24 * sev).clamp(0.0, 2.0);
                 story_floor_accel_g[s] = 0.04 + 0.35 * sev * ((s + 1) as f64 / num_stories as f64);
             }
-            residual_ari = (baseline_ari * (1.0 - 0.28 * sev)).clamp(0.10, baseline_ari);
+            residual_eigengate = (baseline_eigengate * (1.0 - 0.28 * sev)).clamp(0.10, baseline_eigengate);
         }
         ShmFaultScenario::ColumnLossFault => {
             for s in 0..num_stories {
@@ -781,7 +781,7 @@ pub fn evaluate_shm_digital_twin_for_bim(
                 story_residual_drift_pct[s] = (story_transient_drift_pct[s] * 0.28 * sev).clamp(0.0, 2.0);
                 story_floor_accel_g[s] = 0.05 + 0.30 * sev * ((s + 1) as f64 / num_stories as f64);
             }
-            residual_ari = (baseline_ari * (1.0 - 0.48 * sev)).clamp(0.08, baseline_ari);
+            residual_eigengate = (baseline_eigengate * (1.0 - 0.48 * sev)).clamp(0.08, baseline_eigengate);
         }
         ShmFaultScenario::SoilLiquefactionShift => {
             let liq_boost = ssi_report
@@ -797,7 +797,7 @@ pub fn evaluate_shm_digital_twin_for_bim(
                     (0.05 + 0.55 * sev * liq_boost * height_atten).clamp(0.0, 1.8);
                 story_floor_accel_g[s] = 0.06 + 0.28 * sev * ((s + 1) as f64 / num_stories as f64);
             }
-            residual_ari = (baseline_ari * (1.0 - 0.30 * sev)).clamp(0.15, baseline_ari);
+            residual_eigengate = (baseline_eigengate * (1.0 - 0.30 * sev)).clamp(0.15, baseline_eigengate);
         }
         ShmFaultScenario::SeismicDamageFromReplay => {
             if let Some(rep) = replay_report {
@@ -838,7 +838,7 @@ pub fn evaluate_shm_digital_twin_for_bim(
                     story_floor_accel_g[s] = floor_acc.max(0.02);
                 }
                 let max_loss = k_factor.iter().map(|k| 1.0 - k).fold(0.0_f64, f64::max);
-                residual_ari = (baseline_ari * (1.0 - 0.45 * max_loss)).clamp(0.08, baseline_ari);
+                residual_eigengate = (baseline_eigengate * (1.0 - 0.45 * max_loss)).clamp(0.08, baseline_eigengate);
             } else {
                 // Smooth site-demand fallback when replay hasn't been executed yet
                 let pga_fac = (site.seismic_pga_ss_g as f64 * 0.42).clamp(0.12, 1.10);
@@ -850,19 +850,19 @@ pub fn evaluate_shm_digital_twin_for_bim(
                     story_residual_drift_pct[s] = (story_transient_drift_pct[s] * 0.20 * sev).clamp(0.01, 1.5);
                     story_floor_accel_g[s] = (pga_fac * (1.0 + 0.7 * ((s + 1) as f64 / num_stories as f64))).max(0.05);
                 }
-                residual_ari = (baseline_ari * (1.0 - 0.35 * sev)).clamp(0.15, baseline_ari);
+                residual_eigengate = (baseline_eigengate * (1.0 - 0.35 * sev)).clamp(0.15, baseline_eigengate);
             }
         }
         ShmFaultScenario::CustomTelemetryStream => {
             apply_custom_telemetry_to_stories(
                 config.custom_telemetry.as_ref(),
                 baseline_freq_1_hz,
-                baseline_ari,
+                baseline_eigengate,
                 &mut k_factor,
                 &mut story_transient_drift_pct,
                 &mut story_residual_drift_pct,
                 &mut story_floor_accel_g,
-                &mut residual_ari,
+                &mut residual_eigengate,
             );
         }
     }
@@ -1002,7 +1002,7 @@ pub fn evaluate_shm_digital_twin_for_bim(
         mac_mode_1,
         max_transient_drift_pct,
         max_residual_drift_pct,
-        residual_ari,
+        residual_eigengate,
         max_stiffness_loss_pct,
     );
     let mut atc20_placard = atc20_checklist
@@ -1025,7 +1025,7 @@ pub fn evaluate_shm_digital_twin_for_bim(
             observed_freq_1_hz,
             max_transient_drift_pct,
             max_stiffness_loss_pct,
-            residual_ari,
+            residual_eigengate,
             atc20_placard,
         );
 
@@ -1054,8 +1054,8 @@ pub fn evaluate_shm_digital_twin_for_bim(
         freq_shift_pct,
         mac_mode_1,
         global_stiffness_retention_pct,
-        baseline_ari,
-        residual_ari,
+        baseline_eigengate,
+        residual_eigengate,
         max_transient_drift_pct,
         max_residual_drift_pct,
         atc20_placard,
@@ -1088,8 +1088,8 @@ pub fn evaluate_shm_digital_twin_for_bim(
         global_stiffness_retention_pct,
         damping_ratio_baseline_pct,
         damping_ratio_observed_pct,
-        baseline_ari,
-        residual_ari,
+        baseline_eigengate,
+        residual_eigengate,
         max_transient_drift_pct,
         max_residual_drift_pct,
         story_health,
@@ -1137,12 +1137,12 @@ fn story_index_for_z(z_m: f64, level_elevs: &[f64], num_stories: usize) -> usize
 fn apply_custom_telemetry_to_stories(
     custom_opt: Option<&CustomShmTelemetryLog>,
     baseline_f1_hz: f64,
-    baseline_ari: f64,
+    baseline_eigengate: f64,
     k_factor: &mut [f64],
     transient_drift: &mut [f64],
     residual_drift: &mut [f64],
     floor_accel: &mut [f64],
-    residual_ari: &mut f64,
+    residual_eigengate: &mut f64,
 ) {
     let Some(log) = custom_opt else {
         return;
@@ -1187,7 +1187,7 @@ fn apply_custom_telemetry_to_stories(
         }
     }
     let avg_loss = k_factor.iter().map(|k| 1.0 - k).sum::<f64>() / k_factor.len().max(1) as f64;
-    *residual_ari = (baseline_ari * (1.0 - 0.50 * avg_loss)).clamp(0.10, baseline_ari);
+    *residual_eigengate = (baseline_eigengate * (1.0 - 0.50 * avg_loss)).clamp(0.10, baseline_eigengate);
 }
 
 fn estimate_dominant_frequency_from_log(log: &CustomShmTelemetryLog, baseline_f1_hz: f64) -> Option<f64> {
@@ -1564,7 +1564,7 @@ fn evaluate_atc20_checklist(
     mac_mode_1: f64,
     max_transient_drift_pct: f64,
     max_residual_drift_pct: f64,
-    residual_ari: f64,
+    residual_eigengate: f64,
     max_stiffness_loss_pct: f64,
 ) -> Vec<Atc20ChecklistCriterion> {
     let abs_df = freq_shift_pct.abs();
@@ -1600,9 +1600,9 @@ fn evaluate_atc20_checklist(
         Atc20Placard::InspectedGreen
     };
 
-    let ari_outcome = if residual_ari < 0.50 {
+    let eigengate_outcome = if residual_eigengate < 0.50 {
         Atc20Placard::UnsafeRed
-    } else if residual_ari < 0.70 {
+    } else if residual_eigengate < 0.70 {
         Atc20Placard::RestrictedYellow
     } else {
         Atc20Placard::InspectedGreen
@@ -1651,10 +1651,10 @@ fn evaluate_atc20_checklist(
         },
         Atc20ChecklistCriterion {
             code: "ATC-05".to_string(),
-            criterion: "Post-Event Residual Redundancy (ARI)".to_string(),
-            observed_value: format!("{residual_ari:.2}"),
+            criterion: "Post-Event Residual Redundancy (EigenGate)".to_string(),
+            observed_value: format!("{residual_eigengate:.2}"),
             threshold_value: "G>=0.70 | Y>=0.50 | R<0.50".to_string(),
-            outcome: ari_outcome,
+            outcome: eigengate_outcome,
             rationale: "Assesses alternate load-path capacity against progressive collapse under aftershocks.".to_string(),
         },
         Atc20ChecklistCriterion {
@@ -1678,7 +1678,7 @@ fn build_district_portfolio_placards(
     obs_f1_hz: f64,
     active_drift_pct: f64,
     active_loss_pct: f64,
-    active_ari: f64,
+    active_eigengate: f64,
     active_placard: Atc20Placard,
 ) -> (Vec<DistrictBuildingPlacard>, usize, usize, usize) {
     let mut out = Vec::new();
@@ -1703,7 +1703,7 @@ fn build_district_portfolio_placards(
                         estimated_drift_pct: active_drift_pct,
                         estimated_stiffness_loss_pct: active_loss_pct,
                         max_dcr: b.max_dcr,
-                        min_ari: active_ari,
+                        min_eigengate: active_eigengate,
                         placard: active_placard,
                         rationale: "Active BIM SHM Digital Twin coupled assessment.".to_string(),
                     });
@@ -1715,13 +1715,13 @@ fn build_district_portfolio_placards(
                         _ => (0.45 + 0.85 * sev) * (ss / 0.80).clamp(0.5, 1.5),
                     };
                     let dcr_norm = b.max_dcr.clamp(0.2, 2.0);
-                    let ari_penalty = (1.0 - b.min_ari.clamp(0.1, 1.0)) * 18.0;
-                    let est_loss = (dcr_norm * 14.0 * hazard_fac + ari_penalty * hazard_fac).clamp(0.5, 68.0);
-                    let est_drift = (dcr_norm * 0.92 * hazard_fac + (1.0 - b.min_ari) * 0.8).clamp(0.04, 4.2);
+                    let eigengate_penalty = (1.0 - b.min_eigengate.clamp(0.1, 1.0)) * 18.0;
+                    let est_loss = (dcr_norm * 14.0 * hazard_fac + eigengate_penalty * hazard_fac).clamp(0.5, 68.0);
+                    let est_drift = (dcr_norm * 0.92 * hazard_fac + (1.0 - b.min_eigengate) * 0.8).clamp(0.04, 4.2);
 
-                    let placard = if est_loss >= 28.0 || est_drift >= 2.0 || b.min_ari < 0.50 || b.max_dcr >= 1.25 {
+                    let placard = if est_loss >= 28.0 || est_drift >= 2.0 || b.min_eigengate < 0.50 || b.max_dcr >= 1.25 {
                         Atc20Placard::UnsafeRed
-                    } else if est_loss >= 12.0 || est_drift >= 1.0 || b.min_ari < 0.70 || b.max_dcr >= 0.90 {
+                    } else if est_loss >= 12.0 || est_drift >= 1.0 || b.min_eigengate < 0.70 || b.max_dcr >= 0.90 {
                         Atc20Placard::RestrictedYellow
                     } else {
                         Atc20Placard::InspectedGreen
@@ -1740,11 +1740,11 @@ fn build_district_portfolio_placards(
                         estimated_drift_pct: est_drift,
                         estimated_stiffness_loss_pct: est_loss,
                         max_dcr: b.max_dcr,
-                        min_ari: b.min_ari,
+                        min_eigengate: b.min_eigengate,
                         placard,
                         rationale: format!(
-                            "Spectral T1={t1:.2}s screening (DCR {:.2}, ARI {:.2}).",
-                            b.max_dcr, b.min_ari
+                            "Spectral T1={t1:.2}s screening (DCR {:.2}, EigenGate {:.2}).",
+                            b.max_dcr, b.min_eigengate
                         ),
                     });
                 }
@@ -1781,7 +1781,7 @@ fn build_district_portfolio_placards(
             estimated_drift_pct: active_drift_pct,
             estimated_stiffness_loss_pct: active_loss_pct,
             max_dcr: (active_drift_pct / 2.0).clamp(0.15, 2.5),
-            min_ari: active_ari,
+            min_eigengate: active_eigengate,
             placard: active_placard,
             rationale: "Active BIM SHM Digital Twin coupled assessment.".to_string(),
         });
@@ -1802,8 +1802,8 @@ fn build_shm_overlay_ifcx(
     freq_shift_pct: f64,
     mac1: f64,
     stiffness_retention_pct: f64,
-    baseline_ari: f64,
-    residual_ari: f64,
+    baseline_eigengate: f64,
+    residual_eigengate: f64,
     max_transient_drift_pct: f64,
     max_residual_drift_pct: f64,
     placard: Atc20Placard,
@@ -1855,7 +1855,7 @@ fn build_shm_overlay_ifcx(
         "freqShiftPct": freq_shift_pct,
         "macMode1": mac1,
         "globalStiffnessRetentionPct": stiffness_retention_pct,
-        "residualAri": residual_ari,
+        "residualEigenGate": residual_eigengate,
         "maxTransientDriftPct": max_transient_drift_pct,
         "maxResidualDriftPct": max_residual_drift_pct,
         "sensorCount": sensors.len(),
@@ -1888,9 +1888,9 @@ fn build_shm_overlay_ifcx(
         })).collect::<Vec<_>>(),
     });
 
-    let ari_overlay = IfcxAriOverlay {
-        ari_system: residual_ari,
-        ari_average: 0.5 * (baseline_ari + residual_ari),
+    let eigengate_overlay = IfcxEigenGateOverlay {
+        eigengate_system: residual_eigengate,
+        eigengate_average: 0.5 * (baseline_eigengate + residual_eigengate),
         critical_members_count: sensors.iter().filter(|s| s.is_triggered).count(),
         max_dcr_pct: (max_transient_drift_pct / 2.0 * 100.0).min(999.0),
         svd_rank_deficiency: usize::from(placard == Atc20Placard::UnsafeRed),
@@ -1910,8 +1910,8 @@ fn build_shm_overlay_ifcx(
     bldg_node
         .attributes
         .insert(NS_EG_ATC20_PLACARD.to_string(), placard_payload.clone());
-    if let Ok(v) = serde_json::to_value(&ari_overlay) {
-        bldg_node.attributes.insert(ns::EG_ARI.to_string(), v);
+    if let Ok(v) = serde_json::to_value(&eigengate_overlay) {
+        bldg_node.attributes.insert(ns::EG_EIGENGATE.to_string(), v);
     }
     doc.add_node(bldg_node);
 

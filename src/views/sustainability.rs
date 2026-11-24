@@ -14,7 +14,7 @@ use crate::ui_kit;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SustainabilitySubTab {
     EmbodiedCarbon,
-    CarbonAriTradeoff,
+    CarbonEigenGateTradeoff,
     GreenCertification,
     EnergyLifecycle,
     SolarOttvDaylight,
@@ -379,8 +379,8 @@ impl SustainabilityView {
                     SustainabilitySubTab::EmbodiedCarbon => {
                         self.render_embodied_carbon(ui, theme, members, bim_project, features)
                     }
-                    SustainabilitySubTab::CarbonAriTradeoff => {
-                        self.render_carbon_ari_tradeoff(ui, theme)
+                    SustainabilitySubTab::CarbonEigenGateTradeoff => {
+                        self.render_carbon_eigengate_tradeoff(ui, theme)
                     }
                     SustainabilitySubTab::GreenCertification => {
                         self.render_green_certification(ui, theme)
@@ -404,7 +404,7 @@ impl SustainabilityView {
     fn render_header_bar(&mut self, ui: &mut Ui, theme: &MacTheme) {
         let tabs = [
             (SustainabilitySubTab::EmbodiedCarbon, "🌱 Embodied Carbon (CO₂e)"),
-            (SustainabilitySubTab::CarbonAriTradeoff, "📈 Carbon vs ARI Trade-Off"),
+            (SustainabilitySubTab::CarbonEigenGateTradeoff, "📈 Carbon vs EigenGate Trade-Off"),
             (SustainabilitySubTab::GreenCertification, "🏅 Green Certification (LEED/Greenship)"),
             (SustainabilitySubTab::EnergyLifecycle, "⚡ Thermal & Lifecycle Durability"),
             (SustainabilitySubTab::SolarOttvDaylight, "☀️ Solar OTTV & Daylight"),
@@ -445,13 +445,13 @@ impl SustainabilityView {
         } else {
             0.0
         };
-        let avg_ari = if members.is_empty() {
+        let avg_eigengate = if members.is_empty() {
             0.0
         } else {
-            members.iter().map(|m| if m.ari > 0.0 { m.ari } else { m.ari_score }).sum::<f64>()
+            members.iter().map(|m| if m.eigengate > 0.0 { m.eigengate } else { m.eigengate_score }).sum::<f64>()
                 / members.len() as f64
         };
-        let eco_eff = if total_co2 > 1e-6 { avg_ari / total_co2 } else { 0.0 };
+        let eco_eff = if total_co2 > 1e-6 { avg_eigengate / total_co2 } else { 0.0 };
         let floor_area_m2: f64 = bim_project
             .slabs
             .iter()
@@ -495,7 +495,7 @@ impl SustainabilityView {
             (
                 "ECO-REDUNDANCY (η)",
                 format!("{:.4}", eco_eff),
-                "ARI / Total tCO₂e".to_string(),
+                "EigenGate / Total tCO₂e".to_string(),
                 theme.accent_blue,
             ),
         ];
@@ -707,14 +707,14 @@ impl SustainabilityView {
             });
     }
 
-    fn render_carbon_ari_tradeoff(&mut self, ui: &mut Ui, theme: &MacTheme) {
+    fn render_carbon_eigengate_tradeoff(&mut self, ui: &mut Ui, theme: &MacTheme) {
         Frame::new()
             .fill(theme.bg_card)
             .corner_radius(CornerRadius::same(10))
             .inner_margin(Margin::same(16))
             .stroke(Stroke::new(1.0, theme.border_subtle))
             .show(ui, |ui| {
-                icons::icon_label(ui, AppIcon::ChartLine, 14.5, theme.accent_blue, "Pareto Frontier: Structural Redundancy (ARI) vs. Embodied Carbon (CO₂e)", 13.5, theme.text_primary, true);
+                icons::icon_label(ui, AppIcon::ChartLine, 14.5, theme.accent_blue, "Pareto Frontier: Structural Redundancy (EigenGate) vs. Embodied Carbon (CO₂e)", 13.5, theme.text_primary, true);
                 ui.add_space(6.0);
                 ui.label(
                     RichText::new("Finding the optimum trade-off where progressive collapse resilience increases significantly without disproportionate carbon expenditure.")
@@ -726,11 +726,11 @@ impl SustainabilityView {
                 let scenarios = [
                     ("Vulnerable Design (Non-Redundant)", "0.58", "38.2 Tons", "43.9 t CO₂e", AppIcon::AlertTriangle, theme.accent_red, "Catastrophic Collapse Risk (Reconstruction = +120 t CO₂e)", false),
                     ("Code-Baseline Standard Design", "0.72", "44.0 Tons", "50.6 t CO₂e", AppIcon::Info, theme.accent_orange, "Meets Minimum Code, Lacks Secondary Redundancy", false),
-                    ("EigenGraph Optimal Design (Recommended)", "0.94", "48.5 Tons", "55.8 t CO₂e", AppIcon::CheckCircle, theme.accent_green, "SWEET SPOT: ARI +30.5%, Carbon Only +5.2 t CO₂e (+10.2%)", true),
-                    ("Over-Conservative Design", "0.98", "62.0 Tons", "71.3 t CO₂e", AppIcon::Minus, theme.text_muted, "Inefficient: +27.8% Carbon Surcharge for Negligible ARI Gain", false),
+                    ("EigenGraph Optimal Design (Recommended)", "0.94", "48.5 Tons", "55.8 t CO₂e", AppIcon::CheckCircle, theme.accent_green, "SWEET SPOT: EigenGate +30.5%, Carbon Only +5.2 t CO₂e (+10.2%)", true),
+                    ("Over-Conservative Design", "0.98", "62.0 Tons", "71.3 t CO₂e", AppIcon::Minus, theme.text_muted, "Inefficient: +27.8% Carbon Surcharge for Negligible EigenGate Gain", false),
                 ];
 
-                for (name, ari, steel, co2, desc_icon, desc_col, desc, is_opt) in scenarios {
+                for (name, eigengate, steel, co2, desc_icon, desc_col, desc, is_opt) in scenarios {
                     let fill = if is_opt {
                         theme.accent_blue.gamma_multiply(0.12)
                     } else {
@@ -762,7 +762,7 @@ impl SustainabilityView {
 
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     ui.vertical(|ui| {
-                                        ui.label(RichText::new(format!("ARI: {}", ari)).size(13.0).strong().color(if is_opt { theme.accent_green } else { theme.text_primary }));
+                                        ui.label(RichText::new(format!("EigenGate: {}", eigengate)).size(13.0).strong().color(if is_opt { theme.accent_green } else { theme.text_primary }));
                                         ui.label(RichText::new(format!("{} • {}", steel, co2)).size(11.0).color(theme.text_muted));
                                     });
                                 });

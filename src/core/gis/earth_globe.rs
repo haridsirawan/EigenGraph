@@ -205,7 +205,7 @@ pub struct EarthMegastructure {
     pub length_km: f64,
     pub cost_b_usd: f64,
     pub carbon_delta_mt_yr: f64,
-    pub ari_resilience: f64,
+    pub eigengate_resilience: f64,
 }
 
 /// Curated planetary engineering challenge scenarios alongside open Sandbox mode.
@@ -998,7 +998,7 @@ impl PlanetaryWorldState {
         self.push_undo();
         let len_m = SlippyMapState::geodetic_distance_m(start_lat_lon, end_lat_lon);
         let len_km = (len_m / 1000.0).max(1.0);
-        let (height_m, cost_b, carbon_mt, ari) = match kind {
+        let (height_m, cost_b, carbon_mt, eigengate) = match kind {
             MegastructureKind::TransStraitBridge => (
                 260.0 + (len_km * 1.4).min(600.0),
                 (len_km * 0.085).clamp(2.5, 85.0),
@@ -1042,7 +1042,7 @@ impl PlanetaryWorldState {
             length_km: len_km,
             cost_b_usd: cost_b,
             carbon_delta_mt_yr: carbon_mt,
-            ari_resilience: ari,
+            eigengate_resilience: eigengate,
         });
         if !self.unlimited_sandbox_budget {
             self.vitals.budget_billion_usd =

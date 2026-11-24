@@ -185,26 +185,26 @@ pub struct ParetoCandidate {
     pub fc_mpa: f32,
     pub capex_idr_b: f32,
     pub carbon_tco2e: f32,
-    pub ari_score: f32,
+    pub eigengate_score: f32,
     pub max_dcr: f32,
     pub max_drift_ratio: f32,
     pub utility_score: f32,
     pub is_knee: bool,
 }
 
-/// Solves constrained multi-objective structural sizing (5D Capex vs. A1-A3 CO2e vs. ARI Redundancy)
+/// Solves constrained multi-objective structural sizing (5D Capex vs. A1-A3 CO2e vs. EigenGate Redundancy)
 /// and extracts the Rank-0 non-dominated Pareto front plus highest-utility knee solution.
 pub fn solve_nsga2_structural_pareto(
     w_cost: f32,
     w_carbon: f32,
-    w_ari: f32,
-    min_ari: f32,
+    w_eigengate: f32,
+    min_eigengate: f32,
     generations: usize,
 ) -> Vec<ParetoCandidate> {
-    let w_sum = (w_cost + w_carbon + w_ari).max(1e-4);
+    let w_sum = (w_cost + w_carbon + w_eigengate).max(1e-4);
     let wc = w_cost / w_sum;
     let wg = w_carbon / w_sum;
-    let wa = w_ari / w_sum;
+    let wa = w_eigengate / w_sum;
 
     let mut state: u64 = 0x5EED_CAFE_0041_u64 ^ ((generations as u64).wrapping_mul(0x9E37_79B9));
     let mut next_u01 = || -> f32 {
@@ -222,7 +222,7 @@ pub fn solve_nsga2_structural_pareto(
         let beam = 450.0 + (next_u01() * 8.0).round() * 50.0; // 450 - 850 mm
         let fc = 25.0 + (next_u01() * 5.0).round() * 5.0; // 25 - 50 MPa
 
-        // Structural mechanics surrogate calibrated to frame stiffness, embodied concrete/steel, & ARI
+        // Structural mechanics surrogate calibrated to frame stiffness, embodied concrete/steel, & EigenGate
         let steel_ratio = (0.011 + 0.008 * (bay / 10.0) + (45.0 / fc) * 0.003).clamp(0.010, 0.028);
         let conc_vol_m3 = 210.0 * (bay / 8.0).powf(0.85) * ((col / 500.0).powi(2) * 0.42 + (beam / 600.0) * 0.58);
         let rebar_t = conc_vol_m3 * steel_ratio * 7.85;
@@ -233,9 +233,9 @@ pub fn solve_nsga2_structural_pareto(
         let stiffness_index = ((col / 450.0).powi(3) * 0.48 + (beam / 550.0).powi(2) * 0.52) / (bay / 8.0).powf(1.35);
         let dcr = (0.64 / (stiffness_index.sqrt() * (fc / 30.0).powf(0.35))).clamp(0.28, 1.15);
         let drift = (0.00145 / stiffness_index).clamp(0.0004, 0.0035);
-        let ari = (0.78 + 0.19 * (stiffness_index / (stiffness_index + 0.45))).clamp(0.60, 0.99);
+        let eigengate = (0.78 + 0.19 * (stiffness_index / (stiffness_index + 0.45))).clamp(0.60, 0.99);
 
-        if ari >= min_ari && drift <= 0.0020 && dcr <= 0.90 {
+        if eigengate >= min_eigengate && drift <= 0.0020 && dcr <= 0.90 {
             feasible.push(ParetoCandidate {
                 id: i + 1,
                 bay_span_m: bay,
@@ -244,7 +244,7 @@ pub fn solve_nsga2_structural_pareto(
                 fc_mpa: fc,
                 capex_idr_b,
                 carbon_tco2e,
-                ari_score: ari,
+                eigengate_score: eigengate,
                 max_dcr: dcr,
                 max_drift_ratio: drift,
                 utility_score: 0.0,
@@ -262,7 +262,7 @@ pub fn solve_nsga2_structural_pareto(
             fc_mpa: 35.0,
             capex_idr_b: 3.45,
             carbon_tco2e: 412.0,
-            ari_score: 0.936,
+            eigengate_score: 0.936,
             max_dcr: 0.72,
             max_drift_ratio: 0.0012,
             utility_score: 1.0,
@@ -271,7 +271,7 @@ pub fn solve_nsga2_structural_pareto(
         return feasible;
     }
 
-    // Extract Rank-0 Non-Dominated Pareto Frontier (minimize capex & carbon, maximize ARI)
+    // Extract Rank-0 Non-Dominated Pareto Frontier (minimize capex & carbon, maximize EigenGate)
     let mut front: Vec<ParetoCandidate> = feasible
         .iter()
         .enumerate()
@@ -280,10 +280,10 @@ pub fn solve_nsga2_structural_pareto(
                 j != i
                     && b.capex_idr_b <= a.capex_idr_b
                     && b.carbon_tco2e <= a.carbon_tco2e
-                    && b.ari_score >= a.ari_score
+                    && b.eigengate_score >= a.eigengate_score
                     && (b.capex_idr_b < a.capex_idr_b
                         || b.carbon_tco2e < a.carbon_tco2e
-                        || b.ari_score > a.ari_score)
+                        || b.eigengate_score > a.eigengate_score)
             })
         })
         .map(|(_, c)| c.clone())
@@ -294,15 +294,15 @@ pub fn solve_nsga2_structural_pareto(
     let max_c = front.iter().map(|c| c.capex_idr_b).fold(f32::NEG_INFINITY, f32::max).max(min_c + 1e-3);
     let min_g = front.iter().map(|c| c.carbon_tco2e).fold(f32::INFINITY, f32::min);
     let max_g = front.iter().map(|c| c.carbon_tco2e).fold(f32::NEG_INFINITY, f32::max).max(min_g + 1e-3);
-    let min_a = front.iter().map(|c| c.ari_score).fold(f32::INFINITY, f32::min);
-    let max_a = front.iter().map(|c| c.ari_score).fold(f32::NEG_INFINITY, f32::max).max(min_a + 1e-4);
+    let min_a = front.iter().map(|c| c.eigengate_score).fold(f32::INFINITY, f32::min);
+    let max_a = front.iter().map(|c| c.eigengate_score).fold(f32::NEG_INFINITY, f32::max).max(min_a + 1e-4);
 
     let mut best_idx = 0usize;
     let mut best_u = f32::NEG_INFINITY;
     for (idx, c) in front.iter_mut().enumerate() {
         let nc = 1.0 - (c.capex_idr_b - min_c) / (max_c - min_c);
         let ng = 1.0 - (c.carbon_tco2e - min_g) / (max_g - min_g);
-        let na = (c.ari_score - min_a) / (max_a - min_a);
+        let na = (c.eigengate_score - min_a) / (max_a - min_a);
         c.utility_score = wc * nc + wg * ng + wa * na;
         if c.utility_score > best_u {
             best_u = c.utility_score;
@@ -341,7 +341,7 @@ mod tests {
         assert!(!front.is_empty());
         assert_eq!(front.iter().filter(|c| c.is_knee).count(), 1);
         for c in &front {
-            assert!(c.ari_score >= 0.85);
+            assert!(c.eigengate_score >= 0.85);
             assert!(c.max_dcr <= 0.90);
             assert!(c.max_drift_ratio <= 0.0020);
         }

@@ -120,7 +120,7 @@ use crate::core::ifcx::IfcxDocument;
                 story_count: 12,
                 member_count: 180,
                 max_dcr: 0.78,
-                min_ari: 0.84,
+                min_eigengate: 0.84,
                 source: GeoPlacementSource::UserPinnedOnEarth,
                 address_hint: "Bandung".to_string(),
             },
@@ -256,7 +256,7 @@ use crate::core::ifcx::IfcxDocument;
                 neighbor_lat: -6.9176,
                 neighbor_lon: 107.6193,
                 neighbor_height_m: 24.0,
-                neighbor_min_ari: 0.58,
+                neighbor_min_eigengate: 0.58,
                 clear_gap_m: 0.22,
                 required_gap_m: 0.52,
                 severity: PoundingSeverity::PoundingRisk,
@@ -1811,4 +1811,92 @@ use crate::core::ifcx::IfcxDocument;
             "Phase 80 District Risk Heatmap WGSL triggered WebGPU validation error: {val_err:?}"
         );
         assert!(non_black_pixels > 200);
+    }
+
+    #[test]
+    fn test_phase82_webgpu_field_qaqc_mesh_and_real_gpu_render() {
+        use crate::core::field_fabrication::{evaluate_field_fabrication, FieldFabricationConfig};
+        use crate::core::lifecycle_ops::FieldQualityControlLedger;
+
+        let mut proj = BimProject::sample_bimcraft_building();
+        proj.reinforce_all_concrete(&crate::core::bim::RebarPreset::default());
+        let ledger = FieldQualityControlLedger::default();
+        let report = evaluate_field_fabrication(&proj, &ledger, &FieldFabricationConfig::default());
+
+        let mesh = build_rtc_field_qaqc_mesh(&FieldQaqcGpuInput {
+            report: &report,
+            heading_deg: 15.0,
+            visible: true,
+        });
+        assert!(!mesh.vertices.is_empty());
+        assert!(!mesh.indices.is_empty());
+        assert!(mesh.vertices.iter().all(|v| (v.meta[0] - 11.0).abs() < 1e-3));
+
+        fn poll_fut<F: std::future::Future>(fut: F) -> F::Output {
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(waker);
+            let mut pinned = std::pin::pin!(fut);
+            loop {
+                if let std::task::Poll::Ready(val) = pinned.as_mut().poll(&mut cx) {
+                    return val;
+                }
+                std::thread::yield_now();
+            }
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = poll_fut(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let Ok((device, queue)) =
+            poll_fut(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        res.field_qaqc
+            .upload(&device, &queue, "field_qaqc_p82", 1, &mesh);
+
+        let mut cam = GlobeCamera::default();
+        cam.tilt_deg = 42.0;
+        let xf = GlobeScreenTransform::from_view(
+            Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(64.0, 64.0)),
+            -6.2088,
+            106.8456,
+            17.5,
+            &cam,
+        );
+        let uniforms = RtcCameraUniforms::from_globe_xform(
+            &xf,
+            VectorEarthTheme::CoastalBlueprint,
+            &cam,
+            (-6.2088, 106.8456),
+            0.5,
+            true,
+        );
+        queue.write_buffer(
+            &res.planet_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_planet_pass_uniforms()),
+        );
+        queue.write_buffer(
+            &res.site_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_site_pass_uniforms()),
+        );
+        res.ensure_targets(&device, 64, 64);
+
+        let mut encoder = device.create_command_encoder(&Default::default());
+        res.render_offscreen_passes(&mut encoder, true);
+        queue.submit([encoder.finish()]);
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let val_err = poll_fut(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "Phase 82 Field QA/QC WGSL pass triggered WebGPU validation error: {val_err:?}"
+        );
     }

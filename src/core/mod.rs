@@ -1,12 +1,12 @@
 //! core/mod.rs — Root Core Engine Module for EigenGraph.
 //! Encapsulates Mechanics, Finite Element Assembly, SVD Kinematic Guard,
-//! Adjusted Redundancy Index (ARI) Analytics, Parametric CAD Generation,
-//! AI-ARI Topology Optimization, BIM 5D QTO Cost Engine, and AEC Interoperability.
+//! EigenGate Analytics, Parametric CAD Generation,
+//! EigenGate AI Topology Optimization, BIM 5D QTO Cost Engine, and AEC Interoperability.
 
 pub mod linalg;
 pub mod model;
 pub mod solver;
-pub mod ari;
+pub mod eigengate;
 pub mod parametric;
 pub mod interop;
 pub mod optimizer;
@@ -37,6 +37,7 @@ pub mod time_history;
 pub mod fema_p58;
 pub mod gpu_fragility_mc;
 pub mod ifcx_collab;
+pub mod field_fabrication;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -61,8 +62,8 @@ pub use solver::{
     AnalysisResult, EnvelopeAnalysisResult, FemSolver, MemberEnvelopeResult,
     SecondOrderStabilityResult, SecondOrderStabilitySolver,
 };
-pub use ari::{
-    AriEngine, KinematicGuardReport, MemberRedundancyResult, N1SimulationReport,
+pub use eigengate::{
+    EigenGateEngine, KinematicGuardReport, MemberRedundancyResult, N1SimulationReport,
     N2PairRedundancyResult, N2WoodburyScreeningReport, RedundancyAssessment,
 };
 pub use parametric::{ParametricEngine, ParametricFormula};
@@ -72,7 +73,7 @@ pub use interop::{
     IfcxSamExporter, LatexExporter, PbgProjectMetadata, PbgReportGenerator, RebarBbsDetailer,
     RebarBbsSchedule, Sap2000Exporter, Sha256Hasher,
 };
-pub use optimizer::{AriTopologyOptimizer, BracingCandidate, BracingOptimizationReport};
+pub use optimizer::{EigenGateTopologyOptimizer, BracingCandidate, BracingOptimizationReport};
 pub use cost::{AhspUnitRates, BoqLineItem, CostEngine, CostEstimationReport, ProfileQuantity};
 pub use cascade::{
     run_two_stage_crc_and_cascade_for_bim, CascadingCollapseReport, CascadingSimulator,
@@ -111,7 +112,7 @@ pub use dynamics::{
     DynamicsEngine, SuddenRemovalTransientReport, TimeHistoryStep,
 };
 pub use vault::{
-    AriKnowledgeMemory, InternalVault, MultiLodConvergenceReport, MultiLodStageMetrics,
+    EigenGateKnowledgeMemory, InternalVault, MultiLodConvergenceReport, MultiLodStageMetrics,
 };
 pub use geom::{
     area as polygon_area, centroid as polygon_centroid, clip as polygon_clip, contains as polygon_contains,
@@ -186,7 +187,7 @@ pub use fire::{
     FireEngine, FireMemberKind, FireProtectionKind, FireTimeStep, ThermalRestraintKind,
 };
 pub use ifcx::{
-    AiBuildingFrameInferenceReport, IfcxAriOverlay, IfcxAuditItem, IfcxAuditStatus,
+    AiBuildingFrameInferenceReport, IfcxEigenGateOverlay, IfcxAuditItem, IfcxAuditStatus,
     IfcxClashItem, IfcxClashReport, IfcxClashSeverity, IfcxDiffKind, IfcxDiffLayerFilter,
     IfcxDiffReport, IfcxDocument, IfcxEditSession, IfcxGeoWgs84, IfcxHeader, IfcxHealthReport,
     IfcxImport, IfcxNode, IfcxNodeDiff, IfcxStage, IfcxUnits, IfcxVisualDiffEntry,
@@ -217,8 +218,8 @@ pub use lifecycle_ops::{
     VariationOrderRow,
 };
 pub use vector_dossier::{
-    build_permit_compliance_annex_svg, build_pure_vector_engineering_dossier_svg,
-    VectorDossierExport, VectorDossierInput,
+    build_fabrication_bbs_shop_svg, build_permit_compliance_annex_svg,
+    build_pure_vector_engineering_dossier_svg, VectorDossierExport, VectorDossierInput,
 };
 pub use portfolio_retrofit::{
     optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,
@@ -265,6 +266,12 @@ pub use trade_study::{
     run_parametric_trade_study, PermitClauseStatus, PermitComplianceClause,
     PermitComplianceReport, TradeScenarioArchetype, TradeStudyConfig, TradeStudyObjective,
     TradeStudyReport, TradeStudyScenarioResult, NS_EG_TRADE_STUDY_MATRIX,
+};
+pub use field_fabrication::{
+    approve_pour_strip_batch, clear_next_or_matching_hold_point, close_ncr_by_id,
+    evaluate_field_fabrication, log_quick_field_ncr, FieldFabricationConfig,
+    FieldFabricationIfcxOverlay, FieldFabricationReport, FieldInspectionStatus, FieldWaypoint,
+    PourStripStatus, PourStripZone,
 };
 
 

@@ -5,7 +5,7 @@
 //! - Revit-Style Object Snaps (`SE, SM, SI, SC, SP, SN, SG`), 15° Angular Guide & Graduated Ruler
 //! - Live 2D Section Cut View with Solid Poché, Rebar Cut Dots, Level Planes & Grid Bubbles
 //! - Sheet Layout Composer (`Sheet A101` Title Block) with One-Click Vector PDF, SVG & IFCX Export
-//! - Transactional `BimCommandBus` with Unlimited Undo/Redo & Live FEM/ARI Redundancy Audit.
+//! - Transactional `BimCommandBus` with Unlimited Undo/Redo & Live FEM/EigenGate Redundancy Audit.
 
 use egui::{
     Align, Align2, Color32, CornerRadius, Frame, Layout, Margin, Pos2, Rect, RichText, Sense,
@@ -145,7 +145,7 @@ pub struct ParametricView {
     pub show_db_drawer: bool,
     pub save_notification: Option<String>,
     pub ai_suggestion_text: Option<String>,
-    pub live_ari_score: f32,
+    pub live_eigengate_score: f32,
     pub live_svd_margin: f32,
     pub sheet_paper_size: SheetPaperSize,
     pub sheet_scale: SheetScale,
@@ -215,7 +215,7 @@ impl Default for ParametricView {
             show_db_drawer: false,
             save_notification: None,
             ai_suggestion_text: None,
-            live_ari_score: 0.0,
+            live_eigengate_score: 0.0,
             live_svd_margin: 0.0,
             node_graph: crate::models::VisualNodeGraph::empty(),
             selected_node_id: None,
@@ -369,7 +369,7 @@ impl ParametricView {
                 Ok(msg) => {
                     self.save_notification = Some(msg.clone());
                     self.command_history.push(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
                 Err(e) => self.save_notification = Some(e),
             }
@@ -394,7 +394,7 @@ impl ParametricView {
                 Ok(msg) => {
                     self.save_notification = Some(msg.clone());
                     self.command_history.push(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
                 Err(e) => self.save_notification = Some(e),
             }
@@ -431,7 +431,7 @@ impl ParametricView {
                 Ok(msg) => {
                     self.save_notification = Some(format!("Copied wall +{step:.0} mm: {msg}"));
                     self.command_history.push(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
                 Err(e) => self.save_notification = Some(e),
             }
@@ -448,7 +448,7 @@ impl ParametricView {
                 Ok(msg) => {
                     self.save_notification = Some(format!("Copied column +{step:.0} mm: {msg}"));
                     self.command_history.push(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
                 Err(e) => self.save_notification = Some(e),
             }
@@ -474,7 +474,7 @@ impl ParametricView {
                 Ok(msg) => {
                     self.save_notification = Some(msg.clone());
                     self.command_history.push(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
                 Err(e) => self.save_notification = Some(e),
             }
@@ -508,7 +508,7 @@ impl ParametricView {
             Ok(msg) => {
                 self.save_notification = Some(msg.clone());
                 self.command_history.push(msg);
-                self.refresh_live_ari();
+                self.refresh_live_eigengate();
             }
             Err(e) => self.save_notification = Some(e),
         }
@@ -532,7 +532,7 @@ impl ParametricView {
                 Ok(msg) => {
                     self.save_notification = Some(msg.clone());
                     self.command_history.push(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
                 Err(e) => self.save_notification = Some(e),
             }
@@ -570,7 +570,7 @@ impl ParametricView {
             } else if let Some(msg) = self.bim_bus.undo() {
                 self.save_notification = Some(msg.clone());
                 self.command_history.push(msg);
-                self.refresh_live_ari();
+                self.refresh_live_eigengate();
             }
         }
         if fb.redo {
@@ -581,7 +581,7 @@ impl ParametricView {
             } else if let Some(msg) = self.bim_bus.redo() {
                 self.save_notification = Some(msg.clone());
                 self.command_history.push(msg);
-                self.refresh_live_ari();
+                self.refresh_live_eigengate();
             }
         }
         if fb.delete_selected {
@@ -650,23 +650,23 @@ impl ParametricView {
         }
     }
 
-    pub(super) fn refresh_live_ari(&mut self) {
-        if let Ok(rep) = self.bim_bus.project.evaluate_live_ari() {
-            self.live_ari_score = rep.average_ari as f32;
+    pub(super) fn refresh_live_eigengate(&mut self) {
+        if let Ok(rep) = self.bim_bus.project.evaluate_live_eigengate() {
+            self.live_eigengate_score = rep.average_eigengate as f32;
             self.live_svd_margin = if rep.kinematic_guard.is_stable {
                 0.996
             } else {
                 0.0
             };
             self.ai_suggestion_text = Some(format!(
-                "AI Copilot: {} Walls, {} Columns, {} Beams, {} Rooms ({:.1} m²), Rebar {:.0} kg | ARI: {:.3}",
+                "AI Copilot: {} Walls, {} Columns, {} Beams, {} Rooms ({:.1} m²), Rebar {:.0} kg | EigenGate: {:.3}",
                 self.bim_bus.project.walls.len(),
                 self.bim_bus.project.columns.len(),
                 self.bim_bus.project.runs.len(),
                 self.bim_bus.project.rooms.len(),
                 self.bim_bus.project.rooms.iter().map(|r| r.area_m2).sum::<f64>(),
                 self.bim_bus.project.total_rebar_weight_kg(),
-                self.live_ari_score
+                self.live_eigengate_score
             ));
         }
     }
@@ -678,7 +678,7 @@ impl ParametricView {
             match self.bim_bus.execute_json(trimmed) {
                 Ok(msg) => {
                     self.command_history.push(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
                 Err(e) => self.command_history.push(format!("JSON Error: {e}")),
             }
@@ -709,7 +709,7 @@ impl ParametricView {
                     self.pending_start_pt = Some(end);
                     self.command_history.push(msg.clone());
                     self.save_notification = Some(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
                 return;
             }
@@ -728,7 +728,7 @@ impl ParametricView {
                     }) {
                         self.command_history.push(msg.clone());
                         self.save_notification = Some(msg);
-                        self.refresh_live_ari();
+                        self.refresh_live_eigengate();
                     }
                 }
                 return;
@@ -772,13 +772,13 @@ impl ParametricView {
             "UNDO" | "U" => {
                 if let Some(msg) = self.bim_bus.undo() {
                     self.command_history.push(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
             }
             "REDO" => {
                 if let Some(msg) = self.bim_bus.redo() {
                     self.command_history.push(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
             }
             "PDF" | "SVG" | "IFC" => {
@@ -799,7 +799,7 @@ impl ParametricView {
                     }) {
                         self.command_history.push(msg.clone());
                         self.save_notification = Some(msg);
-                        self.refresh_live_ari();
+                        self.refresh_live_eigengate();
                     }
                 }
             }
@@ -811,7 +811,7 @@ impl ParametricView {
                     }) {
                         self.command_history.push(msg.clone());
                         self.save_notification = Some(msg);
-                        self.refresh_live_ari();
+                        self.refresh_live_eigengate();
                     }
                 }
             }
@@ -827,7 +827,7 @@ impl ParametricView {
                 }) {
                     self.command_history.push(msg.clone());
                     self.save_notification = Some(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
             }
             "DEL" | "DELETE" | "ERASE" => {
@@ -838,7 +838,7 @@ impl ParametricView {
                     {
                         self.command_history.push(msg.clone());
                         self.save_notification = Some(msg);
-                        self.refresh_live_ari();
+                        self.refresh_live_eigengate();
                     }
                 }
             }
@@ -846,7 +846,7 @@ impl ParametricView {
                 Ok(msg) => {
                     self.command_history.push(msg.clone());
                     self.save_notification = Some(msg);
-                    self.refresh_live_ari();
+                    self.refresh_live_eigengate();
                 }
                 Err(_) => {
                     self.command_history
@@ -1402,7 +1402,7 @@ mod tests {
                 id: el.id,
                 name: el.name.clone(),
                 section: el.section.name.clone(),
-                ari: 0.62,
+                eigengate: 0.62,
                 utilization: 0.94,
                 ..Default::default()
             })

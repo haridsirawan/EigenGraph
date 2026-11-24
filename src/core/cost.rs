@@ -1,6 +1,6 @@
 //! cost.rs — BIM 5D Quantity Takeoff (QTO) & Dynamic AHSP Cost Engine.
 //! Integrates structural steel metrics with Indonesian AHSP (Permen PUPR) unit rates,
-//! calculates itemized Bill of Quantities (BOQ), and models Cost vs. ARI Trade-off curves.
+//! calculates itemized Bill of Quantities (BOQ), and models Cost vs. EigenGate Trade-off curves.
 
 use std::collections::HashMap;
 use crate::core::model::StructuralModel;

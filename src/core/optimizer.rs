@@ -1,8 +1,8 @@
-//! optimizer.rs — AI-ARI Topology & Bracing Optimization Engine.
-//! Discovers optimal bracing candidates to eliminate fracture-critical single points of failure (ARI < 0.70).
+//! optimizer.rs — EigenGate AI Topology & Bracing Optimization Engine.
+//! Discovers optimal bracing candidates to eliminate fracture-critical single points of failure (EigenGate < 0.70).
 //! Uses Sherman-Morrison rank-1 perturbation evaluator to search Pareto-optimal bracing topologies.
 
-use crate::core::ari::AriEngine;
+use crate::core::eigengate::EigenGateEngine;
 use crate::core::model::{CrossSection, Element3D, ElementType, Material, StructuralModel};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,8 +10,8 @@ pub struct BracingCandidate {
     pub from_node: usize,
     pub to_node: usize,
     pub section_name: String,
-    pub delta_min_ari: f64,
-    pub new_min_ari: f64,
+    pub delta_min_eigengate: f64,
+    pub new_min_eigengate: f64,
     pub added_weight_kg: f64,
     pub efficiency_score: f64,
     pub is_mechanism_eliminated: bool,
@@ -20,23 +20,23 @@ pub struct BracingCandidate {
 
 #[derive(Debug, Clone)]
 pub struct BracingOptimizationReport {
-    pub baseline_min_ari: f64,
+    pub baseline_min_eigengate: f64,
     pub critical_members_count: usize,
     pub candidates_evaluated: usize,
     pub recommendations: Vec<BracingCandidate>,
     pub best_candidate: Option<BracingCandidate>,
 }
 
-pub struct AriTopologyOptimizer;
+pub struct EigenGateTopologyOptimizer;
 
-impl AriTopologyOptimizer {
+impl EigenGateTopologyOptimizer {
     /// Discovers and ranks candidate bracing elements to maximize system redundancy
     pub fn optimize_bracing(
         model: &StructuralModel,
         search_radius_m: Option<f64>,
     ) -> Result<BracingOptimizationReport, String> {
-        let baseline = AriEngine::evaluate_redundancy_fast(model)?;
-        let baseline_min = baseline.min_system_ari;
+        let baseline = EigenGateEngine::evaluate_redundancy_fast(model)?;
+        let baseline_min = baseline.min_system_eigengate;
 
         let max_dist = search_radius_m.unwrap_or(12.0);
         let n_nodes = model.nodes.len();
@@ -84,24 +84,24 @@ impl AriTopologyOptimizer {
                 new_elem.material = steel.clone();
                 candidate_model.add_element(new_elem);
 
-                if let Ok(eval) = AriEngine::evaluate_redundancy_fast(&candidate_model) {
-                    let delta_ari = eval.min_system_ari - baseline_min;
+                if let Ok(eval) = EigenGateEngine::evaluate_redundancy_fast(&candidate_model) {
+                    let delta_eigengate = eval.min_system_eigengate - baseline_min;
                     let added_weight = dist * brace_section.area * steel.density;
-                    let eff = if added_weight > 0.0 { (delta_ari * 1000.0) / added_weight } else { 0.0 };
+                    let eff = if added_weight > 0.0 { (delta_eigengate * 1000.0) / added_weight } else { 0.0 };
 
-                    if delta_ari > 0.001 || eval.critical_members_count < baseline.critical_members_count {
+                    if delta_eigengate > 0.001 || eval.critical_members_count < baseline.critical_members_count {
                         candidates.push(BracingCandidate {
                             from_node: u,
                             to_node: v,
                             section_name: brace_section.name.clone(),
-                            delta_min_ari: delta_ari,
-                            new_min_ari: eval.min_system_ari,
+                            delta_min_eigengate: delta_eigengate,
+                            new_min_eigengate: eval.min_system_eigengate,
                             added_weight_kg: added_weight,
                             efficiency_score: eff,
                             is_mechanism_eliminated: eval.critical_members_count < baseline.critical_members_count,
                             explanation: format!(
-                                "Adding cross-brace ({}, {}) increases system minimum ARI from {:.3} to {:.3} (+{:.1}%), reducing critical members from {} to {}.",
-                                u, v, baseline_min, eval.min_system_ari, delta_ari * 100.0, baseline.critical_members_count, eval.critical_members_count
+                                "Adding cross-brace ({}, {}) increases system minimum EigenGate from {:.3} to {:.3} (+{:.1}%), reducing critical members from {} to {}.",
+                                u, v, baseline_min, eval.min_system_eigengate, delta_eigengate * 100.0, baseline.critical_members_count, eval.critical_members_count
                             ),
                         });
                     }
@@ -110,13 +110,13 @@ impl AriTopologyOptimizer {
         }
 
         candidates.sort_by(|a, b| {
-            b.delta_min_ari.partial_cmp(&a.delta_min_ari).unwrap_or(std::cmp::Ordering::Equal)
+            b.delta_min_eigengate.partial_cmp(&a.delta_min_eigengate).unwrap_or(std::cmp::Ordering::Equal)
         });
 
         let best = candidates.first().cloned();
 
         Ok(BracingOptimizationReport {
-            baseline_min_ari: baseline_min,
+            baseline_min_eigengate: baseline_min,
             critical_members_count: baseline.critical_members_count,
             candidates_evaluated: evaluated_count,
             recommendations: candidates,
@@ -137,13 +137,13 @@ mod tests {
         let mut model = engine.generate_warren_truss().expect("Generate Warren");
         model.add_load(NodalLoad::force_y(3, -50_000.0));
 
-        let opt_report = AriTopologyOptimizer::optimize_bracing(&model, Some(10.0))
+        let opt_report = EigenGateTopologyOptimizer::optimize_bracing(&model, Some(10.0))
             .expect("Bracing optimization should run");
 
         assert!(opt_report.candidates_evaluated > 0);
-        // If candidates found, verify delta_min_ari is non-negative
+        // If candidates found, verify delta_min_eigengate is non-negative
         if let Some(best) = &opt_report.best_candidate {
-            assert!(best.new_min_ari >= opt_report.baseline_min_ari);
+            assert!(best.new_min_eigengate >= opt_report.baseline_min_eigengate);
             assert!(best.added_weight_kg > 0.0);
         }
     }

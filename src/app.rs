@@ -627,9 +627,9 @@ impl App for EigenGraphApp {
                         self.parametric_view.bim_bus.project = self.build_view.bim_bus.project.clone();
                         self.build_view.bim_console_logs.push(rep.summary.clone());
                         self.build_view.modify_status_msg = Some(format!(
-                            "Auto-Repaired: Min ARI {:.3}->{:.3}, Max DCR {:.0}%->{:.0}%",
-                            rep.before_min_ari,
-                            rep.after_min_ari,
+                            "Auto-Repaired: Min EigenGate {:.3}->{:.3}, Max DCR {:.0}%->{:.0}%",
+                            rep.before_min_eigengate,
+                            rep.after_min_eigengate,
                             rep.before_max_dcr * 100.0,
                             rep.after_max_dcr * 100.0
                         ));
@@ -1131,7 +1131,7 @@ impl EigenGraphApp {
         let lens_pillar = match self.spatial_workspace.active_lens {
             SpatialLens::Clean => NavigationPillar::GeometryAssembly,
             SpatialLens::DcrHeatmap
-            | SpatialLens::AriRedundancy
+            | SpatialLens::EigenGateRedundancy
             | SpatialLens::AxialForce
             | SpatialLens::ShearForce
             | SpatialLens::BendingMoment
@@ -1981,13 +1981,13 @@ impl EigenGraphApp {
                         .fit_view_to_project(&mut self.universal_canvas, &self.members);
                     self.spatial_workspace.push_trace(
                         format!(
-                            "AI -> IFCX '{}': {}F ({}C, {}B, {}S) | min ARI {:.2} | max DCR {:.0}% | {}",
+                            "AI -> IFCX '{}': {}F ({}C, {}B, {}S) | min EigenGate {:.2} | max DCR {:.0}% | {}",
                             rep.building_name,
                             rep.inferred_storeys,
                             rep.inferred_columns,
                             rep.inferred_beams,
                             rep.inferred_slabs,
-                            rep.min_ari,
+                            rep.min_eigengate,
                             rep.max_dcr_pct,
                             rep.triage_grade
                         ),
@@ -2077,13 +2077,13 @@ impl EigenGraphApp {
                 self.spatial_workspace.push_trace(
                     if next_before {
                         format!(
-                            "Viewing Pre-Retrofit Baseline (ARI {:.2}, DCR {:.0}%)",
-                            rep.before_min_ari, rep.before_max_dcr_pct
+                            "Viewing Pre-Retrofit Baseline (EigenGate {:.2}, DCR {:.0}%)",
+                            rep.before_min_eigengate, rep.before_max_dcr_pct
                         )
                     } else {
                         format!(
-                            "Viewing Retrofitted Structure (ARI {:.2}, DCR {:.0}%)",
-                            rep.after_min_ari, rep.after_max_dcr_pct
+                            "Viewing Retrofitted Structure (EigenGate {:.2}, DCR {:.0}%)",
+                            rep.after_min_eigengate, rep.after_max_dcr_pct
                         )
                     },
                     true,
@@ -2164,7 +2164,7 @@ impl EigenGraphApp {
                         .push(crate::models::ChatMessage {
                             is_user: false,
                             message: format!(
-                                "[EigenAI Two-Stage ARI v2 + StructGNN-CRC]: {}",
+                                "[EigenAI Two-Stage EigenGate v2 + StructGNN-CRC]: {}",
                                 rep.summary
                             ),
                             time: crate::core::web_bridge::unix_timestamp_label(),
@@ -3098,6 +3098,184 @@ impl EigenGraphApp {
                 .simulate_peer_relay_sync(&self.build_view.bim_bus.project, &self.members);
             self.spatial_workspace.push_trace(msg, true);
         }
+        if let Some(stock_m) = hud_actions.run_field_fabrication {
+            self.universal_canvas.field_fab_config.stock_length_m = stock_m;
+            let rep = self
+                .universal_canvas
+                .run_field_fabrication_audit(&self.build_view.bim_bus.project);
+            self.spatial_workspace.push_trace(rep.summary, true);
+        }
+        if hud_actions.toggle_field_qaqc_3d {
+            self.universal_canvas.field_qaqc_overlay_visible =
+                !self.universal_canvas.field_qaqc_overlay_visible;
+            if self.universal_canvas.field_qaqc_overlay_visible {
+                let rep = self
+                    .universal_canvas
+                    .run_field_fabrication_audit(&self.build_view.bim_bus.project);
+                self.spatial_workspace.push_trace(
+                    format!(
+                        "3D QA/QC Overlay ON ({} waypoints, {} pour strips)",
+                        rep.waypoints.len(),
+                        rep.pour_strips.len()
+                    ),
+                    true,
+                );
+            } else {
+                self.spatial_workspace.push_trace("3D QA/QC Overlay OFF", true);
+            }
+        }
+        if let Some(wp_idx) = hud_actions.fly_to_waypoint_idx {
+            self.universal_canvas.field_qaqc_overlay_visible = true;
+            let rep = self
+                .universal_canvas
+                .run_field_fabrication_audit(&self.build_view.bim_bus.project);
+            if let Some(wp) = rep.waypoints.get(wp_idx) {
+                self.universal_canvas.active_waypoint_idx = wp_idx;
+                let heading_deg = self
+                    .universal_canvas
+                    .active_world_project_rel_path
+                    .as_deref()
+                    .and_then(|r| self.universal_canvas.world_index.get(r))
+                    .map(|b| b.heading_deg)
+                    .unwrap_or(0.0);
+                let rad = heading_deg.to_radians();
+                let ex = wp.local_x_m * rad.cos() - wp.local_y_m * rad.sin();
+                let ny = wp.local_x_m * rad.sin() + wp.local_y_m * rad.cos();
+                let origin = if self.universal_canvas.ground_origin_anchored {
+                    self.universal_canvas.ground_origin_lat_lon
+                } else {
+                    self.universal_canvas.world_map.center_lat_lon
+                };
+                let (w_lat, w_lon) = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                    origin,
+                    [ex * 1000.0, ny * 1000.0],
+                );
+                self.spatial_workspace.active_canvas_mode =
+                    crate::views::spatial_workspace::SpatialCanvasMode::EarthGlobe;
+                self.universal_canvas.globe_mode = true;
+                self.universal_canvas.earth_world.start_fly_to(
+                    &self.universal_canvas.world_map,
+                    w_lat,
+                    w_lon,
+                    18.2,
+                    &wp.code,
+                );
+                self.spatial_workspace.push_trace(
+                    format!("Flew Camera -> {} @ {}", wp.code, wp.element_ref),
+                    true,
+                );
+            }
+        }
+        if let Some(ref target_code) = hud_actions.clear_waypoint_hold {
+            let code_opt = (!target_code.trim().is_empty()).then_some(target_code.as_str());
+            let msg = crate::core::clear_next_or_matching_hold_point(
+                &mut self.universal_canvas.field_qaqc_ledger,
+                code_opt,
+            );
+            let _ = self
+                .universal_canvas
+                .run_field_fabrication_audit(&self.build_view.bim_bus.project);
+            self.spatial_workspace.push_trace(msg, true);
+        }
+        if hud_actions.log_field_ncr_quick {
+            let ncr_id = crate::core::log_quick_field_ncr(
+                &mut self.universal_canvas.field_qaqc_ledger,
+                "Active BIM Structural Bay",
+                "Field inspection NCR logged from 3D Earth Spatial HUD.",
+            );
+            self.universal_canvas.field_qaqc_overlay_visible = true;
+            let _ = self
+                .universal_canvas
+                .run_field_fabrication_audit(&self.build_view.bim_bus.project);
+            self.spatial_workspace
+                .push_trace(format!("Logged {ncr_id} on active site bay"), true);
+        }
+        if hud_actions.export_shop_drawing_svg {
+            let rep = self
+                .universal_canvas
+                .run_field_fabrication_audit(&self.build_view.bim_bus.project);
+            let shop = crate::core::build_fabrication_bbs_shop_svg(
+                &self.build_view.bim_bus.project,
+                &rep,
+                Some(&self.universal_canvas.collab_state),
+                "S-103",
+                "REV 01",
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_rebar_bbs_shop_S103.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &shop.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(shop.sha256_seal);
+                    self.spatial_workspace.push_trace(shop.summary, true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.export_bbs_csv {
+            let rep = self
+                .universal_canvas
+                .run_field_fabrication_audit(&self.build_view.bim_bus.project);
+            let csv = crate::core::CuttingStockOptimizer::export_bbs_csv(&rep.bbs_items);
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_rebar_bbs_schedule.csv");
+            match crate::core::web_bridge::save_text_file(&fname, &csv, "text/csv;charset=utf-8") {
+                Ok(_) => self
+                    .spatial_workspace
+                    .push_trace(format!("Exported {} BBS marks -> {fname}", rep.bbs_items.len()), true),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.export_cutlist_csv {
+            let rep = self
+                .universal_canvas
+                .run_field_fabrication_audit(&self.build_view.bim_bus.project);
+            let csv = crate::core::CuttingStockOptimizer::export_cutting_plan_csv(&rep.cso_report);
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_1d_rebar_cutlist.csv");
+            match crate::core::web_bridge::save_text_file(&fname, &csv, "text/csv;charset=utf-8") {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!(
+                        "Exported {} master stock bars -> {fname}",
+                        rep.cso_report.master_bars_used
+                    ),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.export_field_qaqc_ifcx {
+            let rep = self
+                .universal_canvas
+                .run_field_fabrication_audit(&self.build_view.bim_bus.project);
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_field_qaqc_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_field_qaqc_bbs.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported Field QA/QC & Rebar BBS IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {
@@ -3835,7 +4013,7 @@ impl EigenGraphApp {
                     self.planning_view.active_subtab,
                     crate::views::planning::PlanningSubTab::DynamicRab
                         | crate::views::planning::PlanningSubTab::TakeoffQto
-                        | crate::views::planning::PlanningSubTab::CostAriTradeoff
+                        | crate::views::planning::PlanningSubTab::CostEigenGateTradeoff
                         | crate::views::planning::PlanningSubTab::WbsHierarchy
                         | crate::views::planning::PlanningSubTab::EarnedValueEvm
                         | crate::views::planning::PlanningSubTab::ValueEngineeringBid
@@ -4230,7 +4408,7 @@ impl EigenGraphApp {
             return;
         };
         let report =
-            crate::core::AriEngine::simulate_single_member_removal(&fem_model, &baseline, fid);
+            crate::core::EigenGateEngine::simulate_single_member_removal(&fem_model, &baseline, fid);
         let Some((removed_kind, removed_bim_id)) =
             self.universal_canvas.earth_fem_cache.bim_ref(fid)
         else {
@@ -4244,9 +4422,9 @@ impl EigenGraphApp {
             )
         } else {
             format!(
-                "N-1 Removed {}: Stable (ARI={:.2}, DCR {:.0}%→{:.0}%, Δ {:.1}→{:.1}mm, +{} crit)",
+                "N-1 Removed {}: Stable (EigenGate={:.2}, DCR {:.0}%→{:.0}%, Δ {:.1}→{:.1}mm, +{} crit)",
                 removed_name,
-                report.residual_ari,
+                report.residual_eigengate,
                 report.baseline_max_dcr * 100.0,
                 report.post_max_dcr * 100.0,
                 report.baseline_max_disp_mm,
@@ -4362,8 +4540,8 @@ impl EigenGraphApp {
             cache.modal_modes = modal_rep.modes;
         }
 
-        // 3. Evaluate Adjusted Redundancy Index (ARI) & Populate True 6-DOF Member Forces
-        match crate::core::AriEngine::evaluate_redundancy(&fem) {
+        // 3. Evaluate EigenGate & Populate True 6-DOF Member Forces
+        match crate::core::EigenGateEngine::evaluate_redundancy(&fem) {
             Ok(assessment) => {
                 self.members = fem
                     .elements
@@ -4371,7 +4549,7 @@ impl EigenGraphApp {
                     .enumerate()
                     .map(|(elem_idx, el)| {
                         let res = assessment.member_results.iter().find(|r| r.member_id == el.id);
-                        let ari_val = res.map(|r| r.ari).unwrap_or(0.0);
+                        let eigengate_val = res.map(|r| r.eigengate).unwrap_or(0.0);
                         let axial_kn = fea_opt
                             .as_ref()
                             .and_then(|s| s.member_axial_forces.get(elem_idx))
@@ -4418,8 +4596,8 @@ impl EigenGraphApp {
                             is_critical: res.map(|r| r.is_critical).unwrap_or(false)
                                 || util_val >= 0.85,
                             is_active: true,
-                            ari_score: ari_val,
-                            ari: ari_val,
+                            eigengate_score: eigengate_val,
+                            eigengate: eigengate_val,
                             svd_sensitivity: res
                                 .map(|r| 1.0 - r.svd_margin.clamp(0.0, 1.0))
                                 .unwrap_or(0.0),
@@ -4439,8 +4617,8 @@ impl EigenGraphApp {
                 }
                 self.analyze_view.synced_bim_element_count = self.members.len();
                 self.analyze_view.last_bim_sync_label = format!(
-                    "ARI={:.3} | 6-DOF Δ={:.1}mm | {} FEM ({})",
-                    assessment.average_ari,
+                    "EigenGate={:.3} | 6-DOF Δ={:.1}mm | {} FEM ({})",
+                    assessment.average_eigengate,
                     self.universal_canvas.earth_fem_cache.max_disp_mm,
                     self.members.len(),
                     stamp

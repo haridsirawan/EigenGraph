@@ -452,12 +452,12 @@ impl NonlinearEngine {
             (1.0 + (delta_n_kn / capacity_kn.max(1.0)) * 3.5).clamp(1.0, 8.0)
         };
 
-        let ari_nl = if is_mechanism {
+        let eigenflow_nl = if is_mechanism {
             0.0
         } else {
             (0.5 * (1.0 + rrr_nl) * (1.0 - 0.5 * (delta_n_kn / (capacity_kn * 1.5)).min(1.0)) * (1.0 - 0.03 * (mu - 1.0))).clamp(0.0, 1.0)
         };
-        let ci_nl = 1.0 - ari_nl;
+        let ci_nl = 1.0 - eigenflow_nl;
 
         // Prescriptive Recommendation matching EigenFlow engine standard
         let recommendation = if is_mechanism || alternate_path.is_empty() {
@@ -491,14 +491,14 @@ impl NonlinearEngine {
             alternate_path,
             residual_reserve_ratio_rrr: rrr_nl,
             ductility_demand_mu: mu,
-            non_linear_ari: ari_nl,
+            non_linear_eigenflow: eigenflow_nl,
             non_linear_ci: ci_nl,
             prescriptive_recommendation: recommendation,
         }
     }
 }
 
-/// Result of the Sherman-Morrison / Woodbury Non-Linear Post-Yield Redistribution Analysis (Eqs. 4.13d–4.13g)
+/// Result of the Sherman-Morrison / Woodbury Non-Linear Post-Yield Redistribution Analysis (EigenFlow Engine, Eqs. 4.13d–4.13g)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WoodburyDisruptionReport {
     pub disrupted_element_id: usize,
@@ -512,7 +512,8 @@ pub struct WoodburyDisruptionReport {
     pub alternate_path: Vec<usize>,
     pub residual_reserve_ratio_rrr: f64,
     pub ductility_demand_mu: f64,
-    pub non_linear_ari: f64,
+    #[serde(alias = "non_linear_ari")]
+    pub non_linear_eigenflow: f64,
     pub non_linear_ci: f64,
     pub prescriptive_recommendation: String,
 }

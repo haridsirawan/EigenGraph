@@ -5,7 +5,7 @@
 //!   rotated polygon clear gap against all neighboring buildings inside 200 m.
 //! - **Urban Wind Exposure Calibration & Venturi Channeling (ASCE 7-22 Sec. 26.7)**:
 //!   Determines effective Exposure B/C/D and speed-up factor from local built massing density.
-//! - **Collapse & Crane-Swing Proximity Envelope**: Flags adjacent low-ARI structures inside
+//! - **Collapse & Crane-Swing Proximity Envelope**: Flags adjacent low-EigenGate structures inside
 //!   adjacent debris fall / heavy swing clearance radii.
 
 use super::map_widget::SlippyMapState;
@@ -37,7 +37,7 @@ pub struct NeighborPoundingContact {
     pub neighbor_lat: f64,
     pub neighbor_lon: f64,
     pub neighbor_height_m: f64,
-    pub neighbor_min_ari: f64,
+    pub neighbor_min_eigengate: f64,
     pub clear_gap_m: f64,
     pub required_gap_m: f64,
     pub severity: PoundingSeverity,
@@ -159,7 +159,7 @@ pub fn evaluate_neighborhood_coupling(
 
         let max_h = active_height_m.max(b.total_height_m);
         let inside_collapse_fall_zone =
-            clear_gap_m <= (0.35 * max_h) && (b.min_ari < 0.72 || b.max_dcr >= 0.90);
+            clear_gap_m <= (0.35 * max_h) && (b.min_eigengate < 0.72 || b.max_dcr >= 0.90);
         if inside_collapse_fall_zone {
             report.cascade_overlap_count += 1;
         }
@@ -181,7 +181,7 @@ pub fn evaluate_neighborhood_coupling(
                 neighbor_lat: b.lat,
                 neighbor_lon: b.lon,
                 neighbor_height_m: b.total_height_m,
-                neighbor_min_ari: b.min_ari,
+                neighbor_min_eigengate: b.min_eigengate,
                 clear_gap_m,
                 required_gap_m,
                 severity,
@@ -359,7 +359,7 @@ mod tests {
                 story_count: 11,
                 member_count: 180,
                 max_dcr: 0.96,
-                min_ari: 0.62,
+                min_eigengate: 0.62,
                 source: GeoPlacementSource::UserPinnedOnEarth,
                 address_hint: "Jakarta".to_string(),
             },

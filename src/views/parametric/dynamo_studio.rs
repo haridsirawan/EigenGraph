@@ -656,7 +656,7 @@ impl ParametricView {
         }
 
         let (_, edges, ton) = self.generate_parametric_wireframe();
-        self.refresh_live_ari();
+        self.refresh_live_eigengate();
         let msg = format!(
             "Baked {} ({} mesh struts / {:.1} t): added {} Columns & {} Beams to BIM Project (UNDO ready).",
             self.active_preset.label(),

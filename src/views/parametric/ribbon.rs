@@ -98,7 +98,7 @@ impl ParametricView {
                             {
                                 if let Some(msg) = self.bim_bus.undo() {
                                     self.command_history.push(msg);
-                                    self.refresh_live_ari();
+                                    self.refresh_live_eigengate();
                                 }
                             }
                         });
@@ -119,7 +119,7 @@ impl ParametricView {
                             {
                                 if let Some(msg) = self.bim_bus.redo() {
                                     self.command_history.push(msg);
-                                    self.refresh_live_ari();
+                                    self.refresh_live_eigengate();
                                 }
                             }
                         });
@@ -194,7 +194,7 @@ impl ParametricView {
                         if icons::icon_button(
                             ui,
                             AppIcon::Palette,
-                            "ARI Heat",
+                            "EigenGate Heat",
                             10.5,
                             if self.show_structural_heatmap_2d { Color32::WHITE } else { theme.text_secondary },
                             if self.show_structural_heatmap_2d { theme.accent_green } else { theme.bg_card },
@@ -202,7 +202,7 @@ impl ParametricView {
                             CornerRadius::same(6),
                             Vec2::new(0.0, 26.0),
                         )
-                        .on_hover_text("Toggle live FEM ARI / DCR utilization heatmap overlay on 2D columns and structural runs")
+                        .on_hover_text("Toggle live FEM EigenGate / DCR utilization heatmap overlay on 2D columns and structural runs")
                         .clicked()
                         {
                             self.show_structural_heatmap_2d = !self.show_structural_heatmap_2d;
@@ -505,7 +505,7 @@ impl ParametricView {
                                 if let Some(msg) = self.bim_bus.undo() {
                                     self.save_notification = Some(msg.clone());
                                     self.command_history.push(msg);
-                                    self.refresh_live_ari();
+                                    self.refresh_live_eigengate();
                                 }
                             }
                             if icons::icon_button(
@@ -525,7 +525,7 @@ impl ParametricView {
                                 if let Some(msg) = self.bim_bus.redo() {
                                     self.save_notification = Some(msg.clone());
                                     self.command_history.push(msg);
-                                    self.refresh_live_ari();
+                                    self.refresh_live_eigengate();
                                 }
                             }
                             ui.label(RichText::new("Step:").size(10.0).color(theme.text_muted));
@@ -839,7 +839,7 @@ impl ParametricView {
                                 elevation_mm: next_elev,
                             });
                             self.active_level_idx = self.bim_bus.project.levels.len().saturating_sub(1);
-                            self.refresh_live_ari();
+                            self.refresh_live_eigengate();
                         }
 
                         let cli_w = crate::ui_kit::clamped_row_width(ui, 68.0, 175.0, 146.0);

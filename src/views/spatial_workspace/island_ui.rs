@@ -549,7 +549,7 @@ impl SpatialWorkspaceState {
                     if n1.report.is_kinematic_mechanism {
                         format!("N-1 {} • MECHANISM", n1.removed_name)
                     } else {
-                        format!("N-1 {} • ARI {:.2}", n1.removed_name, n1.report.residual_ari)
+                        format!("N-1 {} • EigenGate {:.2}", n1.removed_name, n1.report.residual_eigengate)
                     },
                     status_col,
                 );
@@ -1483,9 +1483,9 @@ impl SpatialWorkspaceState {
                     ui,
                     AppIcon::Shield,
                     format!(
-                        "Retrofit: ARI {:.2}→{:.2} • DCR {:.0}%→{:.0}% • +{} BRB +{} Jkt • ${:.1}k",
-                        rep.before_min_ari,
-                        rep.after_min_ari,
+                        "Retrofit: EigenGate {:.2}→{:.2} • DCR {:.0}%→{:.0}% • +{} BRB +{} Jkt • ${:.1}k",
+                        rep.before_min_eigengate,
+                        rep.after_min_eigengate,
                         rep.before_max_dcr_pct,
                         rep.after_max_dcr_pct,
                         rep.added_brb_braces,
@@ -1696,15 +1696,15 @@ impl SpatialWorkspaceState {
                 let pf_badge = if let Some(pt) = universal_canvas
                     .last_portfolio_retrofit_report
                     .as_ref()
-                    .and_then(|r| r.active_frontier().map(|p| (r.pre_district_avg_ari, p)))
+                    .and_then(|r| r.active_frontier().map(|p| (r.pre_district_avg_eigengate, p)))
                 {
                     let (pre_avg, p) = pt;
                     format!(
-                        "Portfolio {}/{} • ARI {:.2}→{:.2} • ${:.0}k",
+                        "Portfolio {}/{} • EigenGate {:.2}→{:.2} • ${:.0}k",
                         p.retrofitted_buildings,
                         p.total_buildings,
                         pre_avg,
-                        p.district_avg_ari_after,
+                        p.district_avg_eigengate_after,
                         p.total_cost_usd / 1000.0
                     )
                 } else {
@@ -1718,7 +1718,7 @@ impl SpatialWorkspaceState {
                     "Pareto",
                     self.portfolio_drawer_open,
                     theme.accent_blue,
-                    "Open District Portfolio ARI v2 Pareto Optimizer inside Dynamic Island",
+                    "Open District Portfolio EigenGate v2 Pareto Optimizer inside Dynamic Island",
                 )
                 .clicked()
                 {
@@ -2428,7 +2428,7 @@ impl SpatialWorkspaceState {
                                         AppIcon::ChartLine,
                                         12.5,
                                         theme.accent_green,
-                                        "District Portfolio ARI v2 Pareto Optimizer",
+                                        "District Portfolio EigenGate v2 Pareto Optimizer",
                                         11.0,
                                         theme.text_primary,
                                         true,
@@ -2541,7 +2541,7 @@ impl SpatialWorkspaceState {
                                         format!("Obj: {}", universal_canvas.portfolio_retrofit_config.objective.short_label()),
                                         false,
                                         theme.accent_blue,
-                                        "Cycle optimization objective (ARI/$ / Balanced / Low-CO2 / Max ARI)",
+                                        "Cycle optimization objective (EigenGate/$ / Balanced / Low-CO2 / Max EigenGate)",
                                     )
                                     .clicked()
                                     {
@@ -2580,7 +2580,7 @@ impl SpatialWorkspaceState {
                                 });
                                 ui.add_space(4.0);
                                 if let Some(ref rep) = pf_opt {
-                                    // Pure-vector mini Pareto scatter chart (Cost $k vs District Avg ARI)
+                                    // Pure-vector mini Pareto scatter chart (Cost $k vs District Avg EigenGate)
                                     let chart_w = dw.min(440.0);
                                     let chart_h = 92.0_f32;
                                     let (resp, painter) =
@@ -2597,13 +2597,13 @@ impl SpatialWorkspaceState {
                                         .map(|p| p.total_cost_usd / 1000.0)
                                         .fold(50.0_f64, f64::max)
                                         .max(50.0);
-                                    let min_ari = rep.pre_district_avg_ari.min(0.40);
-                                    let max_ari = rep
+                                    let min_eigengate = rep.pre_district_avg_eigengate.min(0.40);
+                                    let max_eigengate = rep
                                         .pareto_frontier
                                         .iter()
-                                        .map(|p| p.district_avg_ari_after)
+                                        .map(|p| p.district_avg_eigengate_after)
                                         .fold(0.85_f64, f64::max)
-                                        .max(min_ari + 0.10);
+                                        .max(min_eigengate + 0.10);
                                     let pad_l = 32.0_f32;
                                     let pad_r = 12.0_f32;
                                     let pad_t = 12.0_f32;
@@ -2627,14 +2627,14 @@ impl SpatialWorkspaceState {
                                     painter.text(
                                         egui::Pos2::new(r.left() + pad_l + 4.0, r.top() + 3.0),
                                         Align2::LEFT_TOP,
-                                        "Pareto Frontier: Avg ARI vs Cost ($k)",
+                                        "Pareto Frontier: Avg EigenGate vs Cost ($k)",
                                         egui::FontId::proportional(9.0),
                                         theme.text_muted,
                                     );
                                     let mut pts_screen = Vec::with_capacity(rep.pareto_frontier.len());
                                     for p in &rep.pareto_frontier {
                                         let nx = ((p.total_cost_usd / 1000.0) / max_cost_k).clamp(0.0, 1.0) as f32;
-                                        let ny = ((p.district_avg_ari_after - min_ari) / (max_ari - min_ari)).clamp(0.0, 1.0) as f32;
+                                        let ny = ((p.district_avg_eigengate_after - min_eigengate) / (max_eigengate - min_eigengate)).clamp(0.0, 1.0) as f32;
                                         let px = r.left() + pad_l + nx * plot_w;
                                         let py = r.bottom() - pad_b - ny * plot_h;
                                         pts_screen.push(egui::Pos2::new(px, py));
@@ -2667,11 +2667,11 @@ impl SpatialWorkspaceState {
                                                 theme,
                                                 None,
                                                 format!(
-                                                    "F{} {} (${:.0}k | ARI {:.2})",
+                                                    "F{} {} (${:.0}k | EigenGate {:.2})",
                                                     pt.frontier_id,
                                                     pt.label,
                                                     pt.total_cost_usd / 1000.0,
-                                                    pt.district_avg_ari_after
+                                                    pt.district_avg_eigengate_after
                                                 ),
                                                 active,
                                                 theme.accent_green,
@@ -2700,7 +2700,7 @@ impl SpatialWorkspaceState {
                                                     ui.horizontal_wrapped(|ui| {
                                                         let (badge, col) = if let Some(s) = d.selected_strategy {
                                                             (s.short_label(), theme.accent_green)
-                                                        } else if d.pre_min_ari < rep.config.target_min_ari {
+                                                        } else if d.pre_min_eigengate < rep.config.target_min_eigengate {
                                                             ("Deferred", theme.accent_red)
                                                         } else {
                                                             ("Safe", theme.text_muted)
@@ -2713,9 +2713,9 @@ impl SpatialWorkspaceState {
                                                         );
                                                         ui.label(
                                                             RichText::new(format!(
-                                                                "ARI {:.2}->{:.2} | ${:.0}k | {:.1}t",
-                                                                d.pre_min_ari,
-                                                                d.post_min_ari,
+                                                                "EigenGate {:.2}->{:.2} | ${:.0}k | {:.1}t",
+                                                                d.pre_min_eigengate,
+                                                                d.post_min_eigengate,
                                                                 d.estimated_cost_usd / 1000.0,
                                                                 d.embodied_carbon_kg_co2e / 1000.0
                                                             ))
@@ -2813,6 +2813,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.field_qaqc_drawer_open {
+                        self.render_field_qaqc_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -2891,7 +2903,7 @@ impl SpatialWorkspaceState {
                                     if icons::icon_button(
                                         ui,
                                         AppIcon::Wrench,
-                                        "Auto-Repair ARI",
+                                        "Auto-Repair EigenGate",
                                         9.8,
                                         Color32::WHITE,
                                         theme.accent_green,
@@ -3183,15 +3195,15 @@ impl SpatialWorkspaceState {
                                 .iter()
                                 .filter(|b| b.is_critical())
                                 .count();
-                            let (worst_target, max_dcr, min_ari, crit_cnt) =
+                            let (worst_target, max_dcr, min_eigengate, crit_cnt) =
                                 self.structural_health_summary_cached(
                                     &build_view.bim_bus.project,
                                     members,
                                     &universal_canvas.earth_fem_cache,
                                 );
-                            let health_col = if max_dcr > 95.0 || min_ari < 0.65 {
+                            let health_col = if max_dcr > 95.0 || min_eigengate < 0.65 {
                                 theme.accent_red
-                            } else if max_dcr > 75.0 || min_ari < 0.78 {
+                            } else if max_dcr > 75.0 || min_eigengate < 0.78 {
                                 theme.accent_orange
                             } else {
                                 theme.accent_green
@@ -3296,11 +3308,11 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 AppIcon::Bolt,
                                                 format!(
-                                                    "{}C {}B • DCR {:.0}% • ARI {:.2}{}",
+                                                    "{}C {}B • DCR {:.0}% • EigenGate {:.2}{}",
                                                     build_view.bim_bus.project.columns.len(),
                                                     build_view.bim_bus.project.runs.len(),
                                                     max_dcr,
-                                                    min_ari,
+                                                    min_eigengate,
                                                     if crit_cnt > 0 {
                                                         format!(" • Crit {crit_cnt}")
                                                     } else {
@@ -3537,7 +3549,7 @@ impl SpatialWorkspaceState {
                                             for (lens, lbl) in [
                                                 (SpatialLens::Clean, "Clean"),
                                                 (SpatialLens::DcrHeatmap, "DCR%"),
-                                                (SpatialLens::AriRedundancy, "ARI"),
+                                                (SpatialLens::EigenGateRedundancy, "EigenGate"),
                                                 (SpatialLens::BendingMoment, "Moment"),
                                                 (SpatialLens::DeformedShape, "Deform"),
                                                 (SpatialLens::ModalVibration, "Modal"),
@@ -3571,7 +3583,7 @@ impl SpatialWorkspaceState {
                                             ui,
                                             theme,
                                             max_dcr,
-                                            min_ari,
+                                            min_eigengate,
                                             &universal_canvas.earth_fem_cache,
                                             universal_canvas.earth_bim_author.active_modal_mode,
                                             deck_w,
@@ -3600,7 +3612,7 @@ impl SpatialWorkspaceState {
                                                         "CRC + Cascade",
                                                         universal_canvas.last_crc_cascade_report.is_some(),
                                                         theme.accent_orange,
-                                                        "Run Two-Stage ARI v2 + StructGNN-CRC Conformal Screening & 3D Progressive Collapse Cascade",
+                                                        "Run Two-Stage EigenGate v2 + StructGNN-CRC Conformal Screening & 3D Progressive Collapse Cascade",
                                                     )
                                                     .clicked()
                                                     {
@@ -4066,7 +4078,7 @@ impl SpatialWorkspaceState {
                                                         "+ BRB",
                                                         false,
                                                         theme.accent_orange,
-                                                        "Inject 3D Buckling-Restrained Braces (BRB) across low-ARI structural bays",
+                                                        "Inject 3D Buckling-Restrained Braces (BRB) across low-EigenGate structural bays",
                                                     )
                                                     .clicked()
                                                     {
@@ -4151,7 +4163,7 @@ impl SpatialWorkspaceState {
                                                         "Portfolio Pareto",
                                                         pf_on,
                                                         theme.accent_green,
-                                                        "Run multi-building district ARI v2 Pareto optimizer & open frontier drawer",
+                                                        "Run multi-building district EigenGate v2 Pareto optimizer & open frontier drawer",
                                                     )
                                                     .clicked()
                                                     {
@@ -4172,7 +4184,7 @@ impl SpatialWorkspaceState {
                                                         ),
                                                         false,
                                                         theme.accent_blue,
-                                                        "Cycle portfolio Pareto selection objective (ARI/$ / Balanced / Low-CO2 / Max ARI)",
+                                                        "Cycle portfolio Pareto selection objective (EigenGate/$ / Balanced / Low-CO2 / Max EigenGate)",
                                                     )
                                                     .clicked()
                                                     {
@@ -4436,7 +4448,7 @@ impl SpatialWorkspaceState {
                                                                 format!("{world_crit} Crit • Fly"),
                                                                 false,
                                                                 theme.accent_red,
-                                                                "Fly Earth 3D camera to the next high-DCR/low-ARI structure across the Vault",
+                                                                "Fly Earth 3D camera to the next high-DCR/low-EigenGate structure across the Vault",
                                                             )
                                                             .clicked()
                                                         {
@@ -4814,7 +4826,7 @@ impl SpatialWorkspaceState {
                                                 "AI Scan -> IFCX",
                                                 false,
                                                 theme.accent_green,
-                                                "Stream AI real-building massing .ifcx onto Earth with automatic frame inference & instant 6-DOF ARI triage",
+                                                "Stream AI real-building massing .ifcx onto Earth with automatic frame inference & instant 6-DOF EigenGate triage",
                                             )
                                             .clicked()
                                             {
@@ -5303,6 +5315,21 @@ impl SpatialWorkspaceState {
                                                         actions.run_trade_study =
                                                             Some(universal_canvas.trade_study_config.objective);
                                                         actions.run_permit_compliance = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Wrench),
+                                                        "Field QA/QC",
+                                                        self.field_qaqc_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Open Field QA/QC Waypoints, 1D Rebar BBS Cut-List & Sheet S-103",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_field_qaqc_drawer(0);
+                                                        actions.run_field_fabrication =
+                                                            Some(universal_canvas.field_fab_config.stock_length_m);
                                                     }
                                                 },
                                             );
@@ -7156,8 +7183,8 @@ impl SpatialWorkspaceState {
                         ui,
                         AppIcon::Shield,
                         format!(
-                            "Max Drift {:.2}% • Res ARI {:.2}",
-                            rep.max_transient_drift_pct, rep.residual_ari
+                            "Max Drift {:.2}% • Res EigenGate {:.2}",
+                            rep.max_transient_drift_pct, rep.residual_eigengate
                         ),
                         theme.accent_blue,
                     );

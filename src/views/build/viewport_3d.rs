@@ -13,7 +13,7 @@ struct Member3D {
     force_kn: f32,
     capacity_kn: f32,
     utilization: f32,
-    ari: f32,
+    eigengate: f32,
     is_critical: bool,
 }
 
@@ -1020,7 +1020,7 @@ impl BuildView {
                         force_kn: f32,
                         capacity_kn: f32,
                         utilization: f32,
-                        ari: f32,
+                        eigengate: f32,
                         is_critical: bool,
                     }
 
@@ -1045,7 +1045,7 @@ impl BuildView {
                             force_kn: m.force_kn,
                             capacity_kn: m.capacity_kn,
                             utilization: m.utilization,
-                            ari: m.ari,
+                            eigengate: m.eigengate,
                             is_critical: m.is_critical,
                         });
                     }
@@ -1428,12 +1428,12 @@ impl BuildView {
                             Color32::from_rgb(0, 225, 255)
                         } else {
                             match self.color_mode.as_str() {
-                                "ARI" => {
-                                    if item.ari >= 0.85 {
+                                "EigenGate" => {
+                                    if item.eigengate >= 0.85 {
                                         Color32::from_rgb(26, 188, 120) // Emerald Green Safe
-                                    } else if item.ari >= 0.70 {
+                                    } else if item.eigengate >= 0.70 {
                                         Color32::from_rgb(14, 165, 233) // Sky Blue
-                                    } else if item.ari >= 0.55 {
+                                    } else if item.eigengate >= 0.55 {
                                         Color32::from_rgb(245, 158, 11) // Warning Amber
                                     } else {
                                         Color32::from_rgb(239, 68, 68) // Critical Red
@@ -1851,7 +1851,7 @@ impl BuildView {
                     painter.text(
                         tip_pos + Vec2::new(8.0, 70.0),
                         Align2::LEFT_TOP,
-                        format!("ARI Redundancy: {:.3}", item.ari),
+                        format!("EigenGate Redundancy: {:.3}", item.eigengate),
                         egui::FontId::monospace(10.0),
                         theme.accent_green,
                     );
@@ -3307,8 +3307,8 @@ impl BuildView {
             let p2 = (n2.x as f32, n2.y as f32, n2.z as f32);
             let is_col = el.name.contains("Col") || el.name.contains("CL");
             let live_m = fallback_members.iter().find(|m| m.id == el.id);
-            let ari = live_m
-                .map(|m| m.ari as f32)
+            let eigengate = live_m
+                .map(|m| m.eigengate as f32)
                 .unwrap_or_else(|| 0.88 + ((idx % 7) as f32) * 0.015);
             let utilization = live_m.map(|m| m.utilization as f32).unwrap_or(0.42);
             let force_kn = live_m
@@ -3318,7 +3318,7 @@ impl BuildView {
                 .map(|m| m.capacity_kn as f32)
                 .unwrap_or(if is_col { 1450.0 } else { 520.0 });
             let is_critical = live_m
-                .map(|m| m.is_critical || m.utilization > 0.85 || m.ari < 0.70)
+                .map(|m| m.is_critical || m.utilization > 0.85 || m.eigengate < 0.70)
                 .unwrap_or(idx == 0);
             list.push(Member3D {
                 id: el.id,
@@ -3330,7 +3330,7 @@ impl BuildView {
                 force_kn,
                 capacity_kn,
                 utilization,
-                ari,
+                eigengate,
                 is_critical,
             });
         }
@@ -3348,7 +3348,7 @@ impl BuildView {
                     force_kn: m.force_kn as f32,
                     capacity_kn: m.capacity_kn as f32,
                     utilization: m.utilization as f32,
-                    ari: m.ari as f32,
+                    eigengate: m.eigengate as f32,
                     is_critical: m.utilization > 0.85,
                 });
             }
@@ -3534,7 +3534,7 @@ impl BuildView {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(RichText::new("FEM Color Heatmap:").size(11.0).strong().color(theme.text_primary));
                             for (key, lbl, col) in [
-                                ("ARI", "ARI Redundancy", theme.accent_green),
+                                ("EigenGate", "EigenGate Redundancy", theme.accent_green),
                                 ("DCR_Stress", "DCR Utilization %", theme.accent_orange),
                                 ("Tension_Compression", "Axial ±Force", theme.accent_blue),
                                 ("Criticality", "Fracture Criticality", theme.accent_red),
@@ -3572,18 +3572,18 @@ impl BuildView {
 
                     GeometryAnalysisSubTab::SolverAndN1 => {
                         let fem = self.bim_bus.project.to_structural_model();
-                        let ari_res = crate::core::AriEngine::evaluate_redundancy(&fem);
-                        let (sys_ari, intact_pct, status_txt) = match &ari_res {
+                        let eigengate_res = crate::core::EigenGateEngine::evaluate_redundancy(&fem);
+                        let (sys_eigengate, intact_pct, status_txt) = match &eigengate_res {
                             Ok(rep) => (
-                                rep.min_system_ari,
-                                rep.min_system_ari * 100.0,
+                                rep.min_system_eigengate,
+                                rep.min_system_eigengate * 100.0,
                                 format!("{} elements / {} nodes solved", fem.elements.len(), fem.nodes.len()),
                             ),
                             Err(err) => {
                                 let avg = if members.is_empty() {
                                     0.0
                                 } else {
-                                    members.iter().map(|m| m.ari).sum::<f64>() / members.len() as f64
+                                    members.iter().map(|m| m.eigengate).sum::<f64>() / members.len() as f64
                                 };
                                 (avg, avg * 100.0, err.clone())
                             }
@@ -3592,10 +3592,10 @@ impl BuildView {
                         ui_kit::responsive_grid_n(ui, 3, 195.0, |ui, idx| {
                             let (t, v, s, c) = match idx {
                                 0 => (
-                                    "System Redundancy (ARI)",
-                                    format!("{:.3}", sys_ari),
+                                    "System Redundancy (EigenGate)",
+                                    format!("{:.3}", sys_eigengate),
                                     format!("{:.1}% capacity index", intact_pct),
-                                    if sys_ari >= 0.70 { theme.accent_green } else { theme.accent_orange },
+                                    if sys_eigengate >= 0.70 { theme.accent_green } else { theme.accent_orange },
                                 ),
                                 1 => (
                                     "N-1 Eliminated Members",
@@ -3666,7 +3666,7 @@ impl BuildView {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(RichText::new("Open Full Analytical Suite in Analysis:").size(11.0).strong().color(theme.text_primary));
                             for (lbl, tab) in [
-                                ("ARI Redundancy ->", crate::views::analyze::AnalyzeSubTab::RedundancySvd),
+                                ("EigenGate Redundancy ->", crate::views::analyze::AnalyzeSubTab::RedundancySvd),
                                 ("Modal Seismic ->", crate::views::analyze::AnalyzeSubTab::ModalDynamics),
                                 ("Concrete P-M ->", crate::views::analyze::AnalyzeSubTab::ConcretePmInteraction),
                                 ("Steel Connections ->", crate::views::analyze::AnalyzeSubTab::SteelConnection),
@@ -3701,19 +3701,19 @@ impl BuildView {
                         let (_, _, model_members) = self.build_model_geometry(members);
                         if model_members.is_empty() {
                             ui.label(
-                                RichText::new("No structural members yet. Author Columns/Beams/Walls in 3D or load a Template to inspect DCR & ARI.")
+                                RichText::new("No structural members yet. Author Columns/Beams/Walls in 3D or load a Template to inspect DCR & EigenGate.")
                                     .size(11.0)
                                     .color(theme.text_muted),
                             );
                         } else {
                             let mut sorted = model_members;
-                            sorted.sort_by(|a, b| a.ari.total_cmp(&b.ari));
+                            sorted.sort_by(|a, b| a.eigengate.total_cmp(&b.eigengate));
                             ScrollArea::horizontal().id_salt("geom_analysis_members_scroll").show(ui, |ui| {
                                 egui::Grid::new("geom_analysis_members_grid")
                                     .striped(true)
                                     .spacing(Vec2::new(12.0, 5.0))
                                     .show(ui, |ui| {
-                                        for h in ["Member", "Section", "Axial Pu", "DCR %", "ARI", "3D Focus / N-1", "Bridge"] {
+                                        for h in ["Member", "Section", "Axial Pu", "DCR %", "EigenGate", "3D Focus / N-1", "Bridge"] {
                                             ui.label(RichText::new(h).size(10.5).strong().color(theme.accent_blue));
                                         }
                                         ui.end_row();
@@ -3725,7 +3725,7 @@ impl BuildView {
                                             let dcr_pct = m.utilization * 100.0;
                                             let dcr_col = if dcr_pct >= 85.0 { theme.accent_red } else if dcr_pct >= 60.0 { theme.accent_orange } else { theme.accent_green };
                                             ui.label(RichText::new(format!("{:.1}%", dcr_pct)).size(10.5).strong().color(dcr_col));
-                                            ui.label(RichText::new(format!("{:.3}", m.ari)).size(10.5).monospace().color(theme.accent_blue));
+                                            ui.label(RichText::new(format!("{:.3}", m.eigengate)).size(10.5).monospace().color(theme.accent_blue));
                                             ui.horizontal(|ui| {
                                                 let sel = self.selected_member_id == Some(m.id);
                                                 if ui.selectable_label(sel, "Focus 3D").clicked() {
@@ -3746,8 +3746,8 @@ impl BuildView {
                                                     crate::views::analyze::AnalyzeSubTab::MemberCriticality,
                                                     Some(m.id),
                                                     format!(
-                                                        "Inspected #{} {} (ARI {:.3}, DCR {:.1}%) from Geometry",
-                                                        m.id, m.name, m.ari, dcr_pct
+                                                        "Inspected #{} {} (EigenGate {:.3}, DCR {:.1}%) from Geometry",
+                                                        m.id, m.name, m.eigengate, dcr_pct
                                                     ),
                                                 ));
                                             }

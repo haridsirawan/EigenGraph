@@ -7,6 +7,23 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.8.2] - 2026-11-24 — EigenGate / EigenFlow Migration, Field Construction QA/QC Spatial Waypoints, 1D Rebar BBS Cut-List & Sheet S-103 Shop Annex
+
+### Added & Changed
+- **Platform-Wide `ARI` → `EigenGate` (Linear) & `EigenFlow` (Non-Linear) Deep Refactor (`src/core/eigengate.rs`, `src/core/nonlinear.rs`, `src/core/ifcx.rs`, `src/core/optimizer.rs`, `src/core/vault.rs`, `src/models.rs`, `src/views/`)**:
+  - Migrated `src/core/ari.rs` → `src/core/eigengate.rs` (`EigenGateEngine`, `EigenGateConfig`, `EigenGateTopologyOptimizer`, `EigenGateKnowledgeMemory`, `IfcxEigenGateOverlay`), translated all remaining legacy comments to professional Civil & Structural Engineering English, and aligned Branch 1 **EigenGate** (Linear Pre-Analysis & Gatekeeper, [haridsirawan/EigenGate](https://github.com/haridsirawan/EigenGate)) with Branch 2 **EigenFlow** (Non-Linear Woodbury & Pushover, [haridsirawan/EigenFlow](https://github.com/haridsirawan/EigenFlow)).
+  - Preserved full backward compatibility with `#[serde(alias = ...)]` on persisted structs, `eigengraph::ari::v2` -> `eigengraph::eigengate::v2` fallback, legacy vault memory reads, and `/ari` -> `/eigengate` command aliasing while enforcing zero legacy `"ARI"` terminology in UI labels and Sheet SVG/CSV reports.
+- **Field Construction QA/QC Spatial Waypoints & 1D Rebar BBS Cut-List Engine (`src/core/field_fabrication.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Coupled `BimProject`, `CuttingStockOptimizer` (`12.0 m` / `6.0 m` Best-Fit Decreasing 1D rebar cut-list optimization & SNI 2847 / BS 8666 Bar Bending Schedules), and `FieldQualityControlLedger` (`ConcreteCylinderBatch` f'c 28-day tests, ITP hold points, and NCR punch items) into spatial 3D ENU waypoints (`FieldWaypoint`) and concrete pour-strip volumes (`PourStripZone`), emitted via non-destructive `eigengraph::construction::field_qaqc_bbs` IFCX overlays (`IfcxStage::compose_with_field_qaqc_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Field QA/QC Pour-Strips & NCR Beacons + Sheet `S-103` SVG (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added `build_rtc_field_qaqc_mesh` (`material_kind = 11.0`, WGSL `kind >= 10.5` analytical beacon pulse/rim glow, 0% raster), dedicated `field_qaqc` GPU slot in `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_field_qaqc_fallback`), and archival A3 landscape Sheet `S-103` Pure-Vector Shop-Drawing Annex SVG (`build_fabrication_bbs_shop_svg`, 0 `<image>`).
+- **Width-First Dynamic Island `Field QA/QC & Rebar BBS` Drawer, Commands & About EigenGraph (`src/views/spatial_workspace/`, `src/views/settings.rs`, `src/app.rs`)**:
+  - Added the 2-tab width-first **`Field QA/QC & Rebar BBS`** Dynamic Island drawer (`Rebar BBS & Cut-List` with pure-vector cutting-stock bar visualizer & CSV/SVG exports + `Field Waypoints & ITP/NCR` with 3D toggle, `Fly` camera buttons, `Clear Hold`, `Log NCR`, and `.ifcx` export), `/bbs`, `/cutlist`, `/qaqc-3d`, `/waypoint`, `/shop-svg`, `/eigengate`, `/eigenflow` slash commands, `[[RUN_BBS_OPTIMIZE:...]]` / `[[TOGGLE_QAQC_3D]]` / `[[EXPORT_SHOP_SVG]]` / `[[RUN_EIGENFLOW]]` Gemini directives, and updated `Settings -> About EigenGraph` (`v0.8.2 • LATEST`).
+- **Verification**:
+  - Verified clean native test suite (`cargo test --lib` — all unit tests passing with 0 warnings, including `test_field_fabrication_bim_rebar_and_cutlist_12m_vs_6m`, `test_field_qaqc_ledger_mutations_and_ifcx_overlay`, real Metal GPU `test_phase82_webgpu_field_qaqc_mesh_and_real_gpu_render`, Sheet `S-103` SVG assertions in `test_phase72_pure_vector_engineering_dossier_svg_and_sha256_seal`, and responsive width-first Dynamic Island test `phase82_field_qaqc_bbs_drawer_responsive_and_commands_and_directives` across `1600px`/`1280px`/`768px`/`390px`), `cargo check --bin eigengraph --target wasm32-unknown-unknown`, `cargo build --bin eigengraph --target wasm32-unknown-unknown --release`, zero WebGL/`glow`/`glutin` crates, zero `<image>` raster tags, and zero `"ARI"` in UI/reports.
+
+---
+
 ## [v0.8.1] - 2026-11-24 — Parametric Trade-Study Matrix, Automated SNI/ASCE Permit Compliance Annex & Live Peer IFCX Sync Relay
 
 ### Added & Changed
