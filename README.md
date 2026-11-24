@@ -2,9 +2,9 @@
 
 <img src="assets/logo.png" width="360" alt="EigenGraph Logo" />
 
-# EigenGraph — EigenGate (Linear), EigenFlow (Non-Linear) & Spatial Structural Analytics
+# EigenGraph Powered by EigenGate & EigenFlow
 
-### Doctoral Dissertation Reference Platform (Rust + WebAssembly / 100% Pure WebGPU)
+### Doctoral Dissertation Reference Platform (Rust + WebGPU)
 
 [![Live Web App](https://img.shields.io/badge/web%20app-eigengraph.net-0A84FF?style=for-the-badge&logo=cloudflare&logoColor=white)](https://eigengraph.net/)
 [![Version](https://img.shields.io/badge/version-v0.8.2-5B92A5?style=for-the-badge)](docs/CHANGELOG.md)
