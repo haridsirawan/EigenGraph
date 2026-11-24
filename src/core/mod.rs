@@ -36,6 +36,7 @@ pub mod isolation;
 pub mod time_history;
 pub mod fema_p58;
 pub mod gpu_fragility_mc;
+pub mod ifcx_collab;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -248,6 +249,14 @@ pub use gpu_fragility_mc::{
     run_fema_p58_monte_carlo_cpu, ComputeBackendKind, DowntimeHistogramBin, LossExceedancePoint,
     MonteCarloFragilityConfig, MonteCarloFragilityReport, RediTierProbabilities, StoryDemandInput,
     NS_EG_GPU_MONTE_CARLO_LOSS,
+};
+pub use ifcx_collab::{
+    apply_conflict_resolution, evaluate_district_risk_field, synthesize_peer_branch_doc,
+    three_way_merge_ifcx, verify_checkpoint_chain, CheckpointApprovalStatus, CollabDiscipline,
+    ConflictResolution, DistrictRiskFieldReport, DistrictRiskGridCell, DistrictRiskHotspot,
+    DistrictRiskMetric, IfcxCheckpointKpi, IfcxCheckpointRecord, IfcxCollabBundle,
+    IfcxCollabConfig, IfcxCollabState, IfcxMergeConflict, IfcxThreeWayMergeResult,
+    NS_EG_GOVERNANCE_SEAL,
 };
 
 

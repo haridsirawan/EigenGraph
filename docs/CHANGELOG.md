@@ -7,6 +7,21 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.8.0] - 2026-11-24 — Collaborative Multi-Layer IFCX Governance, Signed Checkpoints & 3D WebGPU District Risk Field Heatmap
+
+### Added & Changed
+- **Collaborative Multi-Layer IFCX Governance, SHA-256 Checkpoints & Deterministic 3-Way Merge (`src/core/ifcx_collab.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`, `src/core/vector_dossier.rs`)**:
+  - Implemented cryptographically chained SHA-256 checkpoint records (`IfcxCheckpointRecord` + `IfcxCollabState`) tracking `Structural`, `Geotechnical`, `Architecture`, `EmergencyOps`, and `PeerReview` revisions with frozen `ARI v2`, `DCR%`, ATC-20 placard, FEMA P-58 PML-90, and evacuation connectivity KPIs, formal `Draft` -> `Approved` sign-off, tamper detection, `.ifcx-bundle.json` team handover packages, non-destructive `eigengraph::governance::checkpoint_seal` IFCX overlays (`IfcxStage::compose_with_governance_seal_overlay`), and A3 Pure-Vector SVG title-block checkpoint provenance.
+  - Added deterministic path- and attribute-level Three-Way IFCX Merge (`three_way_merge_ifcx`, `synthesize_peer_branch_doc`, `apply_conflict_resolution`) supporting automated non-conflicting node composition plus interactive per-conflict `KeepLocal` / `KeepIncoming` / `KeepBothLayered` reconciliation.
+- **3D Pure WebGPU (`wgpu` + WGSL) District Risk Field Heatmap (`src/views/webgpu_earth/mesh_builders.rs`, `src/views/webgpu_earth/mod.rs`, `src/views/universal_canvas/render_layers.rs`)**:
+  - Implemented Inverse-Distance-Weighted (`evaluate_district_risk_field`) District Risk Field mapping `CompositeRisk`, `McPml90Loss`, `StructuralAri`, and `EvacuationIsolation` over `IfcSite` TIN terrain and `WorldSpatialIndex` buildings, rendered via analytical WGSL iso-contour lines (`material_kind = 10.0`, dedicated `risk_heatmap` GPU slot, 0% raster pixels) with pure-vector CPU fallback and `.eigen.json` configuration persistence.
+- **Width-First Dynamic Island Governance Drawer, Slash Commands, Gemini Directives & About EigenGraph (`src/views/spatial_workspace/`, `src/views/settings.rs`, `src/app.rs`)**:
+  - Added the exclusive 2-tab width-first `IFCX Governance & Risk` drawer (`Checkpoints & Merge` & `District Risk Field` with pure-vector tier distribution chart and clickable `Fly` hotspot list), `/checkpoint`, `/approve`, `/merge-ifcx`, `/risk-map`, `/collab-ifcx` slash commands, `[[CREATE_CHECKPOINT:...]]`, `[[APPROVE_CHECKPOINT]]`, `[[TOGGLE_RISK_HEATMAP:...]]` Gemini directives, and prepended `v0.8.0 • LATEST` inside `Settings -> About EigenGraph`.
+- **Verification**:
+  - Verified clean native test suite (`cargo test --lib` — all 283 unit tests passing with 0 warnings, including `phase80_ifcx_signed_checkpoints_three_way_merge_and_tamper_seal`, real Metal GPU `test_phase80_webgpu_district_risk_heatmap_mesh_and_real_gpu_render`, and responsive width-first Dynamic Island test `test_phase80_collab_and_risk_map_slash_commands_zero_overflow` across `1600px`/`1280px`/`768px`/`390px`), `cargo check --bin eigengraph --target wasm32-unknown-unknown`, `cargo build --bin eigengraph --target wasm32-unknown-unknown --release`, zero WebGL/`glow`/`glutin` crates, and zero external raster tokens.
+
+---
+
 ## [v0.7.9] - 2026-11-24 — WebGPU `@compute` WGSL Multi-Hazard Particles & FEMA P-58 Monte Carlo Fragility Accelerator
 
 ### Added & Changed

@@ -884,6 +884,22 @@ impl SpatialWorkspaceState {
                         self.open_shm_drawer();
                     }
                 }
+                if universal_canvas.collab_state.config.risk_heatmap_visible {
+                    let metric_lbl = universal_canvas.collab_state.config.risk_metric.short_label();
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Flame),
+                        format!("Risk Map: {metric_lbl}"),
+                        self.collab_drawer_open && self.collab_drawer_tab == 1,
+                        theme.accent_red,
+                        "Open 3D District Risk Field Heatmap & Hotspot drawer",
+                    )
+                    .clicked()
+                    {
+                        self.open_collab_drawer(1);
+                    }
+                }
             }
             if let crate::core::ground_motion_replay::AsyncReplayJobPhase::Running {
                 progress,
@@ -1749,6 +1765,8 @@ impl SpatialWorkspaceState {
                 universal_canvas.evacuation_config.overlay_visible = false;
                 universal_canvas.last_evacuation_report = None;
                 self.evacuation_drawer_open = false;
+                universal_canvas.collab_state.config.risk_heatmap_visible = false;
+                self.collab_drawer_open = false;
                 actions.sync_fem_and_earth = true;
             }
         });
@@ -1793,7 +1811,8 @@ impl SpatialWorkspaceState {
                 || self.portfolio_drawer_open
                 || self.ground_motion_drawer_open
                 || self.shm_drawer_open
-                || self.evacuation_drawer_open,
+                || self.evacuation_drawer_open
+                || self.collab_drawer_open,
         );
 
         let compact_w = if is_mobile {
@@ -2772,6 +2791,18 @@ impl SpatialWorkspaceState {
 
                     if self.evacuation_drawer_open {
                         self.render_evacuation_lifelines_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
+                    if self.collab_drawer_open {
+                        self.render_collab_and_risk_drawer(
                             ui,
                             theme,
                             universal_canvas,
@@ -4999,6 +5030,28 @@ impl SpatialWorkspaceState {
                                                     {
                                                         actions.export_evacuation_ifcx = true;
                                                     }
+                                                    let rm_on = universal_canvas
+                                                        .collab_state
+                                                        .config
+                                                        .risk_heatmap_visible;
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Flame),
+                                                        "3D Risk Map",
+                                                        rm_on || (self.collab_drawer_open && self.collab_drawer_tab == 1),
+                                                        theme.accent_red,
+                                                        "Toggle 3D Pure WebGPU District Risk Field Heatmap & Hotspots",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        universal_canvas
+                                                            .collab_state
+                                                            .config
+                                                            .risk_heatmap_visible = !rm_on;
+                                                        self.open_collab_drawer(1);
+                                                        actions.refresh_district_risk_field = true;
+                                                    }
                                                 },
                                             );
                                         }
@@ -5221,6 +5274,19 @@ impl SpatialWorkspaceState {
                                                     .clicked()
                                                     {
                                                         actions.export_vector_dossier_svg = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Shield),
+                                                        "Gov / Merge",
+                                                        self.collab_drawer_open && self.collab_drawer_tab == 0,
+                                                        theme.accent_blue,
+                                                        "Open SHA-256 Checkpoints, Sign-Off & 3-Way IFCX Merge drawer",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_collab_drawer(0);
                                                     }
                                                 },
                                             );

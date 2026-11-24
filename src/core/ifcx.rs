@@ -75,6 +75,7 @@ pub mod ns {
     pub const EG_EVACUATION_LIFELINES: &str = "eigengraph::analysis::evacuation_lifelines";
     pub const EG_SHM_WATCHDOG: &str = "eigengraph::analysis::shm_watchdog";
     pub const EG_GPU_MONTE_CARLO_LOSS: &str = "eigengraph::analysis::gpu_monte_carlo_loss";
+    pub const EG_GOVERNANCE_SEAL: &str = "eigengraph::governance::checkpoint_seal";
 }
 
 fn default_ifcx_version() -> String {
@@ -1385,10 +1386,22 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), mc_overlay.clone()]);
         stage.to_composed_document(&format!("{}_gpu_monte_carlo_loss", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive signed governance checkpoint seal
+    /// overlay (`eigengraph::governance::checkpoint_seal`).
+    pub fn compose_with_governance_seal_overlay(
+        base_doc: &IfcxDocument,
+        gov_overlay: &IfcxDocument,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[base_doc.clone(), gov_overlay.clone()]);
+        stage.to_composed_document(&format!("{}_governance_seal", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_GPU_MONTE_CARLO_LOSS) {
+    if node.attributes.contains_key(ns::EG_GOVERNANCE_SEAL) {
+        "Governance Seal".to_string()
+    } else if node.attributes.contains_key(ns::EG_GPU_MONTE_CARLO_LOSS) {
         "GPU Monte Carlo Risk".to_string()
     } else if node.attributes.contains_key(ns::EG_SHM_WATCHDOG) {
         "SHM Live Watchdog".to_string()

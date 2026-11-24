@@ -268,6 +268,8 @@ pub struct UnifiedWorkspaceArchive {
     pub shm_watchdog: crate::core::shm_watchdog::ShmWatchdogConfig,
     #[serde(default)]
     pub monte_carlo_config: crate::core::gpu_fragility_mc::MonteCarloFragilityConfig,
+    #[serde(default)]
+    pub collab_config: crate::core::ifcx_collab::IfcxCollabConfig,
     pub sha256_seal: String,
 }
 

@@ -36,6 +36,7 @@ pub struct VectorDossierInput<'a> {
     pub evacuation_report: Option<&'a crate::core::evacuation_routing::EvacuationLifelineReport>,
     pub watchdog_state: Option<&'a crate::core::shm_watchdog::ShmWatchdogState>,
     pub monte_carlo_report: Option<&'a crate::core::gpu_fragility_mc::MonteCarloFragilityReport>,
+    pub collab_state: Option<&'a crate::core::ifcx_collab::IfcxCollabState>,
     pub sheet_code: &'a str,
     pub revision: &'a str,
 }
@@ -931,18 +932,34 @@ fn draw_title_block_panel(svg: &mut String, input: &VectorDossierInput<'_>, plac
         );
     }
 
+    let gov_line = input
+        .collab_state
+        .and_then(|cs| cs.active_checkpoint())
+        .map(|cp| {
+            format!(
+                r##"
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#065f46">GOVERNANCE CHECKPOINT: {} [{}] ({}) • Chain SHA {}</text>"##,
+                px + 28.0,
+                py + 455.0,
+                escape_xml(&cp.checkpoint_id),
+                escape_xml(cp.approval_status.short_label()),
+                escape_xml(cp.discipline.short_label()),
+                escape_xml(cp.short_sha256()),
+            )
+        })
+        .unwrap_or_default();
     let _ = writeln!(
         svg,
-        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="68" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.2"/>
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="74" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.2"/>
 <text x="{:.1}" y="{:.1}" font-size="10" font-weight="bold" fill="#065f46">CRYPTOGRAPHIC INTEGRITY &amp; PURE-VECTOR SEAL</text>
-<text x="{:.1}" y="{:.1}" font-size="8.5" font-family="monospace" fill="#047857">SHA-256: {placeholder_seal}</text>"##,
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-family="monospace" fill="#047857">SHA-256: {placeholder_seal}</text>{gov_line}"##,
         px + 16.0,
-        py + 392.0,
+        py + 388.0,
         pw - 32.0,
         px + 28.0,
-        py + 418.0,
+        py + 412.0,
         px + 28.0,
-        py + 440.0,
+        py + 434.0,
     );
 }
 
@@ -1077,6 +1094,14 @@ mod tests {
                 ..Default::default()
             },
         );
+        let mut collab = crate::core::ifcx_collab::IfcxCollabState::default();
+        collab.create_checkpoint(
+            "Approved Basis",
+            crate::core::ifcx_collab::CollabDiscipline::Structural,
+            layered.clone(),
+            crate::core::ifcx_collab::IfcxCheckpointKpi::default(),
+        );
+        let _ = collab.approve_active_checkpoint("Lead Reviewer");
         let export = build_pure_vector_engineering_dossier_svg(&VectorDossierInput {
             project: &proj,
             members: &members,
@@ -1093,6 +1118,7 @@ mod tests {
             evacuation_report: None,
             watchdog_state: None,
             monte_carlo_report: Some(&mc_rep),
+            collab_state: Some(&collab),
             sheet_code: "S-101",
             revision: "REV 01",
         });
@@ -1103,6 +1129,7 @@ mod tests {
         assert!(export.svg_content.trim_end().ends_with("</svg>"));
         assert!(!export.svg_content.contains("<image"));
         assert!(!export.svg_content.contains("data:image"));
+        assert!(export.svg_content.contains("GOVERNANCE CHECKPOINT: CP-001 [APPROVED]"));
         assert!(export.svg_content.contains("NL-THA Ground-Motion &amp; Hinges"));
         assert!(export.svg_content.contains("MC PML90"));
         assert!(export.svg_content.contains("Tower &lt;A &amp; B&gt;"));
@@ -1140,6 +1167,7 @@ mod tests {
             evacuation_report: None,
             watchdog_state: None,
             monte_carlo_report: None,
+            collab_state: None,
             sheet_code: "S-102",
             revision: "REV 02",
         });
@@ -1180,6 +1208,7 @@ mod tests {
             evacuation_report: Some(&evac_rep),
             watchdog_state: Some(&wd),
             monte_carlo_report: None,
+            collab_state: None,
             sheet_code: "S-103",
             revision: "REV 03",
         });

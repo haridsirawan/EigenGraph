@@ -2467,3 +2467,76 @@ pub fn build_rtc_evacuation_lifelines_mesh(
     }
 }
 
+/// GPU input payload for Phase 80 District Risk Field Heatmap (`material_kind = 10.0`).
+pub struct DistrictRiskHeatmapGpuInput<'a> {
+    pub report: &'a crate::core::ifcx_collab::DistrictRiskFieldReport,
+    pub opacity: f32,
+    pub visible: bool,
+}
+
+fn risk_ramp_rgba(risk_01: f32, opacity: f32) -> [f32; 4] {
+    let t = risk_01.clamp(0.0, 1.0);
+    let rgb = if t < 0.35 {
+        let u = t / 0.35;
+        mix_rgb([0.06, 0.72, 0.50, 1.0], [0.02, 0.71, 0.83, 1.0], u)
+    } else if t < 0.65 {
+        let u = (t - 0.35) / 0.30;
+        mix_rgb([0.02, 0.71, 0.83, 1.0], [0.96, 0.62, 0.04, 1.0], u)
+    } else {
+        let u = (t - 0.65) / 0.35;
+        mix_rgb([0.96, 0.62, 0.04, 1.0], [0.94, 0.24, 0.27, 1.0], u)
+    };
+    [rgb[0], rgb[1], rgb[2], (opacity * (0.45 + 0.45 * t)).clamp(0.15, 0.88)]
+}
+
+/// Builds a terrain-draped pure WebGPU District Risk Field Heatmap mesh (`material_kind = 10.0`)
+/// with continuous IDW grid quads and elevated hotspot octahedron beacons.
+pub fn build_rtc_district_risk_heatmap_mesh(
+    input: &DistrictRiskHeatmapGpuInput<'_>,
+) -> GpuMeshPayload {
+    if !input.visible || input.report.cells.is_empty() {
+        return GpuMeshPayload::default();
+    }
+    let cell_count = input.report.cells.len();
+    let mut verts = Vec::with_capacity(cell_count * 4 + input.report.hotspots.len() * 24);
+    let mut idxs = Vec::with_capacity(cell_count * 6 + input.report.hotspots.len() * 24);
+
+    for cell in &input.report.cells {
+        let z = cell.elev_m + 0.16 + cell.risk_01 * 0.45;
+        let hs = cell.half_step_m * 0.96;
+        let col = risk_ramp_rgba(cell.risk_01, input.opacity);
+        let base = verts.len() as u32;
+        for (dx, dy) in [(-hs, -hs), (hs, -hs), (hs, hs), (-hs, hs)] {
+            verts.push(GpuEarthVertex {
+                pos: [cell.cx_m + dx, cell.cy_m + dy, z],
+                normal: [0.0, 0.0, 1.0],
+                color: col,
+                meta: [10.0, cell.risk_01, 1.0, cell.elev_m],
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    // Elevated hotspot risk beacons over high/critical parcels
+    for h in input.report.hotspots.iter().take(12) {
+        if h.risk_score < 0.45 {
+            continue;
+        }
+        let col = risk_ramp_rgba(h.risk_score, 0.95);
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [h.east_m, h.north_m, 9.5 + h.risk_score * 8.0],
+            1.4 + h.risk_score * 1.1,
+            [col[0], col[1], col[2], 0.92],
+            h.risk_score,
+            10.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

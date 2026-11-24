@@ -436,6 +436,11 @@ pub enum PlannedProposalAction {
     RunGpuMonteCarlo(u32),
     ToggleGpuParticles,
     ExportMcIfcx,
+    // Phase 80: Collaborative Multi-Layer IFCX Governance & 3D Risk Field Heatmap
+    CreateCheckpoint(String),
+    ApproveCheckpoint,
+    RunIfcxMerge,
+    ToggleRiskHeatmap(Option<crate::core::ifcx_collab::DistrictRiskMetric>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -514,6 +519,11 @@ pub enum GeminiDirective {
     RunGpuMonteCarlo(u32),
     ToggleGpuParticles,
     ExportMcIfcx,
+    // Phase 80: Collaborative Multi-Layer IFCX Governance & 3D Risk Field Heatmap
+    CreateCheckpoint(String),
+    ApproveCheckpoint,
+    RunIfcxMerge,
+    ToggleRiskHeatmap(Option<crate::core::ifcx_collab::DistrictRiskMetric>),
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -728,6 +738,30 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleGpuParticles);
             } else if upper == "EXPORT_MC_IFCX" {
                 directives.push(GeminiDirective::ExportMcIfcx);
+            } else if upper == "CREATE_CHECKPOINT" || upper.starts_with("CREATE_CHECKPOINT:") {
+                let lbl = tag
+                    .split_once(':')
+                    .map(|(_, r)| r.trim().to_string())
+                    .unwrap_or_default();
+                directives.push(GeminiDirective::CreateCheckpoint(lbl));
+            } else if upper == "APPROVE_CHECKPOINT" {
+                directives.push(GeminiDirective::ApproveCheckpoint);
+            } else if upper == "TOGGLE_RISK_HEATMAP" || upper.starts_with("TOGGLE_RISK_HEATMAP:") {
+                let metric = upper.split_once(':').and_then(|(_, r)| {
+                    let k = r.trim();
+                    if k.contains("PML") || k.contains("MC") || k.contains("LOSS") {
+                        Some(crate::core::ifcx_collab::DistrictRiskMetric::McPml90Loss)
+                    } else if k.contains("ARI") || k.contains("DCR") {
+                        Some(crate::core::ifcx_collab::DistrictRiskMetric::StructuralAri)
+                    } else if k.contains("ISO") || k.contains("EVAC") {
+                        Some(crate::core::ifcx_collab::DistrictRiskMetric::EvacuationIsolation)
+                    } else if k.contains("COMP") {
+                        Some(crate::core::ifcx_collab::DistrictRiskMetric::CompositeRisk)
+                    } else {
+                        None
+                    }
+                });
+                directives.push(GeminiDirective::ToggleRiskHeatmap(metric));
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -1465,6 +1499,36 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export non-destructive eigengraph::analysis::gpu_monte_carlo_loss .ifcx overlay",
         icon: AppIcon::Cube3D,
     },
+    SlashCommandSpec {
+        cmd: "/checkpoint",
+        category: "Collab",
+        description: "Capture SHA-256 signed multi-layer .ifcx governance checkpoint (/checkpoint <label>)",
+        icon: AppIcon::CheckCircle,
+    },
+    SlashCommandSpec {
+        cmd: "/approve",
+        category: "Collab",
+        description: "Sign off & approve the active .ifcx governance checkpoint",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/merge-ifcx",
+        category: "Collab",
+        description: "Run deterministic 3-way IFCX merge against peer branch & resolve conflicts",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/risk-map",
+        category: "Hazard",
+        description: "Toggle 3D Pure WebGPU District Risk Field Heatmap (/risk-map composite|pml90|ari|isolation)",
+        icon: AppIcon::Flame,
+    },
+    SlashCommandSpec {
+        cmd: "/collab-ifcx",
+        category: "Export",
+        description: "Export signed .ifcx-bundle.json multi-discipline governance checkpoint chain",
+        icon: AppIcon::SaveDisk,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1526,6 +1590,11 @@ pub struct SpatialHudActions {
     pub export_watchdog_ifcx: bool,
     pub run_gpu_monte_carlo: Option<u32>,
     pub export_monte_carlo_ifcx: bool,
+    pub create_checkpoint_label: Option<String>,
+    pub approve_checkpoint: bool,
+    pub run_ifcx_three_way_merge: bool,
+    pub refresh_district_risk_field: bool,
+    pub export_collab_bundle_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -1891,5 +1960,16 @@ impl SpatialHudActions {
         }
         self.disconnect_shm_ws |= other.disconnect_shm_ws;
         self.export_watchdog_ifcx |= other.export_watchdog_ifcx;
+        if other.run_gpu_monte_carlo.is_some() {
+            self.run_gpu_monte_carlo = other.run_gpu_monte_carlo;
+        }
+        self.export_monte_carlo_ifcx |= other.export_monte_carlo_ifcx;
+        if other.create_checkpoint_label.is_some() {
+            self.create_checkpoint_label = other.create_checkpoint_label;
+        }
+        self.approve_checkpoint |= other.approve_checkpoint;
+        self.run_ifcx_three_way_merge |= other.run_ifcx_three_way_merge;
+        self.refresh_district_risk_field |= other.refresh_district_risk_field;
+        self.export_collab_bundle_ifcx |= other.export_collab_bundle_ifcx;
     }
 }

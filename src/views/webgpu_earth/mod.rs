@@ -492,6 +492,14 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 9.5) {
+        // Phase 80: Pure Analytical WGSL District Risk Field Iso-Contour Heatmap (0% raster)
+        let r_val = clamp(height_m, 0.0, 1.0);
+        let contour_phase = fract(r_val * 8.0);
+        let iso_line = smoothstep(0.0, 0.06, contour_phase) * smoothstep(0.12, 0.06, contour_phase);
+        let pulse = 0.88 + 0.12 * sin(u_time * 2.2 - r_val * 5.0);
+        let boost = mix(f_in.color.rgb * pulse, vec3<f32>(0.98, 0.99, 1.0), iso_line * 0.55);
+        col = boost;
     } else if (kind >= 8.5) {
         // Phase 77: Autonomous Evacuation Corridors, Debris Cordons & Assembly Beacons
         let flow = 0.72 + 0.34 * smoothstep(0.35, 0.95, sin(phase * 0.65 - u_time * 4.5));
@@ -675,6 +683,7 @@ pub struct WebGpuEarthResources {
     fragility_loss: GpuMeshSlot,
     shm_triage: GpuMeshSlot,
     evacuation: GpuMeshSlot,
+    risk_heatmap: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
 }
 
@@ -885,6 +894,7 @@ impl WebGpuEarthResources {
             fragility_loss: GpuMeshSlot::default(),
             shm_triage: GpuMeshSlot::default(),
             evacuation: GpuMeshSlot::default(),
+            risk_heatmap: GpuMeshSlot::default(),
             hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
@@ -1004,6 +1014,7 @@ impl WebGpuEarthResources {
             || self.fragility_loss.index_count > 0
             || self.shm_triage.index_count > 0
             || self.evacuation.index_count > 0
+            || self.risk_heatmap.index_count > 0
             || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1041,6 +1052,7 @@ impl WebGpuEarthResources {
             pass.set_bind_group(0, &self.site_bind_group, &[]);
             self.hinges.draw(&mut pass);
             self.subsurface.draw(&mut pass);
+            self.risk_heatmap.draw(&mut pass);
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
             self.hazard_compute.draw(&mut pass);
@@ -1064,6 +1076,7 @@ struct WebGpuEarthPaintCallback {
     pending_fragility: Option<(u64, GpuMeshPayload)>,
     pending_shm: Option<(u64, GpuMeshPayload)>,
     pending_evacuation: Option<(u64, GpuMeshPayload)>,
+    pending_risk_heatmap: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
 }
 
@@ -1131,6 +1144,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
             if res.evacuation.revision_uploaded != ev_in.0 {
                 res.evacuation
                     .upload(device, queue, "evacuation_mesh", ev_in.0, &ev_in.1);
+            }
+        }
+        if let Some(ref rh_in) = self.pending_risk_heatmap {
+            if res.risk_heatmap.revision_uploaded != rh_in.0 {
+                res.risk_heatmap
+                    .upload(device, queue, "risk_heatmap_mesh", rh_in.0, &rh_in.1);
             }
         }
         if let Some(ref h_cmp) = self.pending_hazard_compute {
@@ -1218,6 +1237,7 @@ pub struct WebGpuEarthState {
     cached_fragility_hash: u64,
     cached_shm_hash: u64,
     cached_evacuation_hash: u64,
+    cached_risk_heatmap_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1228,6 +1248,7 @@ pub struct WebGpuEarthState {
     pub last_fragility_tris: usize,
     pub last_shm_tris: usize,
     pub last_evacuation_tris: usize,
+    pub last_risk_heatmap_tris: usize,
     pub last_compute_particles: u32,
     #[cfg(not(target_arch = "wasm32"))]
     wgpu_device: Option<wgpu::Device>,
@@ -1497,6 +1518,7 @@ impl WebGpuEarthState {
         fragility_input: Option<FragilityLossGpuInput<'_>>,
         shm_input: Option<ShmTriageGpuInput<'_>>,
         evacuation_input: Option<EvacuationLifelineGpuInput<'_>>,
+        risk_heatmap_input: Option<DistrictRiskHeatmapGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
@@ -1785,6 +1807,30 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_risk_heatmap = if render_site_pass {
+            if let Some(ref rh_in) = risk_heatmap_input {
+                let rev = rh_in.report.content_hash
+                    ^ ((rh_in.opacity * 100.0).round() as u64).wrapping_mul(1_000_003)
+                    ^ u64::from(rh_in.visible).wrapping_mul(2_654_435_761);
+                if rev != self.cached_risk_heatmap_hash {
+                    let mesh = build_rtc_district_risk_heatmap_mesh(rh_in);
+                    self.last_risk_heatmap_tris = mesh.indices.len() / 3;
+                    self.cached_risk_heatmap_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_risk_heatmap_hash != 0 {
+                self.cached_risk_heatmap_hash = 0;
+                self.last_risk_heatmap_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let pending_hazard_compute = if render_site_pass {
             if let Some(hc) = hazard_compute_input {
                 if hc.enabled {
@@ -1820,6 +1866,7 @@ impl WebGpuEarthState {
                 pending_fragility,
                 pending_shm,
                 pending_evacuation,
+                pending_risk_heatmap,
                 pending_hazard_compute,
             },
         ));
@@ -1840,12 +1887,14 @@ impl WebGpuEarthState {
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ShmDigitalTwin);
         let evac_animated = evacuation_input.as_ref().is_some_and(|e| e.visible);
+        let risk_heatmap_animated = risk_heatmap_input.as_ref().is_some_and(|r| r.visible);
         let frame_ms = if hazard_animated
             || compute_animated
             || subsurface_animated
             || replay_animated
             || shm_animated
             || evac_animated
+            || risk_heatmap_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

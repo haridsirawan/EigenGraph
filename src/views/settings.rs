@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL + @compute Particles/Monte Carlo, 6-DOF FEM & ARI v2, Live WebSocket SHM Watchdog, ATC-20 Triage, Evacuation Lifelines & Width-First Dynamic Island)",
+                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL + @compute Particles/Monte Carlo, Signed Collaborative IFCX Governance & 3D District Risk Heatmap, 6-DOF FEM & ARI v2, SHM Watchdog, ATC-20 Triage, Evacuation Lifelines & Width-First Dynamic Island)",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)
@@ -719,10 +719,16 @@ impl SettingsView {
             ui.separator();
             ui.add_space(6.0);
 
-            let releases: [(&str, bool, &str, &str); 10] = [
+            let releases: [(&str, bool, &str, &str); 11] = [
+                (
+                    "v0.8.0",
+                    true,
+                    "Collaborative IFCX Governance, Signed Checkpoints & 3D WebGPU District Risk Heatmap",
+                    "SHA-256 tamper-proof checkpoint chain across engineering disciplines, formal Approval sign-off sealed into A3 Pure-Vector SVG dossiers & eigengraph::governance::checkpoint_seal IFCX overlays, deterministic 3-Way Peer IFCX Merge with conflict resolver, .ifcx-bundle.json handover export, and terrain-draped Pure WebGPU WGSL iso-contour District Risk Field Heatmap uniting ARI v2, ATC-20, PML-90, liquefaction & evacuation isolation.",
+                ),
                 (
                     "v0.7.9",
-                    true,
+                    false,
                     "WebGPU @compute Multi-Hazard Particles & FEMA P-58 Monte Carlo Accelerator",
                     "WGSL @compute shaders accelerating 60 FPS seismic wavefield & Venturi wind obstacle particles directly on GPU plus 256-16,384 realization FEMA P-58 Monte Carlo fragility curves (P10/P50/PML-90/CVaR-95 & REDi tier probabilities), eigengraph::analysis::gpu_monte_carlo_loss IFCX overlay, and CPU CI parity.",
                 ),

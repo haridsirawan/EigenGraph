@@ -159,6 +159,9 @@ pub struct UniversalCanvasState {
     // Phase 79: WebGPU Compute Shaders (`@compute` WGSL) & FEMA P-58 Monte Carlo Accelerator
     pub monte_carlo_config: crate::core::gpu_fragility_mc::MonteCarloFragilityConfig,
     pub last_monte_carlo_report: Option<crate::core::gpu_fragility_mc::MonteCarloFragilityReport>,
+    // Phase 80: Collaborative Multi-Layer IFCX Governance, Signed Checkpoints & 3D Risk Field
+    pub collab_state: crate::core::ifcx_collab::IfcxCollabState,
+    pub last_risk_field_report: Option<crate::core::ifcx_collab::DistrictRiskFieldReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -284,6 +287,8 @@ impl Default for UniversalCanvasState {
             shm_watchdog: crate::core::shm_watchdog::ShmWatchdogState::default(),
             monte_carlo_config: crate::core::gpu_fragility_mc::MonteCarloFragilityConfig::default(),
             last_monte_carlo_report: None,
+            collab_state: crate::core::ifcx_collab::IfcxCollabState::default(),
+            last_risk_field_report: None,
         }
     }
 }
@@ -464,6 +469,12 @@ impl UniversalCanvasState {
             doc = crate::core::ifcx::IfcxStage::compose_with_monte_carlo_loss_overlay(
                 &doc,
                 &mc_overlay,
+            );
+        }
+        if let Some(gov_overlay) = self.collab_state.build_governance_seal_overlay(bim_project) {
+            doc = crate::core::ifcx::IfcxStage::compose_with_governance_seal_overlay(
+                &doc,
+                &gov_overlay,
             );
         }
         doc
@@ -676,6 +687,127 @@ impl UniversalCanvasState {
             });
         self.last_monte_carlo_report = Some(report.clone());
         report
+    }
+
+    /// Evaluates the spatial IDW District Risk Field Heatmap draped over `IfcSite` TIN terrain.
+    pub fn refresh_district_risk_field(
+        &mut self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+    ) -> crate::core::ifcx_collab::DistrictRiskFieldReport {
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let rep = crate::core::ifcx_collab::evaluate_district_risk_field(
+            &self.collab_state.config,
+            origin,
+            bim_project,
+            members,
+            &self.world_index,
+            self.active_site_tin.as_ref(),
+            self.last_subsurface_ssi_report.as_ref(),
+            self.last_shm_twin_report.as_ref(),
+            self.last_monte_carlo_report.as_ref(),
+            self.last_evacuation_report.as_ref(),
+        );
+        self.last_risk_field_report = Some(rep.clone());
+        rep
+    }
+
+    /// Captures a SHA-256 chained IFCX governance checkpoint of all active layers + KPI metrics.
+    pub fn create_signed_ifcx_checkpoint(
+        &mut self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+        label: &str,
+    ) -> String {
+        let doc = self.build_active_layered_ifcx(bim_project, members);
+        let min_ari = members.iter().map(|m| m.ari).fold(1.0_f64, f64::min);
+        let max_dcr_pct = members.iter().map(|m| m.utilization * 100.0).fold(0.0_f64, f64::max);
+        let atc20_placard = self
+            .last_shm_twin_report
+            .as_ref()
+            .map(|s| s.atc20_placard.short_label().to_string())
+            .unwrap_or_else(|| "GREEN".to_string());
+        let mc_pml90_usd = self
+            .last_monte_carlo_report
+            .as_ref()
+            .map(|m| m.p90_loss_usd)
+            .unwrap_or(0.0);
+        let evacuation_conn_pct = self
+            .last_evacuation_report
+            .as_ref()
+            .map(|e| e.network_connectivity_pct)
+            .unwrap_or(100.0);
+        let kpi = crate::core::ifcx_collab::IfcxCheckpointKpi {
+            min_ari,
+            max_dcr_pct,
+            atc20_placard,
+            mc_pml90_usd,
+            evacuation_conn_pct,
+            node_count: doc.data.len(),
+        };
+        let disc = self.collab_state.config.active_discipline;
+        let cp = self.collab_state.create_checkpoint(label, disc, doc, kpi);
+        format!(
+            "Created {} '{}' ({}) • Chain SHA-256: {}",
+            cp.checkpoint_id,
+            cp.label,
+            cp.discipline.short_label(),
+            cp.short_sha256()
+        )
+    }
+
+    /// Runs a deterministic Three-Way IFCX Merge between the base checkpoint, current active layer,
+    /// and a multi-discipline peer branch revision.
+    pub fn run_peer_three_way_ifcx_merge(
+        &mut self,
+        bim_project: &BimProject,
+        members: &[StructuralMember],
+    ) -> String {
+        let local_doc = self.build_active_layered_ifcx(bim_project, members);
+        if self.collab_state.checkpoints.is_empty() {
+            let _ = self.create_signed_ifcx_checkpoint(bim_project, members, "Merge Base");
+        }
+        let (base_doc, base_lbl) = match self.collab_state.checkpoints.first() {
+            Some(cp) => (cp.snapshot.clone(), cp.checkpoint_id.clone()),
+            None => (local_doc.clone(), "Base".to_string()),
+        };
+        let peer_disc = self.collab_state.peer_discipline;
+        let peer_doc = crate::core::ifcx_collab::synthesize_peer_branch_doc(&base_doc, peer_disc);
+        let mut local_edited = local_doc.clone();
+        if let Some(node) = local_edited
+            .data
+            .iter_mut()
+            .find(|n| n.attributes.contains_key(crate::core::ifcx::ns::EG_BIM_PROJECT) || n.attributes.contains_key(crate::core::ifcx::ns::BSI_PROP))
+        {
+            let mut prop = node
+                .attributes
+                .get(crate::core::ifcx::ns::BSI_PROP)
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            if let Some(obj) = prop.as_object_mut() {
+                obj.entry("peer_review_note".to_string())
+                    .or_insert_with(|| serde_json::json!("Local Structural: ductile boundary verified"));
+                obj.entry("discipline_revision".to_string())
+                    .or_insert_with(|| serde_json::json!("STRUCT-R2"));
+            }
+            node.attributes
+                .insert(crate::core::ifcx::ns::BSI_PROP.to_string(), prop);
+        }
+        let merge = crate::core::ifcx_collab::three_way_merge_ifcx(
+            &base_doc,
+            &local_edited,
+            &peer_doc,
+            &base_lbl,
+            "Local Structural",
+            &self.collab_state.peer_branch_label,
+        );
+        let msg = merge.summary.clone();
+        self.collab_state.last_merge = Some(merge);
+        msg
     }
 
     /// Builds frame parameters for the Pure WebGPU `@compute` 60 FPS multi-hazard particle pass.
@@ -953,6 +1085,7 @@ impl UniversalCanvasState {
             evacuation_routing: self.evacuation_config.clone(),
             shm_watchdog: self.shm_watchdog.config.clone(),
             monte_carlo_config: self.monte_carlo_config.clone(),
+            collab_config: self.collab_state.config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1067,6 +1200,12 @@ impl UniversalCanvasState {
         };
         self.monte_carlo_config = archive.monte_carlo_config;
         self.last_monte_carlo_report = None;
+        self.collab_state.config = archive.collab_config;
+        if self.collab_state.config.risk_heatmap_visible {
+            let _ = self.refresh_district_risk_field(bim_project, members);
+        } else {
+            self.last_risk_field_report = None;
+        }
         self.status_message = Some(format!(
             "Imported verified 1-file workspace '{}' ({} canvas objects)",
             archive.project_name,
@@ -1607,6 +1746,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let risk_heatmap_gpu_input = if self.collab_state.config.risk_heatmap_visible {
+                self.last_risk_field_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::DistrictRiskHeatmapGpuInput {
+                        report: rep,
+                        opacity: self.collab_state.config.risk_opacity,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -1635,6 +1785,7 @@ impl UniversalCanvasState {
                 fragility_gpu_input,
                 shm_gpu_input,
                 evacuation_gpu_input,
+                risk_heatmap_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -1686,6 +1837,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.evacuation_config.overlay_visible {
                 self.paint_cpu_evacuation_lifelines_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.collab_state.config.risk_heatmap_visible {
+                self.paint_cpu_district_risk_heatmap_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

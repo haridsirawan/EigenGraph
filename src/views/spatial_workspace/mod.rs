@@ -128,6 +128,9 @@ pub struct SpatialWorkspaceState {
     pub shm_drawer_tab: usize,
     // Phase 77: Autonomous Multi-Hazard Evacuation Routing & Emergency Lifelines Drawer
     pub evacuation_drawer_open: bool,
+    // Phase 80: Collaborative Multi-Layer IFCX Governance & 3D District Risk Field Drawer
+    pub collab_drawer_open: bool,
+    pub collab_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -226,6 +229,8 @@ impl Default for SpatialWorkspaceState {
             shm_drawer_open: false,
             shm_drawer_tab: 0,
             evacuation_drawer_open: false,
+            collab_drawer_open: false,
+            collab_drawer_tab: 0,
         }
     }
 }
@@ -252,6 +257,7 @@ impl SpatialWorkspaceState {
             || self.ground_motion_drawer_open
             || self.shm_drawer_open
             || self.evacuation_drawer_open
+            || self.collab_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -272,6 +278,7 @@ impl SpatialWorkspaceState {
         self.ground_motion_drawer_open = false;
         self.shm_drawer_open = false;
         self.evacuation_drawer_open = false;
+        self.collab_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -282,190 +289,88 @@ impl SpatialWorkspaceState {
     /// Toggles `"vault"`, `"context"`, `"history"`, or `"api_key"` exclusively so
     /// multiple popovers never stack vertically inside the Dynamic Island.
     pub fn toggle_exclusive_drawer(&mut self, drawer: &'static str) {
-        match drawer {
-            "vault" => {
-                let next = !self.vault_drawer_open;
-                self.vault_drawer_open = next;
-                if next {
-                    self.context_picker_open = false;
-                    self.history_popover_open = false;
-                    self.api_key_popover_open = false;
-                    self.ifcx_diff_drawer_open = false;
-                    self.portfolio_drawer_open = false;
-                    self.ground_motion_drawer_open = false;
-                    self.shm_drawer_open = false;
-                    self.evacuation_drawer_open = false;
-                } else {
-                    self.vault_path_popover_open = false;
-                }
+        if drawer != "vault" {
+            self.vault_drawer_open = false;
+            self.vault_path_popover_open = false;
+        } else {
+            self.vault_drawer_open = !self.vault_drawer_open;
+            if !self.vault_drawer_open {
+                self.vault_path_popover_open = false;
             }
-            "context" => {
-                let next = !self.context_picker_open;
-                self.context_picker_open = next;
-                if next {
-                    self.vault_drawer_open = false;
-                    self.vault_path_popover_open = false;
-                    self.history_popover_open = false;
-                    self.api_key_popover_open = false;
-                    self.ifcx_diff_drawer_open = false;
-                    self.portfolio_drawer_open = false;
-                    self.ground_motion_drawer_open = false;
-                    self.shm_drawer_open = false;
-                    self.evacuation_drawer_open = false;
-                }
-            }
-            "history" => {
-                let next = !self.history_popover_open;
-                self.history_popover_open = next;
-                if next {
-                    self.vault_drawer_open = false;
-                    self.vault_path_popover_open = false;
-                    self.context_picker_open = false;
-                    self.api_key_popover_open = false;
-                    self.ifcx_diff_drawer_open = false;
-                    self.portfolio_drawer_open = false;
-                    self.ground_motion_drawer_open = false;
-                    self.shm_drawer_open = false;
-                    self.evacuation_drawer_open = false;
-                }
-            }
-            "api_key" => {
-                let next = !self.api_key_popover_open;
-                self.api_key_popover_open = next;
-                if next {
-                    self.vault_drawer_open = false;
-                    self.vault_path_popover_open = false;
-                    self.context_picker_open = false;
-                    self.history_popover_open = false;
-                    self.ifcx_diff_drawer_open = false;
-                    self.portfolio_drawer_open = false;
-                    self.ground_motion_drawer_open = false;
-                    self.shm_drawer_open = false;
-                    self.evacuation_drawer_open = false;
-                }
-            }
-            "ifcx_diff" => {
-                let next = !self.ifcx_diff_drawer_open;
-                self.ifcx_diff_drawer_open = next;
-                if next {
-                    self.vault_drawer_open = false;
-                    self.vault_path_popover_open = false;
-                    self.context_picker_open = false;
-                    self.history_popover_open = false;
-                    self.api_key_popover_open = false;
-                    self.portfolio_drawer_open = false;
-                    self.ground_motion_drawer_open = false;
-                    self.shm_drawer_open = false;
-                    self.evacuation_drawer_open = false;
-                }
-            }
-            "portfolio" => {
-                let next = !self.portfolio_drawer_open;
-                self.portfolio_drawer_open = next;
-                if next {
-                    self.vault_drawer_open = false;
-                    self.vault_path_popover_open = false;
-                    self.context_picker_open = false;
-                    self.history_popover_open = false;
-                    self.api_key_popover_open = false;
-                    self.ifcx_diff_drawer_open = false;
-                    self.ground_motion_drawer_open = false;
-                    self.shm_drawer_open = false;
-                    self.evacuation_drawer_open = false;
-                }
-            }
-            "ground_motion" => {
-                let next = !self.ground_motion_drawer_open;
-                self.ground_motion_drawer_open = next;
-                if next {
-                    self.vault_drawer_open = false;
-                    self.vault_path_popover_open = false;
-                    self.context_picker_open = false;
-                    self.history_popover_open = false;
-                    self.api_key_popover_open = false;
-                    self.ifcx_diff_drawer_open = false;
-                    self.portfolio_drawer_open = false;
-                    self.shm_drawer_open = false;
-                    self.evacuation_drawer_open = false;
-                }
-            }
-            "shm" => {
-                let next = !self.shm_drawer_open;
-                self.shm_drawer_open = next;
-                if next {
-                    self.vault_drawer_open = false;
-                    self.vault_path_popover_open = false;
-                    self.context_picker_open = false;
-                    self.history_popover_open = false;
-                    self.api_key_popover_open = false;
-                    self.ifcx_diff_drawer_open = false;
-                    self.portfolio_drawer_open = false;
-                    self.ground_motion_drawer_open = false;
-                    self.evacuation_drawer_open = false;
-                }
-            }
-            "evacuation" => {
-                let next = !self.evacuation_drawer_open;
-                self.evacuation_drawer_open = next;
-                if next {
-                    self.vault_drawer_open = false;
-                    self.vault_path_popover_open = false;
-                    self.context_picker_open = false;
-                    self.history_popover_open = false;
-                    self.api_key_popover_open = false;
-                    self.ifcx_diff_drawer_open = false;
-                    self.portfolio_drawer_open = false;
-                    self.ground_motion_drawer_open = false;
-                    self.shm_drawer_open = false;
-                }
-            }
-            _ => {}
+        }
+        if drawer != "context" {
+            self.context_picker_open = false;
+        } else {
+            self.context_picker_open = !self.context_picker_open;
+        }
+        if drawer != "history" {
+            self.history_popover_open = false;
+        } else {
+            self.history_popover_open = !self.history_popover_open;
+        }
+        if drawer != "api_key" {
+            self.api_key_popover_open = false;
+        } else {
+            self.api_key_popover_open = !self.api_key_popover_open;
+        }
+        if drawer != "ifcx_diff" {
+            self.ifcx_diff_drawer_open = false;
+        } else {
+            self.ifcx_diff_drawer_open = !self.ifcx_diff_drawer_open;
+        }
+        if drawer != "portfolio" {
+            self.portfolio_drawer_open = false;
+        } else {
+            self.portfolio_drawer_open = !self.portfolio_drawer_open;
+        }
+        if drawer != "ground_motion" {
+            self.ground_motion_drawer_open = false;
+        } else {
+            self.ground_motion_drawer_open = !self.ground_motion_drawer_open;
+        }
+        if drawer != "shm" {
+            self.shm_drawer_open = false;
+        } else {
+            self.shm_drawer_open = !self.shm_drawer_open;
+        }
+        if drawer != "evacuation" {
+            self.evacuation_drawer_open = false;
+        } else {
+            self.evacuation_drawer_open = !self.evacuation_drawer_open;
+        }
+        if drawer != "collab" {
+            self.collab_drawer_open = false;
+        } else {
+            self.collab_drawer_open = !self.collab_drawer_open;
         }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
     /// closing all competing exclusive drawers without collapsing an already-open panel.
     pub fn open_ground_motion_drawer(&mut self) {
-        self.vault_drawer_open = false;
-        self.vault_path_popover_open = false;
-        self.context_picker_open = false;
-        self.history_popover_open = false;
-        self.api_key_popover_open = false;
-        self.ifcx_diff_drawer_open = false;
-        self.portfolio_drawer_open = false;
-        self.shm_drawer_open = false;
-        self.evacuation_drawer_open = false;
+        self.toggle_exclusive_drawer("__none");
         self.ground_motion_drawer_open = true;
     }
 
     /// Idempotently opens the Live SHM Digital Twin & Post-Earthquake ATC-20 Placard drawer
     /// inside the Dynamic Island, closing competing drawers without toggling closed if already open.
     pub fn open_shm_drawer(&mut self) {
-        self.vault_drawer_open = false;
-        self.vault_path_popover_open = false;
-        self.context_picker_open = false;
-        self.history_popover_open = false;
-        self.api_key_popover_open = false;
-        self.ifcx_diff_drawer_open = false;
-        self.portfolio_drawer_open = false;
-        self.ground_motion_drawer_open = false;
-        self.evacuation_drawer_open = false;
+        self.toggle_exclusive_drawer("__none");
         self.shm_drawer_open = true;
     }
 
     /// Idempotently opens the Post-Disaster Evacuation & Emergency Lifelines drawer
     /// inside the Dynamic Island, closing competing drawers without toggling closed if already open.
     pub fn open_evacuation_drawer(&mut self) {
-        self.vault_drawer_open = false;
-        self.vault_path_popover_open = false;
-        self.context_picker_open = false;
-        self.history_popover_open = false;
-        self.api_key_popover_open = false;
-        self.ifcx_diff_drawer_open = false;
-        self.portfolio_drawer_open = false;
-        self.ground_motion_drawer_open = false;
-        self.shm_drawer_open = false;
+        self.toggle_exclusive_drawer("__none");
         self.evacuation_drawer_open = true;
+    }
+
+    /// Idempotently opens the Phase 80 Collaborative IFCX Governance & District Risk drawer.
+    pub fn open_collab_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.collab_drawer_tab = tab.min(1);
+        self.collab_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

@@ -2389,6 +2389,7 @@ impl EigenGraphApp {
                     watchdog_state: (self.universal_canvas.shm_watchdog.total_packets_ingested > 0)
                         .then_some(&self.universal_canvas.shm_watchdog),
                     monte_carlo_report: self.universal_canvas.last_monte_carlo_report.as_ref(),
+                    collab_state: Some(&self.universal_canvas.collab_state),
                     sheet_code: "S-101",
                     revision: "REV 01",
                 },
@@ -2879,6 +2880,73 @@ impl EigenGraphApp {
                     }
                     Err(err) => self.spatial_workspace.push_trace(err, false),
                 }
+            }
+        }
+        if let Some(lbl) = hud_actions.create_checkpoint_label {
+            let msg = self.universal_canvas.create_signed_ifcx_checkpoint(
+                &self.build_view.bim_bus.project,
+                &self.members,
+                &lbl,
+            );
+            self.spatial_workspace.push_trace(msg, true);
+        }
+        if hud_actions.approve_checkpoint {
+            match self
+                .universal_canvas
+                .collab_state
+                .approve_active_checkpoint("Principal Structural Reviewer")
+            {
+                Ok(msg) => self.spatial_workspace.push_trace(msg, true),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.run_ifcx_three_way_merge {
+            let msg = self
+                .universal_canvas
+                .run_peer_three_way_ifcx_merge(&self.build_view.bim_bus.project, &self.members);
+            self.spatial_workspace.push_trace(msg, true);
+        }
+        if hud_actions.refresh_district_risk_field {
+            let rep = self
+                .universal_canvas
+                .refresh_district_risk_field(&self.build_view.bim_bus.project, &self.members);
+            self.spatial_workspace.push_trace(rep.summary, true);
+        }
+        if hud_actions.export_collab_bundle_ifcx {
+            if self.universal_canvas.collab_state.checkpoints.is_empty() {
+                let _ = self.universal_canvas.create_signed_ifcx_checkpoint(
+                    &self.build_view.bim_bus.project,
+                    &self.members,
+                    "Handover Baseline",
+                );
+            }
+            match self
+                .universal_canvas
+                .collab_state
+                .export_bundle_json(&self.build_view.bim_bus.project.project_name)
+            {
+                Ok(json) => {
+                    let raw_name =
+                        Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+                    let fname = format!("{raw_name}_collab_checkpoints.ifcx-bundle.json");
+                    match crate::core::web_bridge::save_text_file(
+                        &fname,
+                        &json,
+                        "application/json;charset=utf-8",
+                    ) {
+                        Ok(_) => {
+                            self.spatial_workspace.push_trace(
+                                format!(
+                                    "Exported signed IFCX Collab Bundle ({fname}, {} checkpoints)",
+                                    self.universal_canvas.collab_state.checkpoints.len()
+                                ),
+                                true,
+                            );
+                        }
+                        Err(err) => self.spatial_workspace.push_trace(err, false),
+                    }
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
     }

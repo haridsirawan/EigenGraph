@@ -1074,7 +1074,7 @@ impl SpatialWorkspaceState {
                         )
                         .clicked()
                         {
-                            actions.pick_local_context_file = true;
+                        actions.pick_local_context_file = true;
                             self.context_picker_open = false;
                         }
                     });
@@ -1083,4 +1083,498 @@ impl SpatialWorkspaceState {
         actions
     }
 
+    /// Phase 80 (`v0.8.0`): Width-first 2-tab drawer inside the Single Dynamic Island hosting:
+    /// - Tab 0 (`Checkpoints & Merge`): SHA-256 chained IFCX checkpoints, formal discipline sign-off,
+    ///   `.ifcx-bundle.json` export, and deterministic Three-Way Peer Merge with conflict resolution.
+    /// - Tab 1 (`District Risk Field`): 3D Pure WebGPU IDW District Risk Heatmap controls, pure-vector
+    ///   risk distribution chart, and clickable top hotspot parcels.
+    pub(super) fn render_collab_and_risk_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::ifcx_collab::{
+            apply_conflict_resolution, ConflictResolution, DistrictRiskMetric,
+        };
+
+        let deck_w = (cap_w - 8.0).min(ui.available_width()).max(200.0);
+        let two_col = !is_mobile && deck_w >= 680.0;
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::pill_badge(
+                ui,
+                AppIcon::Shield,
+                "IFCX Governance & Risk",
+                theme.accent_blue,
+            );
+            for (tab_idx, tab_lbl) in [(0_usize, "Checkpoints & Merge"), (1_usize, "District Risk Field")] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    tab_lbl,
+                    self.collab_drawer_tab == tab_idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.collab_drawer_tab = tab_idx;
+                    if tab_idx == 1 && universal_canvas.last_risk_field_report.is_none() {
+                        actions.refresh_district_risk_field = true;
+                    }
+                }
+            }
+            let (chain_ok, bad_links) = universal_canvas.collab_state.verify_chain();
+            icons::pill_badge(
+                ui,
+                AppIcon::CheckCircle,
+                if universal_canvas.collab_state.checkpoints.is_empty() {
+                    "Chain Ready (0 CP)".to_string()
+                } else if chain_ok {
+                    format!(
+                        "SHA-256 Chain OK ({})",
+                        universal_canvas.collab_state.checkpoints.len()
+                    )
+                } else {
+                    format!("TAMPER ALERT ({bad_links})")
+                },
+                if chain_ok {
+                    theme.accent_green
+                } else {
+                    theme.accent_red
+                },
+            );
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close IFCX Governance & Risk drawer",
+            )
+            .clicked()
+            {
+                self.collab_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        let tab = self.collab_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(9, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                if tab == 0 {
+                    if is_left {
+                        ui.label(
+                            RichText::new("SHA-256 Signed Checkpoints & Handover")
+                                .size(10.0)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
+                            ui.label(RichText::new("Label:").size(9.2).color(theme.text_muted));
+                            ui.add(
+                                egui::TextEdit::singleline(
+                                    &mut universal_canvas.collab_state.checkpoint_label_draft,
+                                )
+                                .desired_width((inner_w * 0.42).clamp(80.0, 160.0)),
+                            );
+                            let disc = universal_canvas.collab_state.config.active_discipline;
+                            let [dr, dg, db] = disc.badge_color_rgb();
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                None,
+                                disc.short_label(),
+                                true,
+                                Color32::from_rgb(dr, dg, db),
+                                "Cycle discipline owner for next IFCX checkpoint",
+                            )
+                            .clicked()
+                            {
+                                universal_canvas.collab_state.config.active_discipline = disc.next();
+                            }
+                        });
+                        ui.add_space(3.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Plus),
+                                "+ Checkpoint",
+                                false,
+                                theme.accent_blue,
+                                "Freeze current layered .ifcx graph + KPIs into tamper-proof SHA-256 chain",
+                            )
+                            .clicked()
+                            {
+                                let lbl = universal_canvas.collab_state.checkpoint_label_draft.clone();
+                                actions.create_checkpoint_label = Some(lbl);
+                            }
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Shield),
+                                "Approve",
+                                false,
+                                theme.accent_green,
+                                "Mark selected checkpoint APPROVED and re-seal SHA-256 chain",
+                            )
+                            .clicked()
+                            {
+                                actions.approve_checkpoint = true;
+                            }
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::SaveDisk),
+                                ".ifcx-bundle",
+                                false,
+                                theme.accent_blue,
+                                "Export signed multi-checkpoint .ifcx-bundle.json handover package",
+                            )
+                            .clicked()
+                            {
+                                actions.export_collab_bundle_ifcx = true;
+                            }
+                        });
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.label(
+                            RichText::new("Checkpoint Lineage Timeline:")
+                                .size(9.5)
+                                .strong()
+                                .color(theme.text_secondary),
+                        );
+                        if universal_canvas.collab_state.checkpoints.is_empty() {
+                            ui.label(
+                                RichText::new("No checkpoints recorded yet. Click '+ Checkpoint' or run /checkpoint.")
+                                    .size(9.0)
+                                    .color(theme.text_muted),
+                            );
+                        } else {
+                            let active_i = universal_canvas.collab_state.active_checkpoint_idx;
+                            let mut pick_idx: Option<usize> = None;
+                            ui.horizontal_wrapped(|ui| {
+                                ui.set_max_width(inner_w);
+                                for (idx, cp) in universal_canvas.collab_state.checkpoints.iter().enumerate() {
+                                    let [sr, sg, sb] = cp.approval_status.badge_color_rgb();
+                                    let sel = active_i == Some(idx);
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        None,
+                                        format!(
+                                            "{} [{}] • {} • ARI {:.2}",
+                                            cp.checkpoint_id,
+                                            cp.approval_status.short_label(),
+                                            cp.short_sha256(),
+                                            cp.kpi.min_ari
+                                        ),
+                                        sel,
+                                        Color32::from_rgb(sr, sg, sb),
+                                        &format!("{} | Author: {} | Nodes: {}", cp.label, cp.author, cp.kpi.node_count),
+                                    )
+                                    .clicked()
+                                    {
+                                        pick_idx = Some(idx);
+                                    }
+                                }
+                            });
+                            if let Some(idx) = pick_idx {
+                                universal_canvas.collab_state.active_checkpoint_idx = Some(idx);
+                            }
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new("Deterministic 3-Way Peer IFCX Merge")
+                                .size(10.0)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
+                            let pdisc = universal_canvas.collab_state.peer_discipline;
+                            let [pr, pg, pb] = pdisc.badge_color_rgb();
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                None,
+                                format!("Peer: {}", pdisc.short_label()),
+                                false,
+                                Color32::from_rgb(pr, pg, pb),
+                                "Cycle incoming peer branch discipline",
+                            )
+                            .clicked()
+                            {
+                                universal_canvas.collab_state.peer_discipline = pdisc.next();
+                            }
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Layers),
+                                "Peer 3-Way Merge",
+                                true,
+                                theme.accent_orange,
+                                "Run Base + Local + Peer 3-way node/attribute merge with conflict resolver",
+                            )
+                            .clicked()
+                            {
+                                actions.run_ifcx_three_way_merge = true;
+                            }
+                        });
+                        ui.add_space(3.0);
+                        if let Some(ref mut merge) = universal_canvas.collab_state.last_merge {
+                            ui.label(
+                                RichText::new(&merge.summary)
+                                    .size(9.0)
+                                    .monospace()
+                                    .color(theme.accent_green),
+                            );
+                            let mut pending_res: Option<(usize, ConflictResolution)> = None;
+                            for (ci, c) in merge.conflicts.iter().enumerate() {
+                                let short_path = c.path.rsplit('/').next().unwrap_or(&c.path);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.set_max_width(inner_w);
+                                    ui.label(
+                                        RichText::new(format!("{short_path} [{}]", c.attribute_key))
+                                            .size(8.8)
+                                            .monospace()
+                                            .color(theme.text_primary),
+                                    );
+                                    for res in [
+                                        ConflictResolution::KeepLocal,
+                                        ConflictResolution::KeepIncoming,
+                                        ConflictResolution::KeepBothLayered,
+                                    ] {
+                                        if Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            None,
+                                            res.short_label(),
+                                            c.resolution == res,
+                                            theme.accent_blue,
+                                            res.label(),
+                                        )
+                                        .clicked()
+                                        {
+                                            pending_res = Some((ci, res));
+                                        }
+                                    }
+                                });
+                            }
+                            if let Some((ci, res)) = pending_res {
+                                apply_conflict_resolution(merge, ci, res);
+                            }
+                        } else {
+                            ui.label(
+                                RichText::new("Click 'Peer 3-Way Merge' or run /merge-ifcx to reconcile concurrent discipline layers.")
+                                    .size(9.0)
+                                    .color(theme.text_muted),
+                            );
+                        }
+                    }
+                } else if is_left {
+                    ui.label(
+                        RichText::new("3D WebGPU District Risk Field Heatmap")
+                            .size(10.0)
+                            .strong()
+                            .color(theme.text_primary),
+                    );
+                    ui.horizontal_wrapped(|ui| {
+                        ui.set_max_width(inner_w);
+                        let vis = universal_canvas.collab_state.config.risk_heatmap_visible;
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Flame),
+                            if vis { "Risk Heatmap: ON" } else { "Risk Heatmap: OFF" },
+                            vis,
+                            theme.accent_red,
+                            "Toggle 3D Pure WebGPU iso-contour Risk Field draped over Earth site terrain",
+                        )
+                        .clicked()
+                        {
+                            universal_canvas.collab_state.config.risk_heatmap_visible = !vis;
+                            if universal_canvas.collab_state.config.risk_heatmap_visible {
+                                actions.refresh_district_risk_field = true;
+                            }
+                        }
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Bolt),
+                            "Recompute",
+                            false,
+                            theme.accent_blue,
+                            "Re-evaluate IDW Spatial Risk Field uniting ARI, ATC-20, PML-90, SSI & Evacuation",
+                        )
+                        .clicked()
+                        {
+                            universal_canvas.collab_state.config.risk_heatmap_visible = true;
+                            actions.refresh_district_risk_field = true;
+                        }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.set_max_width(inner_w);
+                        ui.label(RichText::new("Metric:").size(9.2).color(theme.text_muted));
+                        for &m in DistrictRiskMetric::all() {
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                None,
+                                m.short_label(),
+                                universal_canvas.collab_state.config.risk_metric == m,
+                                theme.accent_orange,
+                                m.label(),
+                            )
+                            .clicked()
+                            {
+                                universal_canvas.collab_state.config.risk_metric = m;
+                                universal_canvas.collab_state.config.risk_heatmap_visible = true;
+                                actions.refresh_district_risk_field = true;
+                            }
+                        }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.set_max_width(inner_w);
+                        ui.label(RichText::new("Opacity:").size(9.2).color(theme.text_muted));
+                        ui.spacing_mut().slider_width = (inner_w * 0.42).clamp(64.0, 130.0);
+                        ui.add(
+                            egui::Slider::new(
+                                &mut universal_canvas.collab_state.config.risk_opacity,
+                                0.25..=0.90,
+                            )
+                            .fixed_decimals(2),
+                        );
+                    });
+                    if let Some(ref rep) = universal_canvas.last_risk_field_report {
+                        ui.label(
+                            RichText::new(&rep.summary)
+                                .size(9.0)
+                                .monospace()
+                                .color(theme.text_primary),
+                        );
+                        // Pure-vector risk tier distribution bar chart
+                        let chart_w = inner_w.clamp(130.0, 300.0);
+                        let (rect, _) =
+                            ui.allocate_exact_size(Vec2::new(chart_w, 26.0), egui::Sense::hover());
+                        let painter = ui.painter_at(rect);
+                        let total = (rep.low_count + rep.moderate_count + rep.high_count + rep.critical_count).max(1) as f32;
+                        let tiers = [
+                            (rep.low_count, Color32::from_rgb(16, 185, 129), "Low"),
+                            (rep.moderate_count, Color32::from_rgb(6, 182, 212), "Mod"),
+                            (rep.high_count, Color32::from_rgb(245, 158, 11), "High"),
+                            (rep.critical_count, Color32::from_rgb(239, 68, 68), "Crit"),
+                        ];
+                        let mut x0 = rect.left();
+                        for (cnt, col, _) in tiers {
+                            let w = rect.width() * (cnt as f32 / total);
+                            if w >= 1.0 {
+                                painter.rect_filled(
+                                    Rect::from_min_size(egui::Pos2::new(x0, rect.top() + 2.0), Vec2::new(w, 12.0)),
+                                    CornerRadius::same(2),
+                                    col,
+                                );
+                                x0 += w;
+                            }
+                        }
+                        painter.text(
+                            egui::Pos2::new(rect.left(), rect.top() + 16.0),
+                            egui::Align2::LEFT_TOP,
+                            format!(
+                                "Low:{} Mod:{} High:{} Crit:{}",
+                                rep.low_count, rep.moderate_count, rep.high_count, rep.critical_count
+                            ),
+                            egui::FontId::monospace(8.5),
+                            theme.text_secondary,
+                        );
+                    }
+                } else {
+                    ui.label(
+                        RichText::new("Top District Risk Hotspot Parcels")
+                            .size(10.0)
+                            .strong()
+                            .color(theme.text_primary),
+                    );
+                    if let Some(ref rep) = universal_canvas.last_risk_field_report {
+                        let unit = rep.metric.unit_label();
+                        let mut fly_target: Option<(String, f64, f64)> = None;
+                        for h in rep.hotspots.iter().take(5) {
+                            let col = if h.risk_score >= 0.70 {
+                                theme.accent_red
+                            } else if h.risk_score >= 0.45 {
+                                theme.accent_orange
+                            } else {
+                                theme.accent_green
+                            };
+                            ui.horizontal_wrapped(|ui| {
+                                ui.set_max_width(inner_w);
+                                ui.colored_label(
+                                    col,
+                                    RichText::new(format!("{:.0}%", h.risk_score * 100.0))
+                                        .size(9.2)
+                                        .strong()
+                                        .monospace(),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} ({}) • ARI {:.2} • {:.1} {unit}",
+                                        h.name, h.atc20_tag, h.min_ari, h.metric_value
+                                    ))
+                                    .size(8.8)
+                                    .color(theme.text_secondary),
+                                );
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    Some(AppIcon::Target),
+                                    "Fly",
+                                    false,
+                                    theme.accent_blue,
+                                    "Fly Earth camera to hotspot parcel",
+                                )
+                                .clicked()
+                                {
+                                    fly_target = Some((h.name.clone(), h.lat, h.lon));
+                                }
+                            });
+                        }
+                        if let Some((name, lat, lon)) = fly_target {
+                            self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                            universal_canvas.globe_mode = true;
+                            universal_canvas.earth_world.start_fly_to(
+                                &universal_canvas.world_map,
+                                lat,
+                                lon,
+                                16.4,
+                                &name,
+                            );
+                            self.push_trace(format!("Flew Earth -> Hotspot '{name}'"), true);
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new("Click 'Recompute' or run /risk-map to populate spatial hotspots.")
+                                .size(9.0)
+                                .color(theme.text_muted),
+                        );
+                    }
+                }
+                });
+            });
+        });
+    }
 }

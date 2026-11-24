@@ -4229,3 +4229,161 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_phase80_collab_and_risk_map_slash_commands_zero_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let members = vec![StructuralMember {
+            id: 1,
+            name: "Col-A1".to_string(),
+            section: "RC 400x400".to_string(),
+            force_kn: -380.0,
+            capacity_kn: 720.0,
+            utilization: 0.74,
+            moment_my_knm: 38.0,
+            moment_mz_knm: 26.0,
+            is_critical: false,
+            is_active: true,
+            ari_score: 0.81,
+            svd_sensitivity: 0.14,
+            ari: 0.81,
+            dcr_interaction: 0.76,
+            shear_vy_kn: 50.0,
+            svd_margin: 0.44,
+            ci: 0.16,
+            rr: 0.87,
+        }];
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        for cmd in ["/checkpoint", "/approve", "/merge-ifcx", "/risk-map", "/collab-ifcx"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|s| s.cmd == cmd),
+                "Missing Phase 80 slash command {cmd}"
+            );
+        }
+
+        let act_cp = spatial.execute_spatial_input(
+            "/checkpoint Baseline Audit",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(
+            act_cp.create_checkpoint_label.as_deref(),
+            Some("Baseline Audit")
+        );
+        assert!(spatial.collab_drawer_open);
+        assert_eq!(spatial.collab_drawer_tab, 0);
+        let _ = canvas.create_signed_ifcx_checkpoint(&build.bim_bus.project, &members, "Baseline Audit");
+
+        let act_app = spatial.execute_spatial_input(
+            "/approve",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_app.approve_checkpoint);
+        let _ = canvas
+            .collab_state
+            .approve_active_checkpoint("Lead Reviewer");
+
+        let act_merge = spatial.execute_spatial_input(
+            "/merge-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_merge.run_ifcx_three_way_merge);
+        let _ = canvas.run_peer_three_way_ifcx_merge(&build.bim_bus.project, &members);
+
+        let act_risk = spatial.execute_spatial_input(
+            "/risk-map pml90",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_risk.refresh_district_risk_field);
+        assert_eq!(spatial.collab_drawer_tab, 1);
+        assert!(canvas.collab_state.config.risk_heatmap_visible);
+        assert_eq!(
+            canvas.collab_state.config.risk_metric,
+            crate::core::ifcx_collab::DistrictRiskMetric::McPml90Loss
+        );
+        let _ = canvas.refresh_district_risk_field(&build.bim_bus.project, &members);
+
+        let act_bundle = spatial.execute_spatial_input(
+            "/collab-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_bundle.export_collab_bundle_ifcx);
+
+        let (clean_txt, dirs) = parse_gemini_action_directives(
+            "Governance update [[CREATE_CHECKPOINT:Peer Handover]] [[APPROVE_CHECKPOINT]] [[TOGGLE_RISK_HEATMAP:ARI]]",
+        );
+        assert_eq!(clean_txt, "Governance update");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::CreateCheckpoint("Peer Handover".to_string()),
+                GeminiDirective::ApproveCheckpoint,
+                GeminiDirective::ToggleRiskHeatmap(Some(
+                    crate::core::ifcx_collab::DistrictRiskMetric::StructuralAri
+                )),
+            ]
+        );
+
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_collab_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 840.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 80 Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

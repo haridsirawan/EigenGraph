@@ -2568,6 +2568,86 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Pure-vector CPU fallback rendering the Phase 80 District Risk Field IDW surface & hotspots
+    /// when running headless UI tests or without a native WebGPU adapter.
+    pub(super) fn paint_cpu_district_risk_heatmap_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.collab_state.config.risk_heatmap_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_risk_field_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let proj_enu = |east_m: f32, north_m: f32, elev_m: f32| -> Option<Pos2> {
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [east_m as f64 * 1000.0, north_m as f64 * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, elev_m as f64)
+                .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
+        };
+        let op = self.collab_state.config.risk_opacity.clamp(0.15, 0.90);
+        for cell in &report.cells {
+            let hs = cell.half_step_m * 0.94;
+            let z = cell.elev_m + 0.16 + cell.risk_01 * 0.45;
+            let pts: Vec<Pos2> = [
+                (cell.cx_m - hs, cell.cy_m - hs),
+                (cell.cx_m + hs, cell.cy_m - hs),
+                (cell.cx_m + hs, cell.cy_m + hs),
+                (cell.cx_m - hs, cell.cy_m + hs),
+            ]
+            .iter()
+            .filter_map(|&(ex, ny)| proj_enu(ex, ny, z))
+            .collect();
+            if pts.len() == 4 {
+                let t = cell.risk_01.clamp(0.0, 1.0);
+                let (r, g, b) = if t < 0.35 {
+                    (16_u8, 185_u8, 155_u8)
+                } else if t < 0.65 {
+                    (245_u8, 158_u8, 11_u8)
+                } else {
+                    (239_u8, 68_u8, 68_u8)
+                };
+                let alpha = (op * (70.0 + 115.0 * t)).round().clamp(24.0, 185.0) as u8;
+                clip.add(egui::Shape::convex_polygon(
+                    pts,
+                    Color32::from_rgba_unmultiplied(r, g, b, alpha),
+                    Stroke::NONE,
+                ));
+            }
+        }
+        for h in report.hotspots.iter().take(6) {
+            if let Some(sp) = proj_enu(h.east_m, h.north_m, 11.0 + h.risk_score * 6.0) {
+                let col = if h.risk_score >= 0.70 {
+                    Color32::from_rgb(239, 68, 68)
+                } else if h.risk_score >= 0.45 {
+                    Color32::from_rgb(245, 158, 11)
+                } else {
+                    Color32::from_rgb(16, 185, 129)
+                };
+                clip.circle_filled(sp, 5.0, col);
+                clip.text(
+                    sp + Vec2::new(0.0, -9.0),
+                    Align2::CENTER_BOTTOM,
+                    format!("{} ({:.0}%)", h.name, h.risk_score * 100.0),
+                    egui::FontId::monospace(9.0),
+                    Color32::WHITE,
+                );
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

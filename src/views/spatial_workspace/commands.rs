@@ -456,6 +456,36 @@ impl SpatialWorkspaceState {
                 PlannedProposalAction::ExportMcIfcx => {
                     out.export_monte_carlo_ifcx = true;
                 }
+                PlannedProposalAction::CreateCheckpoint(lbl) => {
+                    let clean_lbl = if lbl.trim().is_empty() {
+                        universal_canvas.collab_state.checkpoint_label_draft.clone()
+                    } else {
+                        lbl.trim().to_string()
+                    };
+                    self.open_collab_drawer(0);
+                    out.create_checkpoint_label = Some(clean_lbl);
+                }
+                PlannedProposalAction::ApproveCheckpoint => {
+                    self.open_collab_drawer(0);
+                    out.approve_checkpoint = true;
+                }
+                PlannedProposalAction::RunIfcxMerge => {
+                    self.open_collab_drawer(0);
+                    out.run_ifcx_three_way_merge = true;
+                }
+                PlannedProposalAction::ToggleRiskHeatmap(metric_opt) => {
+                    if let Some(m) = metric_opt {
+                        universal_canvas.collab_state.config.risk_metric = *m;
+                        universal_canvas.collab_state.config.risk_heatmap_visible = true;
+                    } else {
+                        universal_canvas.collab_state.config.risk_heatmap_visible =
+                            !universal_canvas.collab_state.config.risk_heatmap_visible;
+                    }
+                    self.open_collab_drawer(1);
+                    if universal_canvas.collab_state.config.risk_heatmap_visible {
+                        out.refresh_district_risk_field = true;
+                    }
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -681,6 +711,16 @@ impl SpatialWorkspaceState {
                                 PlannedProposalAction::ToggleGpuParticles
                             }
                             GeminiDirective::ExportMcIfcx => PlannedProposalAction::ExportMcIfcx,
+                            GeminiDirective::CreateCheckpoint(lbl) => {
+                                PlannedProposalAction::CreateCheckpoint(lbl.clone())
+                            }
+                            GeminiDirective::ApproveCheckpoint => {
+                                PlannedProposalAction::ApproveCheckpoint
+                            }
+                            GeminiDirective::RunIfcxMerge => PlannedProposalAction::RunIfcxMerge,
+                            GeminiDirective::ToggleRiskHeatmap(m) => {
+                                PlannedProposalAction::ToggleRiskHeatmap(*m)
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -747,6 +787,15 @@ impl SpatialWorkspaceState {
                             GeminiDirective::RunGpuMonteCarlo(n) => format!("GpuMonteCarlo({n})"),
                             GeminiDirective::ToggleGpuParticles => "ToggleGpuParticles".to_string(),
                             GeminiDirective::ExportMcIfcx => "ExportMcIfcx".to_string(),
+                            GeminiDirective::CreateCheckpoint(lbl) => {
+                                format!("Checkpoint({})", if lbl.is_empty() { "Auto" } else { lbl })
+                            }
+                            GeminiDirective::ApproveCheckpoint => "ApproveCheckpoint".to_string(),
+                            GeminiDirective::RunIfcxMerge => "ThreeWayMergeIfcx".to_string(),
+                            GeminiDirective::ToggleRiskHeatmap(m) => format!(
+                                "RiskHeatmap({})",
+                                m.map(|v| v.short_label()).unwrap_or("Toggle")
+                            ),
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -2120,6 +2169,68 @@ impl SpatialWorkspaceState {
                 }
                 "/mc-ifcx" => {
                     actions.export_monte_carlo_ifcx = true;
+                }
+                "/checkpoint" => {
+                    let lbl = if arg.trim().is_empty() {
+                        universal_canvas.collab_state.checkpoint_label_draft.clone()
+                    } else {
+                        arg.trim().to_string()
+                    };
+                    self.open_collab_drawer(0);
+                    actions.create_checkpoint_label = Some(lbl.clone());
+                    self.push_trace(format!("Capturing signed IFCX checkpoint '{lbl}'..."), true);
+                }
+                "/approve" => {
+                    self.open_collab_drawer(0);
+                    actions.approve_checkpoint = true;
+                    self.push_trace("Signing off active IFCX governance checkpoint...", true);
+                }
+                "/merge-ifcx" => {
+                    self.open_collab_drawer(0);
+                    actions.run_ifcx_three_way_merge = true;
+                    self.push_trace("Running deterministic 3-way IFCX peer merge...", true);
+                }
+                "/risk-map" => {
+                    let low = arg.trim().to_ascii_lowercase();
+                    if low.contains("pml") || low.contains("mc") || low.contains("loss") {
+                        universal_canvas.collab_state.config.risk_metric =
+                            crate::core::ifcx_collab::DistrictRiskMetric::McPml90Loss;
+                        universal_canvas.collab_state.config.risk_heatmap_visible = true;
+                    } else if low.contains("ari") || low.contains("dcr") {
+                        universal_canvas.collab_state.config.risk_metric =
+                            crate::core::ifcx_collab::DistrictRiskMetric::StructuralAri;
+                        universal_canvas.collab_state.config.risk_heatmap_visible = true;
+                    } else if low.contains("iso") || low.contains("evac") {
+                        universal_canvas.collab_state.config.risk_metric =
+                            crate::core::ifcx_collab::DistrictRiskMetric::EvacuationIsolation;
+                        universal_canvas.collab_state.config.risk_heatmap_visible = true;
+                    } else if low.contains("comp") {
+                        universal_canvas.collab_state.config.risk_metric =
+                            crate::core::ifcx_collab::DistrictRiskMetric::CompositeRisk;
+                        universal_canvas.collab_state.config.risk_heatmap_visible = true;
+                    } else if low == "off" {
+                        universal_canvas.collab_state.config.risk_heatmap_visible = false;
+                    } else {
+                        universal_canvas.collab_state.config.risk_heatmap_visible = true;
+                    }
+                    self.open_collab_drawer(1);
+                    actions.refresh_district_risk_field = true;
+                    self.push_trace(
+                        format!(
+                            "District Risk Heatmap ({}) {}",
+                            universal_canvas.collab_state.config.risk_metric.short_label(),
+                            if universal_canvas.collab_state.config.risk_heatmap_visible {
+                                "ON"
+                            } else {
+                                "OFF"
+                            }
+                        ),
+                        true,
+                    );
+                }
+                "/collab-ifcx" => {
+                    self.open_collab_drawer(0);
+                    actions.export_collab_bundle_ifcx = true;
                 }
                 "/section" | "/cut" => {
                     let elev_opt = arg
