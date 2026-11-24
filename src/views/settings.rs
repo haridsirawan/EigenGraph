@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL, 6-DOF FEM & ARI v2, Live WebSocket SHM Watchdog, ATC-20 Triage, Evacuation Lifelines & Width-First Dynamic Island)",
+                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL + @compute Particles/Monte Carlo, 6-DOF FEM & ARI v2, Live WebSocket SHM Watchdog, ATC-20 Triage, Evacuation Lifelines & Width-First Dynamic Island)",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)
@@ -719,10 +719,16 @@ impl SettingsView {
             ui.separator();
             ui.add_space(6.0);
 
-            let releases: [(&str, bool, &str, &str); 9] = [
+            let releases: [(&str, bool, &str, &str); 10] = [
+                (
+                    "v0.7.9",
+                    true,
+                    "WebGPU @compute Multi-Hazard Particles & FEMA P-58 Monte Carlo Accelerator",
+                    "WGSL @compute shaders accelerating 60 FPS seismic wavefield & Venturi wind obstacle particles directly on GPU plus 256-16,384 realization FEMA P-58 Monte Carlo fragility curves (P10/P50/PML-90/CVaR-95 & REDi tier probabilities), eigengraph::analysis::gpu_monte_carlo_loss IFCX overlay, and CPU CI parity.",
+                ),
                 (
                     "v0.7.8",
-                    true,
+                    false,
                     "Live WebSocket SHM Watchdog, Closed-Loop Cascade & Width-First Dynamic Island",
                     "Real-time WebSocket (ws:// / wss://) & deterministic triaxial telemetry streaming with rolling STA/LTA trigger detection, automatic ATC-20 -> A* evacuation re-routing, eigengraph::analysis::shm_watchdog IFCX export, and width-first horizontal Dynamic Island expansion on wide screens.",
                 ),

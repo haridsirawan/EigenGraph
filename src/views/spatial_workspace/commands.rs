@@ -423,6 +423,39 @@ impl SpatialWorkspaceState {
                     );
                     self.push_trace(format!("Started Live Watchdog Simulator: {}", mode.label()), true);
                 }
+                PlannedProposalAction::RunGpuMonteCarlo(n) => {
+                    universal_canvas.monte_carlo_config.sample_count = (*n).clamp(256, 16_384);
+                    self.ground_motion_drawer_tab = 2;
+                    self.toggle_exclusive_drawer("ground_motion");
+                    out.run_gpu_monte_carlo = Some(universal_canvas.monte_carlo_config.sample_count);
+                    self.push_trace(
+                        format!("Running GPU @compute FEMA P-58 Monte Carlo ({} samples)", n),
+                        true,
+                    );
+                }
+                PlannedProposalAction::ToggleGpuParticles => {
+                    universal_canvas.monte_carlo_config.gpu_particles_enabled =
+                        !universal_canvas.monte_carlo_config.gpu_particles_enabled;
+                    let on = universal_canvas.monte_carlo_config.gpu_particles_enabled;
+                    if on && !universal_canvas.district_hazard.any_active() {
+                        universal_canvas.district_hazard.seismic_wave_active = true;
+                        universal_canvas.district_hazard.venturi_wind_active = true;
+                    }
+                    self.push_trace(
+                        if on {
+                            format!(
+                                "GPU @compute Hazard Particles ON ({})",
+                                universal_canvas.monte_carlo_config.normalized_particle_count()
+                            )
+                        } else {
+                            "GPU @compute Hazard Particles OFF".to_string()
+                        },
+                        true,
+                    );
+                }
+                PlannedProposalAction::ExportMcIfcx => {
+                    out.export_monte_carlo_ifcx = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -641,6 +674,13 @@ impl SpatialWorkspaceState {
                             GeminiDirective::TriggerWatchdogSim(mode) => {
                                 PlannedProposalAction::TriggerWatchdogSim(mode.clone())
                             }
+                            GeminiDirective::RunGpuMonteCarlo(n) => {
+                                PlannedProposalAction::RunGpuMonteCarlo(*n)
+                            }
+                            GeminiDirective::ToggleGpuParticles => {
+                                PlannedProposalAction::ToggleGpuParticles
+                            }
+                            GeminiDirective::ExportMcIfcx => PlannedProposalAction::ExportMcIfcx,
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -704,6 +744,9 @@ impl SpatialWorkspaceState {
                             GeminiDirective::StartShmWatchdog => "StartShmWatchdog".to_string(),
                             GeminiDirective::ConnectShmWs(u) => format!("ConnectWs({u})"),
                             GeminiDirective::TriggerWatchdogSim(m) => format!("WatchdogSim({m})"),
+                            GeminiDirective::RunGpuMonteCarlo(n) => format!("GpuMonteCarlo({n})"),
+                            GeminiDirective::ToggleGpuParticles => "ToggleGpuParticles".to_string(),
+                            GeminiDirective::ExportMcIfcx => "ExportMcIfcx".to_string(),
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -2021,6 +2064,62 @@ impl SpatialWorkspaceState {
                 }
                 "/watchdog-ifcx" => {
                     actions.export_watchdog_ifcx = true;
+                }
+                "/gpu-compute" => {
+                    self.ground_motion_drawer_tab = 2;
+                    self.toggle_exclusive_drawer("ground_motion");
+                    if universal_canvas.last_monte_carlo_report.is_none() {
+                        actions.run_gpu_monte_carlo =
+                            Some(universal_canvas.monte_carlo_config.normalized_sample_count());
+                    }
+                    self.push_trace("Opened WebGPU @compute Particles & Monte Carlo drawer", true);
+                }
+                "/mc" => {
+                    let n = arg
+                        .trim()
+                        .parse::<u32>()
+                        .ok()
+                        .unwrap_or_else(|| universal_canvas.monte_carlo_config.normalized_sample_count())
+                        .clamp(256, 16_384);
+                    universal_canvas.monte_carlo_config.sample_count = n;
+                    self.ground_motion_drawer_tab = 2;
+                    if !self.ground_motion_drawer_open {
+                        self.toggle_exclusive_drawer("ground_motion");
+                    }
+                    actions.run_gpu_monte_carlo = Some(n);
+                    self.push_trace(
+                        format!("Running FEMA P-58 Monte Carlo ({n} realizations)..."),
+                        true,
+                    );
+                }
+                "/particles" => {
+                    if let Ok(cnt) = arg.trim().parse::<u32>() {
+                        universal_canvas.monte_carlo_config.gpu_particle_count =
+                            cnt.clamp(128, 4096);
+                        universal_canvas.monte_carlo_config.gpu_particles_enabled = true;
+                    } else {
+                        universal_canvas.monte_carlo_config.gpu_particles_enabled =
+                            !universal_canvas.monte_carlo_config.gpu_particles_enabled;
+                    }
+                    let on = universal_canvas.monte_carlo_config.gpu_particles_enabled;
+                    if on && !universal_canvas.district_hazard.any_active() {
+                        universal_canvas.district_hazard.seismic_wave_active = true;
+                        universal_canvas.district_hazard.venturi_wind_active = true;
+                    }
+                    self.push_trace(
+                        if on {
+                            format!(
+                                "GPU @compute Particles ON ({} @ 60 FPS)",
+                                universal_canvas.monte_carlo_config.normalized_particle_count()
+                            )
+                        } else {
+                            "GPU @compute Particles OFF".to_string()
+                        },
+                        true,
+                    );
+                }
+                "/mc-ifcx" => {
+                    actions.export_monte_carlo_ifcx = true;
                 }
                 "/section" | "/cut" => {
                     let elev_opt = arg

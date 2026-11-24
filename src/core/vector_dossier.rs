@@ -35,6 +35,7 @@ pub struct VectorDossierInput<'a> {
     pub shm_report: Option<&'a crate::core::shm_twin::ShmDigitalTwinReport>,
     pub evacuation_report: Option<&'a crate::core::evacuation_routing::EvacuationLifelineReport>,
     pub watchdog_state: Option<&'a crate::core::shm_watchdog::ShmWatchdogState>,
+    pub monte_carlo_report: Option<&'a crate::core::gpu_fragility_mc::MonteCarloFragilityReport>,
     pub sheet_code: &'a str,
     pub revision: &'a str,
 }
@@ -626,6 +627,16 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
             )
         })
         .unwrap_or_default();
+    let mc_suffix = input
+        .monte_carlo_report
+        .map(|mc| {
+            format!(
+                " | MC PML90 ${:.0}k Pcol {:.0}%",
+                mc.p90_loss_usd * 0.001,
+                mc.collapse_prob_pct
+            )
+        })
+        .unwrap_or_default();
 
     let haz_line = if let Some(shm) = input.shm_report {
         if !wd_suffix.is_empty() {
@@ -684,19 +695,37 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
             )
         }
     } else if let Some(rep) = input.replay_report {
+        if !mc_suffix.is_empty() {
+            format!(
+                "NL-THA {} ({:.2}g) | Drift {:.2}%{mc_suffix}",
+                rep.config.active_record_label(),
+                rep.scaled_pga_g,
+                rep.peak_interstory_drift_ratio * 100.0,
+            )
+        } else {
+            format!(
+                "NL-THA {} ({}, {:.2}g) | Drift {:.2}% | Hinges {}IO/{}LS/{}CP/{}M | Fragility ${:.0}k ({:.0}d {:?})",
+                rep.config.active_record_label(),
+                rep.tridirectional_mode.short_label(),
+                rep.scaled_pga_g,
+                rep.peak_interstory_drift_ratio * 100.0,
+                rep.peak_count_io,
+                rep.peak_count_ls,
+                rep.peak_count_cp,
+                rep.peak_count_mechanism,
+                rep.fragility_loss.total_repair_cost_usd / 1000.0,
+                rep.fragility_loss.downtime_days,
+                rep.fragility_loss.achieved_redi_tier,
+            )
+        }
+    } else if let Some(mc) = input.monte_carlo_report {
         format!(
-            "NL-THA {} ({}, {:.2}g) | Drift {:.2}% | Hinges {}IO/{}LS/{}CP/{}M | Fragility ${:.0}k ({:.0}d {:?})",
-            rep.config.active_record_label(),
-            rep.tridirectional_mode.short_label(),
-            rep.scaled_pga_g,
-            rep.peak_interstory_drift_ratio * 100.0,
-            rep.peak_count_io,
-            rep.peak_count_ls,
-            rep.peak_count_cp,
-            rep.peak_count_mechanism,
-            rep.fragility_loss.total_repair_cost_usd / 1000.0,
-            rep.fragility_loss.downtime_days,
-            rep.fragility_loss.achieved_redi_tier,
+            "GPU MC {} | P50 ${:.0}k | PML90 ${:.0}k | CVaR95 ${:.0}k | Pcol {:.1}%",
+            mc.sample_count,
+            mc.p50_loss_usd * 0.001,
+            mc.p90_loss_usd * 0.001,
+            mc.cvar95_loss_usd * 0.001,
+            mc.collapse_prob_pct,
         )
     } else if let Some(h) = input.hazard_report {
         format!(
@@ -1038,6 +1067,16 @@ mod tests {
         )
         .expect("Replay report");
 
+        let mc_rep = crate::core::gpu_fragility_mc::run_fema_p58_monte_carlo_cpu(
+            &proj,
+            Some(&replay_rep),
+            None,
+            Some(&ssi_rep),
+            &crate::core::gpu_fragility_mc::MonteCarloFragilityConfig {
+                sample_count: 512,
+                ..Default::default()
+            },
+        );
         let export = build_pure_vector_engineering_dossier_svg(&VectorDossierInput {
             project: &proj,
             members: &members,
@@ -1053,6 +1092,7 @@ mod tests {
             shm_report: None,
             evacuation_report: None,
             watchdog_state: None,
+            monte_carlo_report: Some(&mc_rep),
             sheet_code: "S-101",
             revision: "REV 01",
         });
@@ -1064,6 +1104,7 @@ mod tests {
         assert!(!export.svg_content.contains("<image"));
         assert!(!export.svg_content.contains("data:image"));
         assert!(export.svg_content.contains("NL-THA Ground-Motion &amp; Hinges"));
+        assert!(export.svg_content.contains("MC PML90"));
         assert!(export.svg_content.contains("Tower &lt;A &amp; B&gt;"));
         assert!(export.svg_content.contains("Col-C1 &lt;Crit&gt;"));
         assert!(export.svg_content.contains("Vs30="));
@@ -1098,6 +1139,7 @@ mod tests {
             shm_report: Some(&shm_rep),
             evacuation_report: None,
             watchdog_state: None,
+            monte_carlo_report: None,
             sheet_code: "S-102",
             revision: "REV 02",
         });
@@ -1137,6 +1179,7 @@ mod tests {
             shm_report: None,
             evacuation_report: Some(&evac_rep),
             watchdog_state: Some(&wd),
+            monte_carlo_report: None,
             sheet_code: "S-103",
             revision: "REV 03",
         });

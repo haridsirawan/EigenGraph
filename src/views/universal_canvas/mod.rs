@@ -156,6 +156,9 @@ pub struct UniversalCanvasState {
     pub last_evacuation_report: Option<crate::core::evacuation_routing::EvacuationLifelineReport>,
     // Phase 78: Live WebSocket SHM Telemetry Streaming & Rolling-Window Watchdog
     pub shm_watchdog: crate::core::shm_watchdog::ShmWatchdogState,
+    // Phase 79: WebGPU Compute Shaders (`@compute` WGSL) & FEMA P-58 Monte Carlo Accelerator
+    pub monte_carlo_config: crate::core::gpu_fragility_mc::MonteCarloFragilityConfig,
+    pub last_monte_carlo_report: Option<crate::core::gpu_fragility_mc::MonteCarloFragilityReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -279,6 +282,8 @@ impl Default for UniversalCanvasState {
             evacuation_config: crate::core::evacuation_routing::EvacuationRoutingConfig::default(),
             last_evacuation_report: None,
             shm_watchdog: crate::core::shm_watchdog::ShmWatchdogState::default(),
+            monte_carlo_config: crate::core::gpu_fragility_mc::MonteCarloFragilityConfig::default(),
+            last_monte_carlo_report: None,
         }
     }
 }
@@ -452,6 +457,13 @@ impl UniversalCanvasState {
             doc = crate::core::ifcx::IfcxStage::compose_with_shm_watchdog_overlay(
                 &doc,
                 &wd_overlay,
+            );
+        }
+        if let Some(ref mc_rep) = self.last_monte_carlo_report {
+            let mc_overlay = mc_rep.build_ifcx_overlay(bim_project);
+            doc = crate::core::ifcx::IfcxStage::compose_with_monte_carlo_loss_overlay(
+                &doc,
+                &mc_overlay,
             );
         }
         doc
@@ -630,6 +642,129 @@ impl UniversalCanvasState {
             }
         }
         outcome
+    }
+
+    /// Runs FEMA P-58 Monte Carlo fragility assessment using hardware WebGPU `@compute` when
+    /// available on native GPUs, falling back seamlessly to deterministic CPU parity on CI/WASM.
+    pub fn run_monte_carlo_fragility_assessment(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::gpu_fragility_mc::MonteCarloFragilityReport {
+        let replay_opt = self.last_ground_motion_replay_report.as_ref();
+        let haz_opt = self
+            .district_hazard
+            .any_active()
+            .then_some(&self.district_hazard_report);
+        let ssi_opt = self.last_subsurface_ssi_report.as_ref();
+        let report = self
+            .webgpu_earth
+            .try_run_mc_on_gpu(
+                bim_project,
+                replay_opt,
+                haz_opt,
+                ssi_opt,
+                &self.monte_carlo_config,
+            )
+            .unwrap_or_else(|| {
+                crate::core::gpu_fragility_mc::run_fema_p58_monte_carlo_cpu(
+                    bim_project,
+                    replay_opt,
+                    haz_opt,
+                    ssi_opt,
+                    &self.monte_carlo_config,
+                )
+            });
+        self.last_monte_carlo_report = Some(report.clone());
+        report
+    }
+
+    /// Builds frame parameters for the Pure WebGPU `@compute` 60 FPS multi-hazard particle pass.
+    pub fn build_hazard_compute_input(
+        &self,
+        bim_project: &BimProject,
+        time_secs: f32,
+    ) -> crate::views::webgpu_earth::HazardComputeInput {
+        use crate::views::webgpu_earth::{
+            HazardComputeInput, HazardComputeParams, HazardObstacleGpu, MAX_GPU_HAZARD_OBSTACLES,
+        };
+        let enabled = self.monte_carlo_config.gpu_particles_enabled && self.world_map.zoom_level >= 11.5;
+        if !enabled {
+            return HazardComputeInput::default();
+        }
+        let mode_flags = match (
+            self.district_hazard.seismic_wave_active,
+            self.district_hazard.venturi_wind_active,
+        ) {
+            (true, true) => 3.0_f32,
+            (true, false) => 1.0_f32,
+            (false, true) => 2.0_f32,
+            (false, false) => 3.0_f32,
+        };
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let (bmin, bmax) = bim_project
+            .plan_extents_mm()
+            .unwrap_or(([-7000.0, -6000.0], [7000.0, 6000.0]));
+        let active_cx = ((bmin[0] + bmax[0]) * 0.5e-3) as f32;
+        let active_cy = ((bmin[1] + bmax[1]) * 0.5e-3) as f32;
+        let active_hw = ((bmax[0] - bmin[0]).max(4000.0) * 0.5e-3) as f32;
+        let active_hd = ((bmax[1] - bmin[1]).max(4000.0) * 0.5e-3) as f32;
+
+        let mut obstacles = Vec::with_capacity(16);
+        obstacles.push(HazardObstacleGpu {
+            xy_r_h: [active_cx, active_cy, active_hw.hypot(active_hd).max(8.0), 18.0],
+        });
+        for b in &self.world_index.buildings {
+            if obstacles.len() >= MAX_GPU_HAZARD_OBSTACLES || b.is_unlocated() {
+                break;
+            }
+            let [wx_mm, wy_mm] = crate::core::gis::SlippyMapState::lat_lon_to_world_mm(
+                origin, b.lat, b.lon,
+            );
+            let ex = (wx_mm * 1e-3) as f32;
+            let ny = (wy_mm * 1e-3) as f32;
+            if ex.hypot(ny) <= 260.0 {
+                let rad = b
+                    .footprint_local_m
+                    .iter()
+                    .map(|p| p[0].hypot(p[1]))
+                    .fold(8.0_f64, f64::max)
+                    .clamp(6.0, 45.0) as f32;
+                obstacles.push(HazardObstacleGpu {
+                    xy_r_h: [ex, ny, rad, b.total_height_m.max(6.0) as f32],
+                });
+            }
+        }
+        let vs30 = self
+            .last_subsurface_ssi_report
+            .as_ref()
+            .map(|s| s.vs30_m_s as f32)
+            .unwrap_or(280.0);
+        HazardComputeInput {
+            enabled: true,
+            params: HazardComputeParams {
+                time_secs,
+                pga_g: self.district_hazard.seismic_pga_g as f32,
+                wave_speed_ms: self.district_hazard.wave_speed_ms as f32,
+                wave_azimuth_rad: (self.district_hazard.wave_azimuth_deg as f32).to_radians(),
+                wind_speed_ms: self.district_hazard.base_wind_ms as f32,
+                wind_azimuth_rad: (self.district_hazard.wind_azimuth_deg as f32).to_radians(),
+                vs30_ms: vs30,
+                particle_count_f32: self.monte_carlo_config.normalized_particle_count() as f32,
+                mode_flags_f32: mode_flags,
+                domain_radius_m: 140.0,
+                obstacle_count_f32: obstacles.len() as f32,
+                intensity_scale: 1.0,
+                active_cx,
+                active_cy,
+                active_half_w: active_hw,
+                active_half_d: active_hd,
+            },
+            obstacles,
+        }
     }
 
     /// Launches a non-blocking background Ground-Motion Replay & Async `StructGNN-CRC` worker job.
@@ -817,6 +952,7 @@ impl UniversalCanvasState {
             shm_digital_twin: self.shm_twin_config.clone(),
             evacuation_routing: self.evacuation_config.clone(),
             shm_watchdog: self.shm_watchdog.config.clone(),
+            monte_carlo_config: self.monte_carlo_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -929,6 +1065,8 @@ impl UniversalCanvasState {
             config: archive.shm_watchdog,
             ..Default::default()
         };
+        self.monte_carlo_config = archive.monte_carlo_config;
+        self.last_monte_carlo_report = None;
         self.status_message = Some(format!(
             "Imported verified 1-file workspace '{}' ({} canvas objects)",
             archive.project_name,
@@ -1469,6 +1607,12 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
+            let hazard_compute_input =
+                self.build_hazard_compute_input(bim_project, compute_time_secs);
+            let hazard_compute_opt = hazard_compute_input
+                .enabled
+                .then_some(hazard_compute_input.clone());
             let gpu_globe_active = self.webgpu_earth.schedule_paint_pass(
                 ui,
                 &painter,
@@ -1491,6 +1635,7 @@ impl UniversalCanvasState {
                 fragility_gpu_input,
                 shm_gpu_input,
                 evacuation_gpu_input,
+                hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
                 ui,
@@ -1506,6 +1651,9 @@ impl UniversalCanvasState {
                 self.is_frozen,
                 gpu_globe_active,
             );
+            if !gpu_globe_active && hazard_compute_input.enabled {
+                self.paint_cpu_hazard_particles_fallback(&painter, rect, &xform, &hazard_compute_input);
+            }
             if !gpu_globe_active && self.district_hazard.any_active() {
                 self.paint_cpu_district_hazard_fallback(&painter, rect, theme, &xform);
             }

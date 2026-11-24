@@ -1400,3 +1400,222 @@ use crate::core::ifcx::IfcxDocument;
             "Expected Pass 1 + Pass 2 + Evacuation Lifelines render to produce non-black pixels (got {non_black_pixels}/4096)"
         );
     }
+
+    #[test]
+    fn test_phase79_webgpu_compute_pipelines_wgsl_particles_and_mc_gpu() {
+        let proj = BimProject::sample_bimcraft_building();
+        let mc_cfg = crate::core::gpu_fragility_mc::MonteCarloFragilityConfig {
+            sample_count: 1024,
+            seed: 79_2026,
+            gpu_particles_enabled: true,
+            gpu_particle_count: 512,
+            ..Default::default()
+        };
+        let cpu_mc = crate::core::gpu_fragility_mc::run_fema_p58_monte_carlo_cpu(
+            &proj, None, None, None, &mc_cfg,
+        );
+        let hc_input = HazardComputeInput {
+            enabled: true,
+            params: HazardComputeParams {
+                time_secs: 1.25,
+                pga_g: 0.42,
+                wave_speed_ms: 280.0,
+                wave_azimuth_rad: 0.5,
+                wind_speed_ms: 34.0,
+                wind_azimuth_rad: 1.1,
+                vs30_ms: 240.0,
+                particle_count_f32: 512.0,
+                mode_flags_f32: 3.0,
+                domain_radius_m: 120.0,
+                obstacle_count_f32: 1.0,
+                intensity_scale: 1.0,
+                active_cx: 0.0,
+                active_cy: 0.0,
+                active_half_w: 8.0,
+                active_half_d: 8.0,
+            },
+            obstacles: vec![HazardObstacleGpu {
+                xy_r_h: [25.0, -15.0, 12.0, 18.0],
+            }],
+        };
+        let cpu_verts = step_hazard_particles_cpu(&hc_input);
+        assert_eq!(cpu_verts.len(), 512 * 6);
+        assert!(cpu_verts.iter().all(|v| (v.meta[0] - 6.0).abs() < 1e-3 && v.pos[0].is_finite()));
+
+        fn poll_fut<F: std::future::Future>(fut: F) -> F::Output {
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(waker);
+            let mut pinned = std::pin::pin!(fut);
+            loop {
+                if let std::task::Poll::Ready(val) = pinned.as_mut().poll(&mut cx) {
+                    return val;
+                }
+                std::thread::yield_now();
+            }
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = poll_fut(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let Ok((device, queue)) =
+            poll_fut(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        let planet_mesh = build_planetary_vector_globe_mesh(VectorEarthTheme::CoastalBlueprint);
+        res.planet
+            .upload(&device, &queue, "planet_p79", 1, &planet_mesh);
+
+        let mut cam = GlobeCamera::default();
+        cam.tilt_deg = 42.0;
+        let xf = GlobeScreenTransform::from_view(
+            Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(64.0, 64.0)),
+            -6.2088,
+            106.8456,
+            17.0,
+            &cam,
+        );
+        let uniforms = RtcCameraUniforms::from_globe_xform(
+            &xf,
+            VectorEarthTheme::CoastalBlueprint,
+            &cam,
+            (-6.2088, 106.8456),
+            1.25,
+            true,
+        );
+        queue.write_buffer(
+            &res.planet_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_planet_pass_uniforms()),
+        );
+        queue.write_buffer(
+            &res.site_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_site_pass_uniforms()),
+        );
+        res.ensure_targets(&device, 64, 64);
+
+        let out_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("p79_composite_out"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: fmt,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let out_view = out_tex.create_view(&Default::default());
+        let read_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("p79_readback"),
+            size: (64 * 64 * 4) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = device.create_command_encoder(&Default::default());
+        res.hazard_compute.dispatch(&queue, &mut encoder, &hc_input);
+        assert_eq!(res.hazard_compute.active_vertex_count, 512 * 6);
+        res.render_offscreen_passes(&mut encoder, true);
+        {
+            let target = res.targets.as_ref().expect("Targets allocated");
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("p79_composite_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &out_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_viewport(0.0, 0.0, 64.0, 64.0, 0.0, 1.0);
+            pass.set_scissor_rect(0, 0, 64, 64);
+            pass.set_pipeline(&res.composite_pipeline);
+            pass.set_bind_group(0, &target.composite_bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        encoder.copy_texture_to_buffer(
+            out_tex.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &read_buf,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(64 * 4),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit([encoder.finish()]);
+
+        let map_res: std::sync::Arc<std::sync::Mutex<Option<Result<(), wgpu::BufferAsyncError>>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let map_res_cb = std::sync::Arc::clone(&map_res);
+        read_buf
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |r| {
+                *map_res_cb.lock().unwrap() = Some(r);
+            });
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        assert!(matches!(*map_res.lock().unwrap(), Some(Ok(()))));
+        let bytes = read_buf.slice(..).get_mapped_range().expect("Mapped range");
+        let non_black_pixels = bytes
+            .chunks_exact(4)
+            .filter(|px| (px[0] > 0 || px[1] > 0 || px[2] > 0) && px[3] > 0)
+            .count();
+        drop(bytes);
+        read_buf.unmap();
+        assert!(non_black_pixels > 400);
+
+        // Real GPU @compute FEMA P-58 Monte Carlo execution & CPU parity check
+        let gpu_mc = crate::core::gpu_fragility_mc::run_fema_p58_monte_carlo_wgpu(
+            &device, &queue, &proj, None, None, None, &mc_cfg,
+        )
+        .expect("GPU Monte Carlo compute execution");
+        let val_err = poll_fut(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "Phase 79 @compute WGSL triggered WebGPU validation error: {val_err:?}"
+        );
+        assert_eq!(
+            gpu_mc.backend,
+            crate::core::gpu_fragility_mc::ComputeBackendKind::WebGpuCompute
+        );
+        assert_eq!(gpu_mc.sample_count, 1024);
+        assert!(gpu_mc.p10_loss_usd <= gpu_mc.p50_loss_usd);
+        assert!(gpu_mc.p50_loss_usd <= gpu_mc.p90_loss_usd);
+        let rel_mean_diff =
+            (gpu_mc.mean_loss_usd - cpu_mc.mean_loss_usd).abs() / cpu_mc.mean_loss_usd.max(1.0);
+        let rel_p90_diff =
+            (gpu_mc.p90_loss_usd - cpu_mc.p90_loss_usd).abs() / cpu_mc.p90_loss_usd.max(1.0);
+        assert!(
+            rel_mean_diff < 0.02 && rel_p90_diff < 0.02,
+            "GPU MC vs CPU MC parity diverged: gpu=({}, {}) vs cpu=({}, {})",
+            gpu_mc.mean_loss_usd,
+            gpu_mc.p90_loss_usd,
+            cpu_mc.mean_loss_usd,
+            cpu_mc.p90_loss_usd
+        );
+    }

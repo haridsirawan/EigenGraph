@@ -2388,6 +2388,7 @@ impl EigenGraphApp {
                     evacuation_report: self.universal_canvas.last_evacuation_report.as_ref(),
                     watchdog_state: (self.universal_canvas.shm_watchdog.total_packets_ingested > 0)
                         .then_some(&self.universal_canvas.shm_watchdog),
+                    monte_carlo_report: self.universal_canvas.last_monte_carlo_report.as_ref(),
                     sheet_code: "S-101",
                     revision: "REV 01",
                 },
@@ -2835,6 +2836,49 @@ impl EigenGraphApp {
                     );
                 }
                 Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if let Some(n_samples) = hud_actions.run_gpu_monte_carlo {
+            self.universal_canvas.monte_carlo_config.sample_count = n_samples.clamp(256, 16_384);
+            let rep = self
+                .universal_canvas
+                .run_monte_carlo_fragility_assessment(&self.build_view.bim_bus.project);
+            self.spatial_workspace.push_trace(rep.summary, true);
+        }
+        if hud_actions.export_monte_carlo_ifcx {
+            if self.universal_canvas.last_monte_carlo_report.is_none() {
+                self.universal_canvas
+                    .run_monte_carlo_fragility_assessment(&self.build_view.bim_bus.project);
+            }
+            if let Some(ref mc_rep) = self.universal_canvas.last_monte_carlo_report {
+                let raw_name =
+                    Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+                let fname = format!("{raw_name}_gpu_monte_carlo.ifcx");
+                let layered = self
+                    .universal_canvas
+                    .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+                let mc_overlay = mc_rep.build_ifcx_overlay(&self.build_view.bim_bus.project);
+                let composed = crate::core::IfcxStage::compose_with_monte_carlo_loss_overlay(
+                    &layered,
+                    &mc_overlay,
+                );
+                let json = composed.to_json_pretty();
+                match crate::core::web_bridge::save_text_file(
+                    &fname,
+                    &json,
+                    "application/json;charset=utf-8",
+                ) {
+                    Ok(_) => {
+                        self.spatial_workspace.push_trace(
+                            format!(
+                                "Exported GPU Monte Carlo IFCX ({fname}, {} nodes)",
+                                composed.data.len()
+                            ),
+                            true,
+                        );
+                    }
+                    Err(err) => self.spatial_workspace.push_trace(err, false),
+                }
             }
         }
     }

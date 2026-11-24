@@ -35,6 +35,7 @@ pub mod shear_wall;
 pub mod isolation;
 pub mod time_history;
 pub mod fema_p58;
+pub mod gpu_fragility_mc;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -242,6 +243,11 @@ pub use evacuation_routing::{
 pub use shm_watchdog::{
     ShmWatchdogConfig, ShmWatchdogState, ShmWatchdogTickOutcome, WatchdogAlertLevel,
     WatchdogEventEntry, WatchdogSamplePoint, WatchdogSimMode, NS_EG_SHM_WATCHDOG,
+};
+pub use gpu_fragility_mc::{
+    run_fema_p58_monte_carlo_cpu, ComputeBackendKind, DowntimeHistogramBin, LossExceedancePoint,
+    MonteCarloFragilityConfig, MonteCarloFragilityReport, RediTierProbabilities, StoryDemandInput,
+    NS_EG_GPU_MONTE_CARLO_LOSS,
 };
 
 

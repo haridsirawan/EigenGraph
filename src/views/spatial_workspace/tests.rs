@@ -4108,3 +4108,124 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_phase79_gpu_compute_slash_commands_and_width_first_zero_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus.project = BimProject::sample_bimcraft_building();
+        let mut ai = AiAssistantView::default();
+        let members = vec![StructuralMember {
+            id: 1,
+            name: "C1".to_string(),
+            section: "RC 400x400".to_string(),
+            force_kn: -310.0,
+            capacity_kn: 800.0,
+            utilization: 0.62,
+            moment_my_knm: 28.0,
+            moment_mz_knm: 19.0,
+            is_critical: false,
+            is_active: true,
+            ari_score: 0.86,
+            svd_sensitivity: 0.08,
+            ari: 0.86,
+            dcr_interaction: 0.68,
+            shear_vy_kn: 42.0,
+            svd_margin: 0.45,
+            ci: 0.14,
+            rr: 0.88,
+        }];
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        for cmd in ["/gpu-compute", "/mc", "/particles", "/mc-ifcx"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|s| s.cmd == cmd),
+                "Missing Phase 79 slash command {cmd}"
+            );
+        }
+
+        let act_mc = spatial.execute_spatial_input(
+            "/mc 1024",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(act_mc.run_gpu_monte_carlo, Some(1024));
+        assert!(spatial.ground_motion_drawer_open);
+        assert_eq!(spatial.ground_motion_drawer_tab, 2);
+
+        let _ = canvas.run_monte_carlo_fragility_assessment(&build.bim_bus.project);
+        assert!(canvas.last_monte_carlo_report.is_some());
+
+        let _ = spatial.execute_spatial_input(
+            "/particles 2048",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(canvas.monte_carlo_config.gpu_particles_enabled);
+        assert_eq!(canvas.monte_carlo_config.gpu_particle_count, 2048);
+
+        let act_ifcx = spatial.execute_spatial_input(
+            "/mc-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_ifcx.export_monte_carlo_ifcx);
+
+        let (clean_txt, dirs) = parse_gemini_action_directives(
+            "Running GPU compute [[RUN_GPU_MONTE_CARLO:2048]] [[TOGGLE_GPU_PARTICLES]] [[EXPORT_MC_IFCX]]",
+        );
+        assert_eq!(clean_txt, "Running GPU compute");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunGpuMonteCarlo(2048),
+                GeminiDirective::ToggleGpuParticles,
+                GeminiDirective::ExportMcIfcx,
+            ]
+        );
+
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(win_w, 820.0),
+                )),
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let _ = spatial.render_hud_overlays(
+                    ui.ctx(),
+                    &theme,
+                    &mut canvas,
+                    &mut build,
+                    &mut ai,
+                    &members,
+                    &projects,
+                    &mut db_components,
+                );
+            });
+            out.textures_delta.clear();
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 79 Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
+        }
+    }

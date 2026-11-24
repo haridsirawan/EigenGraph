@@ -74,6 +74,7 @@ pub mod ns {
     pub const EG_ATC20_PLACARD: &str = "eigengraph::analysis::atc20_placard";
     pub const EG_EVACUATION_LIFELINES: &str = "eigengraph::analysis::evacuation_lifelines";
     pub const EG_SHM_WATCHDOG: &str = "eigengraph::analysis::shm_watchdog";
+    pub const EG_GPU_MONTE_CARLO_LOSS: &str = "eigengraph::analysis::gpu_monte_carlo_loss";
 }
 
 fn default_ifcx_version() -> String {
@@ -1374,10 +1375,22 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), wd_overlay.clone()]);
         stage.to_composed_document(&format!("{}_shm_watchdog", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive GPU Monte Carlo Fragility Loss overlay
+    /// (`eigengraph::analysis::gpu_monte_carlo_loss`).
+    pub fn compose_with_monte_carlo_loss_overlay(
+        base_doc: &IfcxDocument,
+        mc_overlay: &IfcxDocument,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[base_doc.clone(), mc_overlay.clone()]);
+        stage.to_composed_document(&format!("{}_gpu_monte_carlo_loss", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_SHM_WATCHDOG) {
+    if node.attributes.contains_key(ns::EG_GPU_MONTE_CARLO_LOSS) {
+        "GPU Monte Carlo Risk".to_string()
+    } else if node.attributes.contains_key(ns::EG_SHM_WATCHDOG) {
         "SHM Live Watchdog".to_string()
     } else if node.attributes.contains_key(ns::EG_EVACUATION_LIFELINES) {
         "Evacuation Lifelines".to_string()

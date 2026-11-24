@@ -7,6 +7,19 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.7.9] - 2026-11-24 — WebGPU `@compute` WGSL Multi-Hazard Particles & FEMA P-58 Monte Carlo Fragility Accelerator
+
+### Added & Changed
+- **Pure WebGPU `@compute` WGSL Multi-Hazard Particle Pass (`src/views/webgpu_earth/compute_pass.rs`, `src/views/webgpu_earth/mod.rs`, `src/views/universal_canvas/render_layers.rs`)**:
+  - Added `GpuHazardParticlePipeline` (`HAZARD_COMPUTE_WGSL` `@compute @workgroup_size(64)`) dispatched before Pass 2 (`eigengraph_earth_site_pass`) writing 512–4,096 traveling seismic wavefield and obstacle-deflected Venturi wind particles directly into a shared `STORAGE | VERTEX` buffer with zero per-frame CPU-GPU readback stalls, backed by `step_hazard_particles_cpu` vector fallback.
+- **High-Throughput FEMA P-58 Monte Carlo Accelerator (`src/core/gpu_fragility_mc.rs`, `src/core/ifcx.rs`, `src/core/vector_dossier.rs`, `src/views/spatial_workspace/`, `src/views/settings.rs`, `src/app.rs`)**:
+  - Added `FRAGILITY_MC_WGSL` (`@compute @workgroup_size(64)` PCG32 + Box–Muller lognormal EDP simulator) and exact mathematical CPU fallback (`run_fema_p58_monte_carlo_cpu`) evaluating `256–16,384` realizations for Mean, P10, P50, PML-90, CVaR-95 repair cost, P50/P90 downtime, Arup REDi™ tier probabilities, collapse/red-tag probability, non-destructive `eigengraph::analysis::gpu_monte_carlo_loss` IFCX overlay (`IfcxStage::compose_with_monte_carlo_loss_overlay`), and pure-vector SVG dossier scorecard metrics.
+  - Added width-first Dynamic Island **`GPU Compute & MC`** sub-tab (2 pure-vector charts: Loss Exceedance Curve $1 - \text{CDF}$ + Downtime & REDi™ Probabilities), `GPU Particles` & `GPU MC` toolbar pills, `/gpu-compute`, `/mc`, `/particles`, `/mc-ifcx` commands, `[[RUN_GPU_MONTE_CARLO:...]]` / `[[TOGGLE_GPU_PARTICLES]]` / `[[EXPORT_MC_IFCX]]` Gemini directives, and updated `Settings -> About EigenGraph` (`v0.7.9 • LATEST`).
+- **Verification**:
+  - Verified clean native test suite (`cargo test --lib` — all 280 unit tests passing with 0 warnings, including `phase79_fema_p58_monte_carlo_quantiles_determinism_and_ifcx_overlay`, real Metal GPU `@compute` test `test_phase79_webgpu_compute_pipelines_wgsl_particles_and_mc_gpu`, and responsive width-first Dynamic Island test `test_phase79_gpu_compute_slash_commands_and_width_first_zero_overflow` across `1600px`/`1280px`/`768px`/`390px`), `cargo check --bin eigengraph --target wasm32-unknown-unknown`, `cargo build --bin eigengraph --target wasm32-unknown-unknown --release`, zero WebGL/`glow`/`glutin` crates, and zero external raster tokens.
+
+---
+
 ## [v0.7.8] - 2026-11-24 — Live WebSocket SHM Watchdog, Closed-Loop ATC-20 → Evacuation Cascade & Width-First Responsive Dynamic Island
 
 ### Added & Changed

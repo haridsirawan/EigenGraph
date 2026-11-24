@@ -3755,6 +3755,27 @@ impl SpatialWorkspaceState {
                                                     if Self::glass_pill_button(
                                                         ui,
                                                         theme,
+                                                        Some(AppIcon::Bolt),
+                                                        "GPU MC",
+                                                        self.ground_motion_drawer_open && self.ground_motion_drawer_tab == 2,
+                                                        theme.accent_orange,
+                                                        "Open WebGPU @compute Multi-Hazard Particles & FEMA P-58 Monte Carlo drawer",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.ground_motion_drawer_tab = 2;
+                                                        if !self.ground_motion_drawer_open {
+                                                            self.toggle_exclusive_drawer("ground_motion");
+                                                        }
+                                                        if universal_canvas.last_monte_carlo_report.is_none() {
+                                                            actions.run_gpu_monte_carlo = Some(
+                                                                universal_canvas.monte_carlo_config.normalized_sample_count(),
+                                                            );
+                                                        }
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
                                                         Some(AppIcon::Shield),
                                                         "SHM UI",
                                                         self.shm_drawer_open,
@@ -4728,6 +4749,33 @@ impl SpatialWorkspaceState {
                                                 }
                                             }
                                             ui.separator();
+                                            let gp_on = universal_canvas.monte_carlo_config.gpu_particles_enabled;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Bolt),
+                                                if gp_on {
+                                                    format!(
+                                                        "GPU {}P",
+                                                        universal_canvas.monte_carlo_config.normalized_particle_count()
+                                                    )
+                                                } else {
+                                                    "GPU Particles".to_string()
+                                                },
+                                                gp_on,
+                                                theme.accent_blue,
+                                                "Toggle 60 FPS Pure WebGPU @compute seismic wave & Venturi wind obstacle particles",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.monte_carlo_config.gpu_particles_enabled = !gp_on;
+                                                if universal_canvas.monte_carlo_config.gpu_particles_enabled
+                                                    && !universal_canvas.district_hazard.any_active()
+                                                {
+                                                    universal_canvas.district_hazard.seismic_wave_active = true;
+                                                    universal_canvas.district_hazard.venturi_wind_active = true;
+                                                }
+                                            }
                                             if Self::glass_pill_button(
                                                 ui,
                                                 theme,
@@ -5558,6 +5606,7 @@ impl SpatialWorkspaceState {
                     for (tab_idx, tab_lbl) in [
                         (0_usize, "Time-History"),
                         (1_usize, "Spectrum & Fragility"),
+                        (2_usize, "GPU Compute & MC"),
                     ] {
                         if Self::glass_pill_button(
                             ui,
@@ -5566,7 +5615,7 @@ impl SpatialWorkspaceState {
                             tab_lbl,
                             self.ground_motion_drawer_tab == tab_idx,
                             theme.accent_blue,
-                            "Switch between 60 FPS time-history waveforms and 5% response spectrum + FEMA P-58 fragility synthesis",
+                            "Switch between 60 FPS time-history waveforms, response spectrum + FEMA P-58 fragility, and WebGPU @compute Monte Carlo",
                         )
                         .clicked()
                         {
@@ -5891,7 +5940,24 @@ impl SpatialWorkspaceState {
                 }
 
                 ui.add_space(4.0);
-                if let Some(ref rep) = rep_opt {
+                if self.ground_motion_drawer_tab == 2 {
+                    let max_scroll_h = if is_mobile { 240.0 } else { 310.0 };
+                    ScrollArea::vertical()
+                        .id_salt("gpu_compute_mc_scroll")
+                        .max_height(max_scroll_h)
+                        .show(ui, |ui| {
+                            let panel_w = (dw - 6.0).max(150.0);
+                            ui.set_width(panel_w);
+                            self.render_gpu_compute_and_mc_panel(
+                                ui,
+                                theme,
+                                universal_canvas,
+                                actions,
+                                panel_w,
+                                is_mobile,
+                            );
+                        });
+                } else if let Some(ref rep) = rep_opt {
                     ui.horizontal_wrapped(|ui| {
                         let playing = universal_canvas.replay_anim_playing;
                         if Self::glass_pill_button(
@@ -6534,6 +6600,248 @@ impl SpatialWorkspaceState {
                 theme.accent_blue,
             );
         });
+    }
+
+    fn render_gpu_compute_and_mc_panel(
+        &self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        avail_w: f32,
+        is_mobile: bool,
+    ) {
+        ui.horizontal_wrapped(|ui| {
+            let gp_on = universal_canvas.monte_carlo_config.gpu_particles_enabled;
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Waves),
+                if gp_on { "GPU Particles ON" } else { "GPU Particles OFF" },
+                gp_on,
+                theme.accent_blue,
+                "Toggle 60 FPS WebGPU @compute multi-hazard seismic wavefield & Venturi obstacle particles",
+            )
+            .clicked()
+            {
+                universal_canvas.monte_carlo_config.gpu_particles_enabled = !gp_on;
+                if universal_canvas.monte_carlo_config.gpu_particles_enabled
+                    && !universal_canvas.district_hazard.any_active()
+                {
+                    universal_canvas.district_hazard.seismic_wave_active = true;
+                    universal_canvas.district_hazard.venturi_wind_active = true;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                None,
+                format!(
+                    "Count: {}",
+                    universal_canvas.monte_carlo_config.normalized_particle_count()
+                ),
+                false,
+                theme.text_secondary,
+                "Cycle @compute particle budget (512 / 1024 / 2048 / 4096)",
+            )
+            .clicked()
+            {
+                universal_canvas.monte_carlo_config.cycle_particle_count();
+            }
+            ui.separator();
+            for n in [1024_u32, 4096, 16_384] {
+                let lbl = format!("Run {}k MC", n / 1024);
+                let act = universal_canvas
+                    .last_monte_carlo_report
+                    .as_ref()
+                    .is_some_and(|r| r.sample_count == n);
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Bolt),
+                    lbl,
+                    act,
+                    theme.accent_orange,
+                    "Run FEMA P-58 Monte Carlo realizations on WebGPU @compute (CPU parity fallback in CI)",
+                )
+                .clicked()
+                {
+                    universal_canvas.monte_carlo_config.sample_count = n;
+                    actions.run_gpu_monte_carlo = Some(n);
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Cube3D),
+                "MC .ifcx",
+                false,
+                theme.accent_green,
+                "Export non-destructive eigengraph::analysis::gpu_monte_carlo_loss .ifcx overlay",
+            )
+            .clicked()
+            {
+                actions.export_monte_carlo_ifcx = true;
+            }
+        });
+
+        ui.add_space(4.0);
+        if let Some(ref mc) = universal_canvas.last_monte_carlo_report {
+            ui.horizontal_wrapped(|ui| {
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Bolt,
+                    format!("{} ({}x)", mc.backend.short_label(), mc.sample_count),
+                    theme.accent_blue,
+                );
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Coins,
+                    format!(
+                        "Mean ${:.0}k | P50 ${:.0}k | PML90 ${:.0}k | CVaR95 ${:.0}k",
+                        mc.mean_loss_usd * 0.001,
+                        mc.p50_loss_usd * 0.001,
+                        mc.p90_loss_usd * 0.001,
+                        mc.cvar95_loss_usd * 0.001,
+                    ),
+                    theme.accent_orange,
+                );
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Shield,
+                    format!(
+                        "P90 {:.0}d | P(Col) {:.1}% | RedTag {:.1}%",
+                        mc.p90_downtime_days, mc.collapse_prob_pct, mc.red_tag_prob_pct
+                    ),
+                    if mc.collapse_prob_pct < 2.0 {
+                        theme.accent_green
+                    } else {
+                        theme.accent_red
+                    },
+                );
+            });
+
+            ui.add_space(4.0);
+            let two_col = !is_mobile && avail_w >= 560.0;
+            let cw = if two_col {
+                ((avail_w - 10.0) * 0.5).floor().max(180.0)
+            } else {
+                avail_w.max(150.0)
+            };
+            let ch = if two_col { 92.0_f32 } else { 82.0_f32 };
+
+            let draw_exceedance = |ui: &mut Ui| {
+                let (resp, p) = ui.allocate_painter(Vec2::new(cw, ch), egui::Sense::hover());
+                let r = resp.rect;
+                p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+                p.text(
+                    egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                    Align2::LEFT_TOP,
+                    format!(
+                        "Loss Exceedance (1-CDF) • P50 ${:.0}k | PML90 ${:.0}k",
+                        mc.p50_loss_usd * 0.001,
+                        mc.p90_loss_usd * 0.001
+                    ),
+                    egui::FontId::proportional(8.5),
+                    theme.text_muted,
+                );
+                if mc.exceedance_curve.len() >= 2 {
+                    let max_loss = mc
+                        .exceedance_curve
+                        .last()
+                        .map(|pt| pt.loss_usd)
+                        .unwrap_or(mc.p90_loss_usd)
+                        .max(1.0);
+                    let w = (r.width() - 12.0).max(20.0);
+                    let h = (r.height() - 23.0).max(16.0);
+                    let pts: Vec<egui::Pos2> = mc
+                        .exceedance_curve
+                        .iter()
+                        .map(|pt| {
+                            let x = r.left() + 6.0 + (pt.loss_usd / max_loss).clamp(0.0, 1.0) as f32 * w;
+                            let y = r.bottom() - 6.0 - pt.exceedance_prob.clamp(0.0, 1.0) as f32 * h;
+                            egui::Pos2::new(x, y)
+                        })
+                        .collect();
+                    p.add(egui::Shape::line(pts, Stroke::new(1.6, theme.accent_orange)));
+                    for (val, col) in [
+                        (mc.p50_loss_usd, theme.accent_blue),
+                        (mc.p90_loss_usd, theme.accent_red),
+                    ] {
+                        let mx = r.left() + 6.0 + (val / max_loss).clamp(0.0, 1.0) as f32 * w;
+                        p.line_segment(
+                            [egui::Pos2::new(mx, r.top() + 17.0), egui::Pos2::new(mx, r.bottom() - 6.0)],
+                            Stroke::new(1.1, col),
+                        );
+                    }
+                }
+            };
+
+            let draw_downtime_redi = |ui: &mut Ui| {
+                let (resp, p) = ui.allocate_painter(Vec2::new(cw, ch), egui::Sense::hover());
+                let r = resp.rect;
+                p.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+                p.text(
+                    egui::Pos2::new(r.left() + 6.0, r.top() + 3.0),
+                    Align2::LEFT_TOP,
+                    format!(
+                        "Downtime Bins & REDi (P:{:.0}% G:{:.0}% S:{:.0}%)",
+                        mc.redi_probs.platinum_pct,
+                        mc.redi_probs.gold_pct,
+                        mc.redi_probs.silver_pct
+                    ),
+                    egui::FontId::proportional(8.5),
+                    theme.text_muted,
+                );
+                let max_p = mc
+                    .downtime_bins
+                    .iter()
+                    .map(|b| b.probability_pct)
+                    .fold(10.0_f64, f64::max)
+                    .max(5.0);
+                let n_bins = mc.downtime_bins.len().max(1);
+                let w = (r.width() - 14.0).max(20.0);
+                let h = (r.height() - 25.0).max(14.0);
+                let step_w = w / (n_bins as f32);
+                let bar_w = (step_w - 3.0).max(4.0);
+                for (bi, bin) in mc.downtime_bins.iter().enumerate() {
+                    let frac = (bin.probability_pct / max_p).clamp(0.03, 1.0) as f32;
+                    let bh = frac * h;
+                    let bx = r.left() + 7.0 + (bi as f32) * step_w;
+                    let col = if bin.max_days <= 7.5 {
+                        theme.accent_green
+                    } else if bin.max_days <= 30.5 {
+                        theme.accent_blue
+                    } else if bin.max_days <= 60.5 {
+                        theme.accent_orange
+                    } else {
+                        theme.accent_red
+                    };
+                    p.rect_filled(
+                        Rect::from_min_size(egui::Pos2::new(bx, r.bottom() - 6.0 - bh), Vec2::new(bar_w, bh)),
+                        CornerRadius::same(2),
+                        col,
+                    );
+                }
+            };
+
+            if two_col {
+                ui.horizontal(|ui| {
+                    draw_exceedance(ui);
+                    draw_downtime_redi(ui);
+                });
+            } else {
+                draw_exceedance(ui);
+                ui.add_space(4.0);
+                draw_downtime_redi(ui);
+            }
+        } else {
+            ui.label(
+                RichText::new("Click 'Run 4k MC', '/mc', or toggle 'GPU Particles' to dispatch Pure WebGPU @compute WGSL shaders.")
+                    .size(9.5)
+                    .color(theme.text_muted),
+            );
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

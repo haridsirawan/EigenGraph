@@ -3220,4 +3220,52 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Pure-vector CPU fallback rendering GPU compute multi-hazard particles when WebGPU is inactive.
+    pub(super) fn paint_cpu_hazard_particles_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+        hc_input: &crate::views::webgpu_earth::HazardComputeInput,
+    ) {
+        if !hc_input.enabled || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let mut preview_in = hc_input.clone();
+        preview_in.params.particle_count_f32 = preview_in.params.particle_count_f32.min(256.0);
+        let verts = crate::views::webgpu_earth::step_hazard_particles_cpu(&preview_in);
+        let clip = painter.with_clip_rect(rect);
+        for tri in verts.chunks_exact(6) {
+            let p0 = tri[0].pos;
+            let p1 = tri[1].pos;
+            let ll0 = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [(p0[0] as f64) * 1000.0, (p0[1] as f64) * 1000.0],
+            );
+            let ll1 = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [(p1[0] as f64) * 1000.0, (p1[1] as f64) * 1000.0],
+            );
+            if let (Some((s0, _, v0)), Some((s1, _, v1))) = (
+                xform.project_lat_lon_elev(ll0.0, ll0.1, p0[2] as f64),
+                xform.project_lat_lon_elev(ll1.0, ll1.1, p1[2] as f64),
+            ) {
+                if v0 && v1 {
+                    let c = tri[0].color;
+                    let col = Color32::from_rgba_unmultiplied(
+                        (c[0].clamp(0.0, 1.0) * 255.0) as u8,
+                        (c[1].clamp(0.0, 1.0) * 255.0) as u8,
+                        (c[2].clamp(0.0, 1.0) * 255.0) as u8,
+                        (c[3].clamp(0.0, 1.0) * 200.0) as u8,
+                    );
+                    clip.line_segment([s0, s1], Stroke::new(1.8, col));
+                }
+            }
+        }
+    }
 }

@@ -25,7 +25,9 @@ use crate::core::gis::vector_layers::UrbanVectorLayerCache;
 use crate::core::gis::world_index::WorldSpatialIndex;
 use crate::views::universal_canvas::EarthBimLens;
 
+mod compute_pass;
 mod mesh_builders;
+pub use compute_pass::*;
 pub use mesh_builders::*;
 
 /// Compact GPU vertex layout (`56 bytes`, `14 x f32`) shared by Planetary and RTC Site WebGPU passes.
@@ -673,6 +675,7 @@ pub struct WebGpuEarthResources {
     fragility_loss: GpuMeshSlot,
     shm_triage: GpuMeshSlot,
     evacuation: GpuMeshSlot,
+    hazard_compute: GpuHazardParticlePipeline,
 }
 
 impl WebGpuEarthResources {
@@ -882,6 +885,7 @@ impl WebGpuEarthResources {
             fragility_loss: GpuMeshSlot::default(),
             shm_triage: GpuMeshSlot::default(),
             evacuation: GpuMeshSlot::default(),
+            hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
 
@@ -999,7 +1003,8 @@ impl WebGpuEarthResources {
             || self.hazard.index_count > 0
             || self.fragility_loss.index_count > 0
             || self.shm_triage.index_count > 0
-            || self.evacuation.index_count > 0;
+            || self.evacuation.index_count > 0
+            || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("eigengraph_earth_site_pass"),
@@ -1038,6 +1043,7 @@ impl WebGpuEarthResources {
             self.subsurface.draw(&mut pass);
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
+            self.hazard_compute.draw(&mut pass);
             self.fragility_loss.draw(&mut pass);
             self.shm_triage.draw(&mut pass);
             self.evacuation.draw(&mut pass);
@@ -1058,6 +1064,7 @@ struct WebGpuEarthPaintCallback {
     pending_fragility: Option<(u64, GpuMeshPayload)>,
     pending_shm: Option<(u64, GpuMeshPayload)>,
     pending_evacuation: Option<(u64, GpuMeshPayload)>,
+    pending_hazard_compute: Option<HazardComputeInput>,
 }
 
 impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
@@ -1120,11 +1127,16 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
                     .upload(device, queue, "shm_triage_mesh", rev, mesh);
             }
         }
-        if let Some((rev, ref mesh)) = self.pending_evacuation {
-            if res.evacuation.revision_uploaded != rev {
+        if let Some(ref ev_in) = self.pending_evacuation {
+            if res.evacuation.revision_uploaded != ev_in.0 {
                 res.evacuation
-                    .upload(device, queue, "evacuation_mesh", rev, mesh);
+                    .upload(device, queue, "evacuation_mesh", ev_in.0, &ev_in.1);
             }
+        }
+        if let Some(ref h_cmp) = self.pending_hazard_compute {
+            res.hazard_compute.dispatch(queue, egui_encoder, h_cmp);
+        } else {
+            res.hazard_compute.active_vertex_count = 0;
         }
 
         let pu = self.uniforms.to_planet_pass_uniforms();
@@ -1216,6 +1228,11 @@ pub struct WebGpuEarthState {
     pub last_fragility_tris: usize,
     pub last_shm_tris: usize,
     pub last_evacuation_tris: usize,
+    pub last_compute_particles: u32,
+    #[cfg(not(target_arch = "wasm32"))]
+    wgpu_device: Option<wgpu::Device>,
+    #[cfg(not(target_arch = "wasm32"))]
+    wgpu_queue: Option<wgpu::Queue>,
 }
 
 impl std::fmt::Debug for WebGpuEarthState {
@@ -1255,10 +1272,38 @@ impl WebGpuEarthState {
             .write()
             .callback_resources
             .insert(resources);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.wgpu_device = Some(render_state.device.clone());
+            self.wgpu_queue = Some(render_state.queue.clone());
+        }
         self.ready = true;
         self.enabled = true;
         self.adapter_label = backend_lbl.to_string();
         self.last_init_error = None;
+    }
+
+    /// Attempts hardware `@compute` WGSL FEMA P-58 Monte Carlo execution when native `wgpu` Device & Queue are available.
+    pub fn try_run_mc_on_gpu(
+        &self,
+        project: &crate::core::BimProject,
+        replay_opt: Option<&crate::core::ground_motion_replay::GroundMotionReplayReport>,
+        hazard_opt: Option<&crate::core::gis::DistrictMultiHazardReport>,
+        ssi_opt: Option<&crate::core::geotech::SubsurfaceSsiAnalysisReport>,
+        config: &crate::core::gpu_fragility_mc::MonteCarloFragilityConfig,
+    ) -> Option<crate::core::gpu_fragility_mc::MonteCarloFragilityReport> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let (Some(ref dev), Some(ref q)) = (&self.wgpu_device, &self.wgpu_queue) {
+                return crate::core::gpu_fragility_mc::run_fema_p58_monte_carlo_wgpu(
+                    dev, q, project, replay_opt, hazard_opt, ssi_opt, config,
+                )
+                .ok();
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = (project, replay_opt, hazard_opt, ssi_opt, config);
+        None
     }
 
     /// True when the native WebGPU pipeline is initialized and enabled by the user.
@@ -1452,6 +1497,7 @@ impl WebGpuEarthState {
         fragility_input: Option<FragilityLossGpuInput<'_>>,
         shm_input: Option<ShmTriageGpuInput<'_>>,
         evacuation_input: Option<EvacuationLifelineGpuInput<'_>>,
+        hazard_compute_input: Option<HazardComputeInput>,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
             return false;
@@ -1739,6 +1785,26 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_hazard_compute = if render_site_pass {
+            if let Some(hc) = hazard_compute_input {
+                if hc.enabled {
+                    self.last_compute_particles =
+                        (hc.params.particle_count_f32.round() as u32).clamp(64, MAX_GPU_HAZARD_PARTICLES);
+                    Some(hc)
+                } else {
+                    self.last_compute_particles = 0;
+                    None
+                }
+            } else {
+                self.last_compute_particles = 0;
+                None
+            }
+        } else {
+            self.last_compute_particles = 0;
+            None
+        };
+        let compute_animated = pending_hazard_compute.is_some();
+
         painter.add(egui_wgpu::Callback::new_paint_callback(
             rect,
             WebGpuEarthPaintCallback {
@@ -1754,6 +1820,7 @@ impl WebGpuEarthState {
                 pending_fragility,
                 pending_shm,
                 pending_evacuation,
+                pending_hazard_compute,
             },
         ));
 
@@ -1774,6 +1841,7 @@ impl WebGpuEarthState {
                 .is_some_and(|b| b.lens == EarthBimLens::ShmDigitalTwin);
         let evac_animated = evacuation_input.as_ref().is_some_and(|e| e.visible);
         let frame_ms = if hazard_animated
+            || compute_animated
             || subsurface_animated
             || replay_animated
             || shm_animated

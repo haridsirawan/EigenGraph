@@ -266,6 +266,8 @@ pub struct UnifiedWorkspaceArchive {
     pub evacuation_routing: crate::core::evacuation_routing::EvacuationRoutingConfig,
     #[serde(default)]
     pub shm_watchdog: crate::core::shm_watchdog::ShmWatchdogConfig,
+    #[serde(default)]
+    pub monte_carlo_config: crate::core::gpu_fragility_mc::MonteCarloFragilityConfig,
     pub sha256_seal: String,
 }
 

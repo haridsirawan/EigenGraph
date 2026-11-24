@@ -432,6 +432,10 @@ pub enum PlannedProposalAction {
     StartShmWatchdog,
     ConnectShmWs(String),
     TriggerWatchdogSim(String),
+    // Phase 79: WebGPU Compute Shaders (`@compute` WGSL) & FEMA P-58 Monte Carlo
+    RunGpuMonteCarlo(u32),
+    ToggleGpuParticles,
+    ExportMcIfcx,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -506,6 +510,10 @@ pub enum GeminiDirective {
     StartShmWatchdog,
     ConnectShmWs(String),
     TriggerWatchdogSim(String),
+    // Phase 79: WebGPU Compute Shaders (`@compute` WGSL) & FEMA P-58 Monte Carlo
+    RunGpuMonteCarlo(u32),
+    ToggleGpuParticles,
+    ExportMcIfcx,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -709,6 +717,17 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::TriggerWatchdogSim(
                     rest.trim().to_ascii_lowercase(),
                 ));
+            } else if upper == "RUN_GPU_MONTE_CARLO" || upper.starts_with("RUN_GPU_MONTE_CARLO:") {
+                let n = upper
+                    .strip_prefix("RUN_GPU_MONTE_CARLO:")
+                    .and_then(|s| s.trim().parse::<u32>().ok())
+                    .unwrap_or(4096)
+                    .clamp(256, 16_384);
+                directives.push(GeminiDirective::RunGpuMonteCarlo(n));
+            } else if upper == "TOGGLE_GPU_PARTICLES" {
+                directives.push(GeminiDirective::ToggleGpuParticles);
+            } else if upper == "EXPORT_MC_IFCX" {
+                directives.push(GeminiDirective::ExportMcIfcx);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -1422,6 +1441,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export non-destructive eigengraph::analysis::shm_watchdog .ifcx overlay",
         icon: AppIcon::Cube3D,
     },
+    SlashCommandSpec {
+        cmd: "/gpu-compute",
+        category: "AI",
+        description: "Open WebGPU @compute Multi-Hazard Particles & FEMA P-58 Monte Carlo drawer",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/mc",
+        category: "AI",
+        description: "Run FEMA P-58 probabilistic Monte Carlo fragility (/mc 1024 | 4096 | 16384)",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/particles",
+        category: "Hazard",
+        description: "Toggle 60 FPS WebGPU @compute seismic wave & Venturi wind particles (optional count)",
+        icon: AppIcon::Waves,
+    },
+    SlashCommandSpec {
+        cmd: "/mc-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::gpu_monte_carlo_loss .ifcx overlay",
+        icon: AppIcon::Cube3D,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1481,6 +1524,8 @@ pub struct SpatialHudActions {
     pub connect_shm_ws: Option<String>,
     pub disconnect_shm_ws: bool,
     pub export_watchdog_ifcx: bool,
+    pub run_gpu_monte_carlo: Option<u32>,
+    pub export_monte_carlo_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
