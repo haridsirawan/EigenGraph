@@ -1513,6 +1513,370 @@ pub fn build_fabrication_bbs_shop_svg(
     }
 }
 
+/// Phase 83 (`v0.8.3`): Generates an archival A3 landscape (`1600 x 1131`, 0% raster pixels)
+/// Pure-Vector EigenFlow Non-Linear Pushover, ADRS Capacity Spectrum & Woodbury `P1 -> P2` Annex (`S-104`).
+pub fn build_eigenflow_nonlinear_annex_svg(
+    project_name: &str,
+    report: &crate::core::eigenflow::EigenFlowStudioReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(24_000);
+    let seal_token = "__EIGENGRAPH_EIGENFLOW_S104_SHA256__";
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH EIGENFLOW NON-LINEAR PUSHOVER, ADRS &amp; WOODBURY ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • EigenGate + EigenFlow • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: Pushover Capacity Curve Vb vs Roof Drift (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    let raw = &report.pushover_csm.raw_pushover;
+    let perf = &report.pushover_csm.performance_point;
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. INCREMENTAL P-DELTA PUSHOVER CAPACITY CURVE (Vb vs ROOF DRIFT)",
+        &format!(
+            "{} • Vy={:.0} kN • Vu={:.0} kN • Omega0={:.2} • mu={:.2}",
+            escape_xml(report.pushover_csm.load_pattern.label()),
+            raw.yield_base_shear_kn,
+            raw.ultimate_base_shear_kn,
+            raw.overstrength_factor_omega0,
+            raw.ductility_ratio_mu
+        ),
+    );
+    let gx0 = p1x + 76.0;
+    let gy0 = p1y + 56.0;
+    let gw = p1w - 112.0;
+    let gh = p1h - 116.0;
+    let max_drift = raw
+        .steps
+        .iter()
+        .map(|s| s.roof_drift_mm)
+        .fold(raw.ultimate_drift_mm.max(perf.target_displacement_dt_mm), f64::max)
+        .max(10.0)
+        * 1.12;
+    let max_shear = raw
+        .steps
+        .iter()
+        .map(|s| s.base_shear_kn)
+        .fold(raw.ultimate_base_shear_kn.max(perf.target_base_shear_vt_kn), f64::max)
+        .max(20.0)
+        * 1.15;
+
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{gx0:.1}" y="{gy0:.1}" width="{gw:.1}" height="{gh:.1}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>"##
+    );
+    // Performance zone vertical guides: IO (yield*1.05) and LS (yield*1.85)
+    let io_x = gx0 + ((raw.yield_drift_mm * 1.05) / max_drift).clamp(0.0, 1.0) * gw;
+    let ls_x = gx0 + ((raw.yield_drift_mm * 1.85) / max_drift).clamp(0.0, 1.0) * gw;
+    let _ = writeln!(
+        svg,
+        r##"<line x1="{io_x:.1}" y1="{gy0:.1}" x2="{io_x:.1}" y2="{:.1}" stroke="#0ea5e9" stroke-width="1.1" stroke-dasharray="5,4"/>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-weight="bold" fill="#0284c7">IO</text>
+<line x1="{ls_x:.1}" y1="{gy0:.1}" x2="{ls_x:.1}" y2="{:.1}" stroke="#f59e0b" stroke-width="1.1" stroke-dasharray="5,4"/>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-weight="bold" fill="#d97706">LS / CP</text>"##,
+        gy0 + gh,
+        io_x + 4.0,
+        gy0 + 14.0,
+        gy0 + gh,
+        ls_x + 4.0,
+        gy0 + 14.0,
+    );
+    let mut push_pts = format!("{gx0:.1},{:.1}", gy0 + gh);
+    for st in &raw.steps {
+        let sx = gx0 + (st.roof_drift_mm / max_drift).clamp(0.0, 1.0) * gw;
+        let sy = gy0 + gh - (st.base_shear_kn / max_shear).clamp(0.0, 1.0) * gh;
+        push_pts.push_str(&format!(" {sx:.1},{sy:.1}"));
+    }
+    let perf_px = gx0 + (perf.target_displacement_dt_mm / max_drift).clamp(0.0, 1.0) * gw;
+    let perf_py = gy0 + gh - (perf.target_base_shear_vt_kn / max_shear).clamp(0.0, 1.0) * gh;
+    let yld_px = gx0 + (raw.yield_drift_mm / max_drift).clamp(0.0, 1.0) * gw;
+    let yld_py = gy0 + gh - (raw.yield_base_shear_kn / max_shear).clamp(0.0, 1.0) * gh;
+    let _ = writeln!(
+        svg,
+        r##"<polyline fill="none" stroke="#0369a1" stroke-width="2.8" points="{push_pts}"/>
+<circle cx="{yld_px:.1}" cy="{yld_py:.1}" r="5.5" fill="#f59e0b" stroke="#0f172a" stroke-width="1.1"/>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-weight="bold" fill="#b45309">Yield ({:.1} mm, {:.0} kN)</text>
+<circle cx="{perf_px:.1}" cy="{perf_py:.1}" r="6.5" fill="#10b981" stroke="#0f172a" stroke-width="1.3"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" fill="#047857">Target (Dt={:.1} mm, Vt={:.0} kN)</text>
+<text x="{:.1}" y="{:.1}" font-size="9" font-family="monospace" fill="#334155">Roof Drift Delta (mm) [0 .. {:.0} mm] • Max Vb = {:.0} kN</text>"##,
+        yld_px + 8.0,
+        (yld_py - 8.0).max(gy0 + 26.0),
+        raw.yield_drift_mm,
+        raw.yield_base_shear_kn,
+        (perf_px + 9.0).min(gx0 + gw - 175.0),
+        (perf_py + 14.0).min(gy0 + gh - 8.0),
+        perf.target_displacement_dt_mm,
+        perf.target_base_shear_vt_kn,
+        gx0 + 4.0,
+        gy0 + gh + 24.0,
+        max_drift,
+        max_shear,
+    );
+
+    // Panel 2: ADRS Capacity vs Inelastic Demand Spectrum (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. ATC-40 / ASCE 41-17 ADRS CAPACITY VS INELASTIC DEMAND SPECTRUM",
+        &format!(
+            "Sd*={:.1} mm • Sa*={:.3}g • Teff={:.2}s • Beta_eff={:.1}%",
+            perf.sd_star_m * 1000.0,
+            perf.sa_star_g,
+            perf.effective_period_teff_s,
+            perf.effective_damping_pct
+        ),
+    );
+    let ax0 = p2x + 76.0;
+    let ay0 = p2y + 56.0;
+    let aw = p2w - 112.0;
+    let ah = p2h - 116.0;
+    let cap_pts = &report.pushover_csm.capacity_spectrum.points;
+    let el_pts = &report.pushover_csm.demand_spectrum.elastic_5pct_points;
+    let red_pts = &report.pushover_csm.demand_spectrum.reduced_inelastic_points;
+    let max_sd_mm = cap_pts
+        .iter()
+        .chain(el_pts.iter())
+        .map(|p| p.sd_mm())
+        .fold(perf.sd_star_m * 1000.0, f64::max)
+        .max(30.0)
+        * 1.08;
+    let max_sa_g = cap_pts
+        .iter()
+        .chain(el_pts.iter())
+        .map(|p| p.sa_g)
+        .fold(perf.sa_star_g, f64::max)
+        .max(0.25)
+        * 1.12;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{ax0:.1}" y="{ay0:.1}" width="{aw:.1}" height="{ah:.1}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>"##
+    );
+    let build_adrs_poly = |pts: &[crate::core::pushover::AdrsPoint]| -> String {
+        pts.iter()
+            .map(|p| {
+                let x = ax0 + (p.sd_mm() / max_sd_mm).clamp(0.0, 1.0) * aw;
+                let y = ay0 + ah - (p.sa_g / max_sa_g).clamp(0.0, 1.0) * ah;
+                format!("{x:.1},{y:.1}")
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let el_poly = build_adrs_poly(el_pts);
+    let red_poly = build_adrs_poly(red_pts);
+    let cap_poly = build_adrs_poly(cap_pts);
+    let sx = ax0 + ((perf.sd_star_m * 1000.0) / max_sd_mm).clamp(0.0, 1.0) * aw;
+    let sy = ay0 + ah - (perf.sa_star_g / max_sa_g).clamp(0.0, 1.0) * ah;
+    let _ = writeln!(
+        svg,
+        r##"<polyline fill="none" stroke="#94a3b8" stroke-width="1.6" stroke-dasharray="6,4" points="{el_poly}"/>
+<polyline fill="none" stroke="#ef4444" stroke-width="2.2" stroke-dasharray="4,3" points="{red_poly}"/>
+<polyline fill="none" stroke="#0284c7" stroke-width="2.8" points="{cap_poly}"/>
+<line x1="{ax0:.1}" y1="{:.1}" x2="{sx:.1}" y2="{sy:.1}" stroke="#0f766e" stroke-width="1.1" stroke-dasharray="3,3"/>
+<circle cx="{sx:.1}" cy="{sy:.1}" r="7.0" fill="#10b981" stroke="#0b1427" stroke-width="1.5"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-weight="bold" fill="#065f46">Performance Pt ({:.1} mm, {:.3}g)</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#334155">Blue: Capacity | Red Dash: Inelastic Demand | Grey Dash: 5% Elastic • SDS={:.2}g SD1={:.2}g</text>"##,
+        ay0 + ah,
+        (sx + 10.0).min(ax0 + aw - 190.0),
+        (sy - 8.0).max(ay0 + 22.0),
+        perf.sd_star_m * 1000.0,
+        perf.sa_star_g,
+        ax0 + 4.0,
+        ay0 + ah + 24.0,
+        report.site_sds_g,
+        report.site_sd1_g,
+    );
+
+    // Panel 3: EigenGate (Linear) vs EigenFlow (Non-Linear) Comparative Scorecard (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 620.0, 506.0);
+    let wb = &report.woodbury;
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. EIGENGATE (LINEAR) VS EIGENFLOW (NON-LINEAR) COMPARATIVE SCORECARD",
+        &format!(
+            "P1 Disrupted: #{} ({}) • lambda = {:.2}",
+            wb.disrupted_element_id,
+            escape_xml(&truncate_clean(&wb.disrupted_element_name, 20)),
+            wb.lambda_val
+        ),
+    );
+    let kpis = [
+        (
+            "Linear EigenGate System Index",
+            format!("{:.3}", report.linear_eigengate_system),
+            "#0284c7",
+        ),
+        (
+            "Non-Linear EigenFlow System Index",
+            format!("{:.3}", report.non_linear_eigenflow_system),
+            "#059669",
+        ),
+        (
+            "Delta (EigenFlow NL - EigenGate Lin)",
+            format!("{:+.3}", report.delta_score_nl_minus_lin),
+            if report.delta_score_nl_minus_lin >= 0.0 {
+                "#0f766e"
+            } else {
+                "#d97706"
+            },
+        ),
+        (
+            "Topological Stability Margin m_s",
+            format!("{:.3} (h_e = {:.3})", wb.stability_margin_ms, wb.svd_leverage_he),
+            if wb.is_mechanism { "#dc2626" } else { "#1e293b" },
+        ),
+        (
+            "Woodbury Residual Reserve Ratio (RRR)",
+            format!("{:.3} (CI_nl = {:.3})", wb.residual_reserve_ratio_rrr, wb.non_linear_ci),
+            "#1e293b",
+        ),
+        (
+            "Max Ductility Demand mu / Shed Force",
+            format!("{:.2} / {:.1} kN", wb.max_ductility_mu, wb.total_shed_force_kn),
+            "#1e293b",
+        ),
+        (
+            "ASCE 41-17 Pushover Performance Level",
+            escape_xml(&truncate_clean(perf.performance_level.label(), 44)),
+            "#0369a1",
+        ),
+    ];
+    for (idx, (lbl, val, col)) in kpis.iter().enumerate() {
+        let ry = p3y + 52.0 + (idx as f64) * 44.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="36" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.5" font-weight="bold" fill="#334155">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.8" font-weight="bold" font-family="monospace" text-anchor="end" fill="{col}">{val}</text>"##,
+            p3x + 14.0,
+            p3w - 28.0,
+            p3x + 24.0,
+            ry + 22.0,
+            p3x + p3w - 24.0,
+            ry + 22.0,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="120" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#1e3a8a">PRESCRIPTIVE NON-LINEAR RECOMMENDATION</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p3x + 14.0,
+        p3y + 368.0,
+        p3w - 28.0,
+        p3x + 24.0,
+        p3y + 390.0,
+        p3x + 24.0,
+        p3y + 414.0,
+        escape_xml(&truncate_clean(&wb.prescriptive_recommendation, 84)),
+        p3x + 24.0,
+        p3y + 440.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live Local EigenFlow Baseline".to_string()),
+        ),
+        p3x + 24.0,
+        p3y + 466.0,
+    );
+
+    // Panel 4: Woodbury P1 -> P2 Load-Path Redistribution Schedule (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (668.0, 592.0, 900.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. WOODBURY RANK-1 P1 -> P2 SURVIVING LOAD-PATH REDISTRIBUTION SCHEDULE",
+        &format!(
+            "{} Surviving Backup Members • 3D Hinge Markers: {}",
+            wb.redistributed_p2.len(),
+            report.hinges_3d.len()
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#0369a1">ID    SURVIVING MEMBER              INTACT(kN)   SHED dN(kN)   SHARE(%)   POST-DCR   MU      STATUS</text>"##,
+        p4x + 18.0,
+        p4y + 48.0,
+    );
+    for (idx, m) in wb.redistributed_p2.iter().take(8).enumerate() {
+        let ry = p4y + 58.0 + (idx as f64) * 52.0;
+        let (badge_hex, status_txt) = if m.is_critical_overload {
+            ("#dc2626", "OVERLOAD")
+        } else if m.post_yield_dcr > 0.72 {
+            ("#d97706", "HIGH UTIL")
+        } else {
+            ("#059669", "ELASTIC OK")
+        };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="42" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-family="monospace" fill="#0f172a">#{:<4} {:<28} {:>8.1}     {:>8.1}      {:>5.1}%     {:>5.2}    {:>4.2}</text>
+<rect x="{:.1}" y="{:.1}" width="84" height="22" rx="4" fill="{badge_hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" text-anchor="middle" fill="#ffffff">{status_txt}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 20.0,
+            ry + 25.0,
+            m.element_id,
+            escape_xml(&truncate_clean(&m.element_name, 26)),
+            m.intact_axial_kn,
+            m.delta_n_kn,
+            m.share_pct,
+            m.post_yield_dcr,
+            m.ductility_mu,
+            p4x + p4w - 110.0,
+            ry + 10.0,
+            p4x + p4w - 68.0,
+            ry + 24.5,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_EIGENFLOW_S104");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = wb.redistributed_p2.len() + report.hinges_3d.len() + 1;
+    let summary = format!(
+        "Exported EigenFlow Non-Linear Pushover, ADRS & Woodbury Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1769,5 +2133,24 @@ mod tests {
         assert!(!shop.svg_content.contains("<image"));
         assert!(!shop.svg_content.contains("ARI"));
         assert_eq!(shop.sha256_seal.len(), 64);
+
+        let ef_rep = crate::core::eigenflow::evaluate_eigenflow_studio(
+            &field_proj,
+            None,
+            &crate::core::eigenflow::EigenFlowConfig::default(),
+        );
+        let s104 = build_eigenflow_nonlinear_annex_svg(
+            &field_proj.project_name,
+            &ef_rep,
+            "S-104",
+            Some("abc123def456"),
+        );
+        assert!(s104.svg_content.starts_with("<svg"));
+        assert!(s104.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s104.svg_content.contains("SHEET S-104"));
+        assert!(s104.svg_content.contains("<polyline"));
+        assert!(!s104.svg_content.contains("<image"));
+        assert!(!s104.svg_content.contains("ARI"));
+        assert_eq!(s104.sha256_seal.len(), 64);
     }
 }

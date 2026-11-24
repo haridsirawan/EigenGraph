@@ -4688,3 +4688,126 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn phase83_eigenflow_studio_drawer_responsive_and_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = crate::views::build::BuildView::default();
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_studio = spatial.execute_spatial_input(
+            "/eigenflow-studio",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_studio.run_eigenflow_studio);
+        assert!(spatial.eigenflow_drawer_open);
+        assert_eq!(spatial.eigenflow_drawer_tab, 0);
+
+        let act_push = spatial.execute_spatial_input(
+            "/pushover triangular",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(
+            act_push.eigenflow_set_pattern,
+            Some(crate::core::pushover::LateralLoadPattern::InvertedTriangular)
+        );
+        assert_eq!(spatial.eigenflow_drawer_tab, 1);
+
+        let act_svg = spatial.execute_spatial_input(
+            "/eigenflow-svg",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_svg.export_eigenflow_svg);
+
+        let act_ifcx = spatial.execute_spatial_input(
+            "/eigenflow-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_ifcx.export_eigenflow_ifcx);
+
+        let act_3d = spatial.execute_spatial_input(
+            "/eigenflow-3d",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_3d.toggle_eigenflow_3d);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Non-linear ready [[OPEN_EIGENFLOW_STUDIO]] [[RUN_PUSHOVER:TRIANGULAR]] [[TOGGLE_EIGENFLOW_3D]] [[EXPORT_EIGENFLOW_ANNEX]]",
+        );
+        assert_eq!(clean, "Non-linear ready");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::OpenEigenFlowStudio,
+                GeminiDirective::RunPushover(
+                    crate::core::pushover::LateralLoadPattern::InvertedTriangular
+                ),
+                GeminiDirective::ToggleEigenFlow3d,
+                GeminiDirective::ExportEigenFlowAnnex,
+            ]
+        );
+
+        let _ = canvas.run_eigenflow_studio(&build.bim_bus.project);
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_eigenflow_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 83 EigenFlow Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

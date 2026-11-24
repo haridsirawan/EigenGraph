@@ -134,6 +134,9 @@ pub struct SpatialWorkspaceState {
     // Phase 82: Field Construction QA/QC Spatial Waypoints & 1D Rebar BBS Cut-List Drawer
     pub field_qaqc_drawer_open: bool,
     pub field_qaqc_drawer_tab: usize,
+    // Phase 83: EigenFlow Non-Linear Studio Drawer (Woodbury P1->P2 & Pushover ADRS)
+    pub eigenflow_drawer_open: bool,
+    pub eigenflow_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -236,6 +239,8 @@ impl Default for SpatialWorkspaceState {
             collab_drawer_tab: 0,
             field_qaqc_drawer_open: false,
             field_qaqc_drawer_tab: 0,
+            eigenflow_drawer_open: false,
+            eigenflow_drawer_tab: 0,
         }
     }
 }
@@ -264,6 +269,7 @@ impl SpatialWorkspaceState {
             || self.evacuation_drawer_open
             || self.collab_drawer_open
             || self.field_qaqc_drawer_open
+            || self.eigenflow_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -286,6 +292,7 @@ impl SpatialWorkspaceState {
         self.evacuation_drawer_open = false;
         self.collab_drawer_open = false;
         self.field_qaqc_drawer_open = false;
+        self.eigenflow_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -355,6 +362,11 @@ impl SpatialWorkspaceState {
         } else {
             self.field_qaqc_drawer_open = !self.field_qaqc_drawer_open;
         }
+        if drawer != "eigenflow" {
+            self.eigenflow_drawer_open = false;
+        } else {
+            self.eigenflow_drawer_open = !self.eigenflow_drawer_open;
+        }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
@@ -390,6 +402,13 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.field_qaqc_drawer_tab = tab.min(1);
         self.field_qaqc_drawer_open = true;
+    }
+
+    /// Idempotently opens the Phase 83 EigenFlow Non-Linear Studio drawer (`0` = Woodbury `P1->P2`, `1` = Pushover & ADRS).
+    pub fn open_eigenflow_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.eigenflow_drawer_tab = tab.min(1);
+        self.eigenflow_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

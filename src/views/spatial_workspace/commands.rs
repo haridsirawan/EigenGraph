@@ -518,8 +518,25 @@ impl SpatialWorkspaceState {
                     out.export_shop_drawing_svg = true;
                 }
                 PlannedProposalAction::RunEigenFlow => {
-                    self.open_ground_motion_drawer();
+                    self.open_eigenflow_drawer(0);
+                    out.run_eigenflow_studio = true;
                     self.push_trace("Queued Branch 2 EigenFlow Non-Linear Woodbury check", true);
+                }
+                PlannedProposalAction::OpenEigenFlowStudio => {
+                    self.open_eigenflow_drawer(0);
+                    out.run_eigenflow_studio = true;
+                }
+                PlannedProposalAction::RunPushover(pat) => {
+                    self.open_eigenflow_drawer(1);
+                    out.eigenflow_set_pattern = Some(*pat);
+                }
+                PlannedProposalAction::ToggleEigenFlow3d => {
+                    self.open_eigenflow_drawer(0);
+                    out.toggle_eigenflow_3d = true;
+                }
+                PlannedProposalAction::ExportEigenFlowAnnex => {
+                    self.open_eigenflow_drawer(1);
+                    out.export_eigenflow_svg = true;
                 }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
@@ -771,6 +788,18 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ToggleQaqc3d => PlannedProposalAction::ToggleQaqc3d,
                             GeminiDirective::ExportShopSvg => PlannedProposalAction::ExportShopSvg,
                             GeminiDirective::RunEigenFlow => PlannedProposalAction::RunEigenFlow,
+                            GeminiDirective::OpenEigenFlowStudio => {
+                                PlannedProposalAction::OpenEigenFlowStudio
+                            }
+                            GeminiDirective::RunPushover(pat) => {
+                                PlannedProposalAction::RunPushover(*pat)
+                            }
+                            GeminiDirective::ToggleEigenFlow3d => {
+                                PlannedProposalAction::ToggleEigenFlow3d
+                            }
+                            GeminiDirective::ExportEigenFlowAnnex => {
+                                PlannedProposalAction::ExportEigenFlowAnnex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -861,6 +890,14 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ToggleQaqc3d => "ToggleQaqc3D".to_string(),
                             GeminiDirective::ExportShopSvg => "ExportShopSvg(S-103)".to_string(),
                             GeminiDirective::RunEigenFlow => "RunEigenFlow(Woodbury)".to_string(),
+                            GeminiDirective::OpenEigenFlowStudio => "OpenEigenFlowStudio".to_string(),
+                            GeminiDirective::RunPushover(pat) => {
+                                format!("RunPushover({})", pat.label())
+                            }
+                            GeminiDirective::ToggleEigenFlow3d => "ToggleEigenFlow3d".to_string(),
+                            GeminiDirective::ExportEigenFlowAnnex => {
+                                "ExportEigenFlowAnnex(S-104)".to_string()
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -2460,28 +2497,59 @@ impl SpatialWorkspaceState {
                 }
                 "/eigenflow" | "/woodbury" => {
                     self.command_bar_expanded = true;
-                    let bim_model = build_view.bim_bus.project.to_structural_model();
-                    let target_id = bim_model.elements.first().map(|e| e.id).unwrap_or(1);
-                    let rep = crate::core::nonlinear::NonlinearEngine::evaluate_woodbury_disruption(
-                        &bim_model,
-                        target_id,
-                        0.0,
-                    );
+                    self.open_eigenflow_drawer(0);
+                    let target_id = arg.trim().parse::<usize>().ok();
+                    if target_id.is_some() {
+                        actions.eigenflow_select_element = target_id;
+                    }
+                    actions.run_eigenflow_studio = true;
+                    let rep = universal_canvas.run_eigenflow_studio(&build_view.bim_bus.project);
+                    let wb = &rep.woodbury;
                     ai_assistant.chat_history.push(crate::models::ChatMessage {
                         is_user: false,
                         message: format!(
-                            "[EigenFlow Woodbury Non-Linear (Element #{})]: m_s={:.3}, ΔN={:.1} kN -> P2={:?}, RRR={:.2}, μ={:.2} | {}",
-                            rep.disrupted_element_id,
-                            rep.stability_margin_ms,
-                            rep.redistributed_force_delta_n_kn,
-                            rep.alternate_path,
-                            rep.residual_reserve_ratio_rrr,
-                            rep.ductility_demand_mu,
-                            rep.prescriptive_recommendation,
+                            "[EigenFlow Woodbury Non-Linear (Element #{})]: m_s={:.3}, ΔN={:.1} kN -> P2={} members, RRR={:.2}, μ={:.2} | {}",
+                            wb.disrupted_element_id,
+                            wb.stability_margin_ms,
+                            wb.total_shed_force_kn,
+                            wb.redistributed_p2.len(),
+                            wb.residual_reserve_ratio_rrr,
+                            wb.max_ductility_mu,
+                            wb.prescriptive_recommendation,
                         ),
                         time: crate::core::web_bridge::unix_timestamp_label(),
                     });
                     self.push_trace("Ran Branch 2 EigenFlow Woodbury Non-Linear Screening", true);
+                }
+                "/eigenflow-studio" => {
+                    self.open_eigenflow_drawer(0);
+                    actions.run_eigenflow_studio = true;
+                }
+                "/pushover" => {
+                    self.open_eigenflow_drawer(1);
+                    let lower = arg.to_ascii_lowercase();
+                    let pat = if lower.contains("uni") {
+                        crate::core::pushover::LateralLoadPattern::UniformMass
+                    } else if lower.contains("tri") {
+                        crate::core::pushover::LateralLoadPattern::InvertedTriangular
+                    } else {
+                        crate::core::pushover::LateralLoadPattern::FirstModeModal
+                    };
+                    actions.eigenflow_set_pattern = Some(pat);
+                }
+                "/adrs" => {
+                    self.open_eigenflow_drawer(1);
+                    actions.run_eigenflow_studio = true;
+                }
+                "/eigenflow-3d" => {
+                    self.open_eigenflow_drawer(0);
+                    actions.toggle_eigenflow_3d = true;
+                }
+                "/eigenflow-ifcx" => {
+                    actions.export_eigenflow_ifcx = true;
+                }
+                "/eigenflow-svg" => {
+                    actions.export_eigenflow_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

@@ -450,6 +450,11 @@ pub enum PlannedProposalAction {
     ToggleQaqc3d,
     ExportShopSvg,
     RunEigenFlow,
+    // Phase 83: EigenFlow Non-Linear Studio, 3D Woodbury P1->P2, Pushover ADRS & Sheet S-104
+    OpenEigenFlowStudio,
+    RunPushover(crate::core::pushover::LateralLoadPattern),
+    ToggleEigenFlow3d,
+    ExportEigenFlowAnnex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -542,6 +547,11 @@ pub enum GeminiDirective {
     ToggleQaqc3d,
     ExportShopSvg,
     RunEigenFlow,
+    // Phase 83: EigenFlow Non-Linear Studio, 3D Woodbury P1->P2, Pushover ADRS & Sheet S-104
+    OpenEigenFlowStudio,
+    RunPushover(crate::core::pushover::LateralLoadPattern),
+    ToggleEigenFlow3d,
+    ExportEigenFlowAnnex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -817,6 +827,22 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ExportShopSvg);
             } else if upper == "RUN_EIGENFLOW" || upper == "EIGENFLOW" {
                 directives.push(GeminiDirective::RunEigenFlow);
+            } else if upper == "OPEN_EIGENFLOW_STUDIO" {
+                directives.push(GeminiDirective::OpenEigenFlowStudio);
+            } else if upper == "TOGGLE_EIGENFLOW_3D" {
+                directives.push(GeminiDirective::ToggleEigenFlow3d);
+            } else if upper == "EXPORT_EIGENFLOW_ANNEX" {
+                directives.push(GeminiDirective::ExportEigenFlowAnnex);
+            } else if upper == "RUN_PUSHOVER" || upper.starts_with("RUN_PUSHOVER:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let pat = if arg.contains("UNI") {
+                    crate::core::pushover::LateralLoadPattern::UniformMass
+                } else if arg.contains("TRI") {
+                    crate::core::pushover::LateralLoadPattern::InvertedTriangular
+                } else {
+                    crate::core::pushover::LateralLoadPattern::FirstModeModal
+                };
+                directives.push(GeminiDirective::RunPushover(pat));
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -1623,8 +1649,44 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/eigenflow",
         category: "Safety",
-        description: "Run Branch 2 EigenFlow Non-Linear Woodbury redistribution & pushover check",
+        description: "Run Branch 2 EigenFlow Non-Linear Woodbury P1->P2 screening & open Studio",
         icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/eigenflow-studio",
+        category: "Analysis",
+        description: "Open the 2-tab EigenFlow Non-Linear Studio drawer (Woodbury & ADRS)",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/pushover",
+        category: "Analysis",
+        description: "Run P-Delta Pushover analysis (/pushover modal | uniform | triangular)",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/adrs",
+        category: "Analysis",
+        description: "Open ATC-40 / ASCE 41-17 Pushover & ADRS Capacity Spectrum tab",
+        icon: AppIcon::Target,
+    },
+    SlashCommandSpec {
+        cmd: "/eigenflow-3d",
+        category: "Analysis",
+        description: "Toggle 3D Pure WebGPU EigenFlow P1->P2 flow conduits & Pushover hinges",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/eigenflow-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::eigenflow IFCX layer (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/eigenflow-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-104 Pure-Vector EigenFlow Pushover, ADRS & Woodbury Annex .svg",
+        icon: AppIcon::Printer,
     },
     SlashCommandSpec {
         cmd: "/bbs",
@@ -1740,6 +1802,14 @@ pub struct SpatialHudActions {
     pub export_bbs_csv: bool,
     pub export_cutlist_csv: bool,
     pub export_field_qaqc_ifcx: bool,
+    // Phase 83: EigenFlow Non-Linear Studio
+    pub run_eigenflow_studio: bool,
+    pub toggle_eigenflow_3d: bool,
+    pub export_eigenflow_ifcx: bool,
+    pub export_eigenflow_svg: bool,
+    pub eigenflow_select_element: Option<usize>,
+    pub eigenflow_set_lambda: Option<f64>,
+    pub eigenflow_set_pattern: Option<crate::core::pushover::LateralLoadPattern>,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -2131,5 +2201,18 @@ impl SpatialHudActions {
         }
         self.disconnect_collab_relay |= other.disconnect_collab_relay;
         self.sync_peer_relay_delta |= other.sync_peer_relay_delta;
+        self.run_eigenflow_studio |= other.run_eigenflow_studio;
+        self.toggle_eigenflow_3d |= other.toggle_eigenflow_3d;
+        self.export_eigenflow_ifcx |= other.export_eigenflow_ifcx;
+        self.export_eigenflow_svg |= other.export_eigenflow_svg;
+        if other.eigenflow_select_element.is_some() {
+            self.eigenflow_select_element = other.eigenflow_select_element;
+        }
+        if other.eigenflow_set_lambda.is_some() {
+            self.eigenflow_set_lambda = other.eigenflow_set_lambda;
+        }
+        if other.eigenflow_set_pattern.is_some() {
+            self.eigenflow_set_pattern = other.eigenflow_set_pattern;
+        }
     }
 }

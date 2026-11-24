@@ -906,6 +906,22 @@ impl App for EigenGraphApp {
                 .advance_ground_motion_replay_clock(dt_s);
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
+        if self.universal_canvas.eigenflow_pushover_playing {
+            let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.25);
+            self.universal_canvas.eigenflow_play_accum_sec += dt;
+            if self.universal_canvas.eigenflow_play_accum_sec >= 0.45 {
+                self.universal_canvas.eigenflow_play_accum_sec = 0.0;
+                let n_steps = self
+                    .universal_canvas
+                    .last_eigenflow_report
+                    .as_ref()
+                    .map(|r| r.pushover_csm.raw_pushover.steps.len().max(1))
+                    .unwrap_or(12);
+                self.universal_canvas.eigenflow_config.active_step_idx =
+                    (self.universal_canvas.eigenflow_config.active_step_idx + 1) % n_steps;
+            }
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        }
         if self.planning_view.simulation_day != self.last_planning_sim_day {
             self.last_planning_sim_day = self.planning_view.simulation_day;
             if self.planning_view.simulation_day > 0 {
@@ -3273,6 +3289,111 @@ impl EigenGraphApp {
                     format!("Exported Field QA/QC & Rebar BBS IFCX ({fname})"),
                     true,
                 ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if let Some(eid) = hud_actions.eigenflow_select_element {
+            self.universal_canvas.eigenflow_config.disrupted_element_id = Some(eid);
+            let rep = self
+                .universal_canvas
+                .run_eigenflow_studio(&self.build_view.bim_bus.project);
+            self.spatial_workspace.push_trace(rep.summary_verdict, true);
+        }
+        if let Some(lam) = hud_actions.eigenflow_set_lambda {
+            self.universal_canvas
+                .eigenflow_config
+                .stiffness_retention_lambda = lam.clamp(0.0, 0.90);
+            let rep = self
+                .universal_canvas
+                .run_eigenflow_studio(&self.build_view.bim_bus.project);
+            self.spatial_workspace.push_trace(rep.summary_verdict, true);
+        }
+        if let Some(pat) = hud_actions.eigenflow_set_pattern {
+            self.universal_canvas.eigenflow_config.load_pattern = pat;
+            let rep = self
+                .universal_canvas
+                .run_eigenflow_studio(&self.build_view.bim_bus.project);
+            self.spatial_workspace.push_trace(rep.summary_verdict, true);
+        }
+        if hud_actions.run_eigenflow_studio {
+            let rep = self
+                .universal_canvas
+                .run_eigenflow_studio(&self.build_view.bim_bus.project);
+            self.spatial_workspace.push_trace(rep.summary_verdict, true);
+        }
+        if hud_actions.toggle_eigenflow_3d {
+            self.universal_canvas.eigenflow_overlay_visible =
+                !self.universal_canvas.eigenflow_overlay_visible;
+            if self.universal_canvas.eigenflow_overlay_visible {
+                let rep = self
+                    .universal_canvas
+                    .run_eigenflow_studio(&self.build_view.bim_bus.project);
+                self.spatial_workspace.push_trace(
+                    format!(
+                        "3D EigenFlow Overlay ON (P1 #{}, {} P2 conduits)",
+                        rep.woodbury.disrupted_element_id,
+                        rep.woodbury.redistributed_p2.len()
+                    ),
+                    true,
+                );
+            } else {
+                self.spatial_workspace
+                    .push_trace("3D EigenFlow Overlay OFF", true);
+            }
+        }
+        if hud_actions.export_eigenflow_ifcx {
+            let rep = self
+                .universal_canvas
+                .run_eigenflow_studio(&self.build_view.bim_bus.project);
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_eigenflow_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_eigenflow_nonlinear.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported EigenFlow Non-Linear IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.export_eigenflow_svg {
+            let rep = self
+                .universal_canvas
+                .run_eigenflow_studio(&self.build_view.bim_bus.project);
+            let cp_hash = self
+                .universal_canvas
+                .collab_state
+                .active_checkpoint()
+                .map(|c| c.short_sha256());
+            let annex = crate::core::build_eigenflow_nonlinear_annex_svg(
+                &self.build_view.bim_bus.project.project_name,
+                &rep,
+                "S-104",
+                cp_hash.as_deref(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_sheet_S104_eigenflow.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &annex.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(annex.sha256_seal);
+                    self.spatial_workspace.push_trace(annex.summary, true);
+                }
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }

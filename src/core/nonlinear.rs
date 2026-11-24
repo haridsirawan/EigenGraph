@@ -410,25 +410,70 @@ impl NonlinearEngine {
             fea.member_axial_forces.get(idx).map(|f| f.abs() / 1000.0)
         }).filter(|&f| f > 1e-6).unwrap_or(capacity_kn * 0.45);
 
-        // SVD kinematic leverage h_e approximation from element stiffness ratio vs global DOF
-        let n_elements = model.elements.len().max(1);
-        let h_e = if n_elements <= 3 {
-            1.0 // Determinate
-        } else if element_id == 4 || el_name.to_lowercase().contains("diag") {
-            0.7071
+        // SVD topological leverage h_e weighted by stiffness of surviving node-adjacent neighbors
+        let el_k = |e: &crate::core::model::Element3D| -> f64 {
+            let l = model.member_length(e).unwrap_or(4.0).max(0.25);
+            ((e.material.elastic_modulus * e.section.area) / l
+                + (12.0 * e.material.elastic_modulus * e.section.iz.max(e.section.iy)) / (l * l * l))
+                .max(1.0)
+        };
+        let p1_nodes = el_opt.map(|e| (e.start_node, e.end_node));
+        let mut alternate_path: Vec<usize> = if let Some((s_id, e_id)) = p1_nodes {
+            model
+                .elements
+                .iter()
+                .filter(|e| {
+                    e.id != element_id
+                        && (e.start_node == s_id
+                            || e.end_node == s_id
+                            || e.start_node == e_id
+                            || e.end_node == e_id)
+                })
+                .map(|e| e.id)
+                .collect()
         } else {
-            0.50
+            Vec::new()
+        };
+        if alternate_path.len() < 2 && model.elements.len() > 3 {
+            let hop_ids = alternate_path.clone();
+            for e in &model.elements {
+                if e.id != element_id && !alternate_path.contains(&e.id) {
+                    let shares_hop = hop_ids.iter().any(|hid| {
+                        model.elements.iter().find(|h| h.id == *hid).is_some_and(|h| {
+                            e.start_node == h.start_node
+                                || e.end_node == h.start_node
+                                || e.start_node == h.end_node
+                                || e.end_node == h.end_node
+                        })
+                    });
+                    if shares_hop {
+                        alternate_path.push(e.id);
+                    }
+                }
+            }
+        }
+        let k_p1 = el_opt.map(el_k).unwrap_or(1.0);
+        let k_p2: f64 = model
+            .elements
+            .iter()
+            .filter(|e| alternate_path.contains(&e.id))
+            .map(el_k)
+            .sum();
+        let h_e = if model.elements.len() <= 3 || k_p2 <= 1e-6 {
+            1.0 // Determinate or no topological backup path
+        } else {
+            (k_p1 / (k_p1 + k_p2)).clamp(0.18, 0.96)
         };
 
         let m_s = (1.0 - (1.0 - lambda_val) * h_e).clamp(0.0, 1.0);
         let is_mechanism = m_s < 1e-4;
 
         let primary_path = vec![element_id];
-        let alternate_path: Vec<usize> = if is_mechanism {
-            Vec::new()
+        if is_mechanism {
+            alternate_path.clear();
         } else {
-            model.elements.iter().filter(|e| e.id != element_id).take(2).map(|e| e.id).collect()
-        };
+            alternate_path.truncate(4);
+        }
 
         // Exact redistributed force Delta N shed to surviving elements (Eq. 4.13f)
         let delta_n_kn = if is_mechanism {

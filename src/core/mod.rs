@@ -38,6 +38,7 @@ pub mod fema_p58;
 pub mod gpu_fragility_mc;
 pub mod ifcx_collab;
 pub mod field_fabrication;
+pub mod eigenflow;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -218,8 +219,9 @@ pub use lifecycle_ops::{
     VariationOrderRow,
 };
 pub use vector_dossier::{
-    build_fabrication_bbs_shop_svg, build_permit_compliance_annex_svg,
-    build_pure_vector_engineering_dossier_svg, VectorDossierExport, VectorDossierInput,
+    build_eigenflow_nonlinear_annex_svg, build_fabrication_bbs_shop_svg,
+    build_permit_compliance_annex_svg, build_pure_vector_engineering_dossier_svg,
+    VectorDossierExport, VectorDossierInput,
 };
 pub use portfolio_retrofit::{
     optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,
@@ -272,6 +274,10 @@ pub use field_fabrication::{
     evaluate_field_fabrication, log_quick_field_ncr, FieldFabricationConfig,
     FieldFabricationIfcxOverlay, FieldFabricationReport, FieldInspectionStatus, FieldWaypoint,
     PourStripStatus, PourStripZone,
+};
+pub use eigenflow::{
+    evaluate_eigenflow_studio, EigenFlowConfig, EigenFlowHingeMarker3D, EigenFlowIfcxOverlay,
+    EigenFlowStudioReport, EigenFlowWoodburyResult, RedistributedMemberFlow, NS_EG_EIGENFLOW,
 };
 
 

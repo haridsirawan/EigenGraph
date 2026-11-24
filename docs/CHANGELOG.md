@@ -7,6 +7,19 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.8.3] - 2026-11-24 — EigenFlow Non-Linear Studio, 3D WebGPU Woodbury Load-Path (`P1 -> P2`), Pushover ADRS & Sheet `S-104`
+
+### Added & Changed
+- **EigenFlow Non-Linear Woodbury (`P1 -> P2`) & Pushover ADRS Engine (`src/core/eigenflow.rs`, `src/core/nonlinear.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Upgraded `NonlinearEngine::evaluate_woodbury_disruption` and introduced [`evaluate_eigenflow_studio`](src/core/eigenflow.rs) with real node-adjacent 1-hop/2-hop topological load-transfer path discovery (`P1 -> P2`), stiffness-weighted leverage $h_e$, kinematic margin $m_s$, residual reserve ratio (`RRR`), per-member shed force $\Delta N_j$, post-yield DCR%, ductility demand $\mu$, and side-by-side **EigenGate (Linear)** vs. **EigenFlow (Non-Linear)** indexing.
+  - Integrated site-coupled SNI 1726 / ATC-40 / ASCE 41-17 Pushover Capacity Curves & ADRS Capacity vs. Inelastic Demand Spectra (`FirstModeModal`, `UniformMass`, `InvertedTriangular`), 3D ENU plastic hinge step progression (`EigenFlowHingeMarker3D`), `.eigen.json` persistence (`UnifiedWorkspaceArchive::eigenflow_config`), and non-destructive `eigengraph::eigenflow` IFCX composition (`IfcxStage::compose_with_eigenflow_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Woodbury Load-Path & Hinge Renderer + Sheet `S-104` (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added [`build_rtc_eigenflow_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`EigenFlowGpuInput`, `material_kind = 12.0`, analytical WGSL `kind >= 11.5` animated directional flow waves & Fresnel rim lighting, 0% raster), dedicated `eigenflow` GPU mesh slot inside `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_eigenflow_fallback`), and archival A3 landscape Sheet `S-104` Pure-Vector Annex SVG (`build_eigenflow_nonlinear_annex_svg`, 0 `<image>` tags).
+- **Width-First Dynamic Island `EigenFlow Non-Linear Studio`, Commands & About EigenGraph (`src/views/spatial_workspace/`, `src/views/settings.rs`, `src/app.rs`)**:
+  - Added the 2-tab width-first **`EigenFlow Non-Linear Studio`** Dynamic Island drawer (`Woodbury P1->P2` with $\lambda$ damage presets, `P1` selector, EigenGate vs. EigenFlow scorecard & `P2` bar chart + `Pushover & ADRS` with pattern switcher, Play/Pause/Prev/Next step scrubber, and Pushover/ADRS vector plots), `/eigenflow-studio`, `/pushover`, `/adrs`, `/eigenflow-3d`, `/eigenflow-ifcx`, `/eigenflow-svg` slash commands, `[[OPEN_EIGENFLOW_STUDIO]]` / `[[RUN_PUSHOVER:...]]` / `[[TOGGLE_EIGENFLOW_3D]]` / `[[EXPORT_EIGENFLOW_ANNEX]]` Gemini directives, and updated `Settings -> About EigenGraph` (`v0.8.3 • LATEST`).
+
+---
+
 ## [v0.8.2] - 2026-11-24 — EigenGate / EigenFlow Migration, Field Construction QA/QC Spatial Waypoints, 1D Rebar BBS Cut-List & Sheet S-103 Shop Annex
 
 ### Added & Changed

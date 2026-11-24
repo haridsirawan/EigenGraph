@@ -172,6 +172,12 @@ pub struct UniversalCanvasState {
     pub field_qaqc_ledger: crate::core::lifecycle_ops::FieldQualityControlLedger,
     pub last_field_fab_report: Option<crate::core::field_fabrication::FieldFabricationReport>,
     pub active_waypoint_idx: usize,
+    // Phase 83: EigenFlow Non-Linear Studio (Woodbury P1 -> P2 & Pushover ADRS)
+    pub eigenflow_overlay_visible: bool,
+    pub eigenflow_config: crate::core::eigenflow::EigenFlowConfig,
+    pub last_eigenflow_report: Option<crate::core::eigenflow::EigenFlowStudioReport>,
+    pub eigenflow_pushover_playing: bool,
+    pub eigenflow_play_accum_sec: f32,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -307,6 +313,11 @@ impl Default for UniversalCanvasState {
             field_qaqc_ledger: crate::core::lifecycle_ops::FieldQualityControlLedger::default(),
             last_field_fab_report: None,
             active_waypoint_idx: 0,
+            eigenflow_overlay_visible: false,
+            eigenflow_config: crate::core::eigenflow::EigenFlowConfig::default(),
+            last_eigenflow_report: None,
+            eigenflow_pushover_playing: false,
+            eigenflow_play_accum_sec: 0.0,
         }
     }
 }
@@ -891,6 +902,24 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Branch 2 EigenFlow Non-Linear Woodbury (`P1 -> P2`) & Pushover ADRS Capacity Spectrum.
+    pub fn run_eigenflow_studio(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::eigenflow::EigenFlowStudioReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::eigenflow::evaluate_eigenflow_studio(
+            bim_project,
+            Some(&site),
+            &self.eigenflow_config,
+        );
+        let n_steps = rep.pushover_csm.raw_pushover.steps.len().max(1);
+        self.eigenflow_config.active_step_idx =
+            self.eigenflow_config.active_step_idx.min(n_steps.saturating_sub(1));
+        self.last_eigenflow_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1217,6 +1246,7 @@ impl UniversalCanvasState {
             monte_carlo_config: self.monte_carlo_config.clone(),
             collab_config: self.collab_state.config.clone(),
             trade_study_config: self.trade_study_config.clone(),
+            eigenflow_config: self.eigenflow_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1335,6 +1365,8 @@ impl UniversalCanvasState {
         self.trade_study_config = archive.trade_study_config;
         self.last_trade_study_report = None;
         self.last_permit_report = None;
+        self.eigenflow_config = archive.eigenflow_config;
+        self.last_eigenflow_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -1902,6 +1934,18 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let eigenflow_gpu_input = if self.eigenflow_overlay_visible {
+                self.last_eigenflow_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::EigenFlowGpuInput {
+                        report: rep,
+                        active_step_idx: self.eigenflow_config.active_step_idx,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -1932,6 +1976,7 @@ impl UniversalCanvasState {
                 evacuation_gpu_input,
                 risk_heatmap_gpu_input,
                 field_qaqc_gpu_input,
+                eigenflow_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -1989,6 +2034,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.field_qaqc_overlay_visible {
                 self.paint_cpu_field_qaqc_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.eigenflow_overlay_visible {
+                self.paint_cpu_eigenflow_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

@@ -2303,4 +2303,305 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Phase 83 (`v0.8.3`): Width-first Dynamic Island drawer for Branch 2 **EigenFlow** Non-Linear Studio
+    /// (Woodbury `P1 -> P2` Load-Path Redistribution, Pushover Capacity Curve & ATC-40 ADRS Spectrum).
+    pub(super) fn render_eigenflow_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::pushover::LateralLoadPattern;
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Bolt,
+                13.0,
+                theme.accent_blue,
+                "EigenFlow Non-Linear Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [(0usize, "Woodbury P1->P2"), (1usize, "Pushover & ADRS")] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.eigenflow_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.eigenflow_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close EigenFlow Non-Linear Studio drawer",
+            )
+            .clicked()
+            {
+                self.eigenflow_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        let tab = self.eigenflow_drawer_tab;
+        // Top responsive control strip
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                if tab == 0 {
+                    ui.label(RichText::new("Damage lambda:").size(9.0).color(theme.text_muted));
+                    for (lam, lbl) in [(0.0_f64, "0.00 Cut"), (0.25, "0.25 Severe"), (0.50, "0.50 Yield")] {
+                        let active = (universal_canvas.eigenflow_config.stiffness_retention_lambda - lam).abs() < 0.05;
+                        if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_orange, "Set P1 residual stiffness lambda").clicked() {
+                            actions.eigenflow_set_lambda = Some(lam);
+                        }
+                    }
+                    if let Some(ref rep) = universal_canvas.last_eigenflow_report {
+                        ui.label(RichText::new("P1:").size(9.0).color(theme.text_muted));
+                        for (eid, ename) in rep.woodbury.available_elements.iter().take(4) {
+                            let active = rep.woodbury.disrupted_element_id == *eid;
+                            let short = format!("#{eid} {}", ename.chars().take(6).collect::<String>());
+                            if Self::glass_pill_button(ui, theme, None, &short, active, theme.accent_red, &format!("Disrupt Element #{eid} ({ename})")).clicked() {
+                                actions.eigenflow_select_element = Some(*eid);
+                            }
+                        }
+                    }
+                } else {
+                    ui.label(RichText::new("Pattern:").size(9.0).color(theme.text_muted));
+                    for (pat, lbl) in [
+                        (LateralLoadPattern::FirstModeModal, "FirstMode"),
+                        (LateralLoadPattern::UniformMass, "Uniform"),
+                        (LateralLoadPattern::InvertedTriangular, "Triangular"),
+                    ] {
+                        let active = universal_canvas.eigenflow_config.load_pattern == pat;
+                        if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_blue, pat.label()).clicked() {
+                            actions.eigenflow_set_pattern = Some(pat);
+                        }
+                    }
+                    let n_steps = universal_canvas
+                        .last_eigenflow_report
+                        .as_ref()
+                        .map(|r| r.pushover_csm.raw_pushover.steps.len().max(1))
+                        .unwrap_or(12);
+                    if Self::glass_pill_button(ui, theme, None, "Prev", false, theme.accent_blue, "Previous pushover step").clicked() {
+                        universal_canvas.eigenflow_pushover_playing = false;
+                        universal_canvas.eigenflow_config.active_step_idx =
+                            universal_canvas.eigenflow_config.active_step_idx.saturating_sub(1);
+                    }
+                    let play_lbl = if universal_canvas.eigenflow_pushover_playing { "Pause" } else { "Play" };
+                    if Self::glass_pill_button(ui, theme, None, play_lbl, universal_canvas.eigenflow_pushover_playing, theme.accent_green, "Animate Pushover steps & 3D hinges").clicked() {
+                        universal_canvas.eigenflow_pushover_playing = !universal_canvas.eigenflow_pushover_playing;
+                        if universal_canvas.eigenflow_pushover_playing {
+                            universal_canvas.eigenflow_overlay_visible = true;
+                        }
+                    }
+                    if Self::glass_pill_button(ui, theme, None, "Next", false, theme.accent_blue, "Next pushover step").clicked() {
+                        universal_canvas.eigenflow_pushover_playing = false;
+                        universal_canvas.eigenflow_config.active_step_idx =
+                            (universal_canvas.eigenflow_config.active_step_idx + 1).min(n_steps.saturating_sub(1));
+                    }
+                    ui.label(
+                        RichText::new(format!("Step {}/{}", universal_canvas.eigenflow_config.active_step_idx + 1, n_steps))
+                            .size(8.8)
+                            .monospace()
+                            .color(theme.text_primary),
+                    );
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Target),
+                    if universal_canvas.eigenflow_overlay_visible { "EigenFlow 3D: ON" } else { "EigenFlow 3D" },
+                    universal_canvas.eigenflow_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU P1->P2 conduits & Pushover hinges",
+                ).clicked() {
+                    actions.toggle_eigenflow_3d = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Document), ".ifcx", false, theme.accent_blue, "Export eigengraph::eigenflow IFCX layer").clicked() {
+                    actions.export_eigenflow_ifcx = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Printer), "Sheet S-104 .svg", false, theme.accent_green, "Export A3 Sheet S-104 Pure-Vector EigenFlow Annex").clicked() {
+                    actions.export_eigenflow_svg = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(9, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    let Some(ref rep) = universal_canvas.last_eigenflow_report else {
+                        ui.label(RichText::new("Evaluating EigenFlow Non-Linear Studio...").size(9.5).color(theme.text_muted));
+                        return;
+                    };
+                    if tab == 0 {
+                        let wb = &rep.woodbury;
+                        if is_left {
+                            ui.label(RichText::new("EigenGate (Linear) vs EigenFlow (Non-Linear)").size(10.0).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "EigenGate Lin: {:.3}  |  EigenFlow NL: {:.3} ({:+.3})",
+                                    rep.linear_eigengate_system,
+                                    rep.non_linear_eigenflow_system,
+                                    rep.delta_score_nl_minus_lin
+                                ))
+                                .size(9.2)
+                                .monospace()
+                                .strong()
+                                .color(theme.accent_blue),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "P1 #{} ({}) | h_e={:.3} | m_s={:.3} | RRR={:.3} | mu={:.2} | Shed {:.1} kN",
+                                    wb.disrupted_element_id,
+                                    wb.disrupted_element_name,
+                                    wb.svd_leverage_he,
+                                    wb.stability_margin_ms,
+                                    wb.residual_reserve_ratio_rrr,
+                                    wb.max_ductility_mu,
+                                    wb.total_shed_force_kn
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(&wb.prescriptive_recommendation)
+                                    .size(8.8)
+                                    .color(if wb.is_mechanism { theme.accent_red } else { theme.text_primary }),
+                            );
+                        } else {
+                            ui.label(RichText::new("Woodbury P1 -> P2 Surviving Shed Forces").size(10.0).strong().color(theme.text_primary));
+                            let rows = wb.redistributed_p2.len().clamp(1, 6);
+                            let chart_h = (rows as f32) * 20.0 + 10.0;
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, chart_h), egui::Sense::hover());
+                            let p = ui.painter_at(rect);
+                            let max_dn = wb.redistributed_p2.iter().map(|m| m.delta_n_kn).fold(10.0_f64, f64::max) as f32;
+                            let bar_x0 = rect.left() + 58.0;
+                            let bar_w = (rect.width() - 66.0).max(36.0);
+                            for (idx, m) in wb.redistributed_p2.iter().take(6).enumerate() {
+                                let y = rect.top() + 4.0 + (idx as f32) * 20.0;
+                                p.text(
+                                    egui::pos2(rect.left() + 2.0, y + 7.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    format!("#{}", m.element_id),
+                                    egui::FontId::monospace(8.5),
+                                    theme.text_secondary,
+                                );
+                                let track = egui::Rect::from_min_size(egui::pos2(bar_x0, y), Vec2::new(bar_w, 14.0));
+                                p.rect_filled(track, 3.0, Color32::from_rgba_unmultiplied(128, 128, 128, 36));
+                                let frac = (m.delta_n_kn as f32 / max_dn.max(1.0)).clamp(0.04, 1.0);
+                                let fill_col = if m.is_critical_overload {
+                                    theme.accent_red
+                                } else if m.post_yield_dcr > 0.72 {
+                                    theme.accent_orange
+                                } else {
+                                    theme.accent_blue
+                                };
+                                p.rect_filled(egui::Rect::from_min_size(egui::pos2(bar_x0, y), Vec2::new(bar_w * frac, 14.0)), 3.0, fill_col);
+                                p.text(
+                                    egui::pos2(bar_x0 + 4.0, y + 7.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    format!("{:.1} kN ({:.0}% | DCR {:.2})", m.delta_n_kn, m.share_pct, m.post_yield_dcr),
+                                    egui::FontId::monospace(8.0),
+                                    Color32::WHITE,
+                                );
+                            }
+                        }
+                    } else if is_left {
+                        let raw = &rep.pushover_csm.raw_pushover;
+                        let perf = &rep.pushover_csm.performance_point;
+                        ui.label(
+                            RichText::new(format!("Pushover Curve (Vy={:.0} kN • Vu={:.0} kN)", raw.yield_base_shear_kn, raw.ultimate_base_shear_kn))
+                                .size(9.6)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, 118.0), egui::Sense::hover());
+                        let p = ui.painter_at(rect);
+                        p.rect_filled(rect, 5.0, Color32::from_rgba_unmultiplied(15, 23, 42, 42));
+                        let max_d = raw.steps.iter().map(|s| s.roof_drift_mm).fold(perf.target_displacement_dt_mm, f64::max).max(5.0) * 1.1;
+                        let max_v = raw.steps.iter().map(|s| s.base_shear_kn).fold(perf.target_base_shear_vt_kn, f64::max).max(10.0) * 1.15;
+                        let to_pt = |d: f64, v: f64| -> egui::Pos2 {
+                            egui::pos2(
+                                rect.left() + 8.0 + ((d / max_d).clamp(0.0, 1.0) as f32) * (rect.width() - 16.0),
+                                rect.bottom() - 8.0 - ((v / max_v).clamp(0.0, 1.0) as f32) * (rect.height() - 18.0),
+                            )
+                        };
+                        let mut pts = vec![to_pt(0.0, 0.0)];
+                        for st in &raw.steps {
+                            pts.push(to_pt(st.roof_drift_mm, st.base_shear_kn));
+                        }
+                        if pts.len() >= 2 {
+                            p.add(egui::Shape::line(pts, Stroke::new(2.0, theme.accent_blue)));
+                        }
+                        if let Some(st) = raw.steps.get(universal_canvas.eigenflow_config.active_step_idx) {
+                            p.circle_filled(to_pt(st.roof_drift_mm, st.base_shear_kn), 4.5, theme.accent_green);
+                        }
+                    } else {
+                        let perf = &rep.pushover_csm.performance_point;
+                        ui.label(
+                            RichText::new(format!("ADRS Spectrum (Sd*={:.1} mm • Sa*={:.3}g • Teff={:.2}s)", perf.sd_star_m * 1000.0, perf.sa_star_g, perf.effective_period_teff_s))
+                                .size(9.5)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, 118.0), egui::Sense::hover());
+                        let p = ui.painter_at(rect);
+                        p.rect_filled(rect, 5.0, Color32::from_rgba_unmultiplied(15, 23, 42, 42));
+                        let cap_pts = &rep.pushover_csm.capacity_spectrum.points;
+                        let red_pts = &rep.pushover_csm.demand_spectrum.reduced_inelastic_points;
+                        let max_sd = cap_pts.iter().chain(red_pts.iter()).map(|pt| pt.sd_mm()).fold(perf.sd_star_m * 1000.0, f64::max).max(20.0) * 1.1;
+                        let max_sa = cap_pts.iter().chain(red_pts.iter()).map(|pt| pt.sa_g).fold(perf.sa_star_g, f64::max).max(0.25) * 1.15;
+                        let to_adrs = |sd_mm: f64, sa_g: f64| -> egui::Pos2 {
+                            egui::pos2(
+                                rect.left() + 8.0 + ((sd_mm / max_sd).clamp(0.0, 1.0) as f32) * (rect.width() - 16.0),
+                                rect.bottom() - 8.0 - ((sa_g / max_sa).clamp(0.0, 1.0) as f32) * (rect.height() - 18.0),
+                            )
+                        };
+                        let red_line: Vec<_> = red_pts.iter().map(|pt| to_adrs(pt.sd_mm(), pt.sa_g)).collect();
+                        if red_line.len() >= 2 {
+                            p.add(egui::Shape::line(red_line, Stroke::new(1.6, theme.accent_red)));
+                        }
+                        let cap_line: Vec<_> = cap_pts.iter().map(|pt| to_adrs(pt.sd_mm(), pt.sa_g)).collect();
+                        if cap_line.len() >= 2 {
+                            p.add(egui::Shape::line(cap_line, Stroke::new(2.0, theme.accent_blue)));
+                        }
+                        p.circle_filled(to_adrs(perf.sd_star_m * 1000.0, perf.sa_star_g), 5.0, theme.accent_green);
+                        ui.label(RichText::new(perf.performance_level.label()).size(8.6).color(theme.accent_green));
+                    }
+                });
+            });
+        });
+    }
 }

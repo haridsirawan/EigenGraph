@@ -2734,6 +2734,94 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Pure-vector CPU fallback rendering Phase 83 EigenFlow Woodbury `P1 -> P2` Load-Path & Hinges.
+    pub(super) fn paint_cpu_eigenflow_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.eigenflow_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_eigenflow_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |p: [f64; 3]| -> Option<Pos2> {
+            let ex = p[0] * cr - p[1] * sr;
+            let ny = p[0] * sr + p[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, p[2])
+                .and_then(|(sp, _, vis)| if vis { Some(sp) } else { None })
+        };
+
+        let wb = &report.woodbury;
+        if let (Some(a), Some(b)) = (
+            proj_enu(wb.disrupted_p0_enu_m),
+            proj_enu(wb.disrupted_p1_enu_m),
+        ) {
+            let p1_col = Color32::from_rgb(255, 69, 58);
+            clip.line_segment([a, b], Stroke::new(4.0, p1_col));
+            let mid = Pos2::new(0.5 * (a.x + b.x), 0.5 * (a.y + b.y));
+            clip.circle_filled(mid, 6.0, p1_col);
+            clip.text(
+                mid + Vec2::new(0.0, -8.0),
+                Align2::CENTER_BOTTOM,
+                format!("P1 #{}", wb.disrupted_element_id),
+                egui::FontId::monospace(8.5),
+                Color32::WHITE,
+            );
+        }
+
+        for m in &wb.redistributed_p2 {
+            if let (Some(a), Some(b)) = (proj_enu(m.p0_enu_m), proj_enu(m.p1_enu_m)) {
+                let col = if m.is_critical_overload {
+                    Color32::from_rgb(255, 69, 58)
+                } else if m.post_yield_dcr > 0.72 {
+                    Color32::from_rgb(255, 179, 64)
+                } else {
+                    Color32::from_rgb(48, 209, 240)
+                };
+                clip.line_segment([a, b], Stroke::new(2.6, col));
+            }
+        }
+
+        let active_step = self.eigenflow_config.active_step_idx;
+        for h in &report.hinges_3d {
+            if h.formed_at_step <= active_step {
+                if let Some(p) = proj_enu(h.pos_enu_m) {
+                    let col = match h.state {
+                        crate::core::nonlinear::PlasticHingeState::Elastic => Color32::from_rgb(48, 209, 88),
+                        crate::core::nonlinear::PlasticHingeState::ImmediateOccupancy => Color32::from_rgb(10, 132, 255),
+                        crate::core::nonlinear::PlasticHingeState::LifeSafety => Color32::from_rgb(255, 159, 10),
+                        crate::core::nonlinear::PlasticHingeState::CollapsePrevention => Color32::from_rgb(255, 69, 58),
+                        crate::core::nonlinear::PlasticHingeState::Mechanism => Color32::from_rgb(191, 90, 242),
+                    };
+                    clip.circle_filled(p, 4.8, col);
+                    clip.circle_stroke(p, 7.0, Stroke::new(1.1, Color32::WHITE));
+                }
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

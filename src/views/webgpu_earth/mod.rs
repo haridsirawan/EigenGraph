@@ -492,6 +492,14 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 11.5) {
+        // Phase 83: Pure Analytical WGSL EigenFlow Woodbury P1->P2 Load-Path & Pushover Hinges (0% raster)
+        let flow_wave = 0.72 + 0.36 * smoothstep(0.25, 0.95, sin(phase * 1.4 - u_time * 5.2));
+        let sev = clamp(height_m, 0.0, 1.0);
+        let pulse = 0.85 + 0.25 * sin(u_time * (2.8 + sev * 4.5) + f_in.world_pos.z * 0.8);
+        let ndotv = max(abs(dot(n, v)), 0.10);
+        let rim = pow(1.0 - ndotv, 1.6) * 0.48;
+        col = f_in.color.rgb * (flow_wave * 0.65 + pulse * 0.55 + rim);
     } else if (kind >= 10.5) {
         // Phase 82: Pure Analytical WGSL Field QA/QC Pour-Strips, ITP Hold Pins & NCR Beacons (0% raster)
         let severity = clamp(height_m, 0.0, 1.0);
@@ -693,6 +701,7 @@ pub struct WebGpuEarthResources {
     evacuation: GpuMeshSlot,
     risk_heatmap: GpuMeshSlot,
     field_qaqc: GpuMeshSlot,
+    eigenflow: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
 }
 
@@ -905,6 +914,7 @@ impl WebGpuEarthResources {
             evacuation: GpuMeshSlot::default(),
             risk_heatmap: GpuMeshSlot::default(),
             field_qaqc: GpuMeshSlot::default(),
+            eigenflow: GpuMeshSlot::default(),
             hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
@@ -1026,6 +1036,7 @@ impl WebGpuEarthResources {
             || self.evacuation.index_count > 0
             || self.risk_heatmap.index_count > 0
             || self.field_qaqc.index_count > 0
+            || self.eigenflow.index_count > 0
             || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1065,6 +1076,7 @@ impl WebGpuEarthResources {
             self.subsurface.draw(&mut pass);
             self.risk_heatmap.draw(&mut pass);
             self.field_qaqc.draw(&mut pass);
+            self.eigenflow.draw(&mut pass);
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
             self.hazard_compute.draw(&mut pass);
@@ -1090,6 +1102,7 @@ struct WebGpuEarthPaintCallback {
     pending_evacuation: Option<(u64, GpuMeshPayload)>,
     pending_risk_heatmap: Option<(u64, GpuMeshPayload)>,
     pending_field_qaqc: Option<(u64, GpuMeshPayload)>,
+    pending_eigenflow: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
 }
 
@@ -1169,6 +1182,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
             if res.field_qaqc.revision_uploaded != fq_in.0 {
                 res.field_qaqc
                     .upload(device, queue, "field_qaqc_mesh", fq_in.0, &fq_in.1);
+            }
+        }
+        if let Some(ref ef_in) = self.pending_eigenflow {
+            if res.eigenflow.revision_uploaded != ef_in.0 {
+                res.eigenflow
+                    .upload(device, queue, "eigenflow_mesh", ef_in.0, &ef_in.1);
             }
         }
         if let Some(ref h_cmp) = self.pending_hazard_compute {
@@ -1258,6 +1277,7 @@ pub struct WebGpuEarthState {
     cached_evacuation_hash: u64,
     cached_risk_heatmap_hash: u64,
     cached_field_qaqc_hash: u64,
+    cached_eigenflow_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1270,6 +1290,7 @@ pub struct WebGpuEarthState {
     pub last_evacuation_tris: usize,
     pub last_risk_heatmap_tris: usize,
     pub last_field_qaqc_tris: usize,
+    pub last_eigenflow_tris: usize,
     pub last_compute_particles: u32,
     #[cfg(not(target_arch = "wasm32"))]
     wgpu_device: Option<wgpu::Device>,
@@ -1541,6 +1562,7 @@ impl WebGpuEarthState {
         evacuation_input: Option<EvacuationLifelineGpuInput<'_>>,
         risk_heatmap_input: Option<DistrictRiskHeatmapGpuInput<'_>>,
         field_qaqc_input: Option<FieldQaqcGpuInput<'_>>,
+        eigenflow_input: Option<EigenFlowGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
@@ -1882,6 +1904,36 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_eigenflow = if render_site_pass {
+            if let Some(ref ef_in) = eigenflow_input {
+                let wb = &ef_in.report.woodbury;
+                let pat = ef_in.report.config.load_pattern as u64;
+                let rev: u64 = (wb.disrupted_element_id as u64).wrapping_mul(131)
+                    ^ wb.lambda_val.to_bits()
+                    ^ (pat << 18)
+                    ^ ((ef_in.active_step_idx as u64) << 24)
+                    ^ ((wb.redistributed_p2.len() as u64) << 36)
+                    ^ ((ef_in.heading_deg.round() as u64) << 44)
+                    ^ u64::from(ef_in.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                if rev != self.cached_eigenflow_hash {
+                    let mesh = build_rtc_eigenflow_mesh(ef_in);
+                    self.last_eigenflow_tris = mesh.indices.len() / 3;
+                    self.cached_eigenflow_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_eigenflow_hash != 0 {
+                self.cached_eigenflow_hash = 0;
+                self.last_eigenflow_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let pending_hazard_compute = if render_site_pass {
             if let Some(hc) = hazard_compute_input {
                 if hc.enabled {
@@ -1919,6 +1971,7 @@ impl WebGpuEarthState {
                 pending_evacuation,
                 pending_risk_heatmap,
                 pending_field_qaqc,
+                pending_eigenflow,
                 pending_hazard_compute,
             },
         ));
@@ -1941,6 +1994,7 @@ impl WebGpuEarthState {
         let evac_animated = evacuation_input.as_ref().is_some_and(|e| e.visible);
         let risk_heatmap_animated = risk_heatmap_input.as_ref().is_some_and(|r| r.visible);
         let field_qaqc_animated = field_qaqc_input.as_ref().is_some_and(|f| f.visible);
+        let eigenflow_animated = eigenflow_input.as_ref().is_some_and(|e| e.visible);
         let frame_ms = if hazard_animated
             || compute_animated
             || subsurface_animated
@@ -1949,6 +2003,7 @@ impl WebGpuEarthState {
             || evac_animated
             || risk_heatmap_animated
             || field_qaqc_animated
+            || eigenflow_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

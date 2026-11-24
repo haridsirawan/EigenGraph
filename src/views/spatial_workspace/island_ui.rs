@@ -2825,6 +2825,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.eigenflow_drawer_open {
+                        self.render_eigenflow_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -5330,6 +5342,20 @@ impl SpatialWorkspaceState {
                                                         self.open_field_qaqc_drawer(0);
                                                         actions.run_field_fabrication =
                                                             Some(universal_canvas.field_fab_config.stock_length_m);
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Bolt),
+                                                        "EigenFlow",
+                                                        self.eigenflow_drawer_open,
+                                                        theme.accent_green,
+                                                        "Open EigenFlow Non-Linear Studio (Woodbury P1->P2, Pushover ADRS & Sheet S-104)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_eigenflow_drawer(0);
+                                                        actions.run_eigenflow_studio = true;
                                                     }
                                                 },
                                             );

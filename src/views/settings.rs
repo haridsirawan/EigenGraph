@@ -719,10 +719,16 @@ impl SettingsView {
             ui.separator();
             ui.add_space(6.0);
 
-            let releases: [(&str, bool, &str, &str); 13] = [
+            let releases: [(&str, bool, &str, &str); 14] = [
+                (
+                    "v0.8.3",
+                    true,
+                    "EigenFlow Non-Linear Studio — 3D WebGPU Woodbury P1->P2, Pushover ADRS & Sheet S-104",
+                    "Promotes Branch 2 EigenFlow to a first-class interactive studio coupled to live BIM geometry and site seismic spectra: real node-adjacent 1-hop/2-hop topological Woodbury Rank-1 load-path redistribution (P1 -> P2, stiffness retention lambda, leverage h_e, m_s, RRR, ductility mu), P-Delta Pushover capacity curves & ATC-40/ASCE 41-17 ADRS Capacity Spectrum intersection, 3D Pure WebGPU WGSL directional flow conduits & Pushover plastic hinge octahedra (material_kind 12.0), eigengraph::eigenflow IFCX overlays, A3 Sheet S-104 Pure-Vector Annex SVG, and the 2-tab width-first EigenFlow Studio Dynamic Island drawer.",
+                ),
                 (
                     "v0.8.2",
-                    true,
+                    false,
                     "Field QA/QC Spatial Waypoints, 1D Rebar BBS Cut-List, Sheet S-103 & EigenGate/EigenFlow",
                     "Couples active BIM rebar & structural bays with Best-Fit Decreasing (BFD) 1D master stock bar cutting optimization (12m/6m), spatial 3D Pure WebGPU WGSL concrete pour-strips & ITP/NCR beacon pins (material_kind 11.0), eigengraph::construction::field_qaqc_bbs IFCX overlay, A3 Sheet S-103 Pure-Vector Shop-Drawing Annex SVG + BBS/Cut-List CSV exports, and complete platform migration to EigenGate (Branch 1 Linear) & EigenFlow (Branch 2 Non-Linear Woodbury).",
                 ),

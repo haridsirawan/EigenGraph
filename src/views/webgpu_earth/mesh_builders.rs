@@ -2646,3 +2646,206 @@ pub fn build_rtc_field_qaqc_mesh(input: &FieldQaqcGpuInput<'_>) -> GpuMeshPayloa
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn push_animated_flow_strut_enu(
+    verts: &mut Vec<GpuEarthVertex>,
+    idxs: &mut Vec<u32>,
+    p0_enu: [f64; 3],
+    p1_enu: [f64; 3],
+    width_m: f64,
+    depth_m: f64,
+    col: [f32; 4],
+    severity: f32,
+    material_kind: f32,
+) {
+    let dx = p1_enu[0] - p0_enu[0];
+    let dy = p1_enu[1] - p0_enu[1];
+    let dz = p1_enu[2] - p0_enu[2];
+    let len = (dx * dx + dy * dy + dz * dz).sqrt();
+    if len < 1e-4 {
+        return;
+    }
+    let u = [dx / len, dy / len, dz / len];
+    let ref_up = if u[2].abs() < 0.92 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [1.0, 0.0, 0.0]
+    };
+    let cross = |a: [f64; 3], b: [f64; 3]| -> [f64; 3] {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let norm = |v: [f64; 3]| -> [f64; 3] {
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-9);
+        [v[0] / l, v[1] / l, v[2] / l]
+    };
+    let side = norm(cross(u, ref_up));
+    let up_perp = norm(cross(side, u));
+    let hw = (width_m * 0.5).max(0.06);
+    let hd = (depth_m * 0.5).max(0.06);
+
+    let offset_pt = |p: [f64; 3], sx: f64, sy: f64| -> [f32; 3] {
+        [
+            (p[0] + side[0] * sx * hw + up_perp[0] * sy * hd) as f32,
+            (p[1] + side[1] * sx * hw + up_perp[1] * sy * hd) as f32,
+            (p[2] + side[2] * sx * hw + up_perp[2] * sy * hd) as f32,
+        ]
+    };
+    let a = [
+        offset_pt(p0_enu, -1.0, -1.0),
+        offset_pt(p0_enu, 1.0, -1.0),
+        offset_pt(p0_enu, 1.0, 1.0),
+        offset_pt(p0_enu, -1.0, 1.0),
+    ];
+    let b = [
+        offset_pt(p1_enu, -1.0, -1.0),
+        offset_pt(p1_enu, 1.0, -1.0),
+        offset_pt(p1_enu, 1.0, 1.0),
+        offset_pt(p1_enu, -1.0, 1.0),
+    ];
+    let side_normals = [
+        [-up_perp[0] as f32, -up_perp[1] as f32, -up_perp[2] as f32],
+        [side[0] as f32, side[1] as f32, side[2] as f32],
+        [up_perp[0] as f32, up_perp[1] as f32, up_perp[2] as f32],
+        [-side[0] as f32, -side[1] as f32, -side[2] as f32],
+    ];
+    let len_f = len as f32;
+    for i in 0..4 {
+        let ni = (i + 1) % 4;
+        let base = verts.len() as u32;
+        for (pos, phase) in [
+            (a[i], 0.0_f32),
+            (a[ni], 0.0_f32),
+            (b[ni], len_f),
+            (b[i], len_f),
+        ] {
+            verts.push(GpuEarthVertex {
+                pos,
+                normal: side_normals[i],
+                color: col,
+                meta: [material_kind, severity, 1.0, phase],
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+}
+
+/// GPU input payload for Phase 83 EigenFlow Woodbury `P1 -> P2` Load-Path & Pushover Hinges (`material_kind = 12.0`).
+pub struct EigenFlowGpuInput<'a> {
+    pub report: &'a crate::core::eigenflow::EigenFlowStudioReport,
+    pub active_step_idx: usize,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU EigenFlow disrupted `P1` ghost strut, surviving `P2` animated
+/// load-redistribution conduits, and Pushover plastic hinge beacons (`material_kind = 12.0`, 0% raster).
+pub fn build_rtc_eigenflow_mesh(input: &EigenFlowGpuInput<'_>) -> GpuMeshPayload {
+    use crate::core::nonlinear::PlasticHingeState;
+
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_enu = |p: [f64; 3]| -> [f64; 3] {
+        [p[0] * cr - p[1] * sr, p[0] * sr + p[1] * cr, p[2]]
+    };
+
+    let wb = &input.report.woodbury;
+    let mut verts = Vec::with_capacity(
+        128 + wb.redistributed_p2.len() * 64 + input.report.hinges_3d.len() * 32,
+    );
+    let mut idxs = Vec::with_capacity(
+        256 + wb.redistributed_p2.len() * 96 + input.report.hinges_3d.len() * 48,
+    );
+
+    // 1. Disrupted primary load-path member P1 (pulsing crimson disruption sleeve + midpoint beacon)
+    let p1_a = rot_enu(wb.disrupted_p0_enu_m);
+    let p1_b = rot_enu(wb.disrupted_p1_enu_m);
+    let sev_p1 = (1.0 - wb.lambda_val as f32).clamp(0.25, 1.0);
+    push_animated_flow_strut_enu(
+        &mut verts,
+        &mut idxs,
+        p1_a,
+        p1_b,
+        0.44,
+        0.44,
+        [0.98, 0.22, 0.28, 0.90],
+        sev_p1,
+        12.0,
+    );
+    push_octahedron_beacon_enu(
+        &mut verts,
+        &mut idxs,
+        [
+            (0.5 * (p1_a[0] + p1_b[0])) as f32,
+            (0.5 * (p1_a[1] + p1_b[1])) as f32,
+            (0.5 * (p1_a[2] + p1_b[2])) as f32,
+        ],
+        0.58,
+        [1.0, 0.24, 0.30, 0.96],
+        sev_p1,
+        12.0,
+    );
+
+    // 2. Surviving P2 backup conduits with animated flow phase along member length
+    for m in &wb.redistributed_p2 {
+        let a = rot_enu(m.p0_enu_m);
+        let b = rot_enu(m.p1_enu_m);
+        let w_m = 0.20 + (m.share_pct / 100.0).clamp(0.05, 0.6) * 0.26;
+        let (col, sev) = if m.is_critical_overload {
+            ([1.0_f32, 0.28, 0.24, 0.94], 0.95_f32)
+        } else if m.post_yield_dcr > 0.72 {
+            ([1.0_f32, 0.68, 0.16, 0.92], 0.65_f32)
+        } else {
+            ([0.16_f32, 0.86, 0.96, 0.88], 0.30_f32)
+        };
+        push_animated_flow_strut_enu(&mut verts, &mut idxs, a, b, w_m, w_m, col, sev, 12.0);
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [
+                (0.5 * (a[0] + b[0])) as f32,
+                (0.5 * (a[1] + b[1])) as f32,
+                (0.5 * (a[2] + b[2])) as f32,
+            ],
+            0.30,
+            col,
+            sev,
+            12.0,
+        );
+    }
+
+    // 3. Pushover Step Plastic Hinges up to active scrubbed step
+    for h in &input.report.hinges_3d {
+        if h.formed_at_step <= input.active_step_idx {
+            let p = rot_enu(h.pos_enu_m);
+            let (col, sev, rad_m) = match h.state {
+                PlasticHingeState::Elastic => ([0.18, 0.82, 0.45, 0.85], 0.15, 0.28),
+                PlasticHingeState::ImmediateOccupancy => ([0.10, 0.54, 1.0, 0.92], 0.40, 0.36),
+                PlasticHingeState::LifeSafety => ([1.0, 0.64, 0.12, 0.94], 0.70, 0.44),
+                PlasticHingeState::CollapsePrevention => ([1.0, 0.26, 0.22, 0.96], 0.90, 0.52),
+                PlasticHingeState::Mechanism => ([0.78, 0.34, 0.98, 0.98], 1.0, 0.60),
+            };
+            push_octahedron_beacon_enu(
+                &mut verts,
+                &mut idxs,
+                [p[0] as f32, p[1] as f32, p[2] as f32],
+                rad_m,
+                col,
+                sev,
+                12.0,
+            );
+        }
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

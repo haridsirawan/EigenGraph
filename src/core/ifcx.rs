@@ -1453,10 +1453,47 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_field_qaqc_bbs", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Branch 2 EigenFlow
+    /// Non-Linear Woodbury (`P1 -> P2`) & Pushover ADRS overlay (`eigengraph::eigenflow`).
+    pub fn compose_with_eigenflow_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::eigenflow::EigenFlowIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_eigenflow_nonlinear", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcStructuralAnalysisModel", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "EigenFlow Non-Linear Woodbury & Pushover ADRS Overlay",
+                "disruptedElementId": overlay.disrupted_element_id,
+                "disruptedElementName": overlay.disrupted_element_name,
+                "stabilityMarginMs": overlay.stability_margin_ms,
+                "performanceLevel": overlay.performance_level,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_EIGENFLOW.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/analysis/eigenflow".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_eigenflow_nonlinear", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_FIELD_QAQC_BBS) {
+    if node.attributes.contains_key(ns::EG_EIGENFLOW) {
+        "EigenFlow".to_string()
+    } else if node.attributes.contains_key(ns::EG_FIELD_QAQC_BBS) {
         "Field QA/QC & BBS".to_string()
     } else if node.attributes.contains_key(ns::EG_TRADE_STUDY_MATRIX) {
         "Trade-Study Matrix".to_string()

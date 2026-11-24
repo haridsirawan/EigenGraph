@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.8` Delivered** (`v0.7.9` Planned)  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.3` Delivered**  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% External Raster**  
-> **Current Platform**: EigenGraph `v0.7.8` (Live WebSocket SHM Watchdog, Closed-Loop ATC-20 → Evacuation Cascade & Width-First Responsive Dynamic Island on Pure WebGPU/WGSL)  
+> **Current Platform**: EigenGraph `v0.8.3` (EigenFlow Non-Linear Studio, 3D WebGPU Woodbury Load-Path `P1 -> P2`, Pushover ADRS Capacity Spectrum & Sheet `S-104` on Pure WebGPU/WGSL)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -234,3 +234,9 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
   - Couples `BimProject`, `CuttingStockOptimizer` (Best-Fit Decreasing `12.0 m` / `6.0 m` master stock cutting optimization & SNI 2847 / BS 8666 Bar Bending Schedules), and `FieldQualityControlLedger` (28-day concrete $f'_c$ batches, ITP hold points, NCR items) into ENU spatial `FieldWaypoint`s and `PourStripZone`s with non-destructive `eigengraph::construction::field_qaqc_bbs` IFCX composition (`IfcxStage::compose_with_field_qaqc_overlay`) and archival Sheet `S-103` Pure-Vector Shop Annex SVG (`build_fabrication_bbs_shop_svg`, 0% raster).
 - **3D Pure WebGPU (`wgpu` + WGSL) Field QA/QC Beacons & EigenGate / EigenFlow Architecture (`src/core/eigengate.rs`, `src/core/nonlinear.rs`, `src/views/webgpu_earth/`, `src/views/spatial_workspace/`)**:
   - Adds `build_rtc_field_qaqc_mesh` (`material_kind = 11.0`, analytical WGSL `kind >= 10.5` beacon pulse, `field_qaqc` GPU slot) + CPU fallback + Dynamic Island **`Field QA/QC & Rebar BBS`** drawer (`/bbs`, `/cutlist`, `/qaqc-3d`, `/waypoint`, `/shop-svg`, `/eigengate`, `/eigenflow`) alongside full migration from `ARI` to **EigenGate** (Linear Gatekeeper) and **EigenFlow** (Non-Linear Woodbury).
+
+### Phase 83 (`v0.8.3`) — EigenFlow Non-Linear Studio, 3D WebGPU Woodbury Load-Path (`P1 -> P2`), Pushover ADRS & Sheet `S-104` *(Implemented)*
+- **Topologically Coupled Woodbury Rank-1 & Site Pushover ADRS (`src/core/eigenflow.rs`, `src/core/nonlinear.rs`, `src/core/ifcx.rs`)**:
+  - Evaluates node-adjacent 1-hop/2-hop backup paths `P1 -> P2`, stiffness-weighted leverage $h_e$, kinematic stability margin $m_s$, residual reserve ratio (`RRR`), ductility demand $\mu$, and ATC-40/ASCE 41-17 Pushover ADRS Capacity Spectrum intersection coupled to live BIM geometry, exporting non-destructive `eigengraph::eigenflow` IFCX layers (`IfcxStage::compose_with_eigenflow_overlay`) and archival Sheet `S-104` Pure-Vector Annex SVGs (`build_eigenflow_nonlinear_annex_svg`, 0 `<image>` tags).
+- **3D Pure WebGPU (`wgpu` + WGSL) Animated Flow Conduits & Width-First Studio (`src/views/webgpu_earth/`, `src/views/spatial_workspace/`)**:
+  - Adds `build_rtc_eigenflow_mesh` (`material_kind = 12.0`, WGSL `kind >= 11.5` animated directional flow waves & hinge beacons, `eigenflow` GPU slot) + CPU fallback + 2-tab width-first **`EigenFlow Non-Linear Studio`** drawer (`/eigenflow-studio`, `/pushover`, `/adrs`, `/eigenflow-3d`, `/eigenflow-ifcx`, `/eigenflow-svg`).

@@ -272,6 +272,8 @@ pub struct UnifiedWorkspaceArchive {
     pub collab_config: crate::core::ifcx_collab::IfcxCollabConfig,
     #[serde(default)]
     pub trade_study_config: crate::core::trade_study::TradeStudyConfig,
+    #[serde(default)]
+    pub eigenflow_config: crate::core::eigenflow::EigenFlowConfig,
     pub sha256_seal: String,
 }
 
