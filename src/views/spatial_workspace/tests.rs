@@ -3861,3 +3861,124 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn test_phase77_evacuation_lifelines_slash_commands_and_zero_hud_overflow() {
+        for cmd in ["/evac", "/lifelines", "/safezone", "/evac-ifcx"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|c| c.cmd == cmd),
+                "Missing Phase 77 slash command {cmd} in SLASH_COMMANDS"
+            );
+        }
+
+        let raw_ai = "Red cordon active [[RUN_EVACUATION_ROUTING]] [[OPEN_EVAC_DRAWER]]";
+        let (clean, directives) = parse_gemini_action_directives(raw_ai);
+        assert_eq!(clean, "Red cordon active");
+        assert_eq!(directives.len(), 2);
+        assert!(matches!(directives[0], GeminiDirective::RunEvacuationRouting));
+        assert!(matches!(directives[1], GeminiDirective::OpenEvacuationDrawer));
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+        let members: Vec<StructuralMember> = Vec::new();
+        let projects: Vec<crate::models::ProjectItem> = Vec::new();
+        let mut db_components: Vec<crate::models::DatabaseComponent> = Vec::new();
+
+        build.bim_bus.project = BimProject::sample_bimcraft_building();
+
+        let act_evac = spatial.execute_spatial_input(
+            "/evac",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_evac.run_evacuation_routing);
+        assert!(spatial.evacuation_drawer_open);
+        assert!(canvas.evacuation_config.overlay_visible);
+
+        let act_life = spatial.execute_spatial_input(
+            "/lifelines",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_life.run_evacuation_routing);
+        assert!(spatial.evacuation_drawer_open);
+
+        spatial.toggle_exclusive_drawer("shm");
+        assert!(!spatial.evacuation_drawer_open);
+        spatial.open_evacuation_drawer();
+        assert!(spatial.evacuation_drawer_open);
+        assert!(!spatial.shm_drawer_open);
+
+        let act_safe = spatial.execute_spatial_input(
+            "/safezone",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_safe.run_evacuation_routing);
+        assert!(canvas
+            .city_scene
+            .zones
+            .iter()
+            .any(|z| z.kind == crate::core::IfcxZoneKind::Park));
+
+        let act_ifcx = spatial.execute_spatial_input(
+            "/evac-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_ifcx.export_evacuation_ifcx);
+
+        canvas
+            .run_evacuation_lifeline_routing(&build.bim_bus.project)
+            .expect("Evacuation routing succeeds");
+
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        spatial.open_evacuation_drawer();
+        for win_w in [1280.0_f32, 768.0, 390.0] {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(win_w, 800.0),
+                )),
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let _ = spatial.render_hud_overlays(
+                    ui.ctx(),
+                    &theme,
+                    &mut canvas,
+                    &mut build,
+                    &mut ai,
+                    &members,
+                    &projects,
+                    &mut db_components,
+                );
+            });
+            out.textures_delta.clear();
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                "Phase 77 Dynamic Island overflowed viewport {win_w}: {r:?}"
+            );
+        }
+    }

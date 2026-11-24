@@ -2442,6 +2442,132 @@ impl UniversalCanvasState {
         }
     }
 
+    pub(super) fn paint_cpu_evacuation_lifelines_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        use crate::core::evacuation_routing::{EvacuationMode, RoadEdgeStatus};
+        use crate::core::shm_twin::Atc20Placard;
+
+        if !self.evacuation_config.overlay_visible || self.world_map.zoom_level < 12.5 {
+            return;
+        }
+        let Some(ref rep) = self.last_evacuation_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let proj_enu = |enu: [f64; 2], elev_m: f64| -> Option<Pos2> {
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [enu[0] * 1000.0, enu[1] * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, elev_m)
+                .and_then(|(p, _, vis)| if vis { Some(p) } else { None })
+        };
+
+        // Debris cordons
+        for c in &rep.cordons {
+            if c.placard == Atc20Placard::InspectedGreen {
+                continue;
+            }
+            let col = if c.placard == Atc20Placard::UnsafeRed {
+                Color32::from_rgb(239, 68, 68)
+            } else {
+                Color32::from_rgb(245, 158, 11)
+            };
+            let mut ring = Vec::with_capacity(25);
+            for k in 0..=24 {
+                let th = (k as f64 / 24.0) * std::f64::consts::TAU;
+                let p = [
+                    c.center_enu_m[0] + c.cordon_radius_m * th.cos(),
+                    c.center_enu_m[1] + c.cordon_radius_m * th.sin(),
+                ];
+                if let Some(sp) = proj_enu(p, 0.25) {
+                    ring.push(sp);
+                }
+            }
+            if ring.len() >= 4 {
+                clip.add(egui::Shape::line(ring, Stroke::new(2.0, col)));
+            }
+        }
+
+        // Blocked / Degraded roads
+        for e in &rep.edges {
+            if e.road_name == "Site Access Spur" || e.status == RoadEdgeStatus::OpenSafe {
+                continue;
+            }
+            let (Some(nu), Some(nv)) = (rep.nodes.get(e.u), rep.nodes.get(e.v)) else {
+                continue;
+            };
+            if let (Some(p0), Some(p1)) = (proj_enu(nu.pos_enu_m, 0.30), proj_enu(nv.pos_enu_m, 0.30))
+            {
+                let col = if e.status == RoadEdgeStatus::BlockedClosed {
+                    Color32::from_rgb(239, 68, 68)
+                } else {
+                    Color32::from_rgb(245, 158, 11)
+                };
+                clip.line_segment([p0, p1], Stroke::new(3.2, col));
+            }
+        }
+
+        // Evacuation & Responder routes
+        let show_ped = matches!(
+            rep.config.mode,
+            EvacuationMode::PedestrianEvacuation | EvacuationMode::Both
+        );
+        let show_resp = matches!(
+            rep.config.mode,
+            EvacuationMode::EmergencyResponder | EvacuationMode::Both
+        );
+        for route in &rep.routes {
+            if !route.reachable || route.waypoints_enu_m.len() < 2 {
+                continue;
+            }
+            if (route.is_responder_route && !show_resp) || (!route.is_responder_route && !show_ped)
+            {
+                continue;
+            }
+            let pts: Vec<Pos2> = route
+                .waypoints_enu_m
+                .iter()
+                .filter_map(|&p| proj_enu(p, if route.is_responder_route { 0.8 } else { 0.6 }))
+                .collect();
+            if pts.len() >= 2 {
+                let col = if route.is_responder_route {
+                    Color32::from_rgb(56, 189, 248)
+                } else {
+                    Color32::from_rgb(34, 211, 153)
+                };
+                clip.add(egui::Shape::line(
+                    pts,
+                    Stroke::new(if route.is_active_building { 3.5 } else { 2.2 }, col),
+                ));
+            }
+        }
+
+        // Assembly safe points
+        for sp_node in &rep.safe_points {
+            if let Some(sp) = proj_enu(sp_node.center_enu_m, 2.0) {
+                clip.circle_filled(sp, 6.0, Color32::from_rgb(34, 197, 94));
+                clip.text(
+                    sp + Vec2::new(0.0, -10.0),
+                    Align2::CENTER_BOTTOM,
+                    format!("SAFE ZONE: {}", sp_node.name),
+                    egui::FontId::monospace(9.5),
+                    Color32::from_rgb(167, 243, 208),
+                );
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

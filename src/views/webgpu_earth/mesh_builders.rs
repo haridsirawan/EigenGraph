@@ -2253,3 +2253,217 @@ pub fn build_rtc_shm_triage_mesh(input: &ShmTriageGpuInput<'_>) -> GpuMeshPayloa
     }
 }
 
+/// Phase 77: 3D Post-Disaster Evacuation Corridors, ATC-20 Debris Cordons, Road Closures &
+/// Safe Assembly Point Beacons (`material_kind = 9.0`).
+pub struct EvacuationLifelineGpuInput<'a> {
+    pub report: &'a crate::core::evacuation_routing::EvacuationLifelineReport,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU evacuation route ribbons, responder access corridors, ATC-20 debris cordon
+/// rings, blocked road markers, and assembly safe-zone beacons (`material_kind = 9.0`).
+pub fn build_rtc_evacuation_lifelines_mesh(
+    input: &EvacuationLifelineGpuInput<'_>,
+) -> GpuMeshPayload {
+    use crate::core::evacuation_routing::{EvacuationMode, RoadEdgeStatus};
+    use crate::core::shm_twin::Atc20Placard;
+
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+
+    let mut verts = Vec::with_capacity(1024);
+    let mut idxs = Vec::with_capacity(2048);
+
+    // 1. ATC-20 Red / Yellow Building Debris Cordon Annular Rings
+    for c in &input.report.cordons {
+        if c.placard == Atc20Placard::InspectedGreen {
+            continue;
+        }
+        let col = match c.placard {
+            Atc20Placard::UnsafeRed => [0.96_f32, 0.20, 0.22, 0.44],
+            Atc20Placard::RestrictedYellow => [0.96_f32, 0.68, 0.14, 0.36],
+            Atc20Placard::InspectedGreen => continue,
+        };
+        let r_outer = c.cordon_radius_m as f32;
+        let r_inner = (r_outer - 1.65).max(c.footprint_radius_m as f32 * 0.75);
+        let segs = 28usize;
+        let base_v = verts.len() as u32;
+        for i in 0..=segs {
+            let th = (i as f32 / segs as f32) * std::f32::consts::TAU;
+            let (st, ct) = (th.sin(), th.cos());
+            verts.push(GpuEarthVertex {
+                pos: [
+                    c.center_enu_m[0] as f32 + r_inner * ct,
+                    c.center_enu_m[1] as f32 + r_inner * st,
+                    0.28,
+                ],
+                normal: [0.0, 0.0, 1.0],
+                color: [col[0], col[1], col[2], col[3] * 0.45],
+                meta: [9.0, 0.28, 1.0, 0.0],
+            });
+            verts.push(GpuEarthVertex {
+                pos: [
+                    c.center_enu_m[0] as f32 + r_outer * ct,
+                    c.center_enu_m[1] as f32 + r_outer * st,
+                    0.28,
+                ],
+                normal: [0.0, 0.0, 1.0],
+                color: col,
+                meta: [9.0, 0.28, 1.0, 0.0],
+            });
+        }
+        for i in 0..segs {
+            let a = base_v + (i as u32) * 2;
+            idxs.extend_from_slice(&[a, a + 1, a + 3, a, a + 3, a + 2]);
+        }
+    }
+
+    // 2. Blocked & Degraded Road / Bridge Segments
+    for e in &input.report.edges {
+        if e.road_name == "Site Access Spur" || e.status == RoadEdgeStatus::OpenSafe {
+            continue;
+        }
+        let (Some(nu), Some(nv)) = (input.report.nodes.get(e.u), input.report.nodes.get(e.v)) else {
+            continue;
+        };
+        let ax = nu.pos_enu_m[0] as f32;
+        let ay = nu.pos_enu_m[1] as f32;
+        let bx = nv.pos_enu_m[0] as f32;
+        let by = nv.pos_enu_m[1] as f32;
+        let dx = bx - ax;
+        let dy = by - ay;
+        let len = dx.hypot(dy).max(0.2);
+        let hw = (e.width_m as f32 * 0.24).clamp(0.85, 2.6);
+        let nx = -dy / len * hw;
+        let ny = dx / len * hw;
+        let z = (0.5 * (nu.elev_m + nv.elev_m) + 0.30) as f32;
+        let col = match e.status {
+            RoadEdgeStatus::BlockedClosed => [0.96_f32, 0.18, 0.22, 0.68],
+            RoadEdgeStatus::DegradedDetour => [0.96_f32, 0.66, 0.16, 0.56],
+            RoadEdgeStatus::OpenSafe => continue,
+        };
+        let base = verts.len() as u32;
+        for pt in [
+            [ax - nx, ay - ny, z],
+            [bx - nx, by - ny, z],
+            [bx + nx, by + ny, z],
+            [ax + nx, ay + ny, z],
+        ] {
+            verts.push(GpuEarthVertex {
+                pos: pt,
+                normal: [0.0, 0.0, 1.0],
+                color: col,
+                meta: [9.0, z, 1.0, 0.0],
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    // 3. Active Evacuation & Responder Flow Corridors (with cumulative distance in `meta[3]`)
+    let show_ped = matches!(
+        input.report.config.mode,
+        EvacuationMode::PedestrianEvacuation | EvacuationMode::Both
+    );
+    let show_resp = matches!(
+        input.report.config.mode,
+        EvacuationMode::EmergencyResponder | EvacuationMode::Both
+    );
+    for route in &input.report.routes {
+        if !route.reachable || route.waypoints_enu_m.len() < 2 {
+            continue;
+        }
+        if route.is_responder_route && !show_resp {
+            continue;
+        }
+        if !route.is_responder_route && !show_ped {
+            continue;
+        }
+        let hw = if route.is_active_building { 1.45_f32 } else { 0.95_f32 };
+        let z = if route.is_responder_route { 0.88_f32 } else { 0.68_f32 };
+        let col = if route.is_responder_route {
+            [0.22_f32, 0.72, 1.00, 0.90]
+        } else if route.has_detour {
+            [0.98_f32, 0.72, 0.20, 0.88]
+        } else {
+            [0.10_f32, 0.94, 0.72, 0.90]
+        };
+        let mut cum_dist = 0.0_f32;
+        for seg in route.waypoints_enu_m.windows(2) {
+            let ax = seg[0][0] as f32;
+            let ay = seg[0][1] as f32;
+            let bx = seg[1][0] as f32;
+            let by = seg[1][1] as f32;
+            let dx = bx - ax;
+            let dy = by - ay;
+            let seg_len = dx.hypot(dy).max(0.1);
+            let nx = -dy / seg_len * hw;
+            let ny = dx / seg_len * hw;
+            let d0 = cum_dist;
+            let d1 = cum_dist + seg_len;
+            cum_dist = d1;
+            let base = verts.len() as u32;
+            verts.push(GpuEarthVertex {
+                pos: [ax - nx, ay - ny, z],
+                normal: [0.0, 0.0, 1.0],
+                color: col,
+                meta: [9.0, z, 1.0, d0],
+            });
+            verts.push(GpuEarthVertex {
+                pos: [bx - nx, by - ny, z],
+                normal: [0.0, 0.0, 1.0],
+                color: col,
+                meta: [9.0, z, 1.0, d1],
+            });
+            verts.push(GpuEarthVertex {
+                pos: [bx + nx, by + ny, z],
+                normal: [0.0, 0.0, 1.0],
+                color: col,
+                meta: [9.0, z, 1.0, d1],
+            });
+            verts.push(GpuEarthVertex {
+                pos: [ax + nx, ay + ny, z],
+                normal: [0.0, 0.0, 1.0],
+                color: col,
+                meta: [9.0, z, 1.0, d0],
+            });
+            idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+
+    // 4. Safe Assembly Zone Beacons (`IfcSpatialZone` Parks / Plazas)
+    for sp in &input.report.safe_points {
+        let cx = sp.center_enu_m[0] as f32;
+        let cy = sp.center_enu_m[1] as f32;
+        let pad_fp = [
+            [cx as f64 - 4.2, cy as f64 - 4.2],
+            [cx as f64 + 4.2, cy as f64 - 4.2],
+            [cx as f64 + 4.2, cy as f64 + 4.2],
+            [cx as f64 - 4.2, cy as f64 + 4.2],
+        ];
+        push_box_prism_enu(
+            &mut verts,
+            &mut idxs,
+            &pad_fp,
+            0.18,
+            0.55,
+            [0.16, 0.92, 0.52, 0.65],
+            9.0,
+        );
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [cx, cy, 6.2],
+            1.65,
+            [0.16, 0.95, 0.56, 0.94],
+            1.5,
+            9.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

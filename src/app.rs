@@ -2357,6 +2357,7 @@ impl EigenGraphApp {
                     portfolio_report: self.universal_canvas.last_portfolio_retrofit_report.as_ref(),
                     replay_report: self.universal_canvas.last_ground_motion_replay_report.as_ref(),
                     shm_report: self.universal_canvas.last_shm_twin_report.as_ref(),
+                    evacuation_report: self.universal_canvas.last_evacuation_report.as_ref(),
                     sheet_code: "S-101",
                     revision: "REV 01",
                 },
@@ -2659,6 +2660,85 @@ impl EigenGraphApp {
             } else {
                 self.spatial_workspace
                     .push_trace("No Live SHM Digital Twin report available.", false);
+            }
+        }
+        if hud_actions.run_evacuation_routing {
+            if self.build_view.bim_bus.project.is_empty() {
+                if let Ok(msg) = self
+                    .build_view
+                    .bim_bus
+                    .execute_natural_language("portal 3x2 @6m 2floors")
+                {
+                    self.universal_canvas.ground_origin_anchored = true;
+                    self.spatial_workspace.push_trace(msg, true);
+                    self.sync_bim_to_fem();
+                }
+            }
+            if self.universal_canvas.last_shm_twin_report.is_none() {
+                let _ = self
+                    .universal_canvas
+                    .run_shm_digital_twin(&self.build_view.bim_bus.project);
+            }
+            match self
+                .universal_canvas
+                .run_evacuation_lifeline_routing(&self.build_view.bim_bus.project)
+            {
+                Ok(summary) => {
+                    self.spatial_workspace.push_trace(summary.clone(), true);
+                    self.ai_assistant_view
+                        .chat_history
+                        .push(crate::models::ChatMessage {
+                            is_user: false,
+                            message: format!(
+                                "[EigenAI Evacuation & Emergency Lifelines]: {summary}"
+                            ),
+                            time: crate::core::web_bridge::unix_timestamp_label(),
+                        });
+                }
+                Err(err) => {
+                    self.spatial_workspace.push_trace(err, false);
+                }
+            }
+        }
+        if hud_actions.export_evacuation_ifcx {
+            if self.universal_canvas.last_evacuation_report.is_none()
+                && !self.build_view.bim_bus.project.is_empty()
+            {
+                let _ = self
+                    .universal_canvas
+                    .run_evacuation_lifeline_routing(&self.build_view.bim_bus.project);
+            }
+            if let Some(ref evac) = self.universal_canvas.last_evacuation_report {
+                let raw_name =
+                    Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+                let fname = format!("{raw_name}_evacuation_lifelines.ifcx");
+                let layered = self
+                    .universal_canvas
+                    .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+                let composed =
+                    crate::core::IfcxStage::compose_with_evacuation_lifelines_overlay(
+                        &layered, evac,
+                    );
+                let json = composed.to_json_pretty();
+                match crate::core::web_bridge::save_text_file(
+                    &fname,
+                    &json,
+                    "application/json;charset=utf-8",
+                ) {
+                    Ok(_) => {
+                        self.spatial_workspace.push_trace(
+                            format!(
+                                "Exported Evacuation Lifelines IFCX ({fname}, {} nodes)",
+                                composed.data.len()
+                            ),
+                            true,
+                        );
+                    }
+                    Err(err) => self.spatial_workspace.push_trace(err, false),
+                }
+            } else {
+                self.spatial_workspace
+                    .push_trace("No Evacuation Lifelines report available.", false);
             }
         }
     }

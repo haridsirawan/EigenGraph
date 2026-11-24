@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.6` Delivered** (`v0.7.7` Planned)  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.7.7` Delivered** (`v0.7.8` Planned)  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% External Raster**  
-> **Current Platform**: EigenGraph `v0.7.6` (Live SHM Digital Twin, Modal Fingerprint Identification & Automated Post-Earthquake ATC-20 Placard Triage on Pure WebGPU/WGSL)  
+> **Current Platform**: EigenGraph `v0.7.7` (Autonomous Multi-Hazard Evacuation Routing, Emergency Lifelines & Post-Disaster Road Network Connectivity on Pure WebGPU/WGSL)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -98,7 +98,7 @@ flowchart TD
     D --> F["Site-Coupled 6-DOF FEM, Modal, SVD & ARI v2 Engine"]
     F -->|"ari_analysis_overlay.ifcx"| D
 
-    E --> G["WebGL2 (egui_glow) 3D Viewport (24-Bit Z-Buffer, Procedural Sun/AO/Ocean/Facades, Unified BIM/FEM/Modal/N-1)"]
+    E --> G["Pure WebGPU (egui-wgpu / wgpu WGSL) 3D Viewport (24-Bit Z-Buffer, Procedural Sun/AO/Ocean/Facades, Unified BIM/FEM/Modal/N-1/SHM/Lifelines)"]
     G --> H["egui Overlay Pass (Single Unified Dynamically Widening Liquid Glass Dynamic Island — Zero Detached Pop-Ups)"]
 ```
 
@@ -114,7 +114,7 @@ Because 100% of Earth and buildings live in analytical vector `.ifcx` nodes, cri
 
 ---
 
-## 6. Phased Implementation Roadmap (`v0.6.4 – v0.7.6`)
+## 6. Phased Implementation Roadmap (`v0.6.4 – v0.7.7`)
 
 Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.md` — advancing one patch digit per phase):
 
@@ -197,5 +197,11 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 - **3D Pure WebGPU SHM Beacons, Stiffness Heatmap & Rooftop ATC-20 Placard Shields (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`)**:
   - Adds `EarthBimLens::ShmDigitalTwin`, WGSL `kind >= 7.5` pulsing Fresnel emissive SHM sensor octahedra & ATC-20 rooftop placard shields (`shm_triage` GPU slot in hardware 24-bit `Depth24PlusStencil8` offscreen pass), Dynamic Island 2-tab SHM/ATC-20 drawer with pure-vector Welch PSD & story-retention charts, `/shm`, `/sensors`, `/placard`, `/shm-fault`, `/shm-ifcx` commands, and Gemini `[[OPEN_SHM_TWIN]]`, `[[INJECT_SHM_FAULT:...]]`, `[[RUN_ATC20_TRIAGE]]` directives.
 
-### Planned Next Phases (`v0.7.7`)
-- **Phase 77 (`v0.7.7`) — Autonomous Multi-Hazard Evacuation Routing, Emergency Lifelines & Post-Disaster Road Network Connectivity**: Integrating ATC-20 Green/Yellow/Red building cordons and seismic debris footprints onto the IFCX City-Builder road graph (`IfcRoad`/`IfcBridge`) for real-time A* shortest safe-path evacuation routing and emergency responder accessibility scoring directly in Pure WebGPU IFCX Earth.
+### Phase 77 (`v0.7.7`) — Autonomous Multi-Hazard Evacuation Routing, Emergency Lifelines & Post-Disaster Road Network Connectivity *(Implemented)*
+- **Multi-Hazard Lifeline Graph & A\* Routing Kernel (`src/core/evacuation_routing.rs`, `src/core/ifcx.rs`, `src/core/vector_dossier.rs`)**:
+  - Couples Phase 76 ATC-20 Green/Yellow/Red building cordons, Phase 68 3D flood inundation & seismic PGA, and Phase 71 Seed–Idriss soil liquefaction onto the Phase 67 IFCX City-Builder (`IfcRoad`/`IfcBridge`/`IfcSpatialZone`) road graph (with synthetic district grid fallback), evaluating deterministic A\* safe pedestrian egress routes, emergency responder access routes, bridge fragility compromises, isolated building counts, network connectivity percentage, and non-destructive `eigengraph::analysis::evacuation_lifelines` IFCX overlays + A3 Pure-Vector SVG dossier telemetry.
+- **Pure WebGPU Animated Flow Corridors, Dynamic Island Drawer & About Release Notes (`src/views/webgpu_earth/`, `src/views/spatial_workspace/`, `src/views/settings.rs`)**:
+  - Adds WGSL `kind >= 8.5` animated directional flow chevrons & Fresnel beacons (`evacuation` GPU slot in hardware 24-bit `Depth24PlusStencil8` offscreen pass, backed by CPU vector fallback), Dynamic Island `Evacuation & Lifelines` drawer with pure-vector lifeline mini-map, `/evac`, `/lifelines`, `/safezone`, `/evac-ifcx` commands, `[[RUN_EVACUATION_ROUTING]]` / `[[OPEN_EVAC_DRAWER]]` Gemini directives, and in-app **What's New & Release Highlights** inside Settings → About EigenGraph.
+
+### Planned Next Phases (`v0.7.8`)
+- **Phase 78 (`v0.7.8`) — Live WebSocket SHM Telemetry Streaming & Continuous Watchdog**: Extending Phase 76/77 with live `web_sys::WebSocket` sensor streaming, rolling Welch PSD anomaly detection, and automatic ATC-20 placard + evacuation lifeline re-routing triggers.

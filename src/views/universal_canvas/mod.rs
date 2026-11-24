@@ -151,6 +151,9 @@ pub struct UniversalCanvasState {
     // Phase 76: Live SHM Digital Twin & Automated Post-Earthquake ATC-20 Placard Triage
     pub shm_twin_config: crate::core::shm_twin::ShmDigitalTwinConfig,
     pub last_shm_twin_report: Option<crate::core::shm_twin::ShmDigitalTwinReport>,
+    // Phase 77: Autonomous Multi-Hazard Evacuation Routing & Emergency Lifelines
+    pub evacuation_config: crate::core::evacuation_routing::EvacuationRoutingConfig,
+    pub last_evacuation_report: Option<crate::core::evacuation_routing::EvacuationLifelineReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -271,6 +274,8 @@ impl Default for UniversalCanvasState {
             replay_cursor_time_s: 0.0,
             shm_twin_config: crate::core::shm_twin::ShmDigitalTwinConfig::default(),
             last_shm_twin_report: None,
+            evacuation_config: crate::core::evacuation_routing::EvacuationRoutingConfig::default(),
+            last_evacuation_report: None,
         }
     }
 }
@@ -434,6 +439,11 @@ impl UniversalCanvasState {
         if let Some(ref shm) = self.last_shm_twin_report {
             doc = crate::core::ifcx::IfcxStage::compose_with_shm_atc20_overlay(&doc, shm);
         }
+        if let Some(ref evac) = self.last_evacuation_report {
+            doc = crate::core::ifcx::IfcxStage::compose_with_evacuation_lifelines_overlay(
+                &doc, evac,
+            );
+        }
         doc
     }
 
@@ -538,6 +548,34 @@ impl UniversalCanvasState {
         )?;
         let summary = report.summary.clone();
         self.last_shm_twin_report = Some(report);
+        Ok(summary)
+    }
+
+    /// Runs Phase 77 Autonomous Multi-Hazard Evacuation Routing & Emergency Lifelines evaluation.
+    pub fn run_evacuation_lifeline_routing(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> Result<String, String> {
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        self.evacuation_config.overlay_visible = true;
+        let report = crate::core::evacuation_routing::evaluate_evacuation_and_lifelines(
+            bim_project,
+            &self.city_scene,
+            self.last_shm_twin_report.as_ref(),
+            Some(&self.district_hazard),
+            Some(&self.district_hazard_report),
+            self.last_subsurface_ssi_report.as_ref(),
+            self.active_site_tin.as_ref(),
+            Some(&self.world_index),
+            &self.evacuation_config,
+            origin,
+        )?;
+        let summary = report.summary.clone();
+        self.last_evacuation_report = Some(report);
         Ok(summary)
     }
 
@@ -724,6 +762,7 @@ impl UniversalCanvasState {
             portfolio_retrofit: self.portfolio_retrofit_config.clone(),
             ground_motion_replay: self.ground_motion_replay_config.clone(),
             shm_digital_twin: self.shm_twin_config.clone(),
+            evacuation_routing: self.evacuation_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -830,6 +869,8 @@ impl UniversalCanvasState {
         self.ground_motion_replay_config = archive.ground_motion_replay;
         self.shm_twin_config = archive.shm_digital_twin;
         self.last_shm_twin_report = None;
+        self.evacuation_config = archive.evacuation_routing;
+        self.last_evacuation_report = None;
         self.status_message = Some(format!(
             "Imported verified 1-file workspace '{}' ({} canvas objects)",
             archive.project_name,
@@ -1360,6 +1401,16 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let evacuation_gpu_input = if self.evacuation_config.overlay_visible {
+                self.last_evacuation_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::EvacuationLifelineGpuInput {
+                        report: rep,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let gpu_globe_active = self.webgpu_earth.schedule_paint_pass(
                 ui,
                 &painter,
@@ -1381,6 +1432,7 @@ impl UniversalCanvasState {
                 hinge_gpu_input,
                 fragility_gpu_input,
                 shm_gpu_input,
+                evacuation_gpu_input,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
                 ui,
@@ -1425,6 +1477,9 @@ impl UniversalCanvasState {
                 && self.earth_bim_author.active_lens == EarthBimLens::ShmDigitalTwin
             {
                 self.paint_cpu_shm_triage_fallback(&painter, rect, &xform, bim_project);
+            }
+            if !gpu_globe_active && self.evacuation_config.overlay_visible {
+                self.paint_cpu_evacuation_lifelines_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

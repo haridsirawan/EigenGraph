@@ -262,6 +262,8 @@ pub struct UnifiedWorkspaceArchive {
     pub ground_motion_replay: crate::core::ground_motion_replay::GroundMotionReplayConfig,
     #[serde(default)]
     pub shm_digital_twin: crate::core::shm_twin::ShmDigitalTwinConfig,
+    #[serde(default)]
+    pub evacuation_routing: crate::core::evacuation_routing::EvacuationRoutingConfig,
     pub sha256_seal: String,
 }
 

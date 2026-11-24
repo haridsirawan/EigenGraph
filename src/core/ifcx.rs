@@ -72,6 +72,7 @@ pub mod ns {
     pub const EG_FRAGILITY_LOSS: &str = "eigengraph::analysis::fema_p58_fragility";
     pub const EG_SHM_DIGITAL_TWIN: &str = "eigengraph::analysis::shm_digital_twin";
     pub const EG_ATC20_PLACARD: &str = "eigengraph::analysis::atc20_placard";
+    pub const EG_EVACUATION_LIFELINES: &str = "eigengraph::analysis::evacuation_lifelines";
 }
 
 fn default_ifcx_version() -> String {
@@ -1352,10 +1353,22 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), shm.shm_overlay_ifcx.clone()]);
         stage.to_composed_document(&format!("{}_shm_atc20_triage", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Post-Disaster Evacuation & Emergency
+    /// Lifelines overlay (`eigengraph::analysis::evacuation_lifelines`).
+    pub fn compose_with_evacuation_lifelines_overlay(
+        base_doc: &IfcxDocument,
+        evac: &crate::core::evacuation_routing::EvacuationLifelineReport,
+    ) -> IfcxDocument {
+        let stage = Self::compose(&[base_doc.clone(), evac.evacuation_overlay_ifcx.clone()]);
+        stage.to_composed_document(&format!("{}_evacuation_lifelines", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_SHM_DIGITAL_TWIN)
+    if node.attributes.contains_key(ns::EG_EVACUATION_LIFELINES) {
+        "Evacuation Lifelines".to_string()
+    } else if node.attributes.contains_key(ns::EG_SHM_DIGITAL_TWIN)
         || node.attributes.contains_key(ns::EG_ATC20_PLACARD)
     {
         "SHM & ATC-20".to_string()

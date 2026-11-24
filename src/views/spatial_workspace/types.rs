@@ -425,6 +425,9 @@ pub enum PlannedProposalAction {
         story: usize,
     },
     RunAtc20Triage,
+    // Phase 77: Autonomous Multi-Hazard Evacuation Routing & Emergency Lifelines
+    RunEvacuationRouting,
+    OpenEvacuationDrawer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -492,6 +495,9 @@ pub enum GeminiDirective {
         story: usize,
     },
     RunAtc20Triage,
+    // Phase 77: Autonomous Multi-Hazard Evacuation Routing & Emergency Lifelines
+    RunEvacuationRouting,
+    OpenEvacuationDrawer,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -678,6 +684,10 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::OpenShmDigitalTwin);
             } else if upper == "RUN_ATC20_TRIAGE" {
                 directives.push(GeminiDirective::RunAtc20Triage);
+            } else if upper == "RUN_EVACUATION_ROUTING" {
+                directives.push(GeminiDirective::RunEvacuationRouting);
+            } else if upper == "OPEN_EVAC_DRAWER" {
+                directives.push(GeminiDirective::OpenEvacuationDrawer);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -1337,6 +1347,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export non-destructive eigengraph::analysis::shm_digital_twin + atc20_placard .ifcx",
         icon: AppIcon::Cube3D,
     },
+    SlashCommandSpec {
+        cmd: "/evac",
+        category: "Safety",
+        description: "Compute A* safe evacuation & emergency responder routes avoiding Red cordons & flood",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/lifelines",
+        category: "Safety",
+        description: "Open Post-Disaster Road Network Connectivity & Emergency Lifelines Inspector",
+        icon: AppIcon::Globe,
+    },
+    SlashCommandSpec {
+        cmd: "/safezone",
+        category: "GIS",
+        description: "Place a safe assembly Park zone at the site perimeter & recompute evacuation routes",
+        icon: AppIcon::Target,
+    },
+    SlashCommandSpec {
+        cmd: "/evac-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::evacuation_lifelines .ifcx overlay",
+        icon: AppIcon::Cube3D,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -1391,6 +1425,8 @@ pub struct SpatialHudActions {
     pub run_shm_digital_twin: bool,
     pub open_shm_telemetry_picker: bool,
     pub export_shm_atc20_ifcx: bool,
+    pub run_evacuation_routing: bool,
+    pub export_evacuation_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -1749,5 +1785,7 @@ impl SpatialHudActions {
         self.run_shm_digital_twin |= other.run_shm_digital_twin;
         self.open_shm_telemetry_picker |= other.open_shm_telemetry_picker;
         self.export_shm_atc20_ifcx |= other.export_shm_atc20_ifcx;
+        self.run_evacuation_routing |= other.run_evacuation_routing;
+        self.export_evacuation_ifcx |= other.export_evacuation_ifcx;
     }
 }

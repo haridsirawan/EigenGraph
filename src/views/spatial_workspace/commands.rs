@@ -387,6 +387,13 @@ impl SpatialWorkspaceState {
                     out.run_shm_digital_twin = true;
                     self.push_trace("Executed Automated ATC-20 Post-Earthquake Placard Triage", true);
                 }
+                PlannedProposalAction::RunEvacuationRouting
+                | PlannedProposalAction::OpenEvacuationDrawer => {
+                    universal_canvas.evacuation_config.overlay_visible = true;
+                    self.open_evacuation_drawer();
+                    out.run_evacuation_routing = true;
+                    self.push_trace("Computed Autonomous Multi-Hazard Evacuation & Emergency Lifelines", true);
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -590,6 +597,12 @@ impl SpatialWorkspaceState {
                             GeminiDirective::RunAtc20Triage => {
                                 PlannedProposalAction::RunAtc20Triage
                             }
+                            GeminiDirective::RunEvacuationRouting => {
+                                PlannedProposalAction::RunEvacuationRouting
+                            }
+                            GeminiDirective::OpenEvacuationDrawer => {
+                                PlannedProposalAction::OpenEvacuationDrawer
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -648,6 +661,8 @@ impl SpatialWorkspaceState {
                             GeminiDirective::OpenFragilityTab => "OpenFemaP58".to_string(),
                             GeminiDirective::OpenShmDigitalTwin => "OpenShmTwin".to_string(),
                             GeminiDirective::RunAtc20Triage => "Atc20Triage".to_string(),
+                            GeminiDirective::RunEvacuationRouting => "RunEvacuation".to_string(),
+                            GeminiDirective::OpenEvacuationDrawer => "OpenEvacDrawer".to_string(),
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1892,6 +1907,37 @@ impl SpatialWorkspaceState {
                 }
                 "/shm-ifcx" => {
                     actions.export_shm_atc20_ifcx = true;
+                }
+                "/evac" | "/lifelines" => {
+                    universal_canvas.evacuation_config.overlay_visible = true;
+                    self.open_evacuation_drawer();
+                    actions.run_evacuation_routing = true;
+                }
+                "/safezone" => {
+                    if !universal_canvas
+                        .city_scene
+                        .zones
+                        .iter()
+                        .any(|z| z.kind == crate::core::IfcxZoneKind::Park)
+                    {
+                        universal_canvas.city_scene.add_zone(
+                            [65.0, 55.0],
+                            32.0,
+                            24.0,
+                            0.0,
+                            crate::core::IfcxZoneKind::Park,
+                        );
+                    }
+                    universal_canvas.evacuation_config.overlay_visible = true;
+                    self.open_evacuation_drawer();
+                    actions.run_evacuation_routing = true;
+                    self.push_trace(
+                        "Added Safe Assembly Park Zone & recomputed evacuation lifelines",
+                        true,
+                    );
+                }
+                "/evac-ifcx" => {
+                    actions.export_evacuation_ifcx = true;
                 }
                 "/section" | "/cut" => {
                     let elev_opt = arg

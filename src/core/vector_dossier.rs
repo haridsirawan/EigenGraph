@@ -33,6 +33,7 @@ pub struct VectorDossierInput<'a> {
     pub portfolio_report: Option<&'a crate::core::portfolio_retrofit::DistrictPortfolioRetrofitReport>,
     pub replay_report: Option<&'a crate::core::ground_motion_replay::GroundMotionReplayReport>,
     pub shm_report: Option<&'a crate::core::shm_twin::ShmDigitalTwinReport>,
+    pub evacuation_report: Option<&'a crate::core::evacuation_routing::EvacuationLifelineReport>,
     pub sheet_code: &'a str,
     pub revision: &'a str,
 }
@@ -614,17 +615,41 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
     };
 
     let haz_line = if let Some(shm) = input.shm_report {
+        if let Some(evac) = input.evacuation_report {
+            format!(
+                "SHM {} | f1 {:.2}->{:.2}Hz ({:+.1}%) | MAC {:.2} | Evac Conn {:.0}% Resp {:.0}",
+                shm.atc20_placard.short_label(),
+                shm.baseline_freq_1_hz,
+                shm.observed_freq_1_hz,
+                shm.freq_shift_pct,
+                shm.mac_mode_1,
+                evac.network_connectivity_pct,
+                evac.responder_accessibility_score,
+            )
+        } else {
+            format!(
+                "SHM {} | f1 {:.2}->{:.2}Hz ({:+.1}%) | MAC {:.2} | K_ret {:.0}% | {}G/{}Y/{}R",
+                shm.atc20_placard.short_label(),
+                shm.baseline_freq_1_hz,
+                shm.observed_freq_1_hz,
+                shm.freq_shift_pct,
+                shm.mac_mode_1,
+                shm.global_stiffness_retention_pct,
+                shm.green_count,
+                shm.yellow_count,
+                shm.red_count,
+            )
+        }
+    } else if let Some(evac) = input.evacuation_report {
         format!(
-            "SHM {} | f1 {:.2}->{:.2}Hz ({:+.1}%) | MAC {:.2} | K_ret {:.0}% | {}G/{}Y/{}R",
-            shm.atc20_placard.short_label(),
-            shm.baseline_freq_1_hz,
-            shm.observed_freq_1_hz,
-            shm.freq_shift_pct,
-            shm.mac_mode_1,
-            shm.global_stiffness_retention_pct,
-            shm.green_count,
-            shm.yellow_count,
-            shm.red_count,
+            "Evac Conn {:.0}% ({}/{} open) | Resp {:.0}/100 | Isolated {} | Bridges {}/{} ok",
+            evac.network_connectivity_pct,
+            evac.open_edges,
+            evac.total_edges,
+            evac.responder_accessibility_score,
+            evac.isolated_building_count,
+            evac.bridges_evaluated.saturating_sub(evac.bridges_compromised),
+            evac.bridges_evaluated,
         )
     } else if let Some(rep) = input.replay_report {
         format!(
@@ -652,6 +677,8 @@ fn draw_telemetry_panel(svg: &mut String, input: &VectorDossierInput<'_>) {
 
     let sixth_label = if input.shm_report.is_some() {
         "Live SHM Digital Twin & ATC-20 Placard"
+    } else if input.evacuation_report.is_some() {
+        "Post-Disaster Evacuation & Lifelines"
     } else if input.replay_report.is_some() {
         "NL-THA Ground-Motion & Hinges"
     } else {
@@ -992,6 +1019,7 @@ mod tests {
             portfolio_report: None,
             replay_report: Some(&replay_rep),
             shm_report: None,
+            evacuation_report: None,
             sheet_code: "S-101",
             revision: "REV 01",
         });
@@ -1035,10 +1063,44 @@ mod tests {
             portfolio_report: None,
             replay_report: Some(&replay_rep),
             shm_report: Some(&shm_rep),
+            evacuation_report: None,
             sheet_code: "S-102",
             revision: "REV 02",
         });
         assert!(shm_export.svg_content.contains("Live SHM Digital Twin &amp; ATC-20 Placard"));
         assert!(shm_export.svg_content.contains("SHM "));
+
+        let evac_rep = crate::core::evacuation_routing::evaluate_evacuation_and_lifelines(
+            &proj,
+            &crate::core::gis::IfcxCityScene::default(),
+            Some(&shm_rep),
+            None,
+            None,
+            Some(&ssi_rep),
+            None,
+            None,
+            &crate::core::evacuation_routing::EvacuationRoutingConfig::default(),
+            (-6.2088, 106.8456),
+        )
+        .expect("Evacuation report");
+        let evac_export = build_pure_vector_engineering_dossier_svg(&VectorDossierInput {
+            project: &proj,
+            members: &members,
+            site: &site,
+            lat_lon: (-6.2088, 106.8456),
+            retrofit_report: None,
+            crc_report: None,
+            ssi_report: Some(&ssi_rep),
+            hazard_report: None,
+            diff_report: Some(&diff),
+            portfolio_report: None,
+            replay_report: Some(&replay_rep),
+            shm_report: None,
+            evacuation_report: Some(&evac_rep),
+            sheet_code: "S-103",
+            revision: "REV 03",
+        });
+        assert!(evac_export.svg_content.contains("Post-Disaster Evacuation &amp; Lifelines"));
+        assert!(evac_export.svg_content.contains("Evac Conn "));
     }
 }

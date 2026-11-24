@@ -783,6 +783,43 @@ impl SpatialWorkspaceState {
                         self.toggle_exclusive_drawer("shm");
                     }
                 }
+                if universal_canvas.evacuation_config.overlay_visible {
+                    if let Some(ref evac) = universal_canvas.last_evacuation_report {
+                        let col = if evac.isolated_building_count > 0
+                            || evac.network_connectivity_pct < 60.0
+                        {
+                            theme.accent_red
+                        } else if evac.degraded_edges > 0 || evac.blocked_edges > 0 {
+                            theme.accent_orange
+                        } else {
+                            theme.accent_green
+                        };
+                        ui.label(
+                            RichText::new(format!(
+                                "Evac Conn {:.0}% • Resp {:.0}/100 • Iso {}",
+                                evac.network_connectivity_pct,
+                                evac.responder_accessibility_score,
+                                evac.isolated_building_count
+                            ))
+                            .size(9.2)
+                            .monospace()
+                            .color(col),
+                        );
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            "Evac UI",
+                            self.evacuation_drawer_open,
+                            theme.accent_green,
+                            "Open Evacuation Routing & Emergency Lifelines drawer",
+                        )
+                        .clicked()
+                        {
+                            self.toggle_exclusive_drawer("evacuation");
+                        }
+                    }
+                }
             }
             if let crate::core::ground_motion_replay::AsyncReplayJobPhase::Running {
                 progress,
@@ -1645,6 +1682,9 @@ impl SpatialWorkspaceState {
                 self.ground_motion_drawer_open = false;
                 universal_canvas.last_shm_twin_report = None;
                 self.shm_drawer_open = false;
+                universal_canvas.evacuation_config.overlay_visible = false;
+                universal_canvas.last_evacuation_report = None;
+                self.evacuation_drawer_open = false;
                 actions.sync_fem_and_earth = true;
             }
         });
@@ -1688,7 +1728,8 @@ impl SpatialWorkspaceState {
                 || self.ifcx_diff_drawer_open
                 || self.portfolio_drawer_open
                 || self.ground_motion_drawer_open
-                || self.shm_drawer_open,
+                || self.shm_drawer_open
+                || self.evacuation_drawer_open,
         );
 
         let compact_w = if is_mobile {
@@ -2658,6 +2699,18 @@ impl SpatialWorkspaceState {
                             theme,
                             universal_canvas,
                             build_view,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
+                    if self.evacuation_drawer_open {
+                        self.render_evacuation_lifelines_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
                             &mut actions,
                             cap_w,
                             is_mobile,
@@ -4712,6 +4765,98 @@ impl SpatialWorkspaceState {
                                             }
                                         },
                                     );
+                                    Self::glass_subpill_group(
+                                        ui,
+                                        theme,
+                                        9,
+                                        Margin::symmetric(7, 3),
+                                        deck_w,
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new("Evacuation & Lifelines:")
+                                                    .size(9.3)
+                                                    .strong()
+                                                    .color(theme.text_muted),
+                                            );
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Shield),
+                                                "Evac Route",
+                                                self.evacuation_drawer_open,
+                                                theme.accent_green,
+                                                "Compute A* post-disaster safe evacuation & emergency responder routes",
+                                            )
+                                            .clicked()
+                                            {
+                                                self.open_evacuation_drawer();
+                                                actions.run_evacuation_routing = true;
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Target),
+                                                format!(
+                                                    "Mode: {}",
+                                                    universal_canvas
+                                                        .evacuation_config
+                                                        .mode
+                                                        .short_label()
+                                                ),
+                                                universal_canvas.evacuation_config.overlay_visible,
+                                                theme.accent_blue,
+                                                "Cycle lifeline routing display (Pedestrian / Responder / Both)",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas.evacuation_config.mode =
+                                                    universal_canvas
+                                                        .evacuation_config
+                                                        .mode
+                                                        .cycle_next();
+                                                actions.run_evacuation_routing = true;
+                                            }
+                                            let evac_3d =
+                                                universal_canvas.evacuation_config.overlay_visible;
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Globe),
+                                                "Evac 3D",
+                                                evac_3d,
+                                                theme.accent_green,
+                                                "Toggle 3D Pure WebGPU evacuation corridors, debris cordons & assembly beacons",
+                                            )
+                                            .clicked()
+                                            {
+                                                universal_canvas
+                                                    .evacuation_config
+                                                    .overlay_visible = !evac_3d;
+                                                if universal_canvas
+                                                    .evacuation_config
+                                                    .overlay_visible
+                                                    && universal_canvas
+                                                        .last_evacuation_report
+                                                        .is_none()
+                                                {
+                                                    actions.run_evacuation_routing = true;
+                                                }
+                                            }
+                                            if Self::glass_pill_button(
+                                                ui,
+                                                theme,
+                                                Some(AppIcon::Cube3D),
+                                                "Evac .ifcx",
+                                                false,
+                                                theme.accent_green,
+                                                "Export non-destructive eigengraph::analysis::evacuation_lifelines .ifcx overlay",
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.export_evacuation_ifcx = true;
+                                            }
+                                        },
+                                    );
                                 }
                                 DynamicIslandStudioTab::CadAndExport => {
                                     Self::glass_subpill_group(
@@ -6709,6 +6854,346 @@ impl SpatialWorkspaceState {
                 if Self::glass_pill_button(ui, theme, Some(AppIcon::Shield), "Run ATC-20 Triage", false, theme.accent_green, "Evaluate ATC-20 safety posting").clicked() {
                     actions.run_shm_digital_twin = true;
                 }
+            });
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_evacuation_lifelines_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::evacuation_routing::{EvacuationMode, RoadEdgeStatus};
+        use crate::core::shm_twin::Atc20Placard;
+
+        let avail_w = ui.available_width().min(cap_w - 16.0).max(180.0);
+        let mut recompute = false;
+
+        ui.horizontal_wrapped(|ui| {
+            icons::pill_badge(
+                ui,
+                AppIcon::Shield,
+                "Phase 77 Evacuation & Emergency Lifelines",
+                theme.accent_green,
+            );
+            if let Some(ref rep) = universal_canvas.last_evacuation_report {
+                let conn_col = if rep.network_connectivity_pct >= 80.0 {
+                    theme.accent_green
+                } else if rep.network_connectivity_pct >= 55.0 {
+                    theme.accent_orange
+                } else {
+                    theme.accent_red
+                };
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Globe,
+                    format!("Conn {:.0}%", rep.network_connectivity_pct),
+                    conn_col,
+                );
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Bolt,
+                    format!("Responder {:.0}/100", rep.responder_accessibility_score),
+                    if rep.responder_accessibility_score >= 70.0 {
+                        theme.accent_blue
+                    } else {
+                        theme.accent_orange
+                    },
+                );
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Evacuation & Lifelines drawer",
+            )
+            .clicked()
+            {
+                self.evacuation_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Mode:").size(9.2).strong().color(theme.text_secondary));
+            for &m in EvacuationMode::all() {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    m.short_label(),
+                    universal_canvas.evacuation_config.mode == m,
+                    theme.accent_blue,
+                    m.label(),
+                )
+                .clicked()
+                {
+                    universal_canvas.evacuation_config.mode = m;
+                    recompute = true;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                None,
+                "Flood Gate",
+                universal_canvas.evacuation_config.include_flood_blockage,
+                theme.accent_orange,
+                "Include 3D floodwater depth > 0.35 m road closures",
+            )
+            .clicked()
+            {
+                universal_canvas.evacuation_config.include_flood_blockage =
+                    !universal_canvas.evacuation_config.include_flood_blockage;
+                recompute = true;
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                None,
+                "Liq Penalty",
+                universal_canvas.evacuation_config.include_liquefaction_penalty,
+                theme.accent_orange,
+                "Include Seed-Idriss liquefaction lateral spreading & road settlement penalties",
+            )
+            .clicked()
+            {
+                universal_canvas.evacuation_config.include_liquefaction_penalty =
+                    !universal_canvas.evacuation_config.include_liquefaction_penalty;
+                recompute = true;
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                None,
+                "Bridge Frag",
+                universal_canvas.evacuation_config.include_bridge_fragility,
+                theme.accent_red,
+                "Include seismic pier fragility closures on IfcBridge spans",
+            )
+            .clicked()
+            {
+                universal_canvas.evacuation_config.include_bridge_fragility =
+                    !universal_canvas.evacuation_config.include_bridge_fragility;
+                recompute = true;
+            }
+        });
+
+        ui.add_space(3.0);
+        ui.horizontal_wrapped(|ui| {
+            let mut df = universal_canvas.evacuation_config.debris_radius_factor as f32;
+            ui.label(RichText::new("Debris Factor:").size(9.2).color(theme.text_muted));
+            ui.spacing_mut().slider_width = if is_mobile { 84.0 } else { 120.0 };
+            let sresp = ui.add(egui::Slider::new(&mut df, 0.20..=1.00).fixed_decimals(2));
+            if sresp.changed() {
+                universal_canvas.evacuation_config.debris_radius_factor = df as f64;
+            }
+            if sresp.drag_stopped() {
+                recompute = true;
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Bolt),
+                "Recompute A*",
+                false,
+                theme.accent_green,
+                "Re-evaluate ATC-20 debris cordons, road closures, and A* lifeline routes",
+            )
+            .clicked()
+            {
+                recompute = true;
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Cube3D),
+                "Export .ifcx",
+                false,
+                theme.accent_green,
+                "Export non-destructive eigengraph::analysis::evacuation_lifelines .ifcx overlay",
+            )
+            .clicked()
+            {
+                actions.export_evacuation_ifcx = true;
+            }
+        });
+
+        if recompute {
+            actions.run_evacuation_routing = true;
+        }
+
+        ui.add_space(4.0);
+        if let Some(ref rep) = universal_canvas.last_evacuation_report {
+            ui.horizontal_wrapped(|ui| {
+                icons::pill_badge(
+                    ui,
+                    AppIcon::CheckCircle,
+                    format!("Open {}/{}", rep.open_edges, rep.total_edges),
+                    theme.accent_green,
+                );
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Bolt,
+                    format!("Degraded {}", rep.degraded_edges),
+                    theme.accent_orange,
+                );
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Shield,
+                    format!("Blocked {}", rep.blocked_edges),
+                    theme.accent_red,
+                );
+                icons::pill_badge(
+                    ui,
+                    AppIcon::Target,
+                    format!(
+                        "Isolated {} • Bridges {}/{}",
+                        rep.isolated_building_count,
+                        rep.bridges_evaluated.saturating_sub(rep.bridges_compromised),
+                        rep.bridges_evaluated
+                    ),
+                    theme.accent_blue,
+                );
+            });
+
+            ui.add_space(4.0);
+            // Pure-Vector Lifeline Network & Safe Egress Mini-Map
+            let map_w = avail_w;
+            let map_h = if is_mobile { 125.0 } else { 148.0 };
+            let (map_rect, _) = ui.allocate_exact_size(Vec2::new(map_w, map_h), egui::Sense::hover());
+            let painter = ui.painter_at(map_rect);
+            painter.rect_filled(map_rect, 8.0, theme.bg_sidebar.gamma_multiply(0.85));
+            painter.rect_stroke(
+                map_rect,
+                8.0,
+                Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.35)),
+                egui::StrokeKind::Inside,
+            );
+
+            let (mut min_x, mut max_x) = (-95.0_f64, 95.0_f64);
+            let (mut min_y, mut max_y) = (-95.0_f64, 95.0_f64);
+            for n in &rep.nodes {
+                min_x = min_x.min(n.pos_enu_m[0] - 10.0);
+                max_x = max_x.max(n.pos_enu_m[0] + 10.0);
+                min_y = min_y.min(n.pos_enu_m[1] - 10.0);
+                max_y = max_y.max(n.pos_enu_m[1] + 10.0);
+            }
+            let span = (max_x - min_x).max(max_y - min_y).max(40.0);
+            let cx_w = 0.5 * (min_x + max_x);
+            let cy_w = 0.5 * (min_y + max_y);
+            let scale = ((map_rect.width() - 18.0).min(map_rect.height() - 18.0) as f64) / span;
+            let to_pt = |p: [f64; 2]| -> egui::Pos2 {
+                egui::Pos2::new(
+                    map_rect.center().x + ((p[0] - cx_w) * scale) as f32,
+                    map_rect.center().y - ((p[1] - cy_w) * scale) as f32,
+                )
+            };
+
+            for e in &rep.edges {
+                if e.road_name == "Site Access Spur" {
+                    continue;
+                }
+                if let (Some(nu), Some(nv)) = (rep.nodes.get(e.u), rep.nodes.get(e.v)) {
+                    let col = match e.status {
+                        RoadEdgeStatus::OpenSafe => theme.text_muted.gamma_multiply(0.55),
+                        RoadEdgeStatus::DegradedDetour => Color32::from_rgb(245, 158, 11),
+                        RoadEdgeStatus::BlockedClosed => Color32::from_rgb(239, 68, 68),
+                    };
+                    painter.line_segment(
+                        [to_pt(nu.pos_enu_m), to_pt(nv.pos_enu_m)],
+                        Stroke::new(if e.is_bridge { 2.6 } else { 1.6 }, col),
+                    );
+                }
+            }
+
+            for c in &rep.cordons {
+                let col = match c.placard {
+                    Atc20Placard::InspectedGreen => Color32::from_rgb(34, 197, 94),
+                    Atc20Placard::RestrictedYellow => Color32::from_rgb(245, 158, 11),
+                    Atc20Placard::UnsafeRed => Color32::from_rgb(239, 68, 68),
+                };
+                let rad_px = (c.cordon_radius_m * scale) as f32;
+                let center_px = to_pt(c.center_enu_m);
+                painter.circle_filled(center_px, rad_px.max(3.5), col.gamma_multiply(0.24));
+                painter.circle_stroke(center_px, rad_px.max(3.5), Stroke::new(1.2, col));
+            }
+
+            for r in &rep.routes {
+                if !r.reachable || r.waypoints_enu_m.len() < 2 {
+                    continue;
+                }
+                let pts: Vec<egui::Pos2> = r.waypoints_enu_m.iter().map(|&p| to_pt(p)).collect();
+                let col = if r.is_responder_route {
+                    Color32::from_rgb(56, 189, 248)
+                } else {
+                    Color32::from_rgb(34, 211, 153)
+                };
+                painter.add(egui::Shape::line(
+                    pts,
+                    Stroke::new(if r.is_active_building { 2.6 } else { 1.5 }, col),
+                ));
+            }
+
+            for sp in &rep.safe_points {
+                let p = to_pt(sp.center_enu_m);
+                painter.circle_filled(p, 4.5, Color32::from_rgb(34, 197, 94));
+                painter.circle_stroke(p, 6.5, Stroke::new(1.1, Color32::WHITE));
+            }
+
+            ui.add_space(4.0);
+            for r in rep.routes.iter().take(4) {
+                let col = if !r.reachable {
+                    theme.accent_red
+                } else if r.is_responder_route {
+                    theme.accent_blue
+                } else {
+                    theme.accent_green
+                };
+                ui.horizontal_wrapped(|ui| {
+                    ui.colored_label(
+                        col,
+                        RichText::new(if r.is_responder_route {
+                            "[RESPONDER]"
+                        } else if r.reachable {
+                            "[EGRESS]"
+                        } else {
+                            "[ISOLATED]"
+                        })
+                        .size(8.8)
+                        .strong(),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "{} -> {} | {:.0} m ({:.0} s) | Safety {:.0}/100",
+                            r.origin_label,
+                            r.target_safe_zone,
+                            r.distance_m,
+                            r.estimated_time_sec,
+                            r.safety_score_0_100
+                        ))
+                        .size(8.8)
+                        .color(theme.text_secondary),
+                    );
+                });
+            }
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(
+                        "Click 'Recompute A*' to evaluate post-disaster evacuation routes & lifeline connectivity.",
+                    )
+                    .size(9.5)
+                    .color(theme.text_muted),
+                );
             });
         }
     }

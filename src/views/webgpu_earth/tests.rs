@@ -1184,3 +1184,219 @@ use crate::core::ifcx::IfcxDocument;
             "Expected Pass 1 + Pass 2 + SHM triage render to produce non-black pixels (got {non_black_pixels}/4096)"
         );
     }
+
+    #[test]
+    fn test_phase77_webgpu_evacuation_corridors_debris_cordons_and_real_gpu_render() {
+        let proj = BimProject::sample_bimcraft_building();
+        let site = crate::core::SiteEnvironmentalCoupling::default();
+        let mut city = IfcxCityScene::default();
+        city.add_road([-40.0, 0.0], [60.0, 0.0], crate::core::IfcxRoadKind::Collector, false);
+        city.add_road([-40.0, 0.0], [-40.0, 50.0], crate::core::IfcxRoadKind::Collector, false);
+        city.add_road([-40.0, 50.0], [60.0, 50.0], crate::core::IfcxRoadKind::Arterial, false);
+        city.add_zone([60.0, 50.0], 24.0, 20.0, 0.0, crate::core::IfcxZoneKind::Park);
+
+        let shm_rep = crate::core::shm_twin::evaluate_shm_digital_twin_for_bim(
+            &proj,
+            &site,
+            None,
+            None,
+            None,
+            None,
+            &crate::core::shm_twin::ShmDigitalTwinConfig {
+                fault_scenario: crate::core::shm_twin::ShmFaultScenario::SoftStoryFirstFloor,
+                severity_pct: 90.0,
+                target_story: 1,
+                ..Default::default()
+            },
+            (-6.2088, 106.8456),
+        )
+        .expect("SHM report");
+
+        let evac_cfg = crate::core::evacuation_routing::EvacuationRoutingConfig {
+            overlay_visible: true,
+            mode: crate::core::evacuation_routing::EvacuationMode::Both,
+            ..Default::default()
+        };
+        let evac_rep = crate::core::evacuation_routing::evaluate_evacuation_and_lifelines(
+            &proj,
+            &city,
+            Some(&shm_rep),
+            None,
+            None,
+            None,
+            None,
+            None,
+            &evac_cfg,
+            (-6.2088, 106.8456),
+        )
+        .expect("Evacuation report");
+
+        let evac_mesh = build_rtc_evacuation_lifelines_mesh(&EvacuationLifelineGpuInput {
+            report: &evac_rep,
+            visible: true,
+        });
+        assert!(evac_mesh.indices.len() / 3 > 40);
+        assert!(evac_mesh
+            .vertices
+            .iter()
+            .all(|v| (v.meta[0] - 9.0).abs() < 1e-3));
+
+        fn poll_fut<F: std::future::Future>(fut: F) -> F::Output {
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(waker);
+            let mut pinned = std::pin::pin!(fut);
+            loop {
+                if let std::task::Poll::Ready(val) = pinned.as_mut().poll(&mut cx) {
+                    return val;
+                }
+                std::thread::yield_now();
+            }
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = poll_fut(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let Ok((device, queue)) =
+            poll_fut(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        let planet_mesh = build_planetary_vector_globe_mesh(VectorEarthTheme::CoastalBlueprint);
+        res.planet
+            .upload(&device, &queue, "planet_p77", 1, &planet_mesh);
+        res.evacuation
+            .upload(&device, &queue, "evacuation_p77", 1, &evac_mesh);
+
+        let mut cam = GlobeCamera::default();
+        cam.tilt_deg = 42.0;
+        let xf = GlobeScreenTransform::from_view(
+            Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(64.0, 64.0)),
+            -6.2088,
+            106.8456,
+            17.0,
+            &cam,
+        );
+        let uniforms = RtcCameraUniforms::from_globe_xform(
+            &xf,
+            VectorEarthTheme::CoastalBlueprint,
+            &cam,
+            (-6.2088, 106.8456),
+            1.5,
+            true,
+        );
+        queue.write_buffer(
+            &res.planet_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_planet_pass_uniforms()),
+        );
+        queue.write_buffer(
+            &res.site_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_site_pass_uniforms()),
+        );
+        res.ensure_targets(&device, 64, 64);
+
+        let out_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("p77_composite_out"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: fmt,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let out_view = out_tex.create_view(&Default::default());
+        let read_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("p77_readback"),
+            size: (64 * 64 * 4) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = device.create_command_encoder(&Default::default());
+        res.render_offscreen_passes(&mut encoder, true);
+        {
+            let target = res.targets.as_ref().expect("Targets allocated");
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("p77_composite_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &out_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_viewport(0.0, 0.0, 64.0, 64.0, 0.0, 1.0);
+            pass.set_scissor_rect(0, 0, 64, 64);
+            pass.set_pipeline(&res.composite_pipeline);
+            pass.set_bind_group(0, &target.composite_bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        encoder.copy_texture_to_buffer(
+            out_tex.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &read_buf,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(64 * 4),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit([encoder.finish()]);
+
+        let map_res: std::sync::Arc<std::sync::Mutex<Option<Result<(), wgpu::BufferAsyncError>>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let map_res_cb = std::sync::Arc::clone(&map_res);
+        read_buf
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |r| {
+                *map_res_cb.lock().unwrap() = Some(r);
+            });
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let val_err = poll_fut(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "Phase 77 WGSL evacuation pipeline triggered WebGPU validation error: {val_err:?}"
+        );
+        assert!(matches!(*map_res.lock().unwrap(), Some(Ok(()))));
+
+        let bytes = read_buf
+            .slice(..)
+            .get_mapped_range()
+            .expect("Mapped range");
+        let non_black_pixels = bytes
+            .chunks_exact(4)
+            .filter(|px| (px[0] > 0 || px[1] > 0 || px[2] > 0) && px[3] > 0)
+            .count();
+        drop(bytes);
+        read_buf.unmap();
+        assert!(
+            non_black_pixels > 400,
+            "Expected Pass 1 + Pass 2 + Evacuation Lifelines render to produce non-black pixels (got {non_black_pixels}/4096)"
+        );
+    }

@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL 24-Bit Z-Buffer, f64 RTC, Multi-Layer Composition, City-Builder Authoring, 6-DOF FEM & ARI)",
+                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL 24-Bit Z-Buffer, f64 RTC, 6-DOF FEM & ARI v2, SHM Digital Twin, ATC-20 Triage & Evacuation Lifelines)",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)
@@ -708,6 +708,120 @@ impl SettingsView {
                 };
                 ui.label(RichText::new(runtime).size(12.0).color(theme.text_secondary));
             });
+
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new("WHAT'S NEW & RELEASE HIGHLIGHTS")
+                    .strong()
+                    .size(12.0)
+                    .color(theme.accent_blue),
+            );
+            ui.separator();
+            ui.add_space(6.0);
+
+            let releases: [(&str, bool, &str, &str); 8] = [
+                (
+                    "v0.7.7",
+                    true,
+                    "Autonomous Multi-Hazard Evacuation Routing & Emergency Lifelines",
+                    "A* safe egress & emergency responder routing over IfcRoad/IfcBridge graphs with ATC-20 debris cordons, 3D flood & liquefaction road closures, Pure WebGPU animated flow corridors, and eigengraph::analysis::evacuation_lifelines IFCX export.",
+                ),
+                (
+                    "v0.7.6",
+                    false,
+                    "Live SHM Digital Twin & Automated ATC-20 Placard Triage",
+                    "Streams triaxial MEMS/inclinometer/strain CSV & JSON logs into 6-DOF/MDOF modal shift & MAC identification, Welch PSD plots, 3D WebGPU sensor beacons, and Green/Yellow/Red ATC-20 safety placards.",
+                ),
+                (
+                    "v0.7.5",
+                    false,
+                    "100% Pure WebGPU (WGSL), PEER .at2/.csv Tri-Dir & FEMA P-58 Fragility",
+                    "Replaced WebGL/GLSL with native wgpu + WGSL (Metal/Vulkan/DX12 & Browser WebGPU), SNI 1726 Match Sa(T1) spectrum scaling, tri-directional XYZ ground motion, and 3D per-story FEMA P-58 loss halos.",
+                ),
+                (
+                    "v0.7.4",
+                    false,
+                    "Async Multi-Thread / WebWorker StructGNN-CRC & 60 FPS EQ Replay",
+                    "Non-blocking Native/Blob WebWorker HHT-alpha NL-THA with Bouc-Wen/Takeda hysteresis and pulsing 3D ASCE 41-17 plastic hinge beacons.",
+                ),
+                (
+                    "v0.7.3",
+                    false,
+                    "Autonomous District Portfolio ARI v2 Pareto Retrofit Optimizer",
+                    "Multi-objective Cost vs. Embodied Carbon vs. District ARI v2 Pareto frontier synthesis with 3D district retrofit crowns.",
+                ),
+                (
+                    "v0.7.2",
+                    false,
+                    "Multi-Layer IFCX Visual Diffing & Pure-Vector SVG Dossier Exporter",
+                    "Path-level semantic IFCX diff ghosts (+Added / ~Modified / -Deleted) and archival A3 pure-vector SVG dossiers with SHA-256 verification seals.",
+                ),
+                (
+                    "v0.7.1",
+                    false,
+                    "3D Subsurface Stratigraphy, 6-DOF Winkler SSI & Modular Views",
+                    "Coupled foundation Winkler springs, Veletsos-Meek period lengthening, Seed-Idriss liquefaction screening, and 3D WebGPU subsurface cutaway.",
+                ),
+                (
+                    "v0.7.0",
+                    false,
+                    "Two-Stage ARI v2 + StructGNN-CRC Conformal Screening & Collapse Cascade",
+                    "Spectral kinematic guard + conformal risk calibration (alpha = 0.05) driving UFC 4-023-03 3D domino progressive collapse visualization.",
+                ),
+            ];
+
+            for (ver, is_latest, title, summary) in releases {
+                Frame::new()
+                    .fill(theme.bg_sidebar.gamma_multiply(0.55))
+                    .stroke(Stroke::new(
+                        1.0,
+                        if is_latest {
+                            theme.accent_green.gamma_multiply(0.6)
+                        } else {
+                            theme.accent_blue.gamma_multiply(0.25)
+                        },
+                    ))
+                    .corner_radius(CornerRadius::same(7))
+                    .inner_margin(Margin::symmetric(10, 7))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal_wrapped(|ui| {
+                            Frame::new()
+                                .fill(if is_latest {
+                                    theme.accent_green.gamma_multiply(0.22)
+                                } else {
+                                    theme.accent_blue.gamma_multiply(0.18)
+                                })
+                                .corner_radius(CornerRadius::same(5))
+                                .inner_margin(Margin::symmetric(6, 2))
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        RichText::new(if is_latest {
+                                            format!("{ver} • LATEST")
+                                        } else {
+                                            ver.to_string()
+                                        })
+                                        .size(10.0)
+                                        .strong()
+                                        .color(if is_latest {
+                                            theme.accent_green
+                                        } else {
+                                            theme.accent_blue
+                                        }),
+                                    );
+                                });
+                            ui.label(
+                                RichText::new(title)
+                                    .size(11.5)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                        });
+                        ui.add_space(2.0);
+                        ui.label(RichText::new(summary).size(10.8).color(theme.text_secondary));
+                    });
+                ui.add_space(5.0);
+            }
 
             ui.add_space(8.0);
             ui.label(
@@ -759,5 +873,51 @@ impl SettingsView {
                 );
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_phase77_about_eigengraph_release_highlights_render_cleanly() {
+        let mut settings = SettingsView {
+            active_subtab: SettingsSubTab::About,
+            ..Default::default()
+        };
+        let mut theme = MacTheme::for_mode(ThemeMode::ProDark);
+        let mut canvas = UniversalCanvasState::default();
+        let mut ai_vis = false;
+        let bim = BimProject::default();
+        let members: Vec<StructuralMember> = Vec::new();
+        let vars: Vec<ParametricVariable> = Vec::new();
+        let mut registry = FeatureRegistry::default();
+        let mut pillar = NavigationPillar::MyLibrary;
+
+        let ctx = egui::Context::default();
+        for win_w in [1280.0_f32, 390.0] {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(win_w, 800.0),
+                )),
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(raw, |ui| {
+                settings.show(
+                    ui,
+                    &mut theme,
+                    &mut canvas,
+                    &mut ai_vis,
+                    &bim,
+                    &members,
+                    &vars,
+                    &mut registry,
+                    &mut pillar,
+                );
+            });
+            out.textures_delta.clear();
+        }
     }
 }

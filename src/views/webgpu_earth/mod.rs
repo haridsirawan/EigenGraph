@@ -490,6 +490,12 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 8.5) {
+        // Phase 77: Autonomous Evacuation Corridors, Debris Cordons & Assembly Beacons
+        let flow = 0.72 + 0.34 * smoothstep(0.35, 0.95, sin(phase * 0.65 - u_time * 4.5));
+        let ndotv = max(abs(dot(n, v)), 0.12);
+        let rim = pow(1.0 - ndotv, 1.8) * 0.38;
+        col = f_in.color.rgb * (flow + rim);
     } else if (kind >= 7.5) {
         // Phase 76: Live SHM Sensor Beacons & Post-Earthquake ATC-20 Placard Shields
         let alarm_rate = 2.6 + f_in.v_meta.w * 5.2;
@@ -666,6 +672,7 @@ pub struct WebGpuEarthResources {
     hazard: GpuMeshSlot,
     fragility_loss: GpuMeshSlot,
     shm_triage: GpuMeshSlot,
+    evacuation: GpuMeshSlot,
 }
 
 impl WebGpuEarthResources {
@@ -874,6 +881,7 @@ impl WebGpuEarthResources {
             hazard: GpuMeshSlot::default(),
             fragility_loss: GpuMeshSlot::default(),
             shm_triage: GpuMeshSlot::default(),
+            evacuation: GpuMeshSlot::default(),
         }
     }
 
@@ -990,7 +998,8 @@ impl WebGpuEarthResources {
             || self.portfolio.index_count > 0
             || self.hazard.index_count > 0
             || self.fragility_loss.index_count > 0
-            || self.shm_triage.index_count > 0;
+            || self.shm_triage.index_count > 0
+            || self.evacuation.index_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("eigengraph_earth_site_pass"),
@@ -1031,6 +1040,7 @@ impl WebGpuEarthResources {
             self.hazard.draw(&mut pass);
             self.fragility_loss.draw(&mut pass);
             self.shm_triage.draw(&mut pass);
+            self.evacuation.draw(&mut pass);
         }
     }
 }
@@ -1047,6 +1057,7 @@ struct WebGpuEarthPaintCallback {
     pending_hinges: Option<(u64, GpuMeshPayload)>,
     pending_fragility: Option<(u64, GpuMeshPayload)>,
     pending_shm: Option<(u64, GpuMeshPayload)>,
+    pending_evacuation: Option<(u64, GpuMeshPayload)>,
 }
 
 impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
@@ -1107,6 +1118,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
             if res.shm_triage.revision_uploaded != rev {
                 res.shm_triage
                     .upload(device, queue, "shm_triage_mesh", rev, mesh);
+            }
+        }
+        if let Some((rev, ref mesh)) = self.pending_evacuation {
+            if res.evacuation.revision_uploaded != rev {
+                res.evacuation
+                    .upload(device, queue, "evacuation_mesh", rev, mesh);
             }
         }
 
@@ -1188,6 +1205,7 @@ pub struct WebGpuEarthState {
     cached_hinge_hash: u64,
     cached_fragility_hash: u64,
     cached_shm_hash: u64,
+    cached_evacuation_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1197,6 +1215,7 @@ pub struct WebGpuEarthState {
     pub last_hinge_tris: usize,
     pub last_fragility_tris: usize,
     pub last_shm_tris: usize,
+    pub last_evacuation_tris: usize,
 }
 
 impl std::fmt::Debug for WebGpuEarthState {
@@ -1432,6 +1451,7 @@ impl WebGpuEarthState {
         hinge_input: Option<PlasticHingeGpuInput<'_>>,
         fragility_input: Option<FragilityLossGpuInput<'_>>,
         shm_input: Option<ShmTriageGpuInput<'_>>,
+        evacuation_input: Option<EvacuationLifelineGpuInput<'_>>,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
             return false;
@@ -1693,6 +1713,32 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_evacuation = if render_site_pass {
+            if let Some(ref ev_in) = evacuation_input {
+                let rev = ev_in.report.config.content_revision_hash()
+                    ^ ((ev_in.report.edges.len() as u64 + 1).wrapping_mul(1_000_003))
+                    ^ ((ev_in.report.blocked_edges as u64 + 1).wrapping_mul(2_654_435_761))
+                    ^ ((ev_in.report.routes.len() as u64).wrapping_mul(131))
+                    ^ u64::from(ev_in.visible).wrapping_mul(97);
+                if rev != self.cached_evacuation_hash {
+                    let mesh = build_rtc_evacuation_lifelines_mesh(ev_in);
+                    self.last_evacuation_tris = mesh.indices.len() / 3;
+                    self.cached_evacuation_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_evacuation_hash != 0 {
+                self.cached_evacuation_hash = 0;
+                self.last_evacuation_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         painter.add(egui_wgpu::Callback::new_paint_callback(
             rect,
             WebGpuEarthPaintCallback {
@@ -1707,6 +1753,7 @@ impl WebGpuEarthState {
                 pending_hinges,
                 pending_fragility,
                 pending_shm,
+                pending_evacuation,
             },
         ));
 
@@ -1725,10 +1772,12 @@ impl WebGpuEarthState {
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ShmDigitalTwin);
+        let evac_animated = evacuation_input.as_ref().is_some_and(|e| e.visible);
         let frame_ms = if hazard_animated
             || subsurface_animated
             || replay_animated
             || shm_animated
+            || evac_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

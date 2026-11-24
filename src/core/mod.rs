@@ -44,6 +44,7 @@ pub mod lifecycle_ops;
 pub mod portfolio_retrofit;
 pub mod ground_motion_replay;
 pub mod shm_twin;
+pub mod evacuation_routing;
 pub mod web_bridge;
 pub mod vector_dossier;
 
@@ -231,6 +232,11 @@ pub use shm_twin::{
     DistrictBuildingPlacard, ShmDigitalTwinConfig, ShmDigitalTwinReport, ShmFaultScenario,
     ShmPsdPoint, ShmSensorKind, ShmSensorNodeSnapshot, ShmTelemetryRecord, StoryShmHealth,
     NS_EG_ATC20_PLACARD, NS_EG_SHM_DIGITAL_TWIN,
+};
+pub use evacuation_routing::{
+    evaluate_evacuation_and_lifelines, AssemblySafePoint, DebrisCordonZone,
+    EvacuationLifelineReport, EvacuationMode, EvacuationRoutePath, EvacuationRoutingConfig,
+    LifelineGraphEdge, LifelineGraphNode, RoadEdgeStatus, NS_EG_EVACUATION_LIFELINES,
 };
 
 

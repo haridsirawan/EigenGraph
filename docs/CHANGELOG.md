@@ -7,6 +7,22 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.7.7] - 2026-11-24 — Autonomous Multi-Hazard Evacuation Routing, Emergency Lifelines, Post-Disaster Road Network Connectivity & In-App Release Notes
+
+### Added & Changed
+- **Autonomous Multi-Hazard Evacuation Routing & Emergency Lifelines Kernel (`src/core/evacuation_routing.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`, `src/core/vector_dossier.rs`)**:
+  - Coupled Phase 76 ATC-20 Green/Yellow/Red building cordons, Phase 68 3D flood inundation & seismic PGA, and Phase 71 Seed–Idriss soil liquefaction onto the Phase 67 IFCX City-Builder (`IfcRoad` / `IfcBridge` / `IfcSpatialZone`) road graph (`evaluate_evacuation_and_lifelines`), including segment-segment intersection splitting and synthetic 3×3 contextual district street grid fallback when no user roads are authored.
+  - Evaluates deterministic A\* safe pedestrian egress routes to `Park`/`Civic` assembly safe zones and emergency responder staging access routes, computing edge passability (`OpenSafe`, `DegradedDetour`, `BlockedClosed`), bridge seismic/liquefaction compromises, isolated building counts, network connectivity percentage, responder accessibility score, pure-vector A3 SVG dossier telemetry (`VectorDossierInput::evacuation_report`), and non-destructive IFCX overlay composition (`eigengraph::analysis::evacuation_lifelines`, `IfcxStage::compose_with_evacuation_lifelines_overlay`).
+- **Pure WebGPU (`wgpu` + WGSL) Animated Flow Corridors, Debris Cordons & Assembly Beacons (`src/views/webgpu_earth/`, `src/views/universal_canvas/`)**:
+  - Added `build_rtc_evacuation_lifelines_mesh` (`EvacuationLifelineGpuInput`, `material_kind = 9.0`), `EARTH_WGSL` (`kind >= 8.5`) directional animated flow chevrons & Fresnel rim lighting, and dedicated `evacuation` GPU slot inside the hardware 24-bit `Depth24PlusStencil8` offscreen pass, backed by `paint_cpu_evacuation_lifelines_fallback` and `.eigen.json` persistence (`UnifiedWorkspaceArchive::evacuation_routing`).
+- **Single Unified Dynamic Island Lifelines Drawer, Slash Commands, Gemini Directives & In-App About Release Highlights (`src/views/spatial_workspace/`, `src/views/settings.rs`, `src/app.rs`)**:
+  - Added the **`Evacuation & Lifelines:`** sub-pill group in `GIS & Site` (`Evac Route`, `Mode: Pedestrian/Responder/Both`, `Evac 3D`, `Evac .ifcx`), inline Active Strip KPIs + `Evac UI` chip, widening exclusive `Phase 77 Evacuation & Emergency Lifelines` drawer with pure-vector lifeline network mini-map & ranked egress/responder route cards, `/evac`, `/lifelines`, `/safezone`, `/evac-ifcx` commands, and `[[RUN_EVACUATION_ROUTING]]` / `[[OPEN_EVAC_DRAWER]]` Gemini directives—preserving `hud_rects.len() == 1` across `1280px`/`768px`/`390px`.
+  - Upgraded **Settings → About EigenGraph (`src/views/settings.rs`)** with a structured **What's New & Release Highlights** card listing version updates (`v0.7.7` `LATEST` through `v0.7.0`) directly inside the app, and updated `docs/IFCX Earth.md` Mermaid diagram to Pure WebGPU (`egui-wgpu` / `wgpu` WGSL).
+- **Verification**:
+  - Verified clean native test suite (`cargo test --lib` — all 274 unit tests passing with 0 warnings, including `phase77_evacuation_astar_avoids_atc20_red_debris_and_flood_blockage`, `phase77_evacuation_bridge_seismic_and_liquefaction_compromise`, real Metal GPU `test_phase77_webgpu_evacuation_corridors_debris_cordons_and_real_gpu_render`, responsive Dynamic Island `1280px`/`768px`/`390px` zero-overflow test `test_phase77_evacuation_lifelines_slash_commands_and_zero_hud_overflow`, and `test_phase77_about_eigengraph_release_highlights_render_cleanly`), `cargo check --bin eigengraph --target wasm32-unknown-unknown`, `cargo build --bin eigengraph --target wasm32-unknown-unknown --release`, zero WebGL/`glow`/`glutin` crates, and zero external raster tokens.
+
+---
+
 ## [v0.7.6] - 2026-11-23 — Live SHM Digital Twin, Modal Fingerprint Identification & Automated Post-Earthquake ATC-20 Placard Triage
 
 ### Added & Changed
