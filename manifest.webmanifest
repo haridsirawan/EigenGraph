@@ -1,7 +1,7 @@
 {
-  "name": "EigenGraph — 10D BIM & Structural Analytics",
+  "name": "EigenGraph",
   "short_name": "EigenGraph",
-  "description": "10D BIM, Adjusted Redundancy Index (ARI), SVD Kinematic Mechanism Guards, 4D/5D Scheduling & FEA Workstation.",
+  "description": "100% Pure-Rust Vector Earth, Pure WebGPU (WGSL), OpenBIM IFCX (IFC 5), EigenGate & EigenFlow Structural Engineering Workstation.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
