@@ -2849,6 +2849,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.isolation_drawer_open {
+                        self.render_isolation_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -5382,6 +5394,20 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_extreme_events_drawer(0);
                                                         actions.run_extreme_events = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Shield),
+                                                        "Isolation",
+                                                        self.isolation_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Open Seismic Base Isolation & Damper Studio (ASCE 7-22 Ch. 17-18 / SNI 1726 + Sheet S-106)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_isolation_drawer(0);
+                                                        actions.run_isolation_studio = true;
                                                     }
                                                 },
                                             );

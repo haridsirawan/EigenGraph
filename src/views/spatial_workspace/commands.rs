@@ -566,6 +566,20 @@ impl SpatialWorkspaceState {
                     self.open_extreme_events_drawer(0);
                     out.export_extreme_events_svg = true;
                 }
+                PlannedProposalAction::RunIsolation(iso) => {
+                    universal_canvas.isolation_studio_config.isolator_type = *iso;
+                    universal_canvas.isolation_overlay_visible = true;
+                    self.open_isolation_drawer(0);
+                    out.run_isolation_studio = true;
+                }
+                PlannedProposalAction::ToggleIsolation3d => {
+                    self.open_isolation_drawer(0);
+                    out.toggle_isolation_3d = true;
+                }
+                PlannedProposalAction::ExportIsolationAnnex => {
+                    self.open_isolation_drawer(0);
+                    out.export_isolation_svg = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -846,6 +860,15 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportExtremeAnnex => {
                                 PlannedProposalAction::ExportExtremeAnnex
                             }
+                            GeminiDirective::RunIsolation(iso) => {
+                                PlannedProposalAction::RunIsolation(*iso)
+                            }
+                            GeminiDirective::ToggleIsolation3d => {
+                                PlannedProposalAction::ToggleIsolation3d
+                            }
+                            GeminiDirective::ExportIsolationAnnex => {
+                                PlannedProposalAction::ExportIsolationAnnex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -953,6 +976,13 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ToggleExtreme3d => "ToggleExtreme3d".to_string(),
                             GeminiDirective::ExportExtremeAnnex => {
                                 "ExportExtremeAnnex(S-105)".to_string()
+                            }
+                            GeminiDirective::RunIsolation(iso) => {
+                                format!("RunIsolation({iso:?})")
+                            }
+                            GeminiDirective::ToggleIsolation3d => "ToggleIsolation3d".to_string(),
+                            GeminiDirective::ExportIsolationAnnex => {
+                                "ExportIsolationAnnex(S-106)".to_string()
                             }
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -2654,6 +2684,30 @@ impl SpatialWorkspaceState {
                 }
                 "/extreme-svg" => {
                     actions.export_extreme_events_svg = true;
+                }
+                "/isolation" | "/lrb" | "/fps" | "/fvd" => {
+                    let iso = if cmd == "/fps" || arg.to_ascii_lowercase().contains("fps") {
+                        crate::core::isolation::IsolatorType::FrictionPendulum
+                    } else if cmd == "/fvd" || arg.to_ascii_lowercase().contains("fvd") {
+                        crate::core::isolation::IsolatorType::FluidViscousDamper
+                    } else if arg.to_ascii_lowercase().contains("hdrb") {
+                        crate::core::isolation::IsolatorType::HighDampingRubberBearing
+                    } else {
+                        crate::core::isolation::IsolatorType::LeadRubberBearing
+                    };
+                    universal_canvas.isolation_studio_config.isolator_type = iso;
+                    self.open_isolation_drawer(0);
+                    actions.run_isolation_studio = true;
+                }
+                "/isolation-3d" => {
+                    self.open_isolation_drawer(0);
+                    actions.toggle_isolation_3d = true;
+                }
+                "/isolation-ifcx" => {
+                    actions.export_isolation_ifcx = true;
+                }
+                "/isolation-svg" => {
+                    actions.export_isolation_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

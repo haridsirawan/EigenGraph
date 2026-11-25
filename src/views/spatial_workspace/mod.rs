@@ -140,6 +140,9 @@ pub struct SpatialWorkspaceState {
     // Phase 84: Extreme Events Studio Drawer (Blast UFC 3-340-02 & Fire ISO 834/EC)
     pub extreme_events_drawer_open: bool,
     pub extreme_events_drawer_tab: usize,
+    // Update v0.8.4.1 (1/10 -> v0.8.5): Base Isolation & Damper Studio Drawer
+    pub isolation_drawer_open: bool,
+    pub isolation_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -246,6 +249,8 @@ impl Default for SpatialWorkspaceState {
             eigenflow_drawer_tab: 0,
             extreme_events_drawer_open: false,
             extreme_events_drawer_tab: 0,
+            isolation_drawer_open: false,
+            isolation_drawer_tab: 0,
         }
     }
 }
@@ -276,6 +281,7 @@ impl SpatialWorkspaceState {
             || self.field_qaqc_drawer_open
             || self.eigenflow_drawer_open
             || self.extreme_events_drawer_open
+            || self.isolation_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -300,6 +306,7 @@ impl SpatialWorkspaceState {
         self.field_qaqc_drawer_open = false;
         self.eigenflow_drawer_open = false;
         self.extreme_events_drawer_open = false;
+        self.isolation_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -379,6 +386,11 @@ impl SpatialWorkspaceState {
         } else {
             self.extreme_events_drawer_open = !self.extreme_events_drawer_open;
         }
+        if drawer != "isolation" {
+            self.isolation_drawer_open = false;
+        } else {
+            self.isolation_drawer_open = !self.isolation_drawer_open;
+        }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
@@ -428,6 +440,13 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.extreme_events_drawer_tab = tab.min(1);
         self.extreme_events_drawer_open = true;
+    }
+
+    /// Idempotently opens the Update `v0.8.4.1` Base Isolation & Damper Studio drawer (`0` = Sizing & Moat, `1` = Hysteresis & Compliance).
+    pub fn open_isolation_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.isolation_drawer_tab = tab.min(1);
+        self.isolation_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

@@ -4951,3 +4951,114 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn phase84_1_isolation_studio_drawer_responsive_and_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = crate::views::build::BuildView::default();
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_fps = spatial.execute_spatial_input(
+            "/fps",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_fps.run_isolation_studio);
+        assert_eq!(
+            canvas.isolation_studio_config.isolator_type,
+            crate::core::isolation::IsolatorType::FrictionPendulum
+        );
+        assert!(spatial.isolation_drawer_open);
+
+        assert!(spatial
+            .execute_spatial_input(
+                "/isolation-3d",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .toggle_isolation_3d);
+        assert!(spatial
+            .execute_spatial_input(
+                "/isolation-ifcx",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_isolation_ifcx);
+        assert!(spatial
+            .execute_spatial_input(
+                "/isolation-svg",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_isolation_svg);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Isolate base [[RUN_ISOLATION:LRB]] [[TOGGLE_ISOLATION_3D]] [[EXPORT_ISOLATION_ANNEX]]",
+        );
+        assert_eq!(clean, "Isolate base");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunIsolation(
+                    crate::core::isolation::IsolatorType::LeadRubberBearing
+                ),
+                GeminiDirective::ToggleIsolation3d,
+                GeminiDirective::ExportIsolationAnnex,
+            ]
+        );
+
+        let _ = canvas.run_isolation_studio(&build.bim_bus.project);
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_isolation_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 84.1 Isolation Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

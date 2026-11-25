@@ -2910,6 +2910,82 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Pure-vector CPU fallback rendering Update `v0.8.4.1` Base Isolator Pads, Moat Ring & FVD Dampers.
+    pub(super) fn paint_cpu_isolation_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.isolation_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_isolation_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |p: [f64; 3]| -> Option<Pos2> {
+            let ex = p[0] * cr - p[1] * sr;
+            let ny = p[0] * sr + p[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, p[2])
+                .and_then(|(sp, _, vis)| if vis { Some(sp) } else { None })
+        };
+
+        let m = &report.moat_3d;
+        let ow = m.inner_width_m * 0.5 + m.moat_gap_m;
+        let od = m.inner_depth_m * 0.5 + m.moat_gap_m;
+        let moat_pts: Vec<Pos2> = [
+            [m.center_x_m - ow, m.center_y_m - od, m.z_m],
+            [m.center_x_m + ow, m.center_y_m - od, m.z_m],
+            [m.center_x_m + ow, m.center_y_m + od, m.z_m],
+            [m.center_x_m - ow, m.center_y_m + od, m.z_m],
+        ]
+        .iter()
+        .filter_map(|&p| proj_enu(p))
+        .collect();
+        if moat_pts.len() == 4 {
+            for i in 0..4 {
+                clip.line_segment(
+                    [moat_pts[i], moat_pts[(i + 1) % 4]],
+                    Stroke::new(1.8, Color32::from_rgb(255, 179, 64)),
+                );
+            }
+        }
+        for pad in &report.pads_3d {
+            if let Some(sp) = proj_enu(pad.pos_enu_m) {
+                let col = if pad.is_safe {
+                    Color32::from_rgb(48, 209, 240)
+                } else {
+                    Color32::from_rgb(255, 69, 58)
+                };
+                clip.circle_filled(sp, 5.0, col);
+            }
+        }
+        for d in &report.dampers_3d {
+            if let (Some(a), Some(b)) = (proj_enu(d.p0_enu_m), proj_enu(d.p1_enu_m)) {
+                clip.line_segment([a, b], Stroke::new(2.2, Color32::from_rgb(48, 209, 88)));
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

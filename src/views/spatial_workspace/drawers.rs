@@ -2962,4 +2962,239 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.4.1` (`1/10` -> `v0.8.5`): Width-first Dynamic Island drawer for Seismic Base Isolation & Damper Studio.
+    pub(super) fn render_isolation_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::isolation::IsolatorType;
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Shield,
+                13.0,
+                theme.accent_blue,
+                "Seismic Base Isolation & Damper Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [(0usize, "Isolator Sizing & Moat"), (1usize, "Hysteresis & ASCE/SNI Audit")] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.isolation_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.isolation_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Base Isolation Studio drawer",
+            )
+            .clicked()
+            {
+                self.isolation_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for (iso, lbl) in [
+                    (IsolatorType::LeadRubberBearing, "LRB"),
+                    (IsolatorType::HighDampingRubberBearing, "HDRB"),
+                    (IsolatorType::FrictionPendulum, "FPS"),
+                    (IsolatorType::FluidViscousDamper, "FVD"),
+                ] {
+                    let active = universal_canvas.isolation_studio_config.isolator_type == iso;
+                    if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_blue, "Select isolator / damper system").clicked() {
+                        universal_canvas.isolation_studio_config.isolator_type = iso;
+                        actions.run_isolation_studio = true;
+                    }
+                }
+                for (d_mm, lbl) in [(700.0_f64, "D 700mm"), (850.0, "D 850mm"), (1050.0, "D 1050mm")] {
+                    let active = (universal_canvas.isolation_studio_config.lrb_outer_diameter_mm - d_mm).abs() < 40.0;
+                    if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_orange, "Bearing outer diameter").clicked() {
+                        universal_canvas.isolation_studio_config.lrb_outer_diameter_mm = d_mm;
+                        actions.run_isolation_studio = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Target),
+                    if universal_canvas.isolation_overlay_visible { "Isolation 3D: ON" } else { "Isolation 3D" },
+                    universal_canvas.isolation_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU isolator pads, moat ring & FVD dampers",
+                )
+                .clicked()
+                {
+                    actions.toggle_isolation_3d = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Document), ".ifcx", false, theme.accent_blue, "Export eigengraph::analysis::seismic_isolation IFCX").clicked() {
+                    actions.export_isolation_ifcx = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Printer), "Sheet S-106 .svg", false, theme.accent_green, "Export A3 Sheet S-106 Base Isolation Annex SVG").clicked() {
+                    actions.export_isolation_svg = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.isolation_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(9, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    let Some(ref studio) = universal_canvas.last_isolation_report else {
+                        ui.label(RichText::new("Evaluating Base Isolation Studio...").size(9.5).color(theme.text_muted));
+                        return;
+                    };
+                    let r = &studio.report;
+                    if tab == 0 {
+                        if is_left {
+                            ui.label(RichText::new("Fixed-Base vs Base-Isolated Performance").size(10.0).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "T_fix {:.2}s -> T_M {:.2}s (x{:.2}) | Shear -{:.0}% ({:.0}->{:.0} kN)",
+                                    studio.input_used.fixed_base_period_s,
+                                    r.effective_period_tm_s,
+                                    studio.period_shift_ratio,
+                                    studio.shear_reduction_pct,
+                                    studio.fixed_base_shear_kn,
+                                    r.superstructure_design_base_shear_vs_kn,
+                                ))
+                                .size(9.0)
+                                .monospace()
+                                .color(theme.accent_blue),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "DM={:.0} mm | DTM={:.0} mm | Moat={:.0} mm | Beta={:.1}% | Buckling SF={:.2}",
+                                    r.max_displacement_dm_mm,
+                                    r.total_max_displacement_dtm_mm,
+                                    r.required_moat_gap_mm,
+                                    r.combined_total_damping * 100.0,
+                                    r.buckling_safety_factor
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(if r.is_design_acceptable { theme.accent_green } else { theme.accent_red }),
+                            );
+                        } else {
+                            ui.label(RichText::new("Isolator Bearing & Seismic Moat Schedule").size(10.0).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} Base Pads ({:.0} kN/pad) • {} Perimeter FVD Struts • Moat {:.2} m",
+                                    studio.pads_3d.len(),
+                                    studio.input_used.axial_load_per_bearing_kn,
+                                    studio.dampers_3d.len(),
+                                    studio.moat_3d.moat_gap_m,
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                            for pad in studio.pads_3d.iter().take(3) {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "B{} {} ({:.1},{:.1})m • D={:.2}m • SF={:.2} [{}]",
+                                        pad.id,
+                                        pad.label,
+                                        pad.pos_enu_m[0],
+                                        pad.pos_enu_m[1],
+                                        pad.diameter_m,
+                                        pad.buckling_sf,
+                                        if pad.is_safe { "SAFE" } else { "CHECK" },
+                                    ))
+                                    .size(8.5)
+                                    .monospace()
+                                    .color(if pad.is_safe { theme.accent_green } else { theme.accent_red }),
+                                );
+                            }
+                        }
+                    } else if is_left {
+                        ui.label(
+                            RichText::new(format!("Bilinear Hysteresis Loop (ED={:.1} kJ/cycle)", r.energy_dissipated_per_cycle_kj))
+                                .size(9.6)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, 118.0), egui::Sense::hover());
+                        let p = ui.painter_at(rect);
+                        p.rect_filled(rect, 5.0, Color32::from_rgba_unmultiplied(15, 23, 42, 42));
+                        let max_d = r.hysteresis_loop.iter().map(|pt| pt.displacement_mm.abs()).fold(r.total_max_displacement_dtm_mm, f64::max).max(40.0) * 1.1;
+                        let max_f = r.hysteresis_loop.iter().map(|pt| pt.lateral_force_kn.abs()).fold(100.0_f64, f64::max) * 1.15;
+                        let pts: Vec<_> = r
+                            .hysteresis_loop
+                            .iter()
+                            .map(|pt| {
+                                egui::pos2(
+                                    rect.left() + 8.0 + (((pt.displacement_mm / max_d) * 0.5 + 0.5).clamp(0.0, 1.0) as f32) * (rect.width() - 16.0),
+                                    rect.bottom() - 8.0 - (((pt.lateral_force_kn / max_f) * 0.5 + 0.5).clamp(0.0, 1.0) as f32) * (rect.height() - 16.0),
+                                )
+                            })
+                            .collect();
+                        if pts.len() >= 2 {
+                            p.add(egui::Shape::line(pts, Stroke::new(2.0, theme.accent_blue)));
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new(format!("ASCE 7-22 / SNI 1726 Compliance (D/C {:.2})", r.governing_demand_capacity_ratio))
+                                .size(9.6)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        for chk in r.regulatory_checks.iter().take(4) {
+                            ui.label(
+                                RichText::new(format!(
+                                    "[{}] {} ({:.2}/{:.2} {})",
+                                    if chk.is_passed { "PASS" } else { "FAIL" },
+                                    chk.code_clause,
+                                    chk.demand_val,
+                                    chk.capacity_val,
+                                    chk.unit,
+                                ))
+                                .size(8.5)
+                                .monospace()
+                                .color(if chk.is_passed { theme.accent_green } else { theme.accent_red }),
+                            );
+                        }
+                    }
+                });
+            });
+        });
+    }
 }

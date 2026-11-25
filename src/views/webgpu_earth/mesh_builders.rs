@@ -3008,3 +3008,105 @@ pub fn build_rtc_extreme_events_mesh(input: &ExtremeEventsGpuInput<'_>) -> GpuMe
     }
 }
 
+/// GPU input payload for Update `v0.8.4.1` Seismic Base Isolation Pads, Moat Ring & FVD Dampers (`material_kind = 14.0`).
+pub struct IsolationGpuInput<'a> {
+    pub report: &'a crate::core::base_isolation_studio::IsolationStudioReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU base isolator pads beneath each column, perimeter seismic moat clearance ring,
+/// and diagonal Fluid Viscous Damper struts (`material_kind = 14.0`, 0% raster).
+pub fn build_rtc_isolation_mesh(input: &IsolationGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+    let rot_enu = |p: [f64; 3]| -> [f64; 3] {
+        [p[0] * cr - p[1] * sr, p[0] * sr + p[1] * cr, p[2]]
+    };
+
+    let rep = input.report;
+    let mut verts = Vec::with_capacity(rep.pads_3d.len() * 48 + 128 + rep.dampers_3d.len() * 24);
+    let mut idxs = Vec::with_capacity(rep.pads_3d.len() * 64 + 192 + rep.dampers_3d.len() * 36);
+
+    // 1. Base Isolation Bearing Pads + Core Beacons at each column base
+    for pad in &rep.pads_3d {
+        let (col, sev) = if pad.buckling_sf >= 1.5 {
+            ([0.14_f32, 0.84, 0.94, 0.92], 0.25_f32)
+        } else if pad.buckling_sf >= 1.1 {
+            ([1.0_f32, 0.68, 0.16, 0.94], 0.65_f32)
+        } else {
+            ([1.0_f32, 0.26, 0.24, 0.96], 0.95_f32)
+        };
+        let hw = pad.diameter_m * 0.55;
+        let fp = [
+            rot_xy(pad.pos_enu_m[0] - hw, pad.pos_enu_m[1] - hw),
+            rot_xy(pad.pos_enu_m[0] + hw, pad.pos_enu_m[1] - hw),
+            rot_xy(pad.pos_enu_m[0] + hw, pad.pos_enu_m[1] + hw),
+            rot_xy(pad.pos_enu_m[0] - hw, pad.pos_enu_m[1] + hw),
+        ];
+        let z0 = pad.pos_enu_m[2] as f32;
+        let z1 = z0 + pad.height_m as f32;
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z1, col, 14.0);
+        let cxy = rot_xy(pad.pos_enu_m[0], pad.pos_enu_m[1]);
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [cxy[0] as f32, cxy[1] as f32, z1 + 0.12],
+            (pad.diameter_m as f32) * 0.28,
+            col,
+            sev,
+            14.0,
+        );
+    }
+
+    // 2. Perimeter Seismic Moat Clearance Ring around building base
+    let m = &rep.moat_3d;
+    let ow = m.inner_width_m * 0.5 + m.moat_gap_m;
+    let od = m.inner_depth_m * 0.5 + m.moat_gap_m;
+    let corners = [
+        [m.center_x_m - ow, m.center_y_m - od, m.z_m],
+        [m.center_x_m + ow, m.center_y_m - od, m.z_m],
+        [m.center_x_m + ow, m.center_y_m + od, m.z_m],
+        [m.center_x_m - ow, m.center_y_m + od, m.z_m],
+    ];
+    for i in 0..4 {
+        let p0 = rot_enu(corners[i]);
+        let p1 = rot_enu(corners[(i + 1) % 4]);
+        push_animated_flow_strut_enu(
+            &mut verts,
+            &mut idxs,
+            p0,
+            p1,
+            0.26,
+            0.16,
+            [1.0, 0.72, 0.18, 0.88],
+            0.5,
+            14.0,
+        );
+    }
+
+    // 3. Perimeter Fluid Viscous Damper Struts
+    for d in &rep.dampers_3d {
+        push_animated_flow_strut_enu(
+            &mut verts,
+            &mut idxs,
+            rot_enu(d.p0_enu_m),
+            rot_enu(d.p1_enu_m),
+            0.22,
+            0.22,
+            [0.24, 0.90, 0.62, 0.92],
+            0.4,
+            14.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

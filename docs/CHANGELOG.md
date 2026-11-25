@@ -7,6 +7,18 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [Unreleased — Next: v0.8.5 (1/10)]
+
+### Update 1/10 (`v0.8.4.1`) — Seismic Base Isolation & Damper 3D Studio (`ASCE 7-22 Ch. 17–18` / `SNI 1726`) + Sheet `S-106`
+- **BIM-Coupled Seismic Base Isolation Engine (`src/core/base_isolation_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_isolation_studio`](src/core/base_isolation_studio.rs) coupling active `BimProject` column base anchors, building plan/height seismic weight, and site MCE_R spectral accelerations (`S_MS`, `S_M1`) into [`SeismicIsolationEngine`](src/core/isolation.rs) (`LRB`, `HDRB`, `FPS`, `FVD`), generating 3D isolator pads (`IsolatorPad3D`), seismic moat clearance ring (`SeismicMoatRect3D`), perimeter FVD struts (`DamperStrut3D`), Fixed-Base vs. Isolated reductions, `.eigen.json` persistence (`UnifiedWorkspaceArchive::isolation_studio_config`), and non-destructive `eigengraph::analysis::seismic_isolation` IFCX overlays (`IfcxStage::compose_with_isolation_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Pads, Moat Ring & FVD Dampers + Sheet `S-106` (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added [`build_rtc_isolation_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`IsolationGpuInput`, `material_kind = 14.0`, WGSL `kind >= 13.5` oscillation & Fresnel shader, 0% raster), `isolation` GPU mesh slot in `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_isolation_fallback`), and A3 landscape Sheet `S-106` Pure-Vector Annex SVG (`build_seismic_isolation_annex_svg`, 0 `<image>` tags).
+- **Width-First Dynamic Island `Seismic Base Isolation & Damper Studio`, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the 2-tab width-first Dynamic Island drawer (`Isolator Sizing & Moat` + `Hysteresis & ASCE/SNI Audit`), `Isolation` toolbar pill, `/isolation`, `/lrb`, `/fps`, `/fvd`, `/isolation-3d`, `/isolation-ifcx`, `/isolation-svg` slash commands, and `[[RUN_ISOLATION:...]]` / `[[TOGGLE_ISOLATION_3D]]` / `[[EXPORT_ISOLATION_ANNEX]]` Gemini directives.
+
+---
+
 ## [v0.8.4] - 2026-11-25 — Extreme Events Studio: 3D WebGPU Blast (`UFC 3-340-02`) & Structural Fire (`ISO 834 / Eurocode`), Closed-Loop `EigenFlow` Coupling & Sheet `S-105`
 
 ### Added & Changed

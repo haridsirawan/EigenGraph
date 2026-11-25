@@ -2196,6 +2196,281 @@ pub fn build_extreme_events_annex_svg(
     }
 }
 
+/// Update `v0.8.4.1`: Generates an archival A3 landscape (`1600 x 1131`, 0% raster pixels)
+/// Pure-Vector Seismic Base Isolation & Damper Annex SVG (`S-106`).
+pub fn build_seismic_isolation_annex_svg(
+    project_name: &str,
+    studio: &crate::core::base_isolation_studio::IsolationStudioReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(22_000);
+    let seal_token = "__EIGENGRAPH_ISOLATION_S106_SHA256__";
+    let r = &studio.report;
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH SEISMIC BASE ISOLATION &amp; DAMPER ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • ASCE 7-22 Ch. 17-18 / SNI 1726 • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: Bilinear Hysteresis Loop F vs D (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. ISOLATOR BILINEAR HYSTERESIS LOOP (FORCE vs LATERAL DISPLACEMENT)",
+        &format!(
+            "Qd={:.0} kN • Dy={:.1} mm • DM={:.0} mm • DTM={:.0} mm • ED={:.1} kJ/cycle",
+            r.characteristic_strength_qd_kn,
+            r.yield_displacement_dy_mm,
+            r.max_displacement_dm_mm,
+            r.total_max_displacement_dtm_mm,
+            r.energy_dissipated_per_cycle_kj
+        ),
+    );
+    let gx0 = p1x + 74.0;
+    let gy0 = p1y + 58.0;
+    let gw = p1w - 110.0;
+    let gh = p1h - 120.0;
+    let max_d = r
+        .hysteresis_loop
+        .iter()
+        .map(|p| p.displacement_mm.abs())
+        .fold(r.total_max_displacement_dtm_mm, f64::max)
+        .max(50.0)
+        * 1.12;
+    let max_f = r
+        .hysteresis_loop
+        .iter()
+        .map(|p| p.lateral_force_kn.abs())
+        .fold(100.0_f64, f64::max)
+        * 1.15;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{gx0:.1}" y="{gy0:.1}" width="{gw:.1}" height="{gh:.1}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>
+<line x1="{gx0:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="#94a3b8" stroke-width="0.9" stroke-dasharray="4,3"/>
+<line x1="{:.1}" y1="{gy0:.1}" x2="{:.1}" y2="{:.1}" stroke="#94a3b8" stroke-width="0.9" stroke-dasharray="4,3"/>"##,
+        gy0 + gh * 0.5,
+        gx0 + gw,
+        gy0 + gh * 0.5,
+        gx0 + gw * 0.5,
+        gx0 + gw * 0.5,
+        gy0 + gh,
+    );
+    let hys_poly: String = r
+        .hysteresis_loop
+        .iter()
+        .map(|pt| {
+            let x = gx0 + ((pt.displacement_mm / max_d) * 0.5 + 0.5).clamp(0.0, 1.0) * gw;
+            let y = gy0 + (0.5 - (pt.lateral_force_kn / max_f) * 0.5).clamp(0.0, 1.0) * gh;
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let _ = writeln!(
+        svg,
+        r##"<polyline fill="rgba(2,132,199,0.10)" stroke="#0284c7" stroke-width="2.6" points="{hys_poly}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#334155">Displacement +/-{:.0} mm | Lateral Force +/-{:.0} kN • Total Damping beta = {:.1}%</text>"##,
+        gx0 + 4.0,
+        gy0 + gh + 24.0,
+        max_d,
+        max_f,
+        r.combined_total_damping * 100.0,
+    );
+
+    // Panel 2: Fixed-Base vs Base-Isolated Comparative Metrics (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. FIXED-BASE VS BASE-ISOLATED DYNAMIC PERFORMANCE & MOAT DESIGN",
+        &format!(
+            "T_fixed={:.2}s -> T_M={:.2}s ({:.1}x) • Shear Reduction {:.1}%",
+            studio.input_used.fixed_base_period_s,
+            r.effective_period_tm_s,
+            studio.period_shift_ratio,
+            studio.shear_reduction_pct
+        ),
+    );
+    let cards = [
+        ("Seismic Weight W / Isolator Bearings", format!("{:.0} kN / {} Pads ({:.0} kN/pad)", studio.input_used.seismic_weight_w_kn, studio.input_used.num_bearings, studio.input_used.axial_load_per_bearing_kn), "#0f172a"),
+        ("Period Lengthening T_fixed -> T_M", format!("{:.2} s -> {:.2} s (x{:.2})", studio.input_used.fixed_base_period_s, r.effective_period_tm_s, studio.period_shift_ratio), "#0284c7"),
+        ("Base Shear V_fixed -> Isolated V_s", format!("{:.0} kN -> {:.0} kN (-{:.1}%)", studio.fixed_base_shear_kn, r.superstructure_design_base_shear_vs_kn, studio.shear_reduction_pct), "#059669"),
+        ("MCE_R Displacement DM / Torsional DTM", format!("{:.0} mm / {:.0} mm", r.max_displacement_dm_mm, r.total_max_displacement_dtm_mm), "#0369a1"),
+        ("Required Seismic Moat Clear Gap", format!("{:.0} mm (+10% safety margin)", r.required_moat_gap_mm), "#d97706"),
+        ("Effective Damping beta_total / B_M", format!("{:.1}% / B_M = {:.2}", r.combined_total_damping * 100.0, r.damping_reduction_bm), "#0f766e"),
+        ("Buckling Safety Factor P_cr(DM) / P_v", format!("{:.2} ({})", r.buckling_safety_factor, if r.buckling_safety_factor >= 1.1 { "SAFE" } else { "CHECK" }), if r.buckling_safety_factor >= 1.1 { "#059669" } else { "#dc2626" }),
+    ];
+    for (idx, (lbl, val, col)) in cards.iter().enumerate() {
+        let ry = p2y + 52.0 + (idx as f64) * 48.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="40" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.6" font-weight="bold" fill="#334155">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.6" font-weight="bold" font-family="monospace" text-anchor="end" fill="{col}">{val}</text>"##,
+            p2x + 16.0,
+            p2w - 32.0,
+            p2x + 26.0,
+            ry + 24.0,
+            p2x + p2w - 26.0,
+            ry + 24.0,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="104" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#1e3a8a">ARCHITECTURAL &amp; GOVERNANCE SEAL</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p2x + 16.0,
+        p2y + 394.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 416.0,
+        p2x + 26.0,
+        p2y + 438.0,
+        escape_xml(&truncate_clean(&studio.summary_verdict, 86)),
+        p2x + 26.0,
+        p2y + 462.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live Base Isolation Studio Baseline".to_string()),
+        ),
+        p2x + 26.0,
+        p2y + 484.0,
+    );
+
+    // Panel 3: ASCE 7-22 / SNI 1726 Regulatory Compliance Matrix (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. ASCE 7-22 CH. 17-18 / SNI 1726 PASAL 12-13 REGULATORY COMPLIANCE",
+        &format!(
+            "Overall Status: {} • Governing D/C = {:.2}",
+            if r.is_design_acceptable { "COMPLIANT" } else { "REVIEW REQUIRED" },
+            r.governing_demand_capacity_ratio
+        ),
+    );
+    for (idx, chk) in r.regulatory_checks.iter().take(7).enumerate() {
+        let ry = p3y + 52.0 + (idx as f64) * 60.0;
+        let badge = if chk.is_passed { "#059669" } else { "#dc2626" };
+        let btxt = if chk.is_passed { "PASS" } else { "FAIL" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="50" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#0f172a">{} — {}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#475569">Demand {:.2} vs Limit {:.2} {} (D/C = {:.2})</text>
+<rect x="{:.1}" y="{:.1}" width="64" height="22" rx="4" fill="{badge}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-weight="bold" text-anchor="middle" fill="#ffffff">{btxt}</text>"##,
+            p3x + 14.0,
+            p3w - 28.0,
+            p3x + 22.0,
+            ry + 20.0,
+            escape_xml(&truncate_clean(&chk.code_clause, 24)),
+            escape_xml(&truncate_clean(&chk.description, 44)),
+            p3x + 22.0,
+            ry + 39.0,
+            chk.demand_val,
+            chk.capacity_val,
+            escape_xml(&chk.unit),
+            chk.demand_capacity_ratio,
+            p3x + p3w - 92.0,
+            ry + 14.0,
+            p3x + p3w - 60.0,
+            ry + 28.5,
+        );
+    }
+
+    // Panel 4: Base Isolator Pad & Moat ENU Coordinate Schedule (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. BASE ISOLATOR PAD ENU COORDINATES & MOAT CLEARANCE SCHEDULE",
+        &format!(
+            "{} Base Pads • {} Perimeter FVD Struts • Moat {:.2}m",
+            studio.pads_3d.len(),
+            studio.dampers_3d.len(),
+            studio.moat_3d.moat_gap_m
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#0369a1">PAD   GRID     ENU (E, N, Z) m       DIAM(m)   AXIAL(kN)   BUCKL SF   STATUS</text>"##,
+        p4x + 18.0,
+        p4y + 48.0,
+    );
+    for (idx, pad) in studio.pads_3d.iter().take(8).enumerate() {
+        let ry = p4y + 58.0 + (idx as f64) * 52.0;
+        let hex = if pad.is_safe { "#059669" } else { "#dc2626" };
+        let st = if pad.is_safe { "SAFE" } else { "CHECK" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="42" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.9" font-family="monospace" fill="#0f172a">B{:<3} {:<8} ({:>5.1},{:>5.1},{:>4.1})   {:.2}     {:>8.0}     {:>5.2}</text>
+<rect x="{:.1}" y="{:.1}" width="64" height="22" rx="4" fill="{hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 20.0,
+            ry + 25.0,
+            pad.id,
+            escape_xml(&truncate_clean(&pad.label, 8)),
+            pad.pos_enu_m[0],
+            pad.pos_enu_m[1],
+            pad.pos_enu_m[2],
+            pad.diameter_m,
+            pad.axial_load_kn,
+            pad.buckling_sf,
+            p4x + p4w - 92.0,
+            ry + 10.0,
+            p4x + p4w - 60.0,
+            ry + 24.5,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_ISOLATION_S106");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = studio.pads_3d.len() + studio.dampers_3d.len();
+    let summary = format!(
+        "Exported Seismic Base Isolation & Damper Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2490,5 +2765,24 @@ mod tests {
         assert!(!s105.svg_content.contains("<image"));
         assert!(!s105.svg_content.contains("ARI"));
         assert_eq!(s105.sha256_seal.len(), 64);
+
+        let iso_rep = crate::core::base_isolation_studio::evaluate_isolation_studio(
+            &field_proj,
+            None,
+            &crate::core::base_isolation_studio::IsolationStudioConfig::default(),
+        );
+        let s106 = build_seismic_isolation_annex_svg(
+            &field_proj.project_name,
+            &iso_rep,
+            "S-106",
+            Some("iso841seal"),
+        );
+        assert!(s106.svg_content.starts_with("<svg"));
+        assert!(s106.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s106.svg_content.contains("SHEET S-106"));
+        assert!(s106.svg_content.contains("<polyline"));
+        assert!(!s106.svg_content.contains("<image"));
+        assert!(!s106.svg_content.contains("ARI"));
+        assert_eq!(s106.sha256_seal.len(), 64);
     }
 }

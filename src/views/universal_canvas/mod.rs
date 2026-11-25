@@ -184,6 +184,10 @@ pub struct UniversalCanvasState {
     pub last_extreme_events_report: Option<crate::core::extreme_events::ExtremeEventsReport>,
     pub fire_sim_playing: bool,
     pub fire_play_accum_sec: f32,
+    // Update v0.8.4.1 (1/10 -> v0.8.5): Seismic Base Isolation & Damper 3D Studio
+    pub isolation_overlay_visible: bool,
+    pub isolation_studio_config: crate::core::base_isolation_studio::IsolationStudioConfig,
+    pub last_isolation_report: Option<crate::core::base_isolation_studio::IsolationStudioReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -329,6 +333,9 @@ impl Default for UniversalCanvasState {
             last_extreme_events_report: None,
             fire_sim_playing: false,
             fire_play_accum_sec: 0.0,
+            isolation_overlay_visible: false,
+            isolation_studio_config: crate::core::base_isolation_studio::IsolationStudioConfig::default(),
+            last_isolation_report: None,
         }
     }
 }
@@ -946,6 +953,21 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Seismic Base Isolation & Damper (`LRB`, `HDRB`, `FPS`, `FVD`) coupled to active BIM & site.
+    pub fn run_isolation_studio(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::base_isolation_studio::IsolationStudioReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::base_isolation_studio::evaluate_isolation_studio(
+            bim_project,
+            Some(&site),
+            &self.isolation_studio_config,
+        );
+        self.last_isolation_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1274,6 +1296,7 @@ impl UniversalCanvasState {
             trade_study_config: self.trade_study_config.clone(),
             eigenflow_config: self.eigenflow_config.clone(),
             extreme_events_config: self.extreme_events_config.clone(),
+            isolation_studio_config: self.isolation_studio_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1396,6 +1419,8 @@ impl UniversalCanvasState {
         self.last_eigenflow_report = None;
         self.extreme_events_config = archive.extreme_events_config;
         self.last_extreme_events_report = None;
+        self.isolation_studio_config = archive.isolation_studio_config;
+        self.last_isolation_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -1986,6 +2011,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let isolation_gpu_input = if self.isolation_overlay_visible {
+                self.last_isolation_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::IsolationGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -2018,6 +2054,7 @@ impl UniversalCanvasState {
                 field_qaqc_gpu_input,
                 eigenflow_gpu_input,
                 extreme_events_gpu_input,
+                isolation_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2081,6 +2118,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.extreme_events_overlay_visible {
                 self.paint_cpu_extreme_events_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.isolation_overlay_visible {
+                self.paint_cpu_isolation_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

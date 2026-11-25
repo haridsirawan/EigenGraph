@@ -460,6 +460,10 @@ pub enum PlannedProposalAction {
     RunFire { minutes: f64, story: Option<usize> },
     ToggleExtreme3d,
     ExportExtremeAnnex,
+    // Update v0.8.4.1 (1/10 -> v0.8.5): Seismic Base Isolation & Damper Studio + Sheet S-106
+    RunIsolation(crate::core::isolation::IsolatorType),
+    ToggleIsolation3d,
+    ExportIsolationAnnex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -562,6 +566,10 @@ pub enum GeminiDirective {
     RunFire { minutes: f64, story: Option<usize> },
     ToggleExtreme3d,
     ExportExtremeAnnex,
+    // Update v0.8.4.1 (1/10 -> v0.8.5): Seismic Base Isolation & Damper Studio + Sheet S-106
+    RunIsolation(crate::core::isolation::IsolatorType),
+    ToggleIsolation3d,
+    ExportIsolationAnnex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -892,6 +900,22 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleExtreme3d);
             } else if upper == "EXPORT_EXTREME_ANNEX" {
                 directives.push(GeminiDirective::ExportExtremeAnnex);
+            } else if upper == "RUN_ISOLATION" || upper.starts_with("RUN_ISOLATION:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let iso = if arg.contains("FPS") {
+                    crate::core::isolation::IsolatorType::FrictionPendulum
+                } else if arg.contains("FVD") {
+                    crate::core::isolation::IsolatorType::FluidViscousDamper
+                } else if arg.contains("HDRB") {
+                    crate::core::isolation::IsolatorType::HighDampingRubberBearing
+                } else {
+                    crate::core::isolation::IsolatorType::LeadRubberBearing
+                };
+                directives.push(GeminiDirective::RunIsolation(iso));
+            } else if upper == "TOGGLE_ISOLATION_3D" {
+                directives.push(GeminiDirective::ToggleIsolation3d);
+            } else if upper == "EXPORT_ISOLATION_ANNEX" {
+                directives.push(GeminiDirective::ExportIsolationAnnex);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -1780,6 +1804,48 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Printer,
     },
     SlashCommandSpec {
+        cmd: "/isolation",
+        category: "Safety",
+        description: "Open Seismic Base Isolation & Damper 3D Studio (ASCE 7-22 Ch. 17-18)",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/lrb",
+        category: "Safety",
+        description: "Evaluate Lead-Rubber Bearing (LRB) base isolation & moat gap",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/fps",
+        category: "Safety",
+        description: "Evaluate Friction Pendulum System (FPS) sliding base isolation",
+        icon: AppIcon::Target,
+    },
+    SlashCommandSpec {
+        cmd: "/fvd",
+        category: "Safety",
+        description: "Evaluate Fluid Viscous Damper (FVD) supplementary damping",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/isolation-3d",
+        category: "Safety",
+        description: "Toggle 3D Pure WebGPU base isolator pads, moat ring & FVD dampers",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/isolation-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::seismic_isolation IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/isolation-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-106 Pure-Vector Base Isolation & Damper Annex .svg",
+        icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -1907,6 +1973,11 @@ pub struct SpatialHudActions {
     pub export_extreme_events_ifcx: bool,
     pub export_extreme_events_svg: bool,
     pub extreme_send_to_eigenflow: Option<(usize, f64)>,
+    // Update v0.8.4.1 (1/10 -> v0.8.5): Base Isolation & Damper Studio
+    pub run_isolation_studio: bool,
+    pub toggle_isolation_3d: bool,
+    pub export_isolation_ifcx: bool,
+    pub export_isolation_svg: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -2318,5 +2389,9 @@ impl SpatialHudActions {
         if other.extreme_send_to_eigenflow.is_some() {
             self.extreme_send_to_eigenflow = other.extreme_send_to_eigenflow;
         }
+        self.run_isolation_studio |= other.run_isolation_studio;
+        self.toggle_isolation_3d |= other.toggle_isolation_3d;
+        self.export_isolation_ifcx |= other.export_isolation_ifcx;
+        self.export_isolation_svg |= other.export_isolation_svg;
     }
 }
