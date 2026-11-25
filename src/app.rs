@@ -3818,6 +3818,84 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if hud_actions.run_prestress_studio {
+            let rep = self
+                .universal_canvas
+                .run_prestress_studio(&self.build_view.bim_bus.project);
+            self.spatial_workspace.push_trace(rep.summary_verdict, true);
+        }
+        if hud_actions.toggle_prestress_3d {
+            self.universal_canvas.prestress_overlay_visible =
+                !self.universal_canvas.prestress_overlay_visible;
+            if self.universal_canvas.prestress_overlay_visible {
+                let rep = self
+                    .universal_canvas
+                    .run_prestress_studio(&self.build_view.bim_bus.project);
+                self.spatial_workspace.push_trace(
+                    format!("3D PT Tendons ON — {}", rep.summary_verdict),
+                    true,
+                );
+            } else {
+                self.spatial_workspace
+                    .push_trace("3D PT Tendons OFF", true);
+            }
+        }
+        if hud_actions.export_prestress_ifcx {
+            let rep = self
+                .universal_canvas
+                .run_prestress_studio(&self.build_view.bim_bus.project);
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_prestress_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_prestress_tendon.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported Prestressed / PT IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.export_prestress_svg {
+            let rep = self
+                .universal_canvas
+                .run_prestress_studio(&self.build_view.bim_bus.project);
+            let cp_hash = self
+                .universal_canvas
+                .collab_state
+                .active_checkpoint()
+                .map(|c| c.short_sha256());
+            let annex = crate::core::build_prestress_tendon_annex_svg(
+                &self.build_view.bim_bus.project.project_name,
+                &rep,
+                "S-110",
+                cp_hash.as_deref(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_sheet_S110_prestress.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &annex.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(annex.sha256_seal);
+                    self.spatial_workspace.push_trace(annex.summary, true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {

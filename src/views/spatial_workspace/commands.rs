@@ -658,6 +658,32 @@ impl SpatialWorkspaceState {
                     self.open_connection_drawer(0);
                     out.export_connection_svg = true;
                 }
+                PlannedProposalAction::RunPrestress {
+                    profile,
+                    num_strands,
+                    fc_mpa,
+                } => {
+                    if let Some(pr) = profile {
+                        universal_canvas.prestress_studio_config.profile_kind = *pr;
+                    }
+                    if let Some(ns) = num_strands {
+                        universal_canvas.prestress_studio_config.num_strands = *ns;
+                    }
+                    if let Some(fc) = fc_mpa {
+                        universal_canvas.prestress_studio_config.fc_prime_mpa = *fc;
+                    }
+                    universal_canvas.prestress_overlay_visible = true;
+                    self.open_prestress_drawer(0);
+                    out.run_prestress_studio = true;
+                }
+                PlannedProposalAction::TogglePrestress3d => {
+                    self.open_prestress_drawer(0);
+                    out.toggle_prestress_3d = true;
+                }
+                PlannedProposalAction::ExportPrestressAnnex => {
+                    self.open_prestress_drawer(0);
+                    out.export_prestress_svg = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -990,6 +1016,21 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportConnectionAnnex => {
                                 PlannedProposalAction::ExportConnectionAnnex
                             }
+                            GeminiDirective::RunPrestress {
+                                profile,
+                                num_strands,
+                                fc_mpa,
+                            } => PlannedProposalAction::RunPrestress {
+                                profile: *profile,
+                                num_strands: *num_strands,
+                                fc_mpa: *fc_mpa,
+                            },
+                            GeminiDirective::TogglePrestress3d => {
+                                PlannedProposalAction::TogglePrestress3d
+                            }
+                            GeminiDirective::ExportPrestressAnnex => {
+                                PlannedProposalAction::ExportPrestressAnnex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1133,6 +1174,15 @@ impl SpatialWorkspaceState {
                             }
                             GeminiDirective::ExportConnectionAnnex => {
                                 "ExportConnectionAnnex(S-109)".to_string()
+                            }
+                            GeminiDirective::RunPrestress {
+                                profile,
+                                num_strands,
+                                fc_mpa,
+                            } => format!("RunPrestress({profile:?}/{num_strands:?}/{fc_mpa:?})"),
+                            GeminiDirective::TogglePrestress3d => "TogglePrestress3d".to_string(),
+                            GeminiDirective::ExportPrestressAnnex => {
+                                "ExportPrestressAnnex(S-110)".to_string()
                             }
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -2981,6 +3031,38 @@ impl SpatialWorkspaceState {
                 }
                 "/connection-svg" => {
                     actions.export_connection_svg = true;
+                }
+                "/prestress" | "/tendon" | "/pt-losses" => {
+                    let lo = arg.to_ascii_lowercase();
+                    if lo.contains("harp") {
+                        universal_canvas.prestress_studio_config.profile_kind =
+                            crate::core::prestressed_concrete::TendonProfileKind::HarpedTwoPoint;
+                    } else if lo.contains("straight") {
+                        universal_canvas.prestress_studio_config.profile_kind =
+                            crate::core::prestressed_concrete::TendonProfileKind::StraightEccentric;
+                    } else if lo.contains("para") {
+                        universal_canvas.prestress_studio_config.profile_kind =
+                            crate::core::prestressed_concrete::TendonProfileKind::Parabolic;
+                    }
+                    if let Some(ns) = arg
+                        .split_whitespace()
+                        .filter_map(|t| t.parse::<usize>().ok())
+                        .next()
+                    {
+                        universal_canvas.prestress_studio_config.num_strands = ns.clamp(4, 64);
+                    }
+                    self.open_prestress_drawer(if cmd == "/pt-losses" { 1 } else { 0 });
+                    actions.run_prestress_studio = true;
+                }
+                "/prestress-3d" => {
+                    self.open_prestress_drawer(0);
+                    actions.toggle_prestress_3d = true;
+                }
+                "/prestress-ifcx" => {
+                    actions.export_prestress_ifcx = true;
+                }
+                "/prestress-svg" => {
+                    actions.export_prestress_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

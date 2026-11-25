@@ -488,6 +488,14 @@ pub enum PlannedProposalAction {
     },
     ToggleConnection3d,
     ExportConnectionAnnex,
+    // Update v0.8.4.5 (5/10 -> v0.8.5): Post-Tensioned & Prestressed Concrete Studio + Sheet S-110
+    RunPrestress {
+        profile: Option<crate::core::prestressed_concrete::TendonProfileKind>,
+        num_strands: Option<usize>,
+        fc_mpa: Option<f64>,
+    },
+    TogglePrestress3d,
+    ExportPrestressAnnex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -618,6 +626,14 @@ pub enum GeminiDirective {
     },
     ToggleConnection3d,
     ExportConnectionAnnex,
+    // Update v0.8.4.5 (5/10 -> v0.8.5): Post-Tensioned & Prestressed Concrete Studio + Sheet S-110
+    RunPrestress {
+        profile: Option<crate::core::prestressed_concrete::TendonProfileKind>,
+        num_strands: Option<usize>,
+        fc_mpa: Option<f64>,
+    },
+    TogglePrestress3d,
+    ExportPrestressAnnex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1035,6 +1051,37 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleConnection3d);
             } else if upper == "EXPORT_CONNECTION_ANNEX" {
                 directives.push(GeminiDirective::ExportConnectionAnnex);
+            } else if upper == "RUN_PRESTRESS" || upper.starts_with("RUN_PRESTRESS:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let mut profile = None;
+                let mut num_strands = None;
+                let mut fc_mpa = None;
+                for tok in arg.split(':').map(str::trim).filter(|s| !s.is_empty()) {
+                    if tok.contains("HARP") {
+                        profile = Some(crate::core::prestressed_concrete::TendonProfileKind::HarpedTwoPoint);
+                    } else if tok.contains("STRAIGHT") {
+                        profile = Some(crate::core::prestressed_concrete::TendonProfileKind::StraightEccentric);
+                    } else if tok.contains("PARA") {
+                        profile = Some(crate::core::prestressed_concrete::TendonProfileKind::Parabolic);
+                    } else if let Ok(v) = tok.parse::<f64>() {
+                        if num_strands.is_none() && v <= 64.0 && v >= 4.0 && (v.fract() == 0.0) && v <= 30.0 {
+                            num_strands = Some(v.round() as usize);
+                        } else if num_strands.is_none() {
+                            num_strands = Some((v.round() as usize).clamp(4, 64));
+                        } else if fc_mpa.is_none() {
+                            fc_mpa = Some(v.clamp(30.0, 80.0));
+                        }
+                    }
+                }
+                directives.push(GeminiDirective::RunPrestress {
+                    profile,
+                    num_strands,
+                    fc_mpa,
+                });
+            } else if upper == "TOGGLE_PRESTRESS_3D" {
+                directives.push(GeminiDirective::TogglePrestress3d);
+            } else if upper == "EXPORT_PRESTRESS_ANNEX" {
+                directives.push(GeminiDirective::ExportPrestressAnnex);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -2073,6 +2120,42 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Printer,
     },
     SlashCommandSpec {
+        cmd: "/prestress",
+        category: "Analysis",
+        description: "Open Post-Tensioned Tendon Drape, Losses & Camber 3D Studio (ACI 318 Ch. 24)",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/tendon",
+        category: "Analysis",
+        description: "Configure PT tendon drape profile & strands (/tendon parabolic 20)",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/pt-losses",
+        category: "Analysis",
+        description: "Inspect immediate & time-dependent prestress loss waterfall & camber",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/prestress-3d",
+        category: "Analysis",
+        description: "Toggle 3D Pure WebGPU draped tendon ducts & anchorage blocks",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/prestress-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::prestress_tendon IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/prestress-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-110 Pure-Vector PT Tendon Drape & Losses Annex .svg",
+        icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -2220,6 +2303,11 @@ pub struct SpatialHudActions {
     pub toggle_connection_3d: bool,
     pub export_connection_ifcx: bool,
     pub export_connection_svg: bool,
+    // Update v0.8.4.5 (5/10 -> v0.8.5): Post-Tensioned Tendon Drape & Losses Studio
+    pub run_prestress_studio: bool,
+    pub toggle_prestress_3d: bool,
+    pub export_prestress_ifcx: bool,
+    pub export_prestress_svg: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -2647,5 +2735,9 @@ impl SpatialHudActions {
         self.toggle_connection_3d |= other.toggle_connection_3d;
         self.export_connection_ifcx |= other.export_connection_ifcx;
         self.export_connection_svg |= other.export_connection_svg;
+        self.run_prestress_studio |= other.run_prestress_studio;
+        self.toggle_prestress_3d |= other.toggle_prestress_3d;
+        self.export_prestress_ifcx |= other.export_prestress_ifcx;
+        self.export_prestress_svg |= other.export_prestress_svg;
     }
 }

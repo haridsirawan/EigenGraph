@@ -3177,6 +3177,72 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Pure-vector CPU fallback rendering Update `v0.8.4.5` Post-Tensioned Tendon Drape & Anchorages.
+    pub(super) fn paint_cpu_prestress_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.prestress_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_prestress_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |p: [f64; 3]| -> Option<Pos2> {
+            let ex = p[0] * cr - p[1] * sr;
+            let ny = p[0] * sr + p[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, p[2])
+                .and_then(|(sp, _, vis)| if vis { Some(sp) } else { None })
+        };
+
+        for bay in &report.bays_3d {
+            let col = if bay.is_compliant {
+                Color32::from_rgb(250, 204, 21)
+            } else {
+                Color32::from_rgb(255, 69, 58)
+            };
+            let pts: Vec<Pos2> = bay
+                .tendon_pts_enu_m
+                .iter()
+                .filter_map(|p| proj_enu(*p))
+                .collect();
+            for win in pts.windows(2) {
+                clip.line_segment([win[0], win[1]], Stroke::new(2.6, col));
+            }
+        }
+        for anc in &report.anchorages_3d {
+            if let Some(sp) = proj_enu(anc.pos_enu_m) {
+                let col = if anc.is_live_end {
+                    Color32::from_rgb(56, 189, 248)
+                } else {
+                    Color32::from_rgb(245, 158, 11)
+                };
+                clip.circle_filled(sp, 4.5, col);
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

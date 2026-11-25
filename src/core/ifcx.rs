@@ -71,6 +71,7 @@ pub mod ns {
     pub const EG_WIND_AEROELASTICITY: &str = "eigengraph::analysis::wind_aeroelasticity";
     pub const EG_SHEAR_WALL_SBE: &str = "eigengraph::analysis::shear_wall_sbe";
     pub const EG_STEEL_CONNECTION: &str = "eigengraph::analysis::steel_connection";
+    pub const EG_PRESTRESS_TENDON: &str = "eigengraph::analysis::prestress_tendon";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
@@ -580,6 +581,10 @@ impl IfcxDocument {
         schemas.insert(
             ns::EG_STEEL_CONNECTION.to_string(),
             json!({ "value": { "dataType": "Object", "spec": "EigenGraph Steel Seismic Connection, Bolts & Panel Zone (AISC 358-16 / 360-16)" } }),
+        );
+        schemas.insert(
+            ns::EG_PRESTRESS_TENDON.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph Post-Tensioned & Prestressed Concrete Tendon Drape (ACI 318-19 Ch. 24)" } }),
         );
         Self {
             header: IfcxHeader {
@@ -1694,10 +1699,49 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_steel_connection", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Prestressed / PT Tendon overlay.
+    pub fn compose_with_prestress_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::prestress_studio::PrestressIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc =
+            IfcxDocument::new(&format!("{}_prestress_tendon", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcStructuralAnalysisModel", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Post-Tensioned & Prestressed Concrete Overlay",
+                "profileKind": overlay.profile_kind,
+                "numStrands": overlay.num_strands,
+                "totalLossPct": overlay.total_loss_pct,
+                "aciTensionClass": overlay.aci_tension_class,
+                "flexureDcr": overlay.flexure_dcr,
+                "isCodeCompliant": overlay.is_code_compliant,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_PRESTRESS_TENDON.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/analysis/prestress_tendon".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_prestress_tendon", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_STEEL_CONNECTION) {
+    if node.attributes.contains_key(ns::EG_PRESTRESS_TENDON) {
+        "Prestressed / PT".to_string()
+    } else if node.attributes.contains_key(ns::EG_STEEL_CONNECTION) {
         "Steel Connection".to_string()
     } else if node.attributes.contains_key(ns::EG_SHEAR_WALL_SBE) {
         "Shear Wall & SBE".to_string()

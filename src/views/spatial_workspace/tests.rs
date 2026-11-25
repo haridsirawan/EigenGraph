@@ -5427,3 +5427,117 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn phase84_5_prestress_studio_drawer_responsive_and_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = crate::views::build::BuildView::default();
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_pt = spatial.execute_spatial_input(
+            "/tendon harped 22",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_pt.run_prestress_studio);
+        assert_eq!(
+            canvas.prestress_studio_config.profile_kind,
+            crate::core::prestressed_concrete::TendonProfileKind::HarpedTwoPoint
+        );
+        assert_eq!(canvas.prestress_studio_config.num_strands, 22);
+        assert!(spatial.prestress_drawer_open);
+
+        assert!(spatial
+            .execute_spatial_input(
+                "/prestress-3d",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .toggle_prestress_3d);
+        assert!(spatial
+            .execute_spatial_input(
+                "/prestress-ifcx",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_prestress_ifcx);
+        assert!(spatial
+            .execute_spatial_input(
+                "/prestress-svg",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_prestress_svg);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Check PT [[RUN_PRESTRESS:PARABOLIC:20:50]] [[TOGGLE_PRESTRESS_3D]] [[EXPORT_PRESTRESS_ANNEX]]",
+        );
+        assert_eq!(clean, "Check PT");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunPrestress {
+                    profile: Some(crate::core::prestressed_concrete::TendonProfileKind::Parabolic),
+                    num_strands: Some(20),
+                    fc_mpa: Some(50.0),
+                },
+                GeminiDirective::TogglePrestress3d,
+                GeminiDirective::ExportPrestressAnnex,
+            ]
+        );
+
+        let _ = canvas.run_prestress_studio(&build.bim_bus.project);
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_prestress_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 84.5 Prestress Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

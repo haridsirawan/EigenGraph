@@ -44,6 +44,7 @@ pub mod base_isolation_studio;
 pub mod wind_studio;
 pub mod shear_wall_studio;
 pub mod connection_studio;
+pub mod prestress_studio;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -226,9 +227,10 @@ pub use lifecycle_ops::{
 pub use vector_dossier::{
     build_eigenflow_nonlinear_annex_svg, build_extreme_events_annex_svg,
     build_fabrication_bbs_shop_svg, build_permit_compliance_annex_svg,
-    build_pure_vector_engineering_dossier_svg, build_seismic_isolation_annex_svg,
-    build_shear_wall_annex_svg, build_steel_connection_annex_svg, build_wind_aero_annex_svg,
-    VectorDossierExport, VectorDossierInput,
+    build_prestress_tendon_annex_svg, build_pure_vector_engineering_dossier_svg,
+    build_seismic_isolation_annex_svg, build_shear_wall_annex_svg,
+    build_steel_connection_annex_svg, build_wind_aero_annex_svg, VectorDossierExport,
+    VectorDossierInput,
 };
 pub use portfolio_retrofit::{
     optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,
@@ -306,6 +308,10 @@ pub use shear_wall_studio::{
 pub use connection_studio::{
     evaluate_connection_studio, BoltPin3D, ConnectionJoint3D, ConnectionStudioConfig,
     ConnectionStudioReport, SteelConnectionIfcxOverlay, NS_EG_STEEL_CONNECTION,
+};
+pub use prestress_studio::{
+    evaluate_prestress_studio, AnchorageZone3D, PrestressIfcxOverlay, PrestressStudioConfig,
+    PrestressStudioReport, TendonBay3D, NS_EG_PRESTRESS_TENDON,
 };
 
 

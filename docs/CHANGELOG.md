@@ -7,7 +7,15 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.5 (4/10)]
+## [Unreleased — Next: v0.8.5 (5/10)]
+
+### Update 5/10 (`v0.8.4.5`) — Post-Tensioned & Prestressed Tendon Drape, Prestress Losses & Camber 3D Studio (`ACI 318-19 Ch. 24` / `SNI 2847` / `PCI 8th Ed.`) + Sheet `S-110`
+- **BIM-Coupled Prestressed & PT Tendon Studio (`src/core/prestress_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_prestress_studio`](src/core/prestress_studio.rs) coupling `BimProject` girder spans/elevations into [`PrestressedConcreteEngine::evaluate_girder`](src/core/prestressed_concrete.rs), generating discretized 3D ENU draped tendon polylines (`Parabolic`, `HarpedTwoPoint`, `StraightEccentric`), live/dead anchorage zone blocks (`AnchorageZone3D`), immediate & long-term loss waterfalls, ACI Tension Class U/T/C checks, initial/long-term camber, `.eigen.json` persistence (`UnifiedWorkspaceArchive::prestress_studio_config`), and non-destructive `eigengraph::analysis::prestress_tendon` IFCX overlays (`IfcxStage::compose_with_prestress_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Draped Tendons & Anchorages + Sheet `S-110` (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added [`build_rtc_prestress_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`PrestressGpuInput`, `material_kind = 18.0`, WGSL `kind >= 17.5` animated post-tensioning cable wave & Fresnel rim glow shader, 0% raster), dedicated `prestress` GPU slot inside `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_prestress_fallback`), and archival A3 landscape Sheet `S-110` Pure-Vector Annex SVG (`build_prestress_tendon_annex_svg`, 0 `<image>` tags).
+- **Width-First Dynamic Island `PT / Tendon Studio`, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the 2-tab width-first Dynamic Island drawer (`Tendon Profile & Losses` + `Fiber Stress, Shear & Camber`), `PT / Tendon` toolbar pill, `/prestress`, `/tendon`, `/pt-losses`, `/prestress-3d`, `/prestress-ifcx`, `/prestress-svg` slash commands, and `[[RUN_PRESTRESS:...]]` / `[[TOGGLE_PRESTRESS_3D]]` / `[[EXPORT_PRESTRESS_ANNEX]]` Gemini directives.
 
 ### Update 4/10 (`v0.8.4.4`) — Steel Seismic Connection (`AISC 358-16` / `360-16` / `SNI 1729 & 7860`) & Bolt/Panel-Zone 3D Studio + Sheet `S-109`
 - **BIM-Coupled Steel Connection & Panel-Zone Engine (`src/core/connection_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

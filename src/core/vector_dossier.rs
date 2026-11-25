@@ -3470,6 +3470,300 @@ pub fn build_steel_connection_annex_svg(
     }
 }
 
+/// Pure-Vector Post-Tensioned & Prestressed Concrete Tendon Drape & Losses Annex SVG (`S-110`).
+pub fn build_prestress_tendon_annex_svg(
+    project_name: &str,
+    studio: &crate::core::prestress_studio::PrestressStudioReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(24_000);
+    let seal_token = "__EIGENGRAPH_PRESTRESS_S110_SHA256__";
+    let r = &studio.report;
+    let ls = &r.losses;
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH POST-TENSIONED &amp; PRESTRESSED TENDON DRAPE ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • ACI 318-19 Ch. 24 / SNI 2847 / PCI 8th Ed. • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: Longitudinal Girder Elevation & Draped Tendon Profile (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. LONGITUDINAL GIRDER ELEVATION &amp; DRAPED TENDON PROFILE",
+        &format!(
+            "{} • L={:.1} m • h={:.0} mm • {}x{:.1}mm (Aps={:.0} mm2)",
+            escape_xml(&truncate_clean(r.profile_kind.label(), 28)),
+            r.span_length_m,
+            r.depth_h_mm,
+            r.num_strands,
+            r.strand_dia_mm,
+            r.total_aps_mm2,
+        ),
+    );
+    let gx0 = p1x + 56.0;
+    let gy0 = p1y + 92.0;
+    let gw = p1w - 112.0;
+    let gh = 200.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{gx0:.1}" y="{gy0:.1}" width="{gw:.1}" height="{gh:.1}" fill="#f8fafc" stroke="#0f172a" stroke-width="2.0"/>
+<line x1="{gx0:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5,3"/>"##,
+        gy0 + gh * 0.5,
+        gx0 + gw,
+        gy0 + gh * 0.5,
+    );
+    let span_l = r.span_length_m.max(1.0);
+    let max_e = (r.y_bot_mm.max(r.y_top_mm)).max(200.0);
+    let tendon_poly: String = r
+        .tendon_profile_points
+        .iter()
+        .map(|pt| {
+            let x = gx0 + (pt.x_m / span_l).clamp(0.0, 1.0) * gw;
+            let y = gy0 + gh * 0.5 + (pt.e_mm / max_e).clamp(-0.46, 0.46) * gh;
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let _ = writeln!(
+        svg,
+        r##"<polyline fill="none" stroke="#d97706" stroke-width="4.2" points="{tendon_poly}"/>
+<text x="{:.1}" y="{:.1}" font-size="9" font-family="monospace" fill="#b45309">Tendon Drape Profile: e_end={:.0} mm | e_mid={:.0} mm | Initial Net Camber={:+.1} mm | Long-Term={:+.1} mm</text>"##,
+        gx0 + 4.0,
+        gy0 + gh + 28.0,
+        studio.config.eccentricity_end_mm,
+        studio.config.eccentricity_mid_mm,
+        r.net_camber_transfer_mm,
+        r.long_term_camber_mm,
+    );
+    let geom_cards = [
+        ("Concrete Grades f'ci -> f'c", format!("{:.1} MPa -> {:.1} MPa (Ec={:.0} MPa)", r.fci_prime_mpa, r.fc_prime_mpa, r.ec_mpa)),
+        ("Jacking Force -> Effective Force", format!("{:.1} kN -> {:.1} kN (Aci {})", ls.p_jack_kn, ls.p_effective_kn, escape_xml(&truncate_clean(r.aci_class.label(), 24)))),
+        ("Flexural Cracking Mcr / Min 1.2*Mcr", format!("{:.1} kNm / Min {:.1} kNm", r.m_cracking_knm, r.min_flexure_req_knm)),
+    ];
+    for (idx, (lbl, val)) in geom_cards.iter().enumerate() {
+        let ry = p1y + 346.0 + (idx as f64) * 52.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="42" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#334155">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" font-family="monospace" text-anchor="end" fill="#0f172a">{val}</text>"##,
+            p1x + 16.0,
+            p1w - 32.0,
+            p1x + 26.0,
+            ry + 25.0,
+            p1x + p1w - 26.0,
+            ry + 25.0,
+        );
+    }
+
+    // Panel 2: Prestress Loss Breakdown Waterfall & Governance Seal (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. IMMEDIATE &amp; TIME-DEPENDENT PRESTRESS LOSS WATERFALL &amp; SEAL",
+        &format!(
+            "fpj={:.0} -> fpi={:.0} -> fse={:.0} MPa (Total Loss {:.1} MPa / {:.1}%)",
+            ls.f_pj_mpa, ls.f_pi_mpa, ls.f_se_mpa, ls.total_loss_mpa, ls.loss_percentage
+        ),
+    );
+    let loss_items = [
+        ("Curvature & Wobble Friction (df_pF)", ls.friction_loss_mpa, "#0284c7"),
+        ("Anchorage Seating Draw-In (df_pA)", ls.anchorage_slip_mpa, "#0369a1"),
+        ("Elastic Shortening Concrete (df_pES)", ls.elastic_shortening_mpa, "#0891b2"),
+        ("Concrete Creep (df_pCR)", ls.concrete_creep_mpa, "#d97706"),
+        ("Concrete Shrinkage (df_pSH)", ls.concrete_shrinkage_mpa, "#ea580c"),
+        ("Strand Relaxation (df_pRE)", ls.steel_relaxation_mpa, "#dc2626"),
+    ];
+    let max_l = loss_items
+        .iter()
+        .map(|(_, v, _)| *v)
+        .fold(40.0_f64, f64::max)
+        * 1.15;
+    for (idx, (lbl, val, col)) in loss_items.iter().enumerate() {
+        let ry = p2y + 52.0 + (idx as f64) * 52.0;
+        let pct = (val / ls.f_pj_mpa.max(1.0)) * 100.0;
+        let bw = (val / max_l).clamp(0.02, 1.0) * 210.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="42" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#0f172a">{lbl}</text>
+<rect x="{:.1}" y="{:.1}" width="210" height="12" rx="3" fill="#e2e8f0"/>
+<rect x="{:.1}" y="{:.1}" width="{bw:.1}" height="12" rx="3" fill="{col}"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" font-family="monospace" text-anchor="end" fill="{col}">{val:.1} MPa ({pct:.1}%)</text>"##,
+            p2x + 16.0,
+            p2w - 32.0,
+            p2x + 26.0,
+            ry + 25.0,
+            p2x + p2w - 390.0,
+            ry + 15.0,
+            p2x + p2w - 390.0,
+            ry + 15.0,
+            p2x + p2w - 26.0,
+            ry + 25.0,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="124" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#1e3a8a">ARCHITECTURAL &amp; GOVERNANCE SEAL</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p2x + 16.0,
+        p2y + 378.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 400.0,
+        p2x + 26.0,
+        p2y + 424.0,
+        escape_xml(&truncate_clean(&studio.summary_verdict, 86)),
+        p2x + 26.0,
+        p2y + 450.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live Prestressed / PT Studio".to_string()),
+        ),
+        p2x + 26.0,
+        p2y + 476.0,
+    );
+
+    // Panel 3: Fiber Stress Checks at Transfer & Service + Tension Class (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. FIBER STRESS AUDIT (TRANSFER &amp; SERVICE) &amp; ULTIMATE STRENGTH",
+        &format!(
+            "Flexure Mu={:.0}/{:.0} kNm (DCR={:.2}) • Shear Vu={:.0}/{:.0} kN (DCR={:.2})",
+            r.m_ultimate_knm, r.phi_mn_knm, r.flexure_dcr, r.v_ultimate_kn, r.phi_vn_kn, r.shear_dcr
+        ),
+    );
+    let stress_rows = [
+        ("Transfer Stage Top Fiber Stress", format!("{:+.2} MPa vs Tens Lim {:+.2} MPa", r.transfer_stress.sigma_top_mpa, r.transfer_stress.allowable_tens_mpa), r.transfer_stress.top_dcr),
+        ("Transfer Stage Bottom Fiber Stress", format!("{:+.2} MPa vs Comp Lim {:+.2} MPa", r.transfer_stress.sigma_bot_mpa, r.transfer_stress.allowable_comp_mpa), r.transfer_stress.bot_dcr),
+        ("Service Stage Top Fiber Compression", format!("{:+.2} MPa vs Comp Lim {:+.2} MPa", r.service_stress.sigma_top_mpa, r.service_stress.allowable_comp_mpa), r.service_stress.top_dcr),
+        ("Service Stage Bottom Fiber Tension", format!("{:+.2} MPa vs Tens Lim {:+.2} MPa", r.service_stress.sigma_bot_mpa, r.service_stress.allowable_tens_mpa), r.service_stress.bot_dcr),
+        ("Ultimate Flexural Capacity (Mu / phi*Mn)", format!("{:.1} / {:.1} kNm (fps={:.0} MPa)", r.m_ultimate_knm, r.phi_mn_knm, r.fps_mpa), r.flexure_dcr),
+        ("Web/Flexure-Shear Strength (Vu / phi*Vn)", format!("{:.1} / {:.1} kN (Vci={:.0}, Vcw={:.0})", r.v_ultimate_kn, r.phi_vn_kn, r.v_ci_kn, r.v_cw_kn), r.shear_dcr),
+    ];
+    for (idx, (lbl, detail, dcr)) in stress_rows.iter().enumerate() {
+        let ry = p3y + 54.0 + (idx as f64) * 70.0;
+        let ok = *dcr <= 1.0;
+        let col = if ok { "#059669" } else { "#dc2626" };
+        let st = if ok { "PASS" } else { "FAIL" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="58" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.5" font-weight="bold" fill="#0f172a">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#475569">{detail} | DCR = {dcr:.2}</text>
+<rect x="{:.1}" y="{:.1}" width="64" height="22" rx="4" fill="{col}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p3x + 14.0,
+            p3w - 28.0,
+            p3x + 22.0,
+            ry + 21.0,
+            p3x + 22.0,
+            ry + 43.0,
+            p3x + p3w - 92.0,
+            ry + 18.0,
+            p3x + p3w - 60.0,
+            ry + 32.5,
+        );
+    }
+
+    // Panel 4: 3D Post-Tensioned Bay & Anchorage Schedule (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. 3D POST-TENSIONED GIRDER BAY &amp; ANCHORAGE SCHEDULE",
+        &format!(
+            "{} Girder Bays • {} End Anchorages • Governing DCR = {:.2}",
+            studio.bays_3d.len(),
+            studio.anchorages_3d.len(),
+            r.governing_dcr
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#0369a1">BAY       START (E,N,Z)m -> END (E,N,Z)m      DEPTH   TENDON PTS   STATUS</text>"##,
+        p4x + 18.0,
+        p4y + 48.0,
+    );
+    for (idx, bay) in studio.bays_3d.iter().take(6).enumerate() {
+        let ry = p4y + 58.0 + (idx as f64) * 68.0;
+        let hex = if bay.is_compliant { "#059669" } else { "#dc2626" };
+        let st = if bay.is_compliant { "PASS" } else { "CHECK" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="56" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#0f172a">{:<8} ({:>4.1},{:>4.1},{:>4.1}) -> ({:>4.1},{:>4.1},{:>4.1})   {:.2}m      {:>3} pts</text>
+<rect x="{:.1}" y="{:.1}" width="64" height="22" rx="4" fill="{hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 20.0,
+            ry + 32.0,
+            escape_xml(&truncate_clean(&bay.bay_id, 8)),
+            bay.p0_enu_m[0],
+            bay.p0_enu_m[1],
+            bay.p0_enu_m[2],
+            bay.p1_enu_m[0],
+            bay.p1_enu_m[1],
+            bay.p1_enu_m[2],
+            bay.depth_m,
+            bay.tendon_pts_enu_m.len(),
+            p4x + p4w - 92.0,
+            ry + 17.0,
+            p4x + p4w - 60.0,
+            ry + 31.5,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_PRESTRESS_S110");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = studio.bays_3d.len() + studio.anchorages_3d.len();
+    let summary = format!(
+        "Exported Post-Tensioned Tendon Drape & Losses Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3840,5 +4134,24 @@ mod tests {
         assert!(!s109.svg_content.contains("<image"));
         assert!(!s109.svg_content.contains("ARI"));
         assert_eq!(s109.sha256_seal.len(), 64);
+
+        let pt_rep = crate::core::prestress_studio::evaluate_prestress_studio(
+            &field_proj,
+            None,
+            &crate::core::prestress_studio::PrestressStudioConfig::default(),
+        );
+        let s110 = build_prestress_tendon_annex_svg(
+            &field_proj.project_name,
+            &pt_rep,
+            "S-110",
+            Some("pt845seal"),
+        );
+        assert!(s110.svg_content.starts_with("<svg"));
+        assert!(s110.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s110.svg_content.contains("SHEET S-110"));
+        assert!(s110.svg_content.contains("<polyline"));
+        assert!(!s110.svg_content.contains("<image"));
+        assert!(!s110.svg_content.contains("ARI"));
+        assert_eq!(s110.sha256_seal.len(), 64);
     }
 }

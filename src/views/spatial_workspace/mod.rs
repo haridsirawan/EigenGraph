@@ -152,6 +152,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.4.4 (4/10 -> v0.8.5): Steel Seismic Connection & Panel-Zone Drawer
     pub connection_drawer_open: bool,
     pub connection_drawer_tab: usize,
+    // Update v0.8.4.5 (5/10 -> v0.8.5): Post-Tensioned Tendon Drape & Losses Drawer
+    pub prestress_drawer_open: bool,
+    pub prestress_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -266,6 +269,8 @@ impl Default for SpatialWorkspaceState {
             shear_wall_drawer_tab: 0,
             connection_drawer_open: false,
             connection_drawer_tab: 0,
+            prestress_drawer_open: false,
+            prestress_drawer_tab: 0,
         }
     }
 }
@@ -300,6 +305,7 @@ impl SpatialWorkspaceState {
             || self.wind_drawer_open
             || self.shear_wall_drawer_open
             || self.connection_drawer_open
+            || self.prestress_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -328,6 +334,7 @@ impl SpatialWorkspaceState {
         self.wind_drawer_open = false;
         self.shear_wall_drawer_open = false;
         self.connection_drawer_open = false;
+        self.prestress_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -427,6 +434,11 @@ impl SpatialWorkspaceState {
         } else {
             self.connection_drawer_open = !self.connection_drawer_open;
         }
+        if drawer != "prestress" {
+            self.prestress_drawer_open = false;
+        } else {
+            self.prestress_drawer_open = !self.prestress_drawer_open;
+        }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
@@ -507,6 +519,14 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.connection_drawer_tab = tab.min(1);
         self.connection_drawer_open = true;
+    }
+
+    /// Idempotently opens the Update `v0.8.4.5` Post-Tensioned Tendon Drape & Losses Studio drawer
+    /// (`0` = Tendon Profile & Losses, `1` = Fiber Stress, Shear & Camber).
+    pub fn open_prestress_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.prestress_drawer_tab = tab.min(1);
+        self.prestress_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

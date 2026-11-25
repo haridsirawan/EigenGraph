@@ -3988,4 +3988,282 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.4.5` (`5/10` -> `v0.8.5`): Width-first Dynamic Island drawer for Post-Tensioned Tendon Drape & Losses Studio.
+    pub(super) fn render_prestress_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::prestressed_concrete::{PrestressingMethod, TendonProfileKind};
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::ChartLine,
+                13.0,
+                theme.accent_blue,
+                "Post-Tensioned & Prestressed Tendon Drape Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "Tendon Profile & Losses"),
+                (1usize, "Fiber Stress, Shear & Camber"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.prestress_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.prestress_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Prestressed / PT Studio drawer",
+            )
+            .clicked()
+            {
+                self.prestress_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for (prof, lbl) in [
+                    (TendonProfileKind::Parabolic, "Parabolic"),
+                    (TendonProfileKind::HarpedTwoPoint, "Harped 2-Pt"),
+                    (TendonProfileKind::StraightEccentric, "Straight"),
+                ] {
+                    let active = universal_canvas.prestress_studio_config.profile_kind == prof;
+                    if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_blue, "Tendon longitudinal drape profile").clicked() {
+                        universal_canvas.prestress_studio_config.profile_kind = prof;
+                        actions.run_prestress_studio = true;
+                    }
+                }
+                for (meth, lbl) in [
+                    (PrestressingMethod::PostTensioned, "Post-Tension"),
+                    (PrestressingMethod::PreTensioned, "Pre-Tension"),
+                ] {
+                    let active = universal_canvas.prestress_studio_config.method == meth;
+                    if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_orange, "Prestressing sequence").clicked() {
+                        universal_canvas.prestress_studio_config.method = meth;
+                        actions.run_prestress_studio = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Layers),
+                    if universal_canvas.prestress_overlay_visible { "Tendons 3D: ON" } else { "Tendons 3D" },
+                    universal_canvas.prestress_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU draped tendon ducts & anchorage zones",
+                )
+                .clicked()
+                {
+                    actions.toggle_prestress_3d = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Document), ".ifcx", false, theme.accent_blue, "Export eigengraph::analysis::prestress_tendon IFCX").clicked() {
+                    actions.export_prestress_ifcx = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Printer), "Sheet S-110 .svg", false, theme.accent_green, "Export A3 Sheet S-110 PT Tendon Drape Annex SVG").clicked() {
+                    actions.export_prestress_svg = true;
+                }
+            });
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                let mut strands = universal_canvas.prestress_studio_config.num_strands as f64;
+                ui.label(RichText::new("Strands").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut strands, 4.0..=48.0).max_decimals(0)).changed() {
+                    universal_canvas.prestress_studio_config.num_strands = strands.round() as usize;
+                    actions.run_prestress_studio = true;
+                }
+                let mut e_mid = universal_canvas.prestress_studio_config.eccentricity_mid_mm;
+                ui.label(RichText::new("e_mid (mm)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut e_mid, 100.0..=650.0).max_decimals(0)).changed() {
+                    universal_canvas.prestress_studio_config.eccentricity_mid_mm = e_mid;
+                    actions.run_prestress_studio = true;
+                }
+                let mut fc = universal_canvas.prestress_studio_config.fc_prime_mpa;
+                ui.label(RichText::new("f'c (MPa)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut fc, 30.0..=75.0).max_decimals(0)).changed() {
+                    universal_canvas.prestress_studio_config.fc_prime_mpa = fc;
+                    actions.run_prestress_studio = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.prestress_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(9, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    let Some(ref studio) = universal_canvas.last_prestress_report else {
+                        ui.label(RichText::new("Evaluating Prestressed / PT Studio...").size(9.5).color(theme.text_muted));
+                        return;
+                    };
+                    let r = &studio.report;
+                    let ls = &r.losses;
+                    if tab == 0 {
+                        if is_left {
+                            ui.label(RichText::new("Draped Tendon Profile (L-Elevation)").size(9.8).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "L={:.1}m | {}x{:.1}mm (Aps={:.0} mm2) | e_mid={:.0}mm",
+                                    r.span_length_m,
+                                    r.num_strands,
+                                    r.strand_dia_mm,
+                                    r.total_aps_mm2,
+                                    studio.config.eccentricity_mid_mm,
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(theme.accent_blue),
+                            );
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, 76.0), egui::Sense::hover());
+                            let p = ui.painter_at(rect);
+                            p.rect_filled(rect, 5.0, Color32::from_rgba_unmultiplied(15, 23, 42, 42));
+                            let span_l = r.span_length_m.max(1.0);
+                            let max_e = (r.y_bot_mm.max(r.y_top_mm)).max(200.0);
+                            let pts: Vec<_> = r
+                                .tendon_profile_points
+                                .iter()
+                                .map(|pt| {
+                                    egui::pos2(
+                                        rect.left() + 10.0 + ((pt.x_m / span_l).clamp(0.0, 1.0) as f32) * (rect.width() - 20.0),
+                                        rect.center().y + ((pt.e_mm / max_e).clamp(-0.45, 0.45) as f32) * (rect.height() - 16.0),
+                                    )
+                                })
+                                .collect();
+                            if pts.len() >= 2 {
+                                p.add(egui::Shape::line(pts, Stroke::new(2.6, theme.accent_orange)));
+                            }
+                        } else {
+                            ui.label(RichText::new("Immediate & Long-Term Prestress Losses").size(9.8).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "Pj={:.0} -> Pi={:.0} -> Pe={:.0} kN (-{:.1}% Total Loss)",
+                                    ls.p_jack_kn, ls.p_transfer_kn, ls.p_effective_kn, ls.loss_percentage
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(theme.accent_blue),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Imm: Fric {:.0} + Slip {:.0} + ES {:.0} = {:.0} MPa",
+                                    ls.friction_loss_mpa,
+                                    ls.anchorage_slip_mpa,
+                                    ls.elastic_shortening_mpa,
+                                    ls.total_immediate_loss_mpa,
+                                ))
+                                .size(8.5)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Time: Creep {:.0} + Shr {:.0} + Rel {:.0} = {:.0} MPa",
+                                    ls.concrete_creep_mpa,
+                                    ls.concrete_shrinkage_mpa,
+                                    ls.steel_relaxation_mpa,
+                                    ls.total_long_term_loss_mpa,
+                                ))
+                                .size(8.5)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                        }
+                    } else if is_left {
+                        ui.label(RichText::new("Transfer & Service Fiber Stresses").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "ACI Tension Class: {}",
+                                r.aci_class.label(),
+                            ))
+                            .size(8.6)
+                            .color(theme.accent_blue),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Transfer: top {:+.2} / bot {:+.2} MPa (DCR {:.2}/{:.2})",
+                                r.transfer_stress.sigma_top_mpa,
+                                r.transfer_stress.sigma_bot_mpa,
+                                r.transfer_stress.top_dcr,
+                                r.transfer_stress.bot_dcr,
+                            ))
+                            .size(8.5)
+                            .monospace()
+                            .color(if r.transfer_stress.is_acceptable { theme.accent_green } else { theme.accent_red }),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Service: top {:+.2} / bot {:+.2} MPa (DCR {:.2}/{:.2})",
+                                r.service_stress.sigma_top_mpa,
+                                r.service_stress.sigma_bot_mpa,
+                                r.service_stress.top_dcr,
+                                r.service_stress.bot_dcr,
+                            ))
+                            .size(8.5)
+                            .monospace()
+                            .color(if r.service_stress.is_acceptable { theme.accent_green } else { theme.accent_red }),
+                        );
+                    } else {
+                        ui.label(RichText::new("Ultimate Strength & Camber Summary").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "Flexure Mu={:.0}/{:.0} kNm (DCR={:.2}) | Shear Vu={:.0}/{:.0} kN (DCR={:.2})",
+                                r.m_ultimate_knm, r.phi_mn_knm, r.flexure_dcr, r.v_ultimate_kn, r.phi_vn_kn, r.shear_dcr
+                            ))
+                            .size(8.6)
+                            .monospace()
+                            .color(if r.is_code_compliant { theme.accent_green } else { theme.accent_red }),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Camber: Transfer {:+.1} mm | Long-Term {:+.1} mm | 1.2*Mcr={:.0} kNm",
+                                r.net_camber_transfer_mm, r.long_term_camber_mm, r.min_flexure_req_knm
+                            ))
+                            .size(8.5)
+                            .monospace()
+                            .color(theme.text_secondary),
+                        );
+                    }
+                });
+            });
+        });
+    }
 }

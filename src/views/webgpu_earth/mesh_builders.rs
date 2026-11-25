@@ -3426,3 +3426,96 @@ pub fn build_rtc_connection_mesh(input: &ConnectionGpuInput<'_>) -> GpuMeshPaylo
     }
 }
 
+/// GPU input payload for Update `v0.8.4.5` Post-Tensioned Girder Tendon Drape & Anchorage Blocks (`material_kind = 18.0`).
+pub struct PrestressGpuInput<'a> {
+    pub report: &'a crate::core::prestress_studio::PrestressStudioReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU girder envelopes, parabolic/harped post-tensioning tendon ducts,
+/// and live/dead anchorage blocks (`material_kind = 18.0`, 0% raster).
+pub fn build_rtc_prestress_mesh(input: &PrestressGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+    let rot_enu = |p: [f64; 3]| -> [f64; 3] {
+        [p[0] * cr - p[1] * sr, p[0] * sr + p[1] * cr, p[2]]
+    };
+
+    let rep = input.report;
+    let mut verts = Vec::with_capacity(rep.bays_3d.len() * 140 + rep.anchorages_3d.len() * 16);
+    let mut idxs = Vec::with_capacity(rep.bays_3d.len() * 210 + rep.anchorages_3d.len() * 24);
+
+    for bay in &rep.bays_3d {
+        let dx = bay.p1_enu_m[0] - bay.p0_enu_m[0];
+        let dy = bay.p1_enu_m[1] - bay.p0_enu_m[1];
+        let len = dx.hypot(dy).max(0.5);
+        let nx = -dy / len;
+        let ny = dx / len;
+        let hw = bay.width_m * 0.45;
+        let z_top = bay.p0_enu_m[2] as f32;
+        let z_bot = z_top - bay.depth_m as f32;
+        let fp = [
+            rot_xy(bay.p0_enu_m[0] - nx * hw, bay.p0_enu_m[1] - ny * hw),
+            rot_xy(bay.p1_enu_m[0] - nx * hw, bay.p1_enu_m[1] - ny * hw),
+            rot_xy(bay.p1_enu_m[0] + nx * hw, bay.p1_enu_m[1] + ny * hw),
+            rot_xy(bay.p0_enu_m[0] + nx * hw, bay.p0_enu_m[1] + ny * hw),
+        ];
+        push_box_prism_enu(
+            &mut verts,
+            &mut idxs,
+            &fp,
+            z_bot,
+            z_top,
+            [0.56, 0.78, 0.96, 0.24],
+            18.0,
+        );
+
+        let tendon_col = if bay.is_compliant {
+            [1.0_f32, 0.78, 0.18, 0.95]
+        } else {
+            [1.0_f32, 0.30, 0.24, 0.95]
+        };
+        for seg in bay.tendon_pts_enu_m.windows(2) {
+            push_animated_flow_strut_enu(
+                &mut verts,
+                &mut idxs,
+                rot_enu(seg[0]),
+                rot_enu(seg[1]),
+                0.14,
+                0.14,
+                tendon_col,
+                0.75,
+                18.0,
+            );
+        }
+    }
+
+    for anc in &rep.anchorages_3d {
+        let col = if anc.is_live_end {
+            [0.14_f32, 0.90, 1.0, 0.96]
+        } else {
+            [0.98_f32, 0.56, 0.16, 0.94]
+        };
+        let p = rot_enu(anc.pos_enu_m);
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [p[0] as f32, p[1] as f32, p[2] as f32],
+            0.28,
+            col,
+            0.85,
+            18.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

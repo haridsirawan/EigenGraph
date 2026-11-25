@@ -2897,6 +2897,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.prestress_drawer_open {
+                        self.render_prestress_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -5486,6 +5498,20 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_connection_drawer(0);
                                                         actions.run_connection_studio = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::ChartLine),
+                                                        "PT / Tendon",
+                                                        self.prestress_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Open Post-Tensioned Tendon Drape, Losses & Camber Studio (+ Sheet S-110)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_prestress_drawer(0);
+                                                        actions.run_prestress_studio = true;
                                                     }
                                                 },
                                             );
