@@ -606,6 +606,32 @@ impl SpatialWorkspaceState {
                     self.open_wind_drawer(0);
                     out.export_wind_svg = true;
                 }
+                PlannedProposalAction::RunShearWall {
+                    tw_mm,
+                    fc_mpa,
+                    drift_ratio,
+                } => {
+                    if let Some(tw) = tw_mm {
+                        universal_canvas.shear_wall_studio_config.wall_thickness_mm = *tw;
+                    }
+                    if let Some(fc) = fc_mpa {
+                        universal_canvas.shear_wall_studio_config.fc_mpa = *fc;
+                    }
+                    if let Some(dr) = drift_ratio {
+                        universal_canvas.shear_wall_studio_config.design_drift_ratio = *dr;
+                    }
+                    universal_canvas.shear_wall_overlay_visible = true;
+                    self.open_shear_wall_drawer(0);
+                    out.run_shear_wall_studio = true;
+                }
+                PlannedProposalAction::ToggleShearWall3d => {
+                    self.open_shear_wall_drawer(0);
+                    out.toggle_shear_wall_3d = true;
+                }
+                PlannedProposalAction::ExportShearWallAnnex => {
+                    self.open_shear_wall_drawer(0);
+                    out.export_shear_wall_svg = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -908,6 +934,21 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportWindAnnex => {
                                 PlannedProposalAction::ExportWindAnnex
                             }
+                            GeminiDirective::RunShearWall {
+                                tw_mm,
+                                fc_mpa,
+                                drift_ratio,
+                            } => PlannedProposalAction::RunShearWall {
+                                tw_mm: *tw_mm,
+                                fc_mpa: *fc_mpa,
+                                drift_ratio: *drift_ratio,
+                            },
+                            GeminiDirective::ToggleShearWall3d => {
+                                PlannedProposalAction::ToggleShearWall3d
+                            }
+                            GeminiDirective::ExportShearWallAnnex => {
+                                PlannedProposalAction::ExportShearWallAnnex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1031,6 +1072,15 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ToggleWind3d => "ToggleWind3d".to_string(),
                             GeminiDirective::ExportWindAnnex => {
                                 "ExportWindAnnex(S-107)".to_string()
+                            }
+                            GeminiDirective::RunShearWall {
+                                tw_mm,
+                                fc_mpa,
+                                drift_ratio,
+                            } => format!("RunShearWall({tw_mm:?}/{fc_mpa:?}/{drift_ratio:?})"),
+                            GeminiDirective::ToggleShearWall3d => "ToggleShearWall3d".to_string(),
+                            GeminiDirective::ExportShearWallAnnex => {
+                                "ExportShearWallAnnex(S-108)".to_string()
                             }
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -2805,6 +2855,47 @@ impl SpatialWorkspaceState {
                 }
                 "/wind-svg" => {
                     actions.export_wind_svg = true;
+                }
+                "/shear-wall" | "/sbe" => {
+                    let nums: Vec<f64> = arg
+                        .split_whitespace()
+                        .filter_map(|t| t.parse::<f64>().ok())
+                        .collect();
+                    if let Some(&tw) = nums.first() {
+                        universal_canvas.shear_wall_studio_config.wall_thickness_mm =
+                            tw.clamp(200.0, 800.0);
+                    }
+                    if let Some(&fc) = nums.get(1) {
+                        universal_canvas.shear_wall_studio_config.fc_mpa = fc.clamp(25.0, 70.0);
+                    }
+                    self.open_shear_wall_drawer(0);
+                    actions.run_shear_wall_studio = true;
+                }
+                "/coupling-beam" => {
+                    let nums: Vec<f64> = arg
+                        .split_whitespace()
+                        .filter_map(|t| t.parse::<f64>().ok())
+                        .collect();
+                    if let Some(&ln) = nums.first() {
+                        universal_canvas.shear_wall_studio_config.cb_clear_span_m =
+                            ln.clamp(0.8, 4.5);
+                    }
+                    if let Some(&h) = nums.get(1) {
+                        universal_canvas.shear_wall_studio_config.cb_depth_m =
+                            h.clamp(0.45, 1.8);
+                    }
+                    self.open_shear_wall_drawer(1);
+                    actions.run_shear_wall_studio = true;
+                }
+                "/shear-wall-3d" => {
+                    self.open_shear_wall_drawer(0);
+                    actions.toggle_shear_wall_3d = true;
+                }
+                "/shear-wall-ifcx" => {
+                    actions.export_shear_wall_ifcx = true;
+                }
+                "/shear-wall-svg" => {
+                    actions.export_shear_wall_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

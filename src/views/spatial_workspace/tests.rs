@@ -5188,3 +5188,127 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn phase84_3_shear_wall_studio_drawer_responsive_and_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = crate::views::build::BuildView::default();
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_sbe = spatial.execute_spatial_input(
+            "/sbe 400 45",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_sbe.run_shear_wall_studio);
+        assert!((canvas.shear_wall_studio_config.wall_thickness_mm - 400.0).abs() < 1e-6);
+        assert!((canvas.shear_wall_studio_config.fc_mpa - 45.0).abs() < 1e-6);
+        assert!(spatial.shear_wall_drawer_open);
+
+        let act_cb = spatial.execute_spatial_input(
+            "/coupling-beam 1.4 0.90",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_cb.run_shear_wall_studio);
+        assert!((canvas.shear_wall_studio_config.cb_clear_span_m - 1.4).abs() < 1e-6);
+        assert_eq!(spatial.shear_wall_drawer_tab, 1);
+
+        assert!(spatial
+            .execute_spatial_input(
+                "/shear-wall-3d",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .toggle_shear_wall_3d);
+        assert!(spatial
+            .execute_spatial_input(
+                "/shear-wall-ifcx",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_shear_wall_ifcx);
+        assert!(spatial
+            .execute_spatial_input(
+                "/shear-wall-svg",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_shear_wall_svg);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Wall audit [[RUN_SHEAR_WALL:350:40:0.015]] [[TOGGLE_SHEAR_WALL_3D]] [[EXPORT_SHEAR_WALL_ANNEX]]",
+        );
+        assert_eq!(clean, "Wall audit");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunShearWall {
+                    tw_mm: Some(350.0),
+                    fc_mpa: Some(40.0),
+                    drift_ratio: Some(0.015),
+                },
+                GeminiDirective::ToggleShearWall3d,
+                GeminiDirective::ExportShearWallAnnex,
+            ]
+        );
+
+        let _ = canvas.run_shear_wall_studio(&build.bim_bus.project);
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_shear_wall_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 84.3 Shear Wall Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

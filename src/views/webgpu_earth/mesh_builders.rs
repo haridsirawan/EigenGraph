@@ -3199,3 +3199,151 @@ pub fn build_rtc_wind_mesh(input: &WindGpuInput<'_>) -> GpuMeshPayload {
     }
 }
 
+/// GPU input payload for Update `v0.8.4.3` Special RC Shear Wall SBE Zones & Diagonal X-Cage Coupling Beams (`material_kind = 16.0`).
+pub struct ShearWallGpuInput<'a> {
+    pub report: &'a crate::core::shear_wall_studio::ShearWallStudioReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU shear wall webs, end Special Boundary Element (SBE) plastic hinge zones,
+/// and per-story crossed Diagonal X-Cage coupling beams (`material_kind = 16.0`, 0% raster).
+pub fn build_rtc_shear_wall_mesh(input: &ShearWallGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+    let rot_enu = |p: [f64; 3]| -> [f64; 3] {
+        [p[0] * cr - p[1] * sr, p[0] * sr + p[1] * cr, p[2]]
+    };
+
+    let rep = input.report;
+    let mut verts = Vec::with_capacity(rep.piers_3d.len() * 96 + rep.coupling_beams_3d.len() * 64);
+    let mut idxs = Vec::with_capacity(rep.piers_3d.len() * 144 + rep.coupling_beams_3d.len() * 96);
+
+    // 1. Shear wall webs & end Special Boundary Element (SBE) confinement zones
+    for pier in &rep.piers_3d {
+        let dx = pier.p1_enu_m[0] - pier.p0_enu_m[0];
+        let dy = pier.p1_enu_m[1] - pier.p0_enu_m[1];
+        let len = dx.hypot(dy).max(0.5);
+        let ux = dx / len;
+        let uy = dy / len;
+        let nx = -uy;
+        let ny = ux;
+        let ht = pier.thickness_m * 0.54;
+        let z0 = pier.base_z_m as f32;
+        let z_top = (pier.base_z_m + pier.height_m) as f32;
+        let z_sbe = (pier.base_z_m + pier.sbe_plastic_height_m) as f32;
+
+        // Translucent structural wall web envelope
+        let fp_web = [
+            rot_xy(pier.p0_enu_m[0] - nx * ht, pier.p0_enu_m[1] - ny * ht),
+            rot_xy(pier.p1_enu_m[0] - nx * ht, pier.p1_enu_m[1] - ny * ht),
+            rot_xy(pier.p1_enu_m[0] + nx * ht, pier.p1_enu_m[1] + ny * ht),
+            rot_xy(pier.p0_enu_m[0] + nx * ht, pier.p0_enu_m[1] + ny * ht),
+        ];
+        push_box_prism_enu(
+            &mut verts,
+            &mut idxs,
+            &fp_web,
+            z0,
+            z_top,
+            [0.45, 0.72, 0.96, 0.34],
+            16.0,
+        );
+
+        // Two end Special Boundary Element (SBE) confinement cages
+        let sbe_col = if pier.is_compliant {
+            [0.16_f32, 0.90, 0.60, 0.78]
+        } else {
+            [1.0_f32, 0.36, 0.24, 0.84]
+        };
+        let sbe_ht = ht * 1.18;
+        let sbe_len = pier.sbe_length_m.min(len * 0.42);
+        for (a_xy, b_xy) in [
+            (
+                pier.p0_enu_m,
+                [pier.p0_enu_m[0] + ux * sbe_len, pier.p0_enu_m[1] + uy * sbe_len],
+            ),
+            (
+                [pier.p1_enu_m[0] - ux * sbe_len, pier.p1_enu_m[1] - uy * sbe_len],
+                pier.p1_enu_m,
+            ),
+        ] {
+            let fp_sbe = [
+                rot_xy(a_xy[0] - nx * sbe_ht, a_xy[1] - ny * sbe_ht),
+                rot_xy(b_xy[0] - nx * sbe_ht, b_xy[1] - ny * sbe_ht),
+                rot_xy(b_xy[0] + nx * sbe_ht, b_xy[1] + ny * sbe_ht),
+                rot_xy(a_xy[0] + nx * sbe_ht, a_xy[1] + ny * sbe_ht),
+            ];
+            push_box_prism_enu(&mut verts, &mut idxs, &fp_sbe, z0, z_sbe, sbe_col, 16.0);
+        }
+    }
+
+    // 2. Per-story Coupling Beams & Diagonal X-Cage reinforcement struts
+    for cb in &rep.coupling_beams_3d {
+        let dx = cb.p1_enu_m[0] - cb.p0_enu_m[0];
+        let dy = cb.p1_enu_m[1] - cb.p0_enu_m[1];
+        let len = dx.hypot(dy).max(0.4);
+        let nx = -dy / len;
+        let ny = dx / len;
+        let hw = cb.width_m * 0.48;
+        let z_top = cb.p0_enu_m[2] as f32;
+        let z_bot = z_top - cb.depth_m as f32;
+        let fp_cb = [
+            rot_xy(cb.p0_enu_m[0] - nx * hw, cb.p0_enu_m[1] - ny * hw),
+            rot_xy(cb.p1_enu_m[0] - nx * hw, cb.p1_enu_m[1] - ny * hw),
+            rot_xy(cb.p1_enu_m[0] + nx * hw, cb.p1_enu_m[1] + ny * hw),
+            rot_xy(cb.p0_enu_m[0] + nx * hw, cb.p0_enu_m[1] + ny * hw),
+        ];
+        push_box_prism_enu(
+            &mut verts,
+            &mut idxs,
+            &fp_cb,
+            z_bot,
+            z_top,
+            [0.95, 0.78, 0.24, 0.36],
+            16.0,
+        );
+
+        let diag_col = if cb.coupling_dcr <= 1.0 {
+            [0.14_f32, 0.86, 0.98, 0.92]
+        } else {
+            [1.0_f32, 0.28, 0.24, 0.94]
+        };
+        let z_d0 = cb.p0_enu_m[2] - cb.depth_m * 0.88;
+        let z_d1 = cb.p0_enu_m[2] - cb.depth_m * 0.12;
+        push_animated_flow_strut_enu(
+            &mut verts,
+            &mut idxs,
+            rot_enu([cb.p0_enu_m[0], cb.p0_enu_m[1], z_d0]),
+            rot_enu([cb.p1_enu_m[0], cb.p1_enu_m[1], z_d1]),
+            0.16,
+            0.16,
+            diag_col,
+            (cb.coupling_dcr as f32).clamp(0.1, 1.0),
+            16.0,
+        );
+        if cb.is_diagonal_x_cage {
+            push_animated_flow_strut_enu(
+                &mut verts,
+                &mut idxs,
+                rot_enu([cb.p0_enu_m[0], cb.p0_enu_m[1], z_d1]),
+                rot_enu([cb.p1_enu_m[0], cb.p1_enu_m[1], z_d0]),
+                0.16,
+                0.16,
+                diag_col,
+                (cb.coupling_dcr as f32).clamp(0.1, 1.0),
+                16.0,
+            );
+        }
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

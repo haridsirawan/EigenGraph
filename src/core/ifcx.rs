@@ -69,6 +69,7 @@ pub mod ns {
     pub const EG_EXTREME_EVENTS: &str = "eigengraph::hazard::extreme_events";
     pub const EG_SEISMIC_ISOLATION: &str = "eigengraph::analysis::seismic_isolation";
     pub const EG_WIND_AEROELASTICITY: &str = "eigengraph::analysis::wind_aeroelasticity";
+    pub const EG_SHEAR_WALL_SBE: &str = "eigengraph::analysis::shear_wall_sbe";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
@@ -570,6 +571,10 @@ impl IfcxDocument {
         schemas.insert(
             ns::EG_WIND_AEROELASTICITY.to_string(),
             json!({ "value": { "dataType": "Object", "spec": "EigenGraph Wind Aeroelasticity, Facade Pressure & ISO 10137 Comfort (ASCE 7-22 Ch. 26-30)" } }),
+        );
+        schemas.insert(
+            ns::EG_SHEAR_WALL_SBE.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph Special RC Shear Wall, Boundary Element & Diagonal Coupling Beam (ACI 318-19 §18.10)" } }),
         );
         Self {
             header: IfcxHeader {
@@ -1610,10 +1615,49 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_wind_aeroelasticity", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Special RC Shear Wall & SBE overlay.
+    pub fn compose_with_shear_wall_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::shear_wall_studio::ShearWallIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc =
+            IfcxDocument::new(&format!("{}_shear_wall_sbe", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcStructuralAnalysisModel", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Special RC Shear Wall & SBE Overlay",
+                "wallId": overlay.wall_id,
+                "thicknessTwMm": overlay.thickness_tw_mm,
+                "isSbeRequired": overlay.is_sbe_required,
+                "sbeLengthBeMm": overlay.sbe_length_be_mm,
+                "governingDcr": overlay.governing_dcr,
+                "isFullyCompliant": overlay.is_fully_compliant,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_SHEAR_WALL_SBE.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/analysis/shear_wall_sbe".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_shear_wall_sbe", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_WIND_AEROELASTICITY) {
+    if node.attributes.contains_key(ns::EG_SHEAR_WALL_SBE) {
+        "Shear Wall & SBE".to_string()
+    } else if node.attributes.contains_key(ns::EG_WIND_AEROELASTICITY) {
         "Wind Aeroelasticity".to_string()
     } else if node.attributes.contains_key(ns::EG_SEISMIC_ISOLATION) {
         "Seismic Isolation".to_string()

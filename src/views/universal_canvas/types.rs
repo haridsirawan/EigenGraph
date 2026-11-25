@@ -280,6 +280,8 @@ pub struct UnifiedWorkspaceArchive {
     pub isolation_studio_config: crate::core::base_isolation_studio::IsolationStudioConfig,
     #[serde(default)]
     pub wind_studio_config: crate::core::wind_studio::WindStudioConfig,
+    #[serde(default)]
+    pub shear_wall_studio_config: crate::core::shear_wall_studio::ShearWallStudioConfig,
     pub sha256_seal: String,
 }
 

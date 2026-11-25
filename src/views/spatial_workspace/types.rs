@@ -472,6 +472,14 @@ pub enum PlannedProposalAction {
     },
     ToggleWind3d,
     ExportWindAnnex,
+    // Update v0.8.4.3 (3/10 -> v0.8.5): Special RC Shear Wall, SBE & Diagonal Coupling Beam + Sheet S-108
+    RunShearWall {
+        tw_mm: Option<f64>,
+        fc_mpa: Option<f64>,
+        drift_ratio: Option<f64>,
+    },
+    ToggleShearWall3d,
+    ExportShearWallAnnex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -586,6 +594,14 @@ pub enum GeminiDirective {
     },
     ToggleWind3d,
     ExportWindAnnex,
+    // Update v0.8.4.3 (3/10 -> v0.8.5): Special RC Shear Wall, SBE & Diagonal Coupling Beam + Sheet S-108
+    RunShearWall {
+        tw_mm: Option<f64>,
+        fc_mpa: Option<f64>,
+        drift_ratio: Option<f64>,
+    },
+    ToggleShearWall3d,
+    ExportShearWallAnnex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -961,6 +977,21 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleWind3d);
             } else if upper == "EXPORT_WIND_ANNEX" {
                 directives.push(GeminiDirective::ExportWindAnnex);
+            } else if upper == "RUN_SHEAR_WALL" || upper.starts_with("RUN_SHEAR_WALL:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let mut sp = arg.split(':').filter(|s| !s.is_empty());
+                let tw_mm = sp.next().and_then(|s| s.parse::<f64>().ok()).map(|v| v.clamp(200.0, 800.0));
+                let fc_mpa = sp.next().and_then(|s| s.parse::<f64>().ok()).map(|v| v.clamp(25.0, 70.0));
+                let drift_ratio = sp.next().and_then(|s| s.parse::<f64>().ok()).map(|v| v.clamp(0.005, 0.030));
+                directives.push(GeminiDirective::RunShearWall {
+                    tw_mm,
+                    fc_mpa,
+                    drift_ratio,
+                });
+            } else if upper == "TOGGLE_SHEAR_WALL_3D" {
+                directives.push(GeminiDirective::ToggleShearWall3d);
+            } else if upper == "EXPORT_SHEAR_WALL_ANNEX" {
+                directives.push(GeminiDirective::ExportShearWallAnnex);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -1927,6 +1958,42 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Printer,
     },
     SlashCommandSpec {
+        cmd: "/shear-wall",
+        category: "Safety",
+        description: "Open Special RC Shear Wall & Boundary Element (SBE) 3D Studio (ACI 318-19 §18.10)",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/sbe",
+        category: "Safety",
+        description: "Evaluate Special Boundary Element confinement & thickness (/sbe 350 35)",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/coupling-beam",
+        category: "Safety",
+        description: "Configure diagonally reinforced X-Cage coupling beam (/coupling-beam 1.6 0.95)",
+        icon: AppIcon::Target,
+    },
+    SlashCommandSpec {
+        cmd: "/shear-wall-3d",
+        category: "Safety",
+        description: "Toggle 3D Pure WebGPU Shear Wall SBE zones & X-Cage coupling beams",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/shear-wall-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::shear_wall_sbe IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/shear-wall-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-108 Pure-Vector Shear Wall, SBE & Coupling Beam Annex .svg",
+        icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -2064,6 +2131,11 @@ pub struct SpatialHudActions {
     pub toggle_wind_3d: bool,
     pub export_wind_ifcx: bool,
     pub export_wind_svg: bool,
+    // Update v0.8.4.3 (3/10 -> v0.8.5): Special RC Shear Wall, SBE & Coupling Beam Studio
+    pub run_shear_wall_studio: bool,
+    pub toggle_shear_wall_3d: bool,
+    pub export_shear_wall_ifcx: bool,
+    pub export_shear_wall_svg: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -2483,5 +2555,9 @@ impl SpatialHudActions {
         self.toggle_wind_3d |= other.toggle_wind_3d;
         self.export_wind_ifcx |= other.export_wind_ifcx;
         self.export_wind_svg |= other.export_wind_svg;
+        self.run_shear_wall_studio |= other.run_shear_wall_studio;
+        self.toggle_shear_wall_3d |= other.toggle_shear_wall_3d;
+        self.export_shear_wall_ifcx |= other.export_shear_wall_ifcx;
+        self.export_shear_wall_svg |= other.export_shear_wall_svg;
     }
 }

@@ -2246,3 +2246,87 @@ use crate::core::ifcx::IfcxDocument;
             "Phase 84.2 Wind WGSL pass triggered WebGPU validation error: {val_err:?}"
         );
     }
+
+    #[test]
+    fn test_phase84_3_webgpu_shear_wall_mesh_and_real_gpu_render() {
+        use crate::core::shear_wall_studio::{evaluate_shear_wall_studio, ShearWallStudioConfig};
+
+        let proj = BimProject::sample_bimcraft_building();
+        let report = evaluate_shear_wall_studio(&proj, None, &ShearWallStudioConfig::default());
+        let mesh = build_rtc_shear_wall_mesh(&ShearWallGpuInput {
+            report: &report,
+            heading_deg: 10.0,
+            visible: true,
+        });
+        assert!(!mesh.vertices.is_empty());
+        assert!(!mesh.indices.is_empty());
+        assert!(mesh.vertices.iter().all(|v| (v.meta[0] - 16.0).abs() < 1e-3));
+
+        fn poll_fut<F: std::future::Future>(fut: F) -> F::Output {
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(waker);
+            let mut pinned = std::pin::pin!(fut);
+            loop {
+                if let std::task::Poll::Ready(val) = pinned.as_mut().poll(&mut cx) {
+                    return val;
+                }
+                std::thread::yield_now();
+            }
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = poll_fut(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let Ok((device, queue)) =
+            poll_fut(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        res.shear_wall
+            .upload(&device, &queue, "shear_wall_p84_3", 1, &mesh);
+
+        let mut cam = GlobeCamera::default();
+        cam.tilt_deg = 44.0;
+        let xf = GlobeScreenTransform::from_view(
+            Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(64.0, 64.0)),
+            -6.2088,
+            106.8456,
+            17.5,
+            &cam,
+        );
+        let uniforms = RtcCameraUniforms::from_globe_xform(
+            &xf,
+            VectorEarthTheme::CoastalBlueprint,
+            &cam,
+            (-6.2088, 106.8456),
+            0.5,
+            true,
+        );
+        queue.write_buffer(
+            &res.planet_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_planet_pass_uniforms()),
+        );
+        queue.write_buffer(
+            &res.site_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_site_pass_uniforms()),
+        );
+        res.ensure_targets(&device, 64, 64);
+
+        let mut encoder = device.create_command_encoder(&Default::default());
+        res.render_offscreen_passes(&mut encoder, true);
+        queue.submit([encoder.finish()]);
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let val_err = poll_fut(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "Phase 84.3 Shear Wall WGSL pass triggered WebGPU validation error: {val_err:?}"
+        );
+    }

@@ -3048,6 +3048,77 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Pure-vector CPU fallback rendering Update `v0.8.4.3` Special RC Shear Wall SBE & Coupling Beam X-Cages.
+    pub(super) fn paint_cpu_shear_wall_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.shear_wall_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_shear_wall_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |p: [f64; 3]| -> Option<Pos2> {
+            let ex = p[0] * cr - p[1] * sr;
+            let ny = p[0] * sr + p[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, p[2])
+                .and_then(|(sp, _, vis)| if vis { Some(sp) } else { None })
+        };
+
+        for pier in &report.piers_3d {
+            let sbe_col = if pier.is_compliant {
+                Color32::from_rgb(48, 209, 88)
+            } else {
+                Color32::from_rgb(255, 69, 58)
+            };
+            if let (Some(a), Some(b)) = (
+                proj_enu([pier.p0_enu_m[0], pier.p0_enu_m[1], pier.base_z_m]),
+                proj_enu([pier.p1_enu_m[0], pier.p1_enu_m[1], pier.base_z_m]),
+            ) {
+                clip.line_segment([a, b], Stroke::new(3.2, Color32::from_rgb(96, 165, 250)));
+                clip.circle_filled(a, 5.2, sbe_col);
+                clip.circle_filled(b, 5.2, sbe_col);
+            }
+        }
+        for cb in &report.coupling_beams_3d {
+            let z_bot = cb.p0_enu_m[2] - cb.depth_m;
+            if let (Some(a0), Some(a1), Some(b0), Some(b1)) = (
+                proj_enu([cb.p0_enu_m[0], cb.p0_enu_m[1], z_bot]),
+                proj_enu(cb.p0_enu_m),
+                proj_enu([cb.p1_enu_m[0], cb.p1_enu_m[1], z_bot]),
+                proj_enu(cb.p1_enu_m),
+            ) {
+                let col = Color32::from_rgb(56, 189, 248);
+                clip.line_segment([a0, b1], Stroke::new(1.8, col));
+                if cb.is_diagonal_x_cage {
+                    clip.line_segment([a1, b0], Stroke::new(1.8, col));
+                }
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

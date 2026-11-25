@@ -2801,6 +2801,362 @@ pub fn build_wind_aero_annex_svg(
     }
 }
 
+/// Pure-Vector Special RC Shear Wall, Boundary Element (SBE) & Diagonal Coupling Beam Annex SVG (`S-108`).
+pub fn build_shear_wall_annex_svg(
+    project_name: &str,
+    studio: &crate::core::shear_wall_studio::ShearWallStudioReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(24_000);
+    let seal_token = "__EIGENGRAPH_SHEAR_WALL_S108_SHA256__";
+    let r = &studio.report;
+    let be = &r.boundary_element;
+    let sh = &r.in_plane_shear;
+    let cb = &r.coupling_beam;
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH SPECIAL RC SHEAR WALL, SBE &amp; DIAGONAL COUPLING BEAM ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • ACI 318-19 §18.10 / SNI 2847:2019 • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: Shear Wall Cross-Section & Special Boundary Element (SBE) Detailing (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. WALL PIER CROSS-SECTION &amp; SPECIAL BOUNDARY ELEMENT (SBE) DETAILING",
+        &format!(
+            "Pier {} • lw={:.0} mm x tw={:.0} mm • f'c={:.0} MPa • SBE {} (bE={:.0} mm, s={:.0} mm)",
+            escape_xml(&r.wall_id),
+            r.geometry.length_lw_mm,
+            r.geometry.thickness_tw_mm,
+            r.materials.fc_mpa,
+            if be.is_sbe_required { "REQUIRED" } else { "OPTIONAL" },
+            be.provided_length_be_mm,
+            be.provided_tie_spacing_s_mm,
+        ),
+    );
+    let wx0 = p1x + 70.0;
+    let wy0 = p1y + 150.0;
+    let ww = p1w - 140.0;
+    let wh = 94.0;
+    let sbe_frac = (be.provided_length_be_mm / r.geometry.length_lw_mm.max(500.0)).clamp(0.10, 0.35);
+    let sbe_w = ww * sbe_frac;
+    let c_frac = (be.neutral_axis_c_mm / r.geometry.length_lw_mm.max(500.0)).clamp(0.05, 0.65);
+    let c_x = wx0 + ww * c_frac;
+    let clim_frac = (be.c_limit_mm / r.geometry.length_lw_mm.max(500.0)).clamp(0.05, 0.75);
+    let clim_x = wx0 + ww * clim_frac;
+    let sbe_fill = if be.is_confinement_adequate { "#dcfce7" } else { "#fee2e2" };
+    let sbe_stroke = if be.is_confinement_adequate { "#059669" } else { "#dc2626" };
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{wx0:.1}" y="{wy0:.1}" width="{ww:.1}" height="{wh:.1}" fill="#e2e8f0" stroke="#0f172a" stroke-width="2.2"/>
+<rect x="{wx0:.1}" y="{wy0:.1}" width="{sbe_w:.1}" height="{wh:.1}" fill="{sbe_fill}" stroke="{sbe_stroke}" stroke-width="2.2"/>
+<rect x="{:.1}" y="{wy0:.1}" width="{sbe_w:.1}" height="{wh:.1}" fill="{sbe_fill}" stroke="{sbe_stroke}" stroke-width="2.2"/>
+<line x1="{c_x:.1}" y1="{:.1}" x2="{c_x:.1}" y2="{:.1}" stroke="#0284c7" stroke-width="2.2" stroke-dasharray="6,3"/>
+<line x1="{clim_x:.1}" y1="{:.1}" x2="{clim_x:.1}" y2="{:.1}" stroke="#d97706" stroke-width="1.8" stroke-dasharray="3,3"/>
+<text x="{wx0:.1}" y="{:.1}" font-size="9.5" font-weight="bold" fill="{sbe_stroke}">SBE L (bE={:.0} mm)</text>
+<text x="{:.1}" y="{:.1}" font-size="9.5" font-weight="bold" text-anchor="end" fill="{sbe_stroke}">SBE R (bE={:.0} mm)</text>
+<text x="{c_x:.1}" y="{:.1}" font-size="9" font-family="monospace" text-anchor="middle" fill="#0369a1">c={:.0} mm</text>
+<text x="{clim_x:.1}" y="{:.1}" font-size="9" font-family="monospace" text-anchor="middle" fill="#b45309">c_lim={:.0} mm</text>"##,
+        wx0 + ww - sbe_w,
+        wy0 - 24.0,
+        wy0 + wh + 24.0,
+        wy0 - 16.0,
+        wy0 + wh + 16.0,
+        wy0 - 8.0,
+        be.provided_length_be_mm,
+        wx0 + ww,
+        wy0 - 8.0,
+        be.provided_length_be_mm,
+        wy0 + wh + 38.0,
+        be.neutral_axis_c_mm,
+        wy0 - 22.0,
+        be.c_limit_mm,
+    );
+    let sbe_rows = [
+        ("Extreme Compression Stress / Limit", format!("{:.2} MPa vs {:.2} MPa (0.20 f'c)", be.extreme_comp_stress_mpa, be.stress_limit_mpa)),
+        ("SBE Hoop Confinement Ash/s Req -> Prov", format!("{:.2} -> {:.2} mm2/mm @ s={:.0} mm", be.req_ash_over_s_mm2_per_mm, be.provided_ash_over_s_mm2_per_mm, be.provided_tie_spacing_s_mm)),
+        ("In-Plane Web Shear Vu vs phi*Vn", format!("{:.0} kN vs {:.0} kN (DCR={:.2}, alpha_c={:.2})", sh.factored_shear_vu_kn, sh.phi_vn_kn, sh.shear_dcr, sh.alpha_c)),
+        ("Double Curtain Web Reinforcement", format!("{} (rho_h={:.3}%, min={:.3}%)", if sh.is_double_curtain_required { "MANDATORY (2 Curtains)" } else { "Standard" }, sh.provided_rho_horizontal * 100.0, sh.min_rho_web * 100.0)),
+    ];
+    for (idx, (lbl, val)) in sbe_rows.iter().enumerate() {
+        let ry = p1y + 304.0 + (idx as f64) * 48.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="40" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#334155">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" font-family="monospace" text-anchor="end" fill="#0f172a">{val}</text>"##,
+            p1x + 16.0,
+            p1w - 32.0,
+            p1x + 26.0,
+            ry + 24.0,
+            p1x + p1w - 26.0,
+            ry + 24.0,
+        );
+    }
+
+    // Panel 2: Axial-Flexural P-M Interaction Envelope & Governance Seal (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. WALL PIER P-M INTERACTION ENVELOPE &amp; GOVERNANCE SEAL",
+        &format!(
+            "Demand (Mu={:.0} kNm, Pu={:.0} kN) vs phi*Mn={:.0} kNm (Flexure DCR={:.2})",
+            r.demands.mu_knm, r.demands.pu_kn, r.flexure_phi_mn_knm, r.flexure_dcr
+        ),
+    );
+    let gx0 = p2x + 76.0;
+    let gy0 = p2y + 56.0;
+    let gw = p2w - 116.0;
+    let gh = 260.0;
+    let max_m = studio
+        .pm_curve
+        .iter()
+        .map(|p| p.moment_knm)
+        .fold(r.demands.mu_knm, f64::max)
+        .max(1_000.0)
+        * 1.15;
+    let max_p_pos = studio
+        .pm_curve
+        .iter()
+        .map(|p| p.axial_kn)
+        .fold(r.demands.pu_kn, f64::max)
+        .max(1_000.0)
+        * 1.12;
+    let min_p_neg = studio
+        .pm_curve
+        .iter()
+        .map(|p| p.axial_kn)
+        .fold(0.0_f64, f64::min)
+        .min(-500.0)
+        * 1.12;
+    let span_p = (max_p_pos - min_p_neg).max(1.0);
+    let pm_poly: String = studio
+        .pm_curve
+        .iter()
+        .map(|pt| {
+            let x = gx0 + (pt.moment_knm / max_m).clamp(0.0, 1.0) * gw;
+            let y = gy0 + (1.0 - ((pt.axial_kn - min_p_neg) / span_p).clamp(0.0, 1.0)) * gh;
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let dem_x = gx0 + (r.demands.mu_knm / max_m).clamp(0.0, 1.0) * gw;
+    let dem_y = gy0 + (1.0 - ((r.demands.pu_kn - min_p_neg) / span_p).clamp(0.0, 1.0)) * gh;
+    let zero_p_y = gy0 + (1.0 - ((0.0 - min_p_neg) / span_p).clamp(0.0, 1.0)) * gh;
+    let dem_col = if r.is_flexure_adequate { "#059669" } else { "#dc2626" };
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{gx0:.1}" y="{gy0:.1}" width="{gw:.1}" height="{gh:.1}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>
+<line x1="{gx0:.1}" y1="{zero_p_y:.1}" x2="{:.1}" y2="{zero_p_y:.1}" stroke="#94a3b8" stroke-width="1.0" stroke-dasharray="4,3"/>
+<polyline fill="rgba(2,132,199,0.10)" stroke="#0284c7" stroke-width="2.6" points="{pm_poly}"/>
+<circle cx="{dem_x:.1}" cy="{dem_y:.1}" r="6.5" fill="{dem_col}" stroke="#ffffff" stroke-width="1.6"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#334155">Operating Demand: Mu={:.0} kNm, Pu={:.0} kN (Governing DCR={:.2})</text>"##,
+        gx0 + gw,
+        gx0 + 4.0,
+        gy0 + gh + 22.0,
+        r.demands.mu_knm,
+        r.demands.pu_kn,
+        r.governing_dcr,
+    );
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="106" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#1e3a8a">ARCHITECTURAL &amp; GOVERNANCE SEAL</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p2x + 16.0,
+        p2y + 394.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 416.0,
+        p2x + 26.0,
+        p2y + 438.0,
+        escape_xml(&truncate_clean(&studio.summary_verdict, 86)),
+        p2x + 26.0,
+        p2y + 462.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live Shear Wall & SBE Studio".to_string()),
+        ),
+        p2x + 26.0,
+        p2y + 486.0,
+    );
+
+    // Panel 3: Diagonally Reinforced Coupling Beam X-Cage Elevation (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. COUPLING BEAM ELEVATION &amp; DIAGONAL X-CAGE BUNDLES (ACI §18.10.7)",
+        &format!(
+            "{} • ln/h={:.2} • Diagonal Angle={:.1} deg • {} Bars D{:.0}mm/diag",
+            escape_xml(&truncate_clean(cb.coupling_type.label(), 40)),
+            cb.aspect_ratio_ln_over_h,
+            cb.diagonal_angle_deg,
+            cb.num_bars_per_diagonal,
+            cb.bar_dia_mm,
+        ),
+    );
+    let bx0 = p3x + 120.0;
+    let by0 = p3y + 84.0;
+    let bw = 520.0;
+    let bh = 180.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="56" height="{:.1}" fill="#cbd5e1" stroke="#334155" stroke-width="1.6"/>
+<rect x="{:.1}" y="{:.1}" width="56" height="{:.1}" fill="#cbd5e1" stroke="#334155" stroke-width="1.6"/>
+<rect x="{bx0:.1}" y="{by0:.1}" width="{bw:.1}" height="{bh:.1}" fill="#f8fafc" stroke="#0f172a" stroke-width="2.2"/>
+<line x1="{bx0:.1}" y1="{by0:.1}" x2="{:.1}" y2="{:.1}" stroke="#0284c7" stroke-width="4.5"/>
+<line x1="{bx0:.1}" y1="{:.1}" x2="{:.1}" y2="{by0:.1}" stroke="#059669" stroke-width="4.5"/>
+<text x="{:.1}" y="{:.1}" font-size="9.5" font-weight="bold" text-anchor="middle" fill="#0f172a">Clear Span ln={:.0} mm x Depth h={:.0} mm x Width bw={:.0} mm (alpha={:.1} deg)</text>"##,
+        bx0 - 56.0,
+        by0 - 20.0,
+        bh + 40.0,
+        bx0 + bw,
+        by0 - 20.0,
+        bh + 40.0,
+        bx0 + bw,
+        by0 + bh,
+        by0 + bh,
+        bx0 + bw,
+        bx0 + bw * 0.5,
+        by0 + bh + 34.0,
+        cb.clear_span_ln_mm,
+        cb.total_depth_h_mm,
+        cb.width_bw_mm,
+        cb.diagonal_angle_deg,
+    );
+    let cb_cards = [
+        ("Diagonal Area Avd / Hoop Spacing s_max", format!("{:.0} mm2/diag | Ash={:.0} mm2 @ s <= {:.0} mm", cb.total_diagonal_area_avd_mm2, cb.req_diagonal_confinement_ash_mm2, cb.max_hoop_spacing_s_mm)),
+        ("Coupling Beam Shear Vu vs phi*Vn", format!("{:.0} kN vs {:.0} kN (Cap 0.83*sqrt(fc)*Acw = {:.0} kN)", cb.factored_shear_vu_kn, cb.phi_vn_kn, cb.max_allowable_vn_kn)),
+        ("Coupling Beam Status / DCR", format!("DCR = {:.2} ({})", cb.coupling_dcr, if cb.is_coupling_adequate { "PASS" } else { "INCREASE Avd/fc" })),
+    ];
+    for (idx, (lbl, val)) in cb_cards.iter().enumerate() {
+        let ry = p3y + 324.0 + (idx as f64) * 52.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="42" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#334155">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" font-family="monospace" text-anchor="end" fill="#0f172a">{val}</text>"##,
+            p3x + 16.0,
+            p3w - 32.0,
+            p3x + 26.0,
+            ry + 25.0,
+            p3x + p3w - 26.0,
+            ry + 25.0,
+        );
+    }
+
+    // Panel 4: ACI 318-19 / SNI 2847 Compliance Ledger & 3D Wall Pier Schedule (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. ACI 318-19 §18.10 / SNI 2847 COMPLIANCE &amp; 3D PIER SCHEDULE",
+        &format!(
+            "{} Piers • {} Coupling Beams • Governing DCR = {:.2}",
+            studio.piers_3d.len(),
+            studio.coupling_beams_3d.len(),
+            r.governing_dcr,
+        ),
+    );
+    let checks = [
+        ("ACI §18.10.5 Wall Flexural Capacity (Mu / phi*Mn)", format!("{:.0}/{:.0} kNm", r.demands.mu_knm, r.flexure_phi_mn_knm), r.flexure_dcr, r.is_flexure_adequate),
+        ("ACI §18.10.4 In-Plane Web Shear (Vu / phi*Vn)", format!("{:.0}/{:.0} kN", sh.factored_shear_vu_kn, sh.phi_vn_kn), sh.shear_dcr, sh.is_shear_adequate),
+        ("ACI §18.10.6 SBE Confinement Ash/s", format!("{:.2}/{:.2} mm2/mm", be.req_ash_over_s_mm2_per_mm, be.provided_ash_over_s_mm2_per_mm), be.dcr_confinement, be.is_confinement_adequate),
+        ("ACI §18.10.6 SBE Section Width & Length", format!("{:.0}x{:.0} mm", be.provided_length_be_mm, be.provided_thickness_b_mm), if be.is_geometry_adequate { 0.85 } else { 1.15 }, be.is_geometry_adequate),
+        ("ACI §18.10.7 Coupling Beam Shear (Vu / phi*Vn)", format!("{:.0}/{:.0} kN", cb.factored_shear_vu_kn, cb.phi_vn_kn), cb.coupling_dcr, cb.is_coupling_adequate),
+    ];
+    for (idx, (name, metric, dcr, ok)) in checks.iter().enumerate() {
+        let ry = p4y + 52.0 + (idx as f64) * 58.0;
+        let col = if *ok { "#059669" } else { "#dc2626" };
+        let st = if *ok { "PASS" } else { "FAIL" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="48" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#0f172a">{name}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#475569">{metric} (D/C = {dcr:.2})</text>
+<rect x="{:.1}" y="{:.1}" width="64" height="22" rx="4" fill="{col}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 22.0,
+            ry + 19.0,
+            p4x + 22.0,
+            ry + 38.0,
+            p4x + p4w - 92.0,
+            ry + 13.0,
+            p4x + p4w - 60.0,
+            ry + 27.5,
+        );
+    }
+    for (idx, pier) in studio.piers_3d.iter().take(2).enumerate() {
+        let ry = p4y + 356.0 + (idx as f64) * 58.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="48" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.9" font-family="monospace" fill="#0f172a">PIER {} : ({:.1},{:.1})->({:.1},{:.1})m | H={:.1}m | tw={:.2}m | SBE={:.2}m (h_pl={:.1}m)</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 22.0,
+            ry + 28.0,
+            escape_xml(&truncate_clean(&pier.wall_id, 18)),
+            pier.p0_enu_m[0],
+            pier.p0_enu_m[1],
+            pier.p1_enu_m[0],
+            pier.p1_enu_m[1],
+            pier.height_m,
+            pier.thickness_m,
+            pier.sbe_length_m,
+            pier.sbe_plastic_height_m,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_SHEAR_WALL_S108");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = studio.piers_3d.len() + studio.coupling_beams_3d.len();
+    let summary = format!(
+        "Exported Special RC Shear Wall & SBE Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3133,5 +3489,24 @@ mod tests {
         assert!(!s107.svg_content.contains("<image"));
         assert!(!s107.svg_content.contains("ARI"));
         assert_eq!(s107.sha256_seal.len(), 64);
+
+        let sw_rep = crate::core::shear_wall_studio::evaluate_shear_wall_studio(
+            &field_proj,
+            None,
+            &crate::core::shear_wall_studio::ShearWallStudioConfig::default(),
+        );
+        let s108 = build_shear_wall_annex_svg(
+            &field_proj.project_name,
+            &sw_rep,
+            "S-108",
+            Some("sw843seal"),
+        );
+        assert!(s108.svg_content.starts_with("<svg"));
+        assert!(s108.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s108.svg_content.contains("SHEET S-108"));
+        assert!(s108.svg_content.contains("<polyline"));
+        assert!(!s108.svg_content.contains("<image"));
+        assert!(!s108.svg_content.contains("ARI"));
+        assert_eq!(s108.sha256_seal.len(), 64);
     }
 }

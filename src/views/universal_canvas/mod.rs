@@ -192,6 +192,10 @@ pub struct UniversalCanvasState {
     pub wind_overlay_visible: bool,
     pub wind_studio_config: crate::core::wind_studio::WindStudioConfig,
     pub last_wind_report: Option<crate::core::wind_studio::WindStudioReport>,
+    // Update v0.8.4.3 (3/10 -> v0.8.5): Special RC Shear Wall, SBE & Diagonal Coupling Beam
+    pub shear_wall_overlay_visible: bool,
+    pub shear_wall_studio_config: crate::core::shear_wall_studio::ShearWallStudioConfig,
+    pub last_shear_wall_report: Option<crate::core::shear_wall_studio::ShearWallStudioReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -343,6 +347,9 @@ impl Default for UniversalCanvasState {
             wind_overlay_visible: false,
             wind_studio_config: crate::core::wind_studio::WindStudioConfig::default(),
             last_wind_report: None,
+            shear_wall_overlay_visible: false,
+            shear_wall_studio_config: crate::core::shear_wall_studio::ShearWallStudioConfig::default(),
+            last_shear_wall_report: None,
         }
     }
 }
@@ -990,6 +997,21 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Special RC Shear Wall, SBE & Diagonal Coupling Beam coupled to BIM & site.
+    pub fn run_shear_wall_studio(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::shear_wall_studio::ShearWallStudioReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::shear_wall_studio::evaluate_shear_wall_studio(
+            bim_project,
+            Some(&site),
+            &self.shear_wall_studio_config,
+        );
+        self.last_shear_wall_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1320,6 +1342,7 @@ impl UniversalCanvasState {
             extreme_events_config: self.extreme_events_config.clone(),
             isolation_studio_config: self.isolation_studio_config.clone(),
             wind_studio_config: self.wind_studio_config.clone(),
+            shear_wall_studio_config: self.shear_wall_studio_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1446,6 +1469,8 @@ impl UniversalCanvasState {
         self.last_isolation_report = None;
         self.wind_studio_config = archive.wind_studio_config;
         self.last_wind_report = None;
+        self.shear_wall_studio_config = archive.shear_wall_studio_config;
+        self.last_shear_wall_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2058,6 +2083,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let shear_wall_gpu_input = if self.shear_wall_overlay_visible {
+                self.last_shear_wall_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::ShearWallGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -2092,6 +2128,7 @@ impl UniversalCanvasState {
                 extreme_events_gpu_input,
                 isolation_gpu_input,
                 wind_gpu_input,
+                shear_wall_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2161,6 +2198,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.wind_overlay_visible {
                 self.paint_cpu_wind_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.shear_wall_overlay_visible {
+                self.paint_cpu_shear_wall_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

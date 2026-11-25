@@ -3464,4 +3464,258 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.4.3` (`3/10` -> `v0.8.5`): Width-first Dynamic Island drawer for Special RC Shear Wall, SBE & Coupling Beam Studio.
+    pub(super) fn render_shear_wall_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Layers,
+                13.0,
+                theme.accent_blue,
+                "Special RC Shear Wall, SBE & Coupling Beam Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "Wall Pier & SBE Confinement"),
+                (1usize, "Coupling Beam & ACI/SNI Audit"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.shear_wall_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.shear_wall_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Shear Wall & SBE Studio drawer",
+            )
+            .clicked()
+            {
+                self.shear_wall_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for (fc, lbl) in [(30.0_f64, "fc 30"), (35.0, "fc 35"), (45.0, "fc 45 MPa")] {
+                    let active = (universal_canvas.shear_wall_studio_config.fc_mpa - fc).abs() < 1.5;
+                    if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_blue, "Concrete cylinder strength f'c").clicked() {
+                        universal_canvas.shear_wall_studio_config.fc_mpa = fc;
+                        actions.run_shear_wall_studio = true;
+                    }
+                }
+                for (dia, lbl) in [(22.0_f64, "X-D22"), (25.0, "X-D25"), (29.0, "X-D29")] {
+                    let active = (universal_canvas.shear_wall_studio_config.cb_diag_bar_dia_mm - dia).abs() < 1.0;
+                    if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_orange, "Coupling beam diagonal bar diameter").clicked() {
+                        universal_canvas.shear_wall_studio_config.cb_diag_bar_dia_mm = dia;
+                        actions.run_shear_wall_studio = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Layers),
+                    if universal_canvas.shear_wall_overlay_visible { "SBE 3D: ON" } else { "SBE 3D" },
+                    universal_canvas.shear_wall_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU Shear Wall SBE zones & X-Cage coupling beams",
+                )
+                .clicked()
+                {
+                    actions.toggle_shear_wall_3d = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Document), ".ifcx", false, theme.accent_blue, "Export eigengraph::analysis::shear_wall_sbe IFCX").clicked() {
+                    actions.export_shear_wall_ifcx = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Printer), "Sheet S-108 .svg", false, theme.accent_green, "Export A3 Sheet S-108 Shear Wall & SBE Annex SVG").clicked() {
+                    actions.export_shear_wall_svg = true;
+                }
+            });
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                let mut tw = universal_canvas.shear_wall_studio_config.wall_thickness_mm;
+                ui.label(RichText::new("Web tw (mm)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut tw, 250.0..=600.0).max_decimals(0)).changed() {
+                    universal_canvas.shear_wall_studio_config.wall_thickness_mm = tw;
+                    actions.run_shear_wall_studio = true;
+                }
+                let mut drift_pct = universal_canvas.shear_wall_studio_config.design_drift_ratio * 100.0;
+                ui.label(RichText::new("Drift (%)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut drift_pct, 0.5..=2.5).max_decimals(2)).changed() {
+                    universal_canvas.shear_wall_studio_config.design_drift_ratio = drift_pct * 0.01;
+                    actions.run_shear_wall_studio = true;
+                }
+                let mut ln = universal_canvas.shear_wall_studio_config.cb_clear_span_m;
+                ui.label(RichText::new("CB ln (m)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut ln, 1.0..=3.2).max_decimals(2)).changed() {
+                    universal_canvas.shear_wall_studio_config.cb_clear_span_m = ln;
+                    actions.run_shear_wall_studio = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.shear_wall_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(9, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    let Some(ref studio) = universal_canvas.last_shear_wall_report else {
+                        ui.label(RichText::new("Evaluating Special RC Shear Wall Studio...").size(9.5).color(theme.text_muted));
+                        return;
+                    };
+                    let r = &studio.report;
+                    let be = &r.boundary_element;
+                    let sh = &r.in_plane_shear;
+                    let cb = &r.coupling_beam;
+                    if tab == 0 {
+                        if is_left {
+                            ui.label(RichText::new("Special Boundary Element (SBE) Section Schematic").size(9.8).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "SBE {} | c={:.0} vs c_lim={:.0} mm | bE={:.0} mm @ s={:.0} mm",
+                                    if be.is_sbe_required { "REQUIRED" } else { "OPTIONAL" },
+                                    be.neutral_axis_c_mm,
+                                    be.c_limit_mm,
+                                    be.provided_length_be_mm,
+                                    be.provided_tie_spacing_s_mm,
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(if be.is_confinement_adequate { theme.accent_green } else { theme.accent_red }),
+                            );
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, 72.0), egui::Sense::hover());
+                            let p = ui.painter_at(rect);
+                            p.rect_filled(rect, 5.0, Color32::from_rgba_unmultiplied(15, 23, 42, 42));
+                            let w_rect = Rect::from_min_size(
+                                egui::pos2(rect.left() + 14.0, rect.top() + 16.0),
+                                Vec2::new((rect.width() - 28.0).max(40.0), 40.0),
+                            );
+                            p.rect_filled(w_rect, 2.0, Color32::from_rgb(71, 85, 105));
+                            let sbe_w = (w_rect.width()
+                                * ((be.provided_length_be_mm / r.geometry.length_lw_mm.max(500.0)).clamp(0.12, 0.34) as f32))
+                                .max(12.0);
+                            let sbe_c = if be.is_confinement_adequate { theme.accent_green } else { theme.accent_red };
+                            p.rect_filled(Rect::from_min_size(w_rect.min, Vec2::new(sbe_w, 40.0)), 2.0, sbe_c);
+                            p.rect_filled(
+                                Rect::from_min_size(egui::pos2(w_rect.right() - sbe_w, w_rect.top()), Vec2::new(sbe_w, 40.0)),
+                                2.0,
+                                sbe_c,
+                            );
+                        } else {
+                            ui.label(RichText::new("Pier Flexure & In-Plane Shear Demand").size(9.8).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "Flexure Mu={:.0}/{:.0} kNm (DCR={:.2}) | Double Curtain: {}",
+                                    r.demands.mu_knm,
+                                    r.flexure_phi_mn_knm,
+                                    r.flexure_dcr,
+                                    if sh.is_double_curtain_required { "YES" } else { "NO" },
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(theme.accent_blue),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "In-Plane Shear Vu={:.0}/{:.0} kN (DCR={:.2}) | Ash/s={:.2}/{:.2}",
+                                    sh.factored_shear_vu_kn,
+                                    sh.phi_vn_kn,
+                                    sh.shear_dcr,
+                                    be.provided_ash_over_s_mm2_per_mm,
+                                    be.req_ash_over_s_mm2_per_mm,
+                                ))
+                                .size(8.6)
+                                .monospace()
+                                .color(if sh.is_shear_adequate { theme.accent_green } else { theme.accent_red }),
+                            );
+                        }
+                    } else if is_left {
+                        ui.label(RichText::new("Coupling Beam X-Cage Geometry & Capacity").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "ln/h={:.2} | alpha={:.1} deg | {} D{:.0}mm | DCR={:.2}",
+                                cb.aspect_ratio_ln_over_h,
+                                cb.diagonal_angle_deg,
+                                cb.num_bars_per_diagonal,
+                                cb.bar_dia_mm,
+                                cb.coupling_dcr,
+                            ))
+                            .size(8.8)
+                            .monospace()
+                            .color(if cb.is_coupling_adequate { theme.accent_blue } else { theme.accent_red }),
+                        );
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, 72.0), egui::Sense::hover());
+                        let p = ui.painter_at(rect);
+                        p.rect_filled(rect, 5.0, Color32::from_rgba_unmultiplied(15, 23, 42, 42));
+                        let bx = rect.left() + 18.0;
+                        let by = rect.top() + 12.0;
+                        let bw = (rect.width() - 36.0).max(40.0);
+                        let bh = 48.0;
+                        p.rect_stroke(Rect::from_min_size(egui::pos2(bx, by), Vec2::new(bw, bh)), 2.0, Stroke::new(1.5, theme.text_secondary), egui::StrokeKind::Inside);
+                        p.line_segment([egui::pos2(bx, by), egui::pos2(bx + bw, by + bh)], Stroke::new(2.4, theme.accent_blue));
+                        p.line_segment([egui::pos2(bx, by + bh), egui::pos2(bx + bw, by)], Stroke::new(2.4, theme.accent_green));
+                    } else {
+                        ui.label(RichText::new("ACI 318-19 §18.10 / SNI 2847 Compliance").size(9.8).strong().color(theme.text_primary));
+                        for (nm, ok, dcr) in [
+                            ("Flexure Mu / phi*Mn", r.is_flexure_adequate, r.flexure_dcr),
+                            ("Web Shear Vu / phi*Vn", sh.is_shear_adequate, sh.shear_dcr),
+                            ("SBE Confinement Ash/s", be.is_confinement_adequate, be.dcr_confinement),
+                            ("Coupling Beam X-Cage", cb.is_coupling_adequate, cb.coupling_dcr),
+                        ] {
+                            ui.label(
+                                RichText::new(format!(
+                                    "[{}] {} (DCR {:.2})",
+                                    if ok { "PASS" } else { "FAIL" },
+                                    nm,
+                                    dcr
+                                ))
+                                .size(8.6)
+                                .monospace()
+                                .color(if ok { theme.accent_green } else { theme.accent_red }),
+                            );
+                        }
+                    }
+                });
+            });
+        });
+    }
 }

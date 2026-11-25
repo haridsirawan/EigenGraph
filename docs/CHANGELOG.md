@@ -7,7 +7,15 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.5 (2/10)]
+## [Unreleased — Next: v0.8.5 (3/10)]
+
+### Update 3/10 (`v0.8.4.3`) — Special RC Shear Wall, Boundary Element (SBE) & Diagonal Coupling Beam 3D Studio (`ACI 318-19 §18.10` / `SNI 2847:2019`) + Sheet `S-108`
+- **BIM-Coupled Special RC Shear Wall & Coupling Beam Engine (`src/core/shear_wall_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_shear_wall_studio`](src/core/shear_wall_studio.rs) coupling active `BimProject` structural walls/levels and site seismic demands into [`ShearWallEngine::evaluate_wall`](src/core/shear_wall.rs), evaluating Special Boundary Element (SBE) displacement/stress triggers, confinement `Ash/s`, double-curtain web shear, diagonally reinforced X-Cage coupling beams (`ACI §18.10.7`), analytical `P-M` interaction envelopes, `.eigen.json` persistence (`UnifiedWorkspaceArchive::shear_wall_studio_config`), and non-destructive `eigengraph::analysis::shear_wall_sbe` IFCX overlays (`IfcxStage::compose_with_shear_wall_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) SBE Zones & Diagonal X-Cage + Sheet `S-108` (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added [`build_rtc_shear_wall_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`ShearWallGpuInput`, `material_kind = 16.0`, WGSL `kind >= 15.5` analytical SBE/rebar pulse & Fresnel rim glow shader, 0% raster), dedicated `shear_wall` GPU slot inside `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_shear_wall_fallback`), and archival A3 landscape Sheet `S-108` Pure-Vector Annex SVG (`build_shear_wall_annex_svg`, 0 `<image>` tags).
+- **Width-First Dynamic Island `Shear Wall & SBE Studio`, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the 2-tab width-first Dynamic Island drawer (`Wall Pier & SBE Confinement` + `Coupling Beam & ACI/SNI Audit`), `Shear Wall` toolbar pill, `/shear-wall`, `/sbe`, `/coupling-beam`, `/shear-wall-3d`, `/shear-wall-ifcx`, `/shear-wall-svg` slash commands, and `[[RUN_SHEAR_WALL:...]]` / `[[TOGGLE_SHEAR_WALL_3D]]` / `[[EXPORT_SHEAR_WALL_ANNEX]]` Gemini directives.
 
 ### Update 2/10 (`v0.8.4.2`) — Wind Aeroelasticity, Facade Cladding Pressure & ISO 10137 Comfort 3D Studio (`ASCE 7-22 Ch. 26–30` / `SNI 1727:2020`) + Sheet `S-107`
 - **BIM-Coupled Wind Aeroelasticity & ISO 10137 Comfort Engine (`src/core/wind_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

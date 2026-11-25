@@ -146,6 +146,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.4.2 (2/10 -> v0.8.5): Wind Aeroelasticity & ISO 10137 Comfort Drawer
     pub wind_drawer_open: bool,
     pub wind_drawer_tab: usize,
+    // Update v0.8.4.3 (3/10 -> v0.8.5): Special RC Shear Wall, SBE & Coupling Beam Drawer
+    pub shear_wall_drawer_open: bool,
+    pub shear_wall_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -256,6 +259,8 @@ impl Default for SpatialWorkspaceState {
             isolation_drawer_tab: 0,
             wind_drawer_open: false,
             wind_drawer_tab: 0,
+            shear_wall_drawer_open: false,
+            shear_wall_drawer_tab: 0,
         }
     }
 }
@@ -288,6 +293,7 @@ impl SpatialWorkspaceState {
             || self.extreme_events_drawer_open
             || self.isolation_drawer_open
             || self.wind_drawer_open
+            || self.shear_wall_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -314,6 +320,7 @@ impl SpatialWorkspaceState {
         self.extreme_events_drawer_open = false;
         self.isolation_drawer_open = false;
         self.wind_drawer_open = false;
+        self.shear_wall_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -403,6 +410,11 @@ impl SpatialWorkspaceState {
         } else {
             self.wind_drawer_open = !self.wind_drawer_open;
         }
+        if drawer != "shear_wall" {
+            self.shear_wall_drawer_open = false;
+        } else {
+            self.shear_wall_drawer_open = !self.shear_wall_drawer_open;
+        }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
@@ -467,6 +479,14 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.wind_drawer_tab = tab.min(1);
         self.wind_drawer_open = true;
+    }
+
+    /// Idempotently opens the Update `v0.8.4.3` Special RC Shear Wall, SBE & Diagonal Coupling Beam drawer
+    /// (`0` = Wall Pier & SBE Confinement, `1` = Coupling Beam & ACI/SNI Audit).
+    pub fn open_shear_wall_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.shear_wall_drawer_tab = tab.min(1);
+        self.shear_wall_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

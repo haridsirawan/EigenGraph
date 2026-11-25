@@ -2873,6 +2873,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.shear_wall_drawer_open {
+                        self.render_shear_wall_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -5434,6 +5446,20 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_wind_drawer(0);
                                                         actions.run_wind_studio = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Layers),
+                                                        "Shear Wall",
+                                                        self.shear_wall_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Open Special RC Shear Wall, SBE & Diagonal Coupling Beam Studio (+ Sheet S-108)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_shear_wall_drawer(0);
+                                                        actions.run_shear_wall_studio = true;
                                                     }
                                                 },
                                             );

@@ -42,6 +42,7 @@ pub mod eigenflow;
 pub mod extreme_events;
 pub mod base_isolation_studio;
 pub mod wind_studio;
+pub mod shear_wall_studio;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -225,7 +226,8 @@ pub use vector_dossier::{
     build_eigenflow_nonlinear_annex_svg, build_extreme_events_annex_svg,
     build_fabrication_bbs_shop_svg, build_permit_compliance_annex_svg,
     build_pure_vector_engineering_dossier_svg, build_seismic_isolation_annex_svg,
-    build_wind_aero_annex_svg, VectorDossierExport, VectorDossierInput,
+    build_shear_wall_annex_svg, build_wind_aero_annex_svg, VectorDossierExport,
+    VectorDossierInput,
 };
 pub use portfolio_retrofit::{
     optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,
@@ -295,6 +297,10 @@ pub use base_isolation_studio::{
 pub use wind_studio::{
     evaluate_wind_studio, FacadePressurePanel3D, WindAeroIfcxOverlay, WindStudioConfig,
     WindStudioReport, WindVectorArrow3D, NS_EG_WIND_AEROELASTICITY,
+};
+pub use shear_wall_studio::{
+    evaluate_shear_wall_studio, CouplingBeamCage3D, ShearWallIfcxOverlay, ShearWallPier3D,
+    ShearWallStudioConfig, ShearWallStudioReport, WallPmCurvePoint, NS_EG_SHEAR_WALL_SBE,
 };
 
 
