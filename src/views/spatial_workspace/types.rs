@@ -464,6 +464,14 @@ pub enum PlannedProposalAction {
     RunIsolation(crate::core::isolation::IsolatorType),
     ToggleIsolation3d,
     ExportIsolationAnnex,
+    // Update v0.8.4.2 (2/10 -> v0.8.5): Wind Aeroelasticity & ISO 10137 Comfort Studio + Sheet S-107
+    RunWind {
+        speed_ms: Option<f64>,
+        exposure: Option<crate::core::wind::ExposureCategory>,
+        azimuth_deg: Option<f64>,
+    },
+    ToggleWind3d,
+    ExportWindAnnex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -570,6 +578,14 @@ pub enum GeminiDirective {
     RunIsolation(crate::core::isolation::IsolatorType),
     ToggleIsolation3d,
     ExportIsolationAnnex,
+    // Update v0.8.4.2 (2/10 -> v0.8.5): Wind Aeroelasticity & ISO 10137 Comfort Studio + Sheet S-107
+    RunWind {
+        speed_ms: Option<f64>,
+        exposure: Option<crate::core::wind::ExposureCategory>,
+        azimuth_deg: Option<f64>,
+    },
+    ToggleWind3d,
+    ExportWindAnnex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -916,6 +932,35 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleIsolation3d);
             } else if upper == "EXPORT_ISOLATION_ANNEX" {
                 directives.push(GeminiDirective::ExportIsolationAnnex);
+            } else if upper == "RUN_WIND" || upper.starts_with("RUN_WIND:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let mut speed_ms = None;
+                let mut exposure = None;
+                let mut azimuth_deg = None;
+                for tok in arg.split(':').map(str::trim).filter(|s| !s.is_empty()) {
+                    if tok == "B" || tok == "EXPOSUREB" || tok == "EXPOSURE_B" {
+                        exposure = Some(crate::core::wind::ExposureCategory::ExposureB);
+                    } else if tok == "C" || tok == "EXPOSUREC" || tok == "EXPOSURE_C" {
+                        exposure = Some(crate::core::wind::ExposureCategory::ExposureC);
+                    } else if tok == "D" || tok == "EXPOSURED" || tok == "EXPOSURE_D" {
+                        exposure = Some(crate::core::wind::ExposureCategory::ExposureD);
+                    } else if let Ok(v) = tok.parse::<f64>() {
+                        if speed_ms.is_none() {
+                            speed_ms = Some(v.clamp(20.0, 90.0));
+                        } else if azimuth_deg.is_none() {
+                            azimuth_deg = Some(v.rem_euclid(360.0));
+                        }
+                    }
+                }
+                directives.push(GeminiDirective::RunWind {
+                    speed_ms,
+                    exposure,
+                    azimuth_deg,
+                });
+            } else if upper == "TOGGLE_WIND_3D" {
+                directives.push(GeminiDirective::ToggleWind3d);
+            } else if upper == "EXPORT_WIND_ANNEX" {
+                directives.push(GeminiDirective::ExportWindAnnex);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -1846,6 +1891,42 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Printer,
     },
     SlashCommandSpec {
+        cmd: "/wind-studio",
+        category: "Wind",
+        description: "Open Wind Aeroelasticity & ISO 10137 Comfort 3D Studio (ASCE 7-22 Ch. 26-30)",
+        icon: AppIcon::Wind,
+    },
+    SlashCommandSpec {
+        cmd: "/wind-dir",
+        category: "Wind",
+        description: "Set basic wind speed (m/s) and/or azimuth deg (/wind-dir 48 270)",
+        icon: AppIcon::Wind,
+    },
+    SlashCommandSpec {
+        cmd: "/wind-exposure",
+        category: "Wind",
+        description: "Set terrain exposure category (/wind-exposure B | C | D)",
+        icon: AppIcon::Wind,
+    },
+    SlashCommandSpec {
+        cmd: "/wind-3d",
+        category: "Wind",
+        description: "Toggle 3D Pure WebGPU facade cladding pressures & wind flow vectors",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/wind-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::wind_aeroelasticity IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/wind-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-107 Pure-Vector Wind & ISO 10137 Comfort Annex .svg",
+        icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -1978,6 +2059,11 @@ pub struct SpatialHudActions {
     pub toggle_isolation_3d: bool,
     pub export_isolation_ifcx: bool,
     pub export_isolation_svg: bool,
+    // Update v0.8.4.2 (2/10 -> v0.8.5): Wind Aeroelasticity & ISO 10137 Comfort Studio
+    pub run_wind_studio: bool,
+    pub toggle_wind_3d: bool,
+    pub export_wind_ifcx: bool,
+    pub export_wind_svg: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -2393,5 +2479,9 @@ impl SpatialHudActions {
         self.toggle_isolation_3d |= other.toggle_isolation_3d;
         self.export_isolation_ifcx |= other.export_isolation_ifcx;
         self.export_isolation_svg |= other.export_isolation_svg;
+        self.run_wind_studio |= other.run_wind_studio;
+        self.toggle_wind_3d |= other.toggle_wind_3d;
+        self.export_wind_ifcx |= other.export_wind_ifcx;
+        self.export_wind_svg |= other.export_wind_svg;
     }
 }

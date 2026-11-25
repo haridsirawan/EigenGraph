@@ -7,7 +7,15 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.5 (1/10)]
+## [Unreleased — Next: v0.8.5 (2/10)]
+
+### Update 2/10 (`v0.8.4.2`) — Wind Aeroelasticity, Facade Cladding Pressure & ISO 10137 Comfort 3D Studio (`ASCE 7-22 Ch. 26–30` / `SNI 1727:2020`) + Sheet `S-107`
+- **BIM-Coupled Wind Aeroelasticity & ISO 10137 Comfort Engine (`src/core/wind_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_wind_studio`](src/core/wind_studio.rs) coupling active `BimProject` footprint/story elevations and `SiteEnvironmentalCoupling` into [`WindEngine`](src/core/wind.rs) (`ASCE 7-22 Ch. 26–30` / `SNI 1727:2020`), computing directional wind exposure profiles (`ExposureB`/`C`/`D`), per-story `FacadePressurePanel3D` cladding zones (`Windward`, `Leeward`, `Sidewalls`), inflow & suction wake `WindVectorArrow3D` trajectories, ISO 10137 Residential (`15 mg`) / Office (`20 mg`) comfort audits, Wind vs. Seismic governing lateral base shear comparison, `.eigen.json` persistence (`UnifiedWorkspaceArchive::wind_studio_config`), and non-destructive `eigengraph::analysis::wind_aeroelasticity` IFCX overlays (`IfcxStage::compose_with_wind_studio_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Facade Pressures & Flow Vectors + Sheet `S-107` (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added [`build_rtc_wind_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`WindGpuInput`, `material_kind = 15.0`, WGSL `kind >= 14.5` analytical wind flow pulse & Fresnel rim glow shader, 0% raster), dedicated `wind_aero` GPU slot inside `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_wind_fallback`), and archival A3 landscape Sheet `S-107` Pure-Vector Annex SVG (`build_wind_aero_annex_svg`, 0 `<image>` tags).
+- **Width-First Dynamic Island `Wind Aeroelasticity & Comfort Studio`, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the 2-tab width-first Dynamic Island drawer (`Wind Profile & Cladding` + `ISO 10137 Comfort & Envelope`), `Wind / Aero` toolbar pill, `/wind-studio` (`/aero`, `/cladding`), `/wind-dir`, `/wind-exposure`, `/wind-3d`, `/wind-ifcx`, `/wind-svg` slash commands, and `[[RUN_WIND:...]]` / `[[TOGGLE_WIND_3D]]` / `[[EXPORT_WIND_ANNEX]]` Gemini directives.
 
 ### Update 1/10 (`v0.8.4.1`) — Seismic Base Isolation & Damper 3D Studio (`ASCE 7-22 Ch. 17–18` / `SNI 1726`) + Sheet `S-106`
 - **BIM-Coupled Seismic Base Isolation Engine (`src/core/base_isolation_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

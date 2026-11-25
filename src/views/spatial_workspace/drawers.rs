@@ -3197,4 +3197,271 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.4.2` (`2/10` -> `v0.8.5`): Width-first Dynamic Island drawer for Wind Aeroelasticity & ISO 10137 Comfort Studio.
+    pub(super) fn render_wind_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::wind::{EnclosureClassification, ExposureCategory};
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Wind,
+                13.0,
+                theme.accent_blue,
+                "Wind Aeroelasticity & ISO 10137 Comfort Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "Wind Profile & Cladding"),
+                (1usize, "ISO 10137 Comfort & Envelope"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.wind_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.wind_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Wind Aeroelasticity Studio drawer",
+            )
+            .clicked()
+            {
+                self.wind_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for (exp, lbl) in [
+                    (ExposureCategory::ExposureB, "Exp B"),
+                    (ExposureCategory::ExposureC, "Exp C"),
+                    (ExposureCategory::ExposureD, "Exp D"),
+                ] {
+                    let active = universal_canvas.wind_studio_config.exposure == exp;
+                    if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_blue, "ASCE 7-22 Terrain Exposure Category").clicked() {
+                        universal_canvas.wind_studio_config.exposure = exp;
+                        actions.run_wind_studio = true;
+                    }
+                }
+                for (enc, lbl) in [
+                    (EnclosureClassification::Enclosed, "Enclosed"),
+                    (EnclosureClassification::PartiallyEnclosed, "Partial"),
+                ] {
+                    let active = universal_canvas.wind_studio_config.enclosure == enc;
+                    if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_orange, "Building enclosure classification").clicked() {
+                        universal_canvas.wind_studio_config.enclosure = enc;
+                        actions.run_wind_studio = true;
+                    }
+                }
+                let occ_lbl = if universal_canvas.wind_studio_config.occupancy_residential {
+                    "Residential (15mg)"
+                } else {
+                    "Office (20mg)"
+                };
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    occ_lbl,
+                    universal_canvas.wind_studio_config.occupancy_residential,
+                    theme.accent_blue,
+                    "Toggle ISO 10137 occupant comfort limit (15 mg Residential vs 20 mg Office)",
+                )
+                .clicked()
+                {
+                    universal_canvas.wind_studio_config.occupancy_residential =
+                        !universal_canvas.wind_studio_config.occupancy_residential;
+                    actions.run_wind_studio = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Layers),
+                    if universal_canvas.wind_overlay_visible { "Wind 3D: ON" } else { "Wind 3D" },
+                    universal_canvas.wind_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU facade cladding pressure & wind flow vectors",
+                )
+                .clicked()
+                {
+                    actions.toggle_wind_3d = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Document), ".ifcx", false, theme.accent_blue, "Export eigengraph::analysis::wind_aeroelasticity IFCX").clicked() {
+                    actions.export_wind_ifcx = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Printer), "Sheet S-107 .svg", false, theme.accent_green, "Export A3 Sheet S-107 Wind & ISO 10137 Annex SVG").clicked() {
+                    actions.export_wind_svg = true;
+                }
+            });
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                let mut spd = universal_canvas.wind_studio_config.basic_wind_speed_ms;
+                ui.label(RichText::new("Speed V (m/s)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut spd, 20.0..=90.0).max_decimals(0)).changed() {
+                    universal_canvas.wind_studio_config.basic_wind_speed_ms = spd;
+                    actions.run_wind_studio = true;
+                }
+                let mut az = universal_canvas.wind_studio_config.wind_azimuth_deg;
+                ui.label(RichText::new("Azimuth (deg)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut az, 0.0..=360.0).max_decimals(0)).changed() {
+                    universal_canvas.wind_studio_config.wind_azimuth_deg = az;
+                    actions.run_wind_studio = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.wind_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(9, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    let Some(ref studio) = universal_canvas.last_wind_report else {
+                        ui.label(RichText::new("Evaluating Wind Aeroelasticity Studio...").size(9.5).color(theme.text_muted));
+                        return;
+                    };
+                    let r = &studio.report;
+                    let c = &r.comfort_audit;
+                    if tab == 0 {
+                        if is_left {
+                            ui.label(RichText::new("Velocity Pressure qz(z) & Net MWFRS Profile").size(9.8).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "V={:.1} m/s ({:.0} deg) | qh={:.0} Pa | Gf={:.3} | Vw={:.1} kN",
+                                    r.basic_wind_speed_v_ms,
+                                    studio.config.wind_azimuth_deg,
+                                    r.qh_mean_roof_velocity_pressure_pa,
+                                    c.gust_effect_factor_g,
+                                    r.total_base_shear_wind_kn,
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(theme.accent_blue),
+                            );
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, 108.0), egui::Sense::hover());
+                            let p = ui.painter_at(rect);
+                            p.rect_filled(rect, 5.0, Color32::from_rgba_unmultiplied(15, 23, 42, 42));
+                            let max_p = r.story_levels.iter().map(|l| l.net_mwfrs_pressure_pa.max(l.qz_velocity_pressure_pa)).fold(200.0_f64, f64::max) * 1.1;
+                            let n = r.story_levels.len().max(1);
+                            let row_h = ((rect.height() - 12.0) / n as f32).clamp(4.0, 20.0);
+                            for (idx, lvl) in r.story_levels.iter().take(12).enumerate() {
+                                let y = rect.bottom() - 6.0 - (idx as f32 + 1.0) * row_h;
+                                let bar_w = ((lvl.net_mwfrs_pressure_pa / max_p).clamp(0.0, 1.0) as f32) * (rect.width() - 18.0);
+                                p.rect_filled(
+                                    Rect::from_min_size(egui::pos2(rect.left() + 8.0, y + 1.0), Vec2::new(bar_w, (row_h - 2.0).max(2.0))),
+                                    2.0,
+                                    theme.accent_blue,
+                                );
+                            }
+                        } else {
+                            ui.label(RichText::new("Facade Cladding Pressures (Top Story)").size(9.8).strong().color(theme.text_primary));
+                            let top_story = r.story_levels.last().map(|l| l.story_num).unwrap_or(1);
+                            for pan in studio.panels_3d.iter().filter(|p| p.story_num == top_story).take(4) {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{}: {:+.0} Pa ({:.1}x{:.1} m)",
+                                        pan.face_label, pan.pressure_pa, pan.width_m, pan.height_m
+                                    ))
+                                    .size(8.6)
+                                    .monospace()
+                                    .color(if pan.is_windward { theme.accent_blue } else { theme.accent_orange }),
+                                );
+                            }
+                        }
+                    } else if is_left {
+                        ui.label(RichText::new("ISO 10137 Occupant Comfort Acceleration").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "f1={:.3} Hz (T1={:.2} s) | Along={:.2} mg | Cross={:.2} mg",
+                                c.fundamental_frequency_hz,
+                                c.fundamental_period_t1_s,
+                                c.peak_acceleration_along_wind_mg,
+                                c.peak_acceleration_cross_wind_mg,
+                            ))
+                            .size(8.8)
+                            .monospace()
+                            .color(theme.accent_blue),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Resultant a_res = {:.2} mg vs Limit {:.1} mg [{}]",
+                                c.resultant_acceleration_mg,
+                                studio.comfort_limit_mg,
+                                if studio.comfort_acceptable { "COMPLIANT" } else { "REVIEW" },
+                            ))
+                            .size(8.8)
+                            .monospace()
+                            .color(if studio.comfort_acceptable { theme.accent_green } else { theme.accent_red }),
+                        );
+                    } else {
+                        ui.label(RichText::new("Wind vs Seismic Governing Lateral Envelope").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "Wind Vw={:.0} kN vs Seismic Vs={:.0} kN -> {}",
+                                r.total_base_shear_wind_kn,
+                                r.seismic_base_shear_ref_kn,
+                                if r.wind_governs_lateral_system { "WIND GOVERNS" } else { "SEISMIC GOVERNS" },
+                            ))
+                            .size(8.8)
+                            .monospace()
+                            .color(if r.wind_governs_lateral_system { theme.accent_orange } else { theme.accent_green }),
+                        );
+                        for lvl in r.story_levels.iter().take(4) {
+                            ui.label(
+                                RichText::new(format!(
+                                    "L{} z={:.1}m | qz={:.0} Pa | Fx={:.1} kN | Vx={:.0} kN",
+                                    lvl.story_num,
+                                    lvl.height_z_m,
+                                    lvl.qz_velocity_pressure_pa,
+                                    lvl.tributary_force_fx_kn,
+                                    lvl.cumulative_shear_vx_kn,
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                        }
+                    }
+                });
+            });
+        });
+    }
 }

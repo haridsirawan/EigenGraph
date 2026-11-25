@@ -492,6 +492,13 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 14.5) {
+        // Update v0.8.4.2: Pure Analytical WGSL Wind Aeroelasticity Facade Pressure & Flow Vectors (0% raster)
+        let flow = 0.72 + 0.34 * smoothstep(0.20, 0.95, sin(phase * 1.3 - u_time * 5.8));
+        let p_norm = clamp(height_m, 0.0, 1.0);
+        let ndotv = max(abs(dot(n, v)), 0.12);
+        let rim = pow(1.0 - ndotv, 1.6) * (0.40 + 0.25 * p_norm);
+        col = f_in.color.rgb * (0.68 + 0.42 * flow + rim);
     } else if (kind >= 13.5) {
         // Phase 84.1: Pure Analytical WGSL Seismic Base Isolator Pads, Moat Ring & FVD Dampers (0% raster)
         let osc = 0.78 + 0.24 * sin(u_time * 3.2 + phase * 1.2);
@@ -719,6 +726,7 @@ pub struct WebGpuEarthResources {
     eigenflow: GpuMeshSlot,
     extreme_events: GpuMeshSlot,
     isolation: GpuMeshSlot,
+    wind_aero: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
 }
 
@@ -934,6 +942,7 @@ impl WebGpuEarthResources {
             eigenflow: GpuMeshSlot::default(),
             extreme_events: GpuMeshSlot::default(),
             isolation: GpuMeshSlot::default(),
+            wind_aero: GpuMeshSlot::default(),
             hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
@@ -1058,6 +1067,7 @@ impl WebGpuEarthResources {
             || self.eigenflow.index_count > 0
             || self.extreme_events.index_count > 0
             || self.isolation.index_count > 0
+            || self.wind_aero.index_count > 0
             || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1100,6 +1110,7 @@ impl WebGpuEarthResources {
             self.eigenflow.draw(&mut pass);
             self.extreme_events.draw(&mut pass);
             self.isolation.draw(&mut pass);
+            self.wind_aero.draw(&mut pass);
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
             self.hazard_compute.draw(&mut pass);
@@ -1128,6 +1139,7 @@ struct WebGpuEarthPaintCallback {
     pending_eigenflow: Option<(u64, GpuMeshPayload)>,
     pending_extreme_events: Option<(u64, GpuMeshPayload)>,
     pending_isolation: Option<(u64, GpuMeshPayload)>,
+    pending_wind: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
 }
 
@@ -1227,6 +1239,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
                     .upload(device, queue, "isolation_mesh", is_in.0, &is_in.1);
             }
         }
+        if let Some(ref wi_in) = self.pending_wind {
+            if res.wind_aero.revision_uploaded != wi_in.0 {
+                res.wind_aero
+                    .upload(device, queue, "wind_aero_mesh", wi_in.0, &wi_in.1);
+            }
+        }
         if let Some(ref h_cmp) = self.pending_hazard_compute {
             res.hazard_compute.dispatch(queue, egui_encoder, h_cmp);
         } else {
@@ -1317,6 +1335,7 @@ pub struct WebGpuEarthState {
     cached_eigenflow_hash: u64,
     cached_extreme_events_hash: u64,
     cached_isolation_hash: u64,
+    cached_wind_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1332,6 +1351,7 @@ pub struct WebGpuEarthState {
     pub last_eigenflow_tris: usize,
     pub last_extreme_events_tris: usize,
     pub last_isolation_tris: usize,
+    pub last_wind_tris: usize,
     pub last_compute_particles: u32,
     #[cfg(not(target_arch = "wasm32"))]
     wgpu_device: Option<wgpu::Device>,
@@ -1606,6 +1626,7 @@ impl WebGpuEarthState {
         eigenflow_input: Option<EigenFlowGpuInput<'_>>,
         extreme_events_input: Option<ExtremeEventsGpuInput<'_>>,
         isolation_input: Option<IsolationGpuInput<'_>>,
+        wind_input: Option<WindGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
@@ -2039,6 +2060,38 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_wind = if render_site_pass {
+            if let Some(ref wi_in) = wind_input {
+                let c = &wi_in.report.config;
+                let rev: u64 = ((c.exposure as u64) << 4)
+                    ^ ((c.risk_category as u64) << 8)
+                    ^ ((c.enclosure as u64) << 12)
+                    ^ c.basic_wind_speed_ms.to_bits()
+                    ^ c.wind_azimuth_deg.to_bits().rotate_left(9)
+                    ^ c.damping_ratio.to_bits().rotate_left(17)
+                    ^ (u64::from(c.occupancy_residential) << 20)
+                    ^ ((wi_in.report.panels_3d.len() as u64) << 28)
+                    ^ ((wi_in.heading_deg.round() as u64) << 44)
+                    ^ u64::from(wi_in.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                if rev != self.cached_wind_hash {
+                    let mesh = build_rtc_wind_mesh(wi_in);
+                    self.last_wind_tris = mesh.indices.len() / 3;
+                    self.cached_wind_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_wind_hash != 0 {
+                self.cached_wind_hash = 0;
+                self.last_wind_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let pending_hazard_compute = if render_site_pass {
             if let Some(hc) = hazard_compute_input {
                 if hc.enabled {
@@ -2079,6 +2132,7 @@ impl WebGpuEarthState {
                 pending_eigenflow,
                 pending_extreme_events,
                 pending_isolation,
+                pending_wind,
                 pending_hazard_compute,
             },
         ));
@@ -2104,6 +2158,7 @@ impl WebGpuEarthState {
         let eigenflow_animated = eigenflow_input.as_ref().is_some_and(|e| e.visible);
         let extreme_events_animated = extreme_events_input.as_ref().is_some_and(|x| x.visible);
         let isolation_animated = isolation_input.as_ref().is_some_and(|i| i.visible);
+        let wind_animated = wind_input.as_ref().is_some_and(|w| w.visible);
         let frame_ms = if hazard_animated
             || compute_animated
             || subsurface_animated
@@ -2115,6 +2170,7 @@ impl WebGpuEarthState {
             || eigenflow_animated
             || extreme_events_animated
             || isolation_animated
+            || wind_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

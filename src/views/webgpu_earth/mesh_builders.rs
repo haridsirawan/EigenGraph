@@ -3110,3 +3110,92 @@ pub fn build_rtc_isolation_mesh(input: &IsolationGpuInput<'_>) -> GpuMeshPayload
     }
 }
 
+/// GPU input payload for Update `v0.8.4.2` Wind Aeroelasticity Facade Pressure Panels & Directional Flow Vectors (`material_kind = 15.0`).
+pub struct WindGpuInput<'a> {
+    pub report: &'a crate::core::wind_studio::WindStudioReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU facade cladding pressure panels (`Windward` cyan vs `Leeward/Sidewall` amber-crimson)
+/// and animated directional wind flow vector shafts (`material_kind = 15.0`, 0% raster).
+pub fn build_rtc_wind_mesh(input: &WindGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+    let rot_enu = |p: [f64; 3]| -> [f64; 3] {
+        [p[0] * cr - p[1] * sr, p[0] * sr + p[1] * cr, p[2]]
+    };
+
+    let rep = input.report;
+    let max_p = rep
+        .panels_3d
+        .iter()
+        .map(|p| p.pressure_pa.abs())
+        .fold(400.0_f64, f64::max);
+
+    let mut verts = Vec::with_capacity(rep.panels_3d.len() * 24 + rep.arrows_3d.len() * 32);
+    let mut idxs = Vec::with_capacity(rep.panels_3d.len() * 36 + rep.arrows_3d.len() * 48);
+
+    // 1. Extruded facade cladding pressure slabs slightly offset outward along face normal
+    for pan in &rep.panels_3d {
+        let ratio = (pan.pressure_pa.abs() / max_p).clamp(0.15, 1.0) as f32;
+        let col = if pan.is_windward {
+            [0.10_f32, 0.72 + 0.24 * ratio, 1.0, 0.34 + 0.22 * ratio]
+        } else if pan.face_label.contains("Leeward") {
+            [1.0_f32, 0.32 + 0.16 * (1.0 - ratio), 0.22, 0.34 + 0.22 * ratio]
+        } else {
+            [1.0_f32, 0.68, 0.16, 0.28 + 0.18 * ratio]
+        };
+
+        let nx = pan.normal_xy[0];
+        let ny = pan.normal_xy[1];
+        let tx = -ny;
+        let ty = nx;
+        let offset = 0.22 + (ratio as f64) * 0.24;
+        let cx = pan.center_enu_m[0] + nx * offset;
+        let cy = pan.center_enu_m[1] + ny * offset;
+        let hw = pan.width_m * 0.44;
+        let th = 0.14;
+
+        let fp = [
+            rot_xy(cx - tx * hw - nx * th, cy - ty * hw - ny * th),
+            rot_xy(cx + tx * hw - nx * th, cy + ty * hw - ny * th),
+            rot_xy(cx + tx * hw + nx * th, cy + ty * hw + ny * th),
+            rot_xy(cx - tx * hw + nx * th, cy - ty * hw + ny * th),
+        ];
+        let z0 = (pan.center_enu_m[2] - pan.height_m * 0.45) as f32;
+        let z1 = (pan.center_enu_m[2] + pan.height_m * 0.45) as f32;
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z1, col, 15.0);
+    }
+
+    // 2. Directional inflow streamlines & leeward suction wake arrows
+    for arr in &rep.arrows_3d {
+        let p0 = rot_enu(arr.p0_enu_m);
+        let p1 = rot_enu(arr.p1_enu_m);
+        let (col, sev) = if arr.is_suction {
+            ([1.0_f32, 0.44, 0.18, 0.88], 0.75_f32)
+        } else {
+            ([0.16_f32, 0.88, 1.0, 0.90], 0.55_f32)
+        };
+        push_animated_flow_strut_enu(&mut verts, &mut idxs, p0, p1, 0.24, 0.14, col, sev, 15.0);
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [p1[0] as f32, p1[1] as f32, p1[2] as f32],
+            0.34,
+            col,
+            sev,
+            15.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

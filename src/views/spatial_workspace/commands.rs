@@ -580,6 +580,32 @@ impl SpatialWorkspaceState {
                     self.open_isolation_drawer(0);
                     out.export_isolation_svg = true;
                 }
+                PlannedProposalAction::RunWind {
+                    speed_ms,
+                    exposure,
+                    azimuth_deg,
+                } => {
+                    if let Some(v) = speed_ms {
+                        universal_canvas.wind_studio_config.basic_wind_speed_ms = *v;
+                    }
+                    if let Some(exp) = exposure {
+                        universal_canvas.wind_studio_config.exposure = *exp;
+                    }
+                    if let Some(az) = azimuth_deg {
+                        universal_canvas.wind_studio_config.wind_azimuth_deg = *az;
+                    }
+                    universal_canvas.wind_overlay_visible = true;
+                    self.open_wind_drawer(0);
+                    out.run_wind_studio = true;
+                }
+                PlannedProposalAction::ToggleWind3d => {
+                    self.open_wind_drawer(0);
+                    out.toggle_wind_3d = true;
+                }
+                PlannedProposalAction::ExportWindAnnex => {
+                    self.open_wind_drawer(0);
+                    out.export_wind_svg = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -869,6 +895,19 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportIsolationAnnex => {
                                 PlannedProposalAction::ExportIsolationAnnex
                             }
+                            GeminiDirective::RunWind {
+                                speed_ms,
+                                exposure,
+                                azimuth_deg,
+                            } => PlannedProposalAction::RunWind {
+                                speed_ms: *speed_ms,
+                                exposure: *exposure,
+                                azimuth_deg: *azimuth_deg,
+                            },
+                            GeminiDirective::ToggleWind3d => PlannedProposalAction::ToggleWind3d,
+                            GeminiDirective::ExportWindAnnex => {
+                                PlannedProposalAction::ExportWindAnnex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -983,6 +1022,15 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ToggleIsolation3d => "ToggleIsolation3d".to_string(),
                             GeminiDirective::ExportIsolationAnnex => {
                                 "ExportIsolationAnnex(S-106)".to_string()
+                            }
+                            GeminiDirective::RunWind {
+                                speed_ms,
+                                exposure,
+                                azimuth_deg,
+                            } => format!("RunWind({speed_ms:?}/{exposure:?}/{azimuth_deg:?})"),
+                            GeminiDirective::ToggleWind3d => "ToggleWind3d".to_string(),
+                            GeminiDirective::ExportWindAnnex => {
+                                "ExportWindAnnex(S-107)".to_string()
                             }
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -2708,6 +2756,55 @@ impl SpatialWorkspaceState {
                 }
                 "/isolation-svg" => {
                     actions.export_isolation_svg = true;
+                }
+                "/wind-studio" | "/aero" | "/cladding" => {
+                    self.open_wind_drawer(0);
+                    actions.run_wind_studio = true;
+                }
+                "/wind-dir" => {
+                    let nums: Vec<f64> = arg
+                        .split_whitespace()
+                        .filter_map(|t| t.trim_end_matches("deg").parse::<f64>().ok())
+                        .collect();
+                    if let Some(&v) = nums.first() {
+                        if nums.len() >= 2 {
+                            universal_canvas.wind_studio_config.basic_wind_speed_ms =
+                                v.clamp(20.0, 90.0);
+                            universal_canvas.wind_studio_config.wind_azimuth_deg =
+                                nums[1].rem_euclid(360.0);
+                        } else if v > 90.0 {
+                            universal_canvas.wind_studio_config.wind_azimuth_deg =
+                                v.rem_euclid(360.0);
+                        } else {
+                            universal_canvas.wind_studio_config.basic_wind_speed_ms =
+                                v.clamp(20.0, 90.0);
+                        }
+                    }
+                    self.open_wind_drawer(0);
+                    actions.run_wind_studio = true;
+                }
+                "/wind-exposure" => {
+                    let lo = arg.to_ascii_lowercase();
+                    let exp = if lo.contains('b') {
+                        crate::core::wind::ExposureCategory::ExposureB
+                    } else if lo.contains('d') {
+                        crate::core::wind::ExposureCategory::ExposureD
+                    } else {
+                        crate::core::wind::ExposureCategory::ExposureC
+                    };
+                    universal_canvas.wind_studio_config.exposure = exp;
+                    self.open_wind_drawer(0);
+                    actions.run_wind_studio = true;
+                }
+                "/wind-3d" => {
+                    self.open_wind_drawer(0);
+                    actions.toggle_wind_3d = true;
+                }
+                "/wind-ifcx" => {
+                    actions.export_wind_ifcx = true;
+                }
+                "/wind-svg" => {
+                    actions.export_wind_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

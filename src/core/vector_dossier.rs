@@ -2471,6 +2471,336 @@ pub fn build_seismic_isolation_annex_svg(
     }
 }
 
+/// Pure-Vector Wind Aeroelasticity, Facade Pressure & ISO 10137 Comfort Annex SVG (`S-107`).
+pub fn build_wind_aero_annex_svg(
+    project_name: &str,
+    studio: &crate::core::wind_studio::WindStudioReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(24_000);
+    let seal_token = "__EIGENGRAPH_WIND_AERO_S107_SHA256__";
+    let r = &studio.report;
+    let c = &r.comfort_audit;
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH WIND AEROELASTICITY, FACADE PRESSURE &amp; ISO 10137 COMFORT ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • ASCE 7-22 Ch. 26-30 / SNI 1727:2020 • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: Velocity Pressure qz(z) & Windward/Leeward Pressure Profile (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. VELOCITY PRESSURE qz(z) &amp; MWFRS FACADE PRESSURE PROFILE",
+        &format!(
+            "V={:.1} m/s ({:.0} deg) • qh={:.0} Pa • Gf={:.3} • H={:.1} m",
+            r.basic_wind_speed_v_ms,
+            studio.config.wind_azimuth_deg,
+            r.qh_mean_roof_velocity_pressure_pa,
+            c.gust_effect_factor_g,
+            r.building_height_h_m
+        ),
+    );
+    let gx0 = p1x + 76.0;
+    let gy0 = p1y + 56.0;
+    let gw = p1w - 116.0;
+    let gh = p1h - 122.0;
+    let max_p = r
+        .story_levels
+        .iter()
+        .map(|l| l.net_mwfrs_pressure_pa.max(l.qz_velocity_pressure_pa))
+        .fold(200.0_f64, f64::max)
+        * 1.15;
+    let max_z = r.building_height_h_m.max(3.6);
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{gx0:.1}" y="{gy0:.1}" width="{gw:.1}" height="{gh:.1}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>"##,
+    );
+    let qz_pts: String = r
+        .story_levels
+        .iter()
+        .map(|l| {
+            let x = gx0 + (l.qz_velocity_pressure_pa / max_p).clamp(0.0, 1.0) * gw;
+            let y = gy0 + gh - (l.height_z_m / max_z).clamp(0.0, 1.0) * gh;
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let net_pts: String = r
+        .story_levels
+        .iter()
+        .map(|l| {
+            let x = gx0 + (l.net_mwfrs_pressure_pa / max_p).clamp(0.0, 1.0) * gw;
+            let y = gy0 + gh - (l.height_z_m / max_z).clamp(0.0, 1.0) * gh;
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let ww_pts: String = r
+        .story_levels
+        .iter()
+        .map(|l| {
+            let x = gx0 + (l.windward_pressure_pa / max_p).clamp(0.0, 1.0) * gw;
+            let y = gy0 + gh - (l.height_z_m / max_z).clamp(0.0, 1.0) * gh;
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let _ = writeln!(
+        svg,
+        r##"<polyline fill="none" stroke="#0284c7" stroke-width="2.6" points="{qz_pts}"/>
+<polyline fill="none" stroke="#059669" stroke-width="2.2" stroke-dasharray="6,3" points="{ww_pts}"/>
+<polyline fill="none" stroke="#d97706" stroke-width="2.6" points="{net_pts}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#334155">Blue: Velocity Pressure qz(z) | Dashed Green: Windward +p | Amber: Net MWFRS (max {:.0} Pa)</text>"##,
+        gx0 + 4.0,
+        gy0 + gh + 24.0,
+        max_p / 1.15,
+    );
+
+    // Panel 2: ISO 10137 Human Comfort & Lateral Envelope (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. ISO 10137 OCCUPANT COMFORT AUDIT &amp; LATERAL GOVERNING ENVELOPE",
+        &format!(
+            "f1={:.3} Hz (T1={:.2} s) • a_res={:.2} mg vs {:.1} mg limit • {}",
+            c.fundamental_frequency_hz,
+            c.fundamental_period_t1_s,
+            c.resultant_acceleration_mg,
+            studio.comfort_limit_mg,
+            if r.wind_governs_lateral_system {
+                "WIND GOVERNS"
+            } else {
+                "SEISMIC GOVERNS"
+            }
+        ),
+    );
+    let cx0 = p2x + 76.0;
+    let cy0 = p2y + 56.0;
+    let cw = p2w - 116.0;
+    let ch = 175.0;
+    let max_acc_plot = studio.comfort_limit_mg.max(c.resultant_acceleration_mg).max(25.0) * 1.25;
+    let y_res_lim = cy0 + ch - (15.0 / max_acc_plot).clamp(0.0, 1.0) * ch;
+    let y_off_lim = cy0 + ch - (20.0 / max_acc_plot).clamp(0.0, 1.0) * ch;
+    let px_f = cx0 + ((c.fundamental_frequency_hz.clamp(0.08, 2.5) - 0.08) / 2.42) * cw;
+    let py_a = cy0 + ch - (c.resultant_acceleration_mg / max_acc_plot).clamp(0.0, 1.0) * ch;
+    let pt_col = if studio.comfort_acceptable { "#059669" } else { "#dc2626" };
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{cx0:.1}" y="{cy0:.1}" width="{cw:.1}" height="{ch:.1}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>
+<line x1="{cx0:.1}" y1="{y_off_lim:.1}" x2="{:.1}" y2="{y_off_lim:.1}" stroke="#d97706" stroke-width="1.6" stroke-dasharray="6,3"/>
+<line x1="{cx0:.1}" y1="{y_res_lim:.1}" x2="{:.1}" y2="{y_res_lim:.1}" stroke="#dc2626" stroke-width="1.4" stroke-dasharray="4,3"/>
+<circle cx="{px_f:.1}" cy="{py_a:.1}" r="6.5" fill="{pt_col}" stroke="#ffffff" stroke-width="1.5"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#334155">Operating Point: f1={:.3} Hz, a_along={:.2} mg, a_cross={:.2} mg, a_res={:.2} mg (Limits: 15 Res / 20 Off mg)</text>"##,
+        cx0 + cw,
+        cx0 + cw,
+        cx0 + 6.0,
+        cy0 + ch + 18.0,
+        c.fundamental_frequency_hz,
+        c.peak_acceleration_along_wind_mg,
+        c.peak_acceleration_cross_wind_mg,
+        c.resultant_acceleration_mg,
+    );
+
+    let env_cards = [
+        ("Wind MWFRS Base Shear V_w / Overturning M", format!("{:.0} kN / {:.0} kNm", r.total_base_shear_wind_kn, r.total_overturning_moment_wind_knm), "#0284c7"),
+        ("Reference Seismic Base Shear V_s", format!("{:.0} kN ({})", r.seismic_base_shear_ref_kn, if r.wind_governs_lateral_system { "WIND GOVERNS" } else { "SEISMIC GOVERNS" }), if r.wind_governs_lateral_system { "#d97706" } else { "#059669" }),
+        ("ISO 10137 Comfort Verdict", format!("{:.2} / {:.1} mg ({})", c.resultant_acceleration_mg, studio.comfort_limit_mg, if studio.comfort_acceptable { "COMPLIANT" } else { "REVIEW" }), pt_col),
+    ];
+    for (idx, (lbl, val, col)) in env_cards.iter().enumerate() {
+        let ry = p2y + 272.0 + (idx as f64) * 44.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="36" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#334155">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" font-family="monospace" text-anchor="end" fill="{col}">{val}</text>"##,
+            p2x + 16.0,
+            p2w - 32.0,
+            p2x + 26.0,
+            ry + 22.0,
+            p2x + p2w - 26.0,
+            ry + 22.0,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="96" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#1e3a8a">ARCHITECTURAL &amp; GOVERNANCE SEAL</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p2x + 16.0,
+        p2y + 408.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 428.0,
+        p2x + 26.0,
+        p2y + 448.0,
+        escape_xml(&truncate_clean(&studio.summary_verdict, 86)),
+        p2x + 26.0,
+        p2y + 470.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live Wind Aeroelasticity Studio".to_string()),
+        ),
+        p2x + 26.0,
+        p2y + 492.0,
+    );
+
+    // Panel 3: Directional Plan Facade Pressure Map (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. PLAN FACADE CLADDING PRESSURE MAP &amp; WIND AZIMUTH VECTOR",
+        &format!(
+            "Exposure: {} • Enclosure: {}",
+            escape_xml(&truncate_clean(r.exposure_category.label(), 32)),
+            escape_xml(&truncate_clean(r.enclosure.label(), 28))
+        ),
+    );
+    let plan_cx = p3x + 260.0;
+    let plan_cy = p3y + 270.0;
+    let b_w = 180.0;
+    let b_d = 140.0;
+    let az_rad = studio.config.wind_azimuth_deg.to_radians();
+    let fdx = -az_rad.sin();
+    let fdy = az_rad.cos(); // screen Y is down (+Y down vs +Y North up)
+    let arr_x0 = plan_cx - fdx * 165.0;
+    let arr_y0 = plan_cy - fdy * 165.0;
+    let arr_x1 = plan_cx - fdx * 105.0;
+    let arr_y1 = plan_cy - fdy * 105.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{b_w:.1}" height="{b_d:.1}" fill="#e2e8f0" stroke="#0f172a" stroke-width="2.0"/>
+<line x1="{arr_x0:.1}" y1="{arr_y0:.1}" x2="{arr_x1:.1}" y2="{arr_y1:.1}" stroke="#0284c7" stroke-width="4.2"/>
+<circle cx="{arr_x1:.1}" cy="{arr_y1:.1}" r="5.5" fill="#0284c7"/>
+<text x="{plan_cx:.1}" y="{:.1}" font-size="10" font-weight="bold" text-anchor="middle" fill="#0f172a">PLAN ({:.1}m x {:.1}m)</text>
+<text x="{plan_cx:.1}" y="{:.1}" font-size="9" font-family="monospace" text-anchor="middle" fill="#0369a1">Azimuth {:.0} deg (Blowing From)</text>"##,
+        plan_cx - b_w * 0.5,
+        plan_cy - b_d * 0.5,
+        plan_cy - 4.0,
+        studio.footprint_size_xy[0],
+        studio.footprint_size_xy[1],
+        plan_cy + 14.0,
+        studio.config.wind_azimuth_deg,
+    );
+    // Show roof-level panel pressures by face on right half of Panel 3
+    let top_story = r.story_levels.last().map(|l| l.story_num).unwrap_or(1);
+    let roof_panels: Vec<_> = studio
+        .panels_3d
+        .iter()
+        .filter(|p| p.story_num == top_story)
+        .collect();
+    for (idx, pan) in roof_panels.iter().take(4).enumerate() {
+        let rx = p3x + 470.0;
+        let ry = p3y + 78.0 + (idx as f64) * 96.0;
+        let badge = if pan.is_windward { "#0284c7" } else { "#d97706" };
+        let kind = if pan.is_windward { "+POS" } else { "-SUCT" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{rx:.1}" y="{ry:.1}" width="268" height="78" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-family="monospace" fill="{badge}">{:.1} Pa ({kind})</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">Panel {:.1}m x {:.1}m @ z={:.1}m</text>"##,
+            rx + 12.0,
+            ry + 22.0,
+            escape_xml(&truncate_clean(&pan.face_label, 28)),
+            rx + 12.0,
+            ry + 44.0,
+            pan.pressure_pa,
+            rx + 12.0,
+            ry + 64.0,
+            pan.width_m,
+            pan.height_m,
+            pan.center_enu_m[2],
+        );
+    }
+
+    // Panel 4: Story Wind Force, Pressure & Shear Schedule (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. STORY WIND PRESSURE, FORCE &amp; CUMULATIVE SHEAR SCHEDULE",
+        &format!(
+            "{} Stories • Total Base Shear Vw={:.1} kN • OTM={:.0} kNm",
+            r.story_levels.len(),
+            r.total_base_shear_wind_kn,
+            r.total_overturning_moment_wind_knm
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#0369a1">STORY    z(m)    Kz      qz(Pa)   WW(Pa)   LW(Pa)   NET(Pa)   Fx(kN)    Vx(kN)</text>"##,
+        p4x + 18.0,
+        p4y + 48.0,
+    );
+    for (idx, lvl) in r.story_levels.iter().take(9).enumerate() {
+        let ry = p4y + 58.0 + (idx as f64) * 47.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="38" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#0f172a">L{:<3}   {:>5.1}   {:.3}   {:>6.1}   {:>6.1}   {:>6.1}    {:>6.1}   {:>6.1}   {:>7.1}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 20.0,
+            ry + 23.0,
+            lvl.story_num,
+            lvl.height_z_m,
+            lvl.kz_exposure_coef,
+            lvl.qz_velocity_pressure_pa,
+            lvl.windward_pressure_pa,
+            lvl.leeward_pressure_pa,
+            lvl.net_mwfrs_pressure_pa,
+            lvl.tributary_force_fx_kn,
+            lvl.cumulative_shear_vx_kn,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_WIND_AERO_S107");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = studio.panels_3d.len() + studio.arrows_3d.len();
+    let summary = format!(
+        "Exported Wind Aeroelasticity & ISO 10137 Comfort Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2784,5 +3114,24 @@ mod tests {
         assert!(!s106.svg_content.contains("<image"));
         assert!(!s106.svg_content.contains("ARI"));
         assert_eq!(s106.sha256_seal.len(), 64);
+
+        let wind_rep = crate::core::wind_studio::evaluate_wind_studio(
+            &field_proj,
+            None,
+            &crate::core::wind_studio::WindStudioConfig::default(),
+        );
+        let s107 = build_wind_aero_annex_svg(
+            &field_proj.project_name,
+            &wind_rep,
+            "S-107",
+            Some("wind842seal"),
+        );
+        assert!(s107.svg_content.starts_with("<svg"));
+        assert!(s107.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s107.svg_content.contains("SHEET S-107"));
+        assert!(s107.svg_content.contains("<polyline"));
+        assert!(!s107.svg_content.contains("<image"));
+        assert!(!s107.svg_content.contains("ARI"));
+        assert_eq!(s107.sha256_seal.len(), 64);
     }
 }

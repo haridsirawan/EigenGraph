@@ -143,6 +143,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.4.1 (1/10 -> v0.8.5): Base Isolation & Damper Studio Drawer
     pub isolation_drawer_open: bool,
     pub isolation_drawer_tab: usize,
+    // Update v0.8.4.2 (2/10 -> v0.8.5): Wind Aeroelasticity & ISO 10137 Comfort Drawer
+    pub wind_drawer_open: bool,
+    pub wind_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -251,6 +254,8 @@ impl Default for SpatialWorkspaceState {
             extreme_events_drawer_tab: 0,
             isolation_drawer_open: false,
             isolation_drawer_tab: 0,
+            wind_drawer_open: false,
+            wind_drawer_tab: 0,
         }
     }
 }
@@ -282,6 +287,7 @@ impl SpatialWorkspaceState {
             || self.eigenflow_drawer_open
             || self.extreme_events_drawer_open
             || self.isolation_drawer_open
+            || self.wind_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -307,6 +313,7 @@ impl SpatialWorkspaceState {
         self.eigenflow_drawer_open = false;
         self.extreme_events_drawer_open = false;
         self.isolation_drawer_open = false;
+        self.wind_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -391,6 +398,11 @@ impl SpatialWorkspaceState {
         } else {
             self.isolation_drawer_open = !self.isolation_drawer_open;
         }
+        if drawer != "wind_studio" {
+            self.wind_drawer_open = false;
+        } else {
+            self.wind_drawer_open = !self.wind_drawer_open;
+        }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
@@ -447,6 +459,14 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.isolation_drawer_tab = tab.min(1);
         self.isolation_drawer_open = true;
+    }
+
+    /// Idempotently opens the Update `v0.8.4.2` Wind Aeroelasticity & ISO 10137 Comfort Studio drawer
+    /// (`0` = Wind Profile & Cladding, `1` = ISO 10137 Comfort & Governing Envelope).
+    pub fn open_wind_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.wind_drawer_tab = tab.min(1);
+        self.wind_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

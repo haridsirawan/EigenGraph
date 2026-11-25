@@ -2861,6 +2861,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.wind_drawer_open {
+                        self.render_wind_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -5408,6 +5420,20 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_isolation_drawer(0);
                                                         actions.run_isolation_studio = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Wind),
+                                                        "Wind / Aero",
+                                                        self.wind_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Open Wind Aeroelasticity, Facade Pressure & ISO 10137 Comfort Studio (+ Sheet S-107)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_wind_drawer(0);
+                                                        actions.run_wind_studio = true;
                                                     }
                                                 },
                                             );
