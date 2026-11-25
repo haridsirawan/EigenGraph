@@ -5890,3 +5890,125 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn phase84_9_construction_lca_studio_drawer_responsive_and_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = crate::views::build::BuildView::default();
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_lca = spatial.execute_spatial_input(
+            "/sequence 120 dri geopolymer",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_lca.run_construction_lca_studio);
+        assert_eq!(canvas.construction_lca_config.active_day, 120);
+        assert_eq!(
+            canvas.construction_lca_config.steel_route,
+            crate::core::construction_lca_studio::SteelSmeltingRoute::GreenHydrogenDri
+        );
+        assert_eq!(
+            canvas.construction_lca_config.concrete_mix,
+            crate::core::construction_lca_studio::ConcreteMixGrade::GeopolymerGreen
+        );
+        assert!(spatial.construction_lca_drawer_open);
+
+        assert!(spatial
+            .execute_spatial_input(
+                "/4d-3d",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .toggle_construction_3d);
+        assert!(spatial
+            .execute_spatial_input(
+                "/4d-ifcx",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_construction_ifcx);
+        assert!(spatial
+            .execute_spatial_input(
+                "/4d-svg",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_construction_svg);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "4D/5D/6D update [[RUN_CONSTRUCTION_LCA:DAY120:DRI:GEOPOLYMER]] [[TOGGLE_CONSTRUCTION_3D]] [[EXPORT_CONSTRUCTION_ANNEX]]",
+        );
+        assert_eq!(clean, "4D/5D/6D update");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunConstructionLca {
+                    active_day: Some(120),
+                    steel_route: Some(
+                        crate::core::construction_lca_studio::SteelSmeltingRoute::GreenHydrogenDri
+                    ),
+                    concrete_mix: Some(
+                        crate::core::construction_lca_studio::ConcreteMixGrade::GeopolymerGreen
+                    ),
+                },
+                GeminiDirective::ToggleConstruction3d,
+                GeminiDirective::ExportConstructionAnnex,
+            ]
+        );
+
+        let _ = canvas.run_construction_lca_studio(&build.bim_bus.project);
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_construction_lca_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 84.9 4D/5D/6D Construction LCA Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

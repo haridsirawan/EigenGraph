@@ -7,7 +7,15 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.5 (8/10)]
+## [Unreleased — Next: v0.8.5 (9/10)]
+
+### Update 9/10 (`v0.8.4.9`) — 4D/5D/6D Construction Sequence, Cost S-Curve & Embodied Carbon LCA 3D Studio (`CPM` / `AHSP` / `EN 15978`) + Sheet `S-114`
+- **BIM-Coupled 4D/5D/6D Construction & LCA Engine (`src/core/construction_lca_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_construction_lca_studio`](src/core/construction_lca_studio.rs) coupling `BimProject` levels/footprint/quantities and site rain delay + remote logistics multipliers into [`ScheduleEngine::compute_cpm`](src/core/schedule.rs), [`ScheduleEngine::generate_scurve`](src/core/schedule.rs), [`CostEngine`](src/core/cost.rs), and [`CarbonSteelRoute`](src/core/carbon.rs), evaluating EN 15978 A1–A5 embodied carbon (`BF-BOF` / `EAF` / `DRI-H2` + `OPC` / `GGBS 30%` / `Geopolymer`), GBCI Greenship / LEED tiers, 3D ENU story erection sequence prisms & slewing tower crane, `.eigen.json` persistence (`UnifiedWorkspaceArchive::construction_lca_config`), and non-destructive `eigengraph::analysis::construction_4d5d6d` IFCX overlays (`IfcxStage::compose_with_construction_lca_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Story Sequence & Slewing Crane + Sheet `S-114` (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added [`build_rtc_construction_lca_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`ConstructionLcaGpuInput`, `material_kind = 22.0`, WGSL `kind >= 21.5` 4D erection scan & Fresnel rim glow shader, 0% raster), dedicated `construction_lca` GPU slot inside `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_construction_lca_fallback`), and archival A3 landscape Sheet `S-114` Pure-Vector Annex SVG (`build_construction_lca_annex_svg`, 0 `<image>` tags).
+- **Width-First Dynamic Island `4D/5D/6D Studio`, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the 2-tab width-first Dynamic Island drawer (`4D Sequence & 5D S-Curve` + `6D Carbon LCA & QTO`), `4D/5D/6D` toolbar pill, `/4d-studio`, `/sequence`, `/scurve`, `/lca`, `/4d-3d`, `/4d-ifcx`, `/4d-svg` slash commands, and `[[RUN_CONSTRUCTION_LCA:...]]` / `[[TOGGLE_CONSTRUCTION_3D]]` / `[[EXPORT_CONSTRUCTION_ANNEX]]` Gemini directives.
 
 ### Update 8/10 (`v0.8.4.8`) — Deep Foundation Pile Group, Winkler Springs & Punching Shear 3D Studio (`ACI 318-19 §22.6` / `SNI 8460:2017`) + Sheet `S-113`
 - **BIM-Coupled Deep Foundation & SSI Engine (`src/core/foundation_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

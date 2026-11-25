@@ -3744,3 +3744,93 @@ pub fn build_rtc_foundation_mesh(input: &FoundationGpuInput<'_>) -> GpuMeshPaylo
     }
 }
 
+/// GPU input payload for Update `v0.8.4.9` 4D/5D/6D Construction Sequence & Slewing Crane (`material_kind = 22.0`).
+pub struct ConstructionLcaGpuInput<'a> {
+    pub report: &'a crate::core::construction_lca_studio::ConstructionLcaStudioReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU 4D story progress prisms & slewing tower crane mast/jib
+/// (`material_kind = 22.0`, 0% raster).
+pub fn build_rtc_construction_lca_mesh(input: &ConstructionLcaGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+
+    let rep = input.report;
+    let mut verts = Vec::with_capacity(rep.story_zones_3d.len() * 32 + 64);
+    let mut idxs = Vec::with_capacity(rep.story_zones_3d.len() * 48 + 96);
+
+    for z in &rep.story_zones_3d {
+        let ratio = (z.completion_pct / 100.0).clamp(0.18, 1.0);
+        let z0 = z.min_enu_m[2] as f32;
+        let z1 = z0 + ((z.max_enu_m[2] - z.min_enu_m[2]) * ratio) as f32;
+        let col = if z.completion_pct >= 99.5 {
+            [0.14_f32, 0.84, 0.62, 0.42]
+        } else if z.completion_pct > 0.5 {
+            [1.0_f32, 0.68, 0.14, 0.56]
+        } else {
+            [0.22_f32, 0.64, 1.0, 0.22]
+        };
+        let fp = [
+            rot_xy(z.min_enu_m[0], z.min_enu_m[1]),
+            rot_xy(z.max_enu_m[0], z.min_enu_m[1]),
+            rot_xy(z.max_enu_m[0], z.max_enu_m[1]),
+            rot_xy(z.min_enu_m[0], z.max_enu_m[1]),
+        ];
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z1, col, 22.0);
+    }
+
+    // Tower crane mast & slewing jib
+    let c = &rep.crane_3d;
+    let bxy = rot_xy(c.base_enu_m[0], c.base_enu_m[1]);
+    let mast_top = [bxy[0], bxy[1], c.base_enu_m[2] + c.mast_height_m];
+    let jib_ang = (c.slew_deg + input.heading_deg).to_radians();
+    let jib_tip = [
+        bxy[0] + c.jib_length_m * jib_ang.cos(),
+        bxy[1] + c.jib_length_m * jib_ang.sin(),
+        mast_top[2],
+    ];
+    let crane_col = [1.0_f32, 0.82, 0.12, 0.94];
+    push_animated_flow_strut_enu(
+        &mut verts,
+        &mut idxs,
+        [bxy[0], bxy[1], c.base_enu_m[2]],
+        mast_top,
+        0.9,
+        0.9,
+        crane_col,
+        0.65,
+        22.0,
+    );
+    push_animated_flow_strut_enu(
+        &mut verts,
+        &mut idxs,
+        mast_top,
+        jib_tip,
+        0.7,
+        0.7,
+        crane_col,
+        0.80,
+        22.0,
+    );
+    push_octahedron_beacon_enu(
+        &mut verts,
+        &mut idxs,
+        [jib_tip[0] as f32, jib_tip[1] as f32, (jib_tip[2] - 2.2) as f32],
+        0.55,
+        [1.0_f32, 0.42, 0.16, 0.96],
+        0.90,
+        22.0,
+    );
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

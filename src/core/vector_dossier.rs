@@ -4658,6 +4658,291 @@ pub fn build_deep_foundation_annex_svg(
     }
 }
 
+/// Pure-Vector 4D CPM Sequence, 5D Cost S-Curve & 6D EN 15978 Embodied Carbon LCA Annex SVG (`S-114`).
+pub fn build_construction_lca_annex_svg(
+    project_name: &str,
+    studio: &crate::core::construction_lca_studio::ConstructionLcaStudioReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(28_000);
+    let seal_token = "__EIGENGRAPH_CONSTRUCTION_S114_SHA256__";
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH 4D CPM SEQUENCE, 5D COST S-CURVE &amp; 6D CARBON LCA ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • CPM 4D / AHSP 5D / EN 15978 6D LCA • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: 4D CPM Gantt Schedule & Critical Path (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. 4D CPM GANTT SCHEDULE &amp; CRITICAL PATH",
+        &format!(
+            "Active Day {}/{} ({:.1}% Complete) • {} Critical Path Tasks",
+            studio.config.active_day,
+            studio.total_duration_days,
+            studio.physical_progress_pct,
+            studio.critical_path_count,
+        ),
+    );
+    let gx0 = p1x + 260.0;
+    let gw = p1w - 284.0;
+    let max_d = (studio.total_duration_days as f64).max(1.0);
+    let cur_x = gx0 + ((studio.config.active_day as f64) / max_d).clamp(0.0, 1.0) * gw;
+    for (idx, a) in studio.activities.iter().take(7).enumerate() {
+        let ry = p1y + 62.0 + (idx as f64) * 58.0;
+        let bx = gx0 + ((a.early_start as f64) / max_d) * gw;
+        let bw = (((a.duration_days as f64) / max_d) * gw).max(8.0);
+        let col = if a.is_critical { "#dc2626" } else { "#0284c7" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="46" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.0" font-family="monospace" fill="#475569">D{}-D{} (TF={}) [{}]</text>
+<rect x="{gx0:.1}" y="{:.1}" width="{gw:.1}" height="14" rx="3" fill="#f1f5f9"/>
+<rect x="{bx:.1}" y="{:.1}" width="{bw:.1}" height="14" rx="3" fill="{col}"/>"##,
+            p1x + 14.0,
+            p1w - 28.0,
+            p1x + 22.0,
+            ry + 19.0,
+            escape_xml(&truncate_clean(&a.name, 30)),
+            p1x + 22.0,
+            ry + 36.0,
+            a.early_start,
+            a.early_finish,
+            a.total_float,
+            escape_xml(&a.status),
+            ry + 16.0,
+            ry + 16.0,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<line x1="{cur_x:.1}" y1="{:.1}" x2="{cur_x:.1}" y2="{:.1}" stroke="#059669" stroke-width="2.0" stroke-dasharray="5,3"/>
+<text x="{cur_x:.1}" y="{:.1}" font-size="8.2" font-weight="bold" text-anchor="middle" fill="#047857">Day {}</text>"##,
+        p1y + 56.0,
+        p1y + 476.0,
+        p1y + 494.0,
+        studio.config.active_day,
+    );
+
+    // Panel 2: 5D Cumulative Cost S-Curve (AHSP) & Governance Seal (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. 5D CUMULATIVE COST S-CURVE (AHSP) &amp; GOVERNANCE SEAL",
+        &format!(
+            "Total Budget: {} • Earned: IDR {:.0}M",
+            escape_xml(&studio.total_budget_label),
+            studio.spent_to_date_idr / 1e6,
+        ),
+    );
+    let sx = p2x + 70.0;
+    let sy = p2y + 68.0;
+    let sw = p2w - 104.0;
+    let sh = 276.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{sx:.1}" y="{sy:.1}" width="{sw:.1}" height="{sh:.1}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>"##
+    );
+    let max_w = (studio.scurve.len() as f64).max(1.0);
+    let pts: String = std::iter::once(format!("{sx:.1},{:.1}", sy + sh))
+        .chain(studio.scurve.iter().map(|pt| {
+            let px = sx + ((pt.week_number as f64) / max_w) * sw;
+            let py = sy + (1.0 - (pt.cumulative_planned_pct / 100.0).clamp(0.0, 1.0)) * sh;
+            format!("{px:.1},{py:.1}")
+        }))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let _ = writeln!(
+        svg,
+        r##"<polyline fill="none" stroke="#0284c7" stroke-width="2.6" points="{pts}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#0369a1">AHSP 5D Planned S-Curve (0% -&gt; 100% Cumulative Cost IDR M)</text>"##,
+        sx,
+        sy + sh + 22.0,
+    );
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="96" rx="5" fill="#f0f9ff" stroke="#7dd3fc" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.6" font-weight="bold" fill="#0c4a6e">VERDICT: {}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.7" font-family="monospace" fill="#334155">SHA-256 SEAL: {seal_token}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-family="monospace" fill="#475569">{}</text>"##,
+        p2x + 16.0,
+        p2y + 398.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 422.0,
+        escape_xml(&truncate_clean(&studio.summary_verdict, 84)),
+        p2x + 26.0,
+        p2y + 448.0,
+        p2x + 26.0,
+        p2y + 474.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live 4D/5D/6D Construction & LCA Studio".to_string()),
+        ),
+    );
+
+    // Panel 3: 6D EN 15978 Embodied Carbon LCA Breakdown (A1-A5) (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. 6D EN 15978 EMBODIED CARBON LCA BREAKDOWN (A1-A5)",
+        &format!(
+            "Total={:.1} tCO2e vs Baseline {:.1} tCO2e (-{:.1}%) • {:.1} kgCO2e/m2",
+            studio.total_embodied_carbon_ton,
+            studio.baseline_carbon_ton,
+            studio.carbon_reduction_pct,
+            studio.carbon_intensity_kg_m2,
+        ),
+    );
+    let max_lca_w = 380.0;
+    for (idx, st) in studio.lca_stages.iter().enumerate() {
+        let ry = p3y + 68.0 + (idx as f64) * 86.0;
+        let bw = (st.percentage / 100.0).clamp(0.03, 1.0) * max_lca_w;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="70" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.5" font-weight="bold" fill="#0f172a">{} — {}</text>
+<rect x="{:.1}" y="{:.1}" width="{max_lca_w:.1}" height="18" rx="3" fill="#e2e8f0"/>
+<rect x="{:.1}" y="{:.1}" width="{bw:.1}" height="18" rx="3" fill="#10b981"/>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-weight="bold" font-family="monospace" text-anchor="end" fill="#0f172a">{:.1} tCO2e ({:.1}%)</text>"##,
+            p3x + 16.0,
+            p3w - 32.0,
+            p3x + 24.0,
+            ry + 25.0,
+            escape_xml(&st.stage_code),
+            escape_xml(&st.stage_name),
+            p3x + 24.0,
+            ry + 38.0,
+            p3x + 24.0,
+            ry + 38.0,
+            p3x + p3w - 26.0,
+            ry + 51.0,
+            st.emission_ton_co2e,
+            st.percentage,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="106" rx="5" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.6" font-weight="bold" fill="#065f46">Certification Tier: {}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#334155">Steel Route: {} ({:.2} kg/kg) • {:.1} ton</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#334155">Concrete Mix: {} ({:.0} kg/m3) • {:.0} m3 • GFA {:.0} m2</text>"##,
+        p3x + 16.0,
+        p3y + 344.0,
+        p3w - 32.0,
+        p3x + 26.0,
+        p3y + 372.0,
+        escape_xml(&studio.greenship_leed_tier),
+        p3x + 26.0,
+        p3y + 398.0,
+        escape_xml(studio.config.steel_route.label()),
+        studio.config.steel_route.emission_factor_kg_per_kg(),
+        studio.steel_tonnage,
+        p3x + 26.0,
+        p3y + 424.0,
+        escape_xml(studio.config.concrete_mix.label()),
+        studio.config.concrete_mix.emission_kg_per_m3(),
+        studio.concrete_m3,
+        studio.gfa_m2,
+    );
+
+    // Panel 4: Story-by-Story 4D/5D/6D Progress & QTO Audit Table (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. STORY-BY-STORY 4D/5D/6D PROGRESS &amp; QTO AUDIT TABLE",
+        &format!(
+            "{} Stories • Crane Jib={:.1}m @ {:.0} deg",
+            studio.story_zones_3d.len(),
+            studio.crane_3d.jib_length_m,
+            studio.crane_3d.slew_deg,
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#0369a1">STORY    WINDOW         PROG%     COST (IDR M)    CARBON (tCO2e)    STATUS</text>"##,
+        p4x + 18.0,
+        p4y + 48.0,
+    );
+    for (idx, z) in studio.story_zones_3d.iter().take(6).enumerate() {
+        let ry = p4y + 58.0 + (idx as f64) * 68.0;
+        let (hex, st) = if z.completion_pct >= 99.5 {
+            ("#059669", "DONE")
+        } else if z.completion_pct > 0.5 {
+            ("#d97706", "ACTIVE")
+        } else {
+            ("#0284c7", "PLAN")
+        };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="56" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#0f172a">{:<6} D{:<3}-D{:<3}     {:>5.1}%    {:>9.1}       {:>8.1}</text>
+<rect x="{:.1}" y="{:.1}" width="66" height="22" rx="4" fill="{hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 20.0,
+            ry + 32.0,
+            escape_xml(&z.story_id),
+            z.start_day,
+            z.finish_day,
+            z.completion_pct,
+            z.cost_idr_m,
+            z.carbon_ton_co2e,
+            p4x + p4w - 94.0,
+            ry + 17.0,
+            p4x + p4w - 61.0,
+            ry + 31.5,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_CONSTRUCTION_S114");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = studio.activities.len() + studio.scurve.len() + studio.story_zones_3d.len();
+    let summary = format!(
+        "Exported 4D/5D/6D Construction Sequence & Carbon LCA Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5105,5 +5390,24 @@ mod tests {
         assert!(!s113.svg_content.contains("<image"));
         assert!(!s113.svg_content.contains("ARI"));
         assert_eq!(s113.sha256_seal.len(), 64);
+
+        let lca_rep = crate::core::construction_lca_studio::evaluate_construction_lca_studio(
+            &field_proj,
+            None,
+            &crate::core::construction_lca_studio::ConstructionLcaConfig::default(),
+        );
+        let s114 = build_construction_lca_annex_svg(
+            &field_proj.project_name,
+            &lca_rep,
+            "S-114",
+            Some("lca849seal"),
+        );
+        assert!(s114.svg_content.starts_with("<svg"));
+        assert!(s114.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s114.svg_content.contains("SHEET S-114"));
+        assert!(s114.svg_content.contains("<polyline"));
+        assert!(!s114.svg_content.contains("<image"));
+        assert!(!s114.svg_content.contains("ARI"));
+        assert_eq!(s114.sha256_seal.len(), 64);
     }
 }

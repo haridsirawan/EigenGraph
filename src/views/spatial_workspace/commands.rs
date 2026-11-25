@@ -766,6 +766,32 @@ impl SpatialWorkspaceState {
                     self.open_foundation_drawer(0);
                     out.export_foundation_svg = true;
                 }
+                PlannedProposalAction::RunConstructionLca {
+                    active_day,
+                    steel_route,
+                    concrete_mix,
+                } => {
+                    if let Some(d) = active_day {
+                        universal_canvas.construction_lca_config.active_day = (*d).min(540);
+                    }
+                    if let Some(sr) = steel_route {
+                        universal_canvas.construction_lca_config.steel_route = *sr;
+                    }
+                    if let Some(cm) = concrete_mix {
+                        universal_canvas.construction_lca_config.concrete_mix = *cm;
+                    }
+                    universal_canvas.construction_lca_overlay_visible = true;
+                    self.open_construction_lca_drawer(0);
+                    out.run_construction_lca_studio = true;
+                }
+                PlannedProposalAction::ToggleConstruction3d => {
+                    self.open_construction_lca_drawer(0);
+                    out.toggle_construction_3d = true;
+                }
+                PlannedProposalAction::ExportConstructionAnnex => {
+                    self.open_construction_lca_drawer(0);
+                    out.export_construction_svg = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -1160,6 +1186,21 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportFoundationAnnex => {
                                 PlannedProposalAction::ExportFoundationAnnex
                             }
+                            GeminiDirective::RunConstructionLca {
+                                active_day,
+                                steel_route,
+                                concrete_mix,
+                            } => PlannedProposalAction::RunConstructionLca {
+                                active_day: *active_day,
+                                steel_route: *steel_route,
+                                concrete_mix: *concrete_mix,
+                            },
+                            GeminiDirective::ToggleConstruction3d => {
+                                PlannedProposalAction::ToggleConstruction3d
+                            }
+                            GeminiDirective::ExportConstructionAnnex => {
+                                PlannedProposalAction::ExportConstructionAnnex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1344,6 +1385,17 @@ impl SpatialWorkspaceState {
                             }
                             GeminiDirective::ExportFoundationAnnex => {
                                 "ExportFoundationAnnex(S-113)".to_string()
+                            }
+                            GeminiDirective::RunConstructionLca {
+                                active_day,
+                                steel_route,
+                                concrete_mix,
+                            } => format!("RunConstructionLca(D{active_day:?}/{steel_route:?}/{concrete_mix:?})"),
+                            GeminiDirective::ToggleConstruction3d => {
+                                "ToggleConstruction3d".to_string()
+                            }
+                            GeminiDirective::ExportConstructionAnnex => {
+                                "ExportConstructionAnnex(S-114)".to_string()
                             }
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -3345,6 +3397,48 @@ impl SpatialWorkspaceState {
                 }
                 "/foundation-svg" => {
                     actions.export_foundation_svg = true;
+                }
+                "/4d-studio" | "/sequence" | "/scurve" | "/lca" => {
+                    let lo = arg.to_ascii_lowercase();
+                    if lo.contains("dri") || lo.contains("h2") {
+                        universal_canvas.construction_lca_config.steel_route =
+                            crate::core::construction_lca_studio::SteelSmeltingRoute::GreenHydrogenDri;
+                    } else if lo.contains("eaf") {
+                        universal_canvas.construction_lca_config.steel_route =
+                            crate::core::construction_lca_studio::SteelSmeltingRoute::EafRecycled;
+                    } else if lo.contains("bof") {
+                        universal_canvas.construction_lca_config.steel_route =
+                            crate::core::construction_lca_studio::SteelSmeltingRoute::BfBofStandard;
+                    }
+                    if lo.contains("geo") {
+                        universal_canvas.construction_lca_config.concrete_mix =
+                            crate::core::construction_lca_studio::ConcreteMixGrade::GeopolymerGreen;
+                    } else if lo.contains("ggbs") {
+                        universal_canvas.construction_lca_config.concrete_mix =
+                            crate::core::construction_lca_studio::ConcreteMixGrade::Ggbs30LowCarbon;
+                    } else if lo.contains("opc") {
+                        universal_canvas.construction_lca_config.concrete_mix =
+                            crate::core::construction_lca_studio::ConcreteMixGrade::OpcStandard;
+                    }
+                    if let Some(day) = lo
+                        .split_whitespace()
+                        .filter_map(|t| t.trim_start_matches("day").parse::<usize>().ok())
+                        .next()
+                    {
+                        universal_canvas.construction_lca_config.active_day = day.min(540);
+                    }
+                    self.open_construction_lca_drawer(if cmd == "/lca" { 1 } else { 0 });
+                    actions.run_construction_lca_studio = true;
+                }
+                "/4d-3d" => {
+                    self.open_construction_lca_drawer(0);
+                    actions.toggle_construction_3d = true;
+                }
+                "/4d-ifcx" => {
+                    actions.export_construction_ifcx = true;
+                }
+                "/4d-svg" => {
+                    actions.export_construction_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

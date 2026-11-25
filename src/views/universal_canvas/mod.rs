@@ -216,6 +216,11 @@ pub struct UniversalCanvasState {
     pub foundation_overlay_visible: bool,
     pub foundation_studio_config: crate::core::foundation_studio::FoundationStudioConfig,
     pub last_foundation_report: Option<crate::core::foundation_studio::FoundationStudioReport>,
+    // Update v0.8.4.9 (9/10 -> v0.8.5): 4D/5D/6D Construction Sequence, Cost S-Curve & Embodied Carbon LCA
+    pub construction_lca_overlay_visible: bool,
+    pub construction_lca_config: crate::core::construction_lca_studio::ConstructionLcaConfig,
+    pub last_construction_lca_report:
+        Option<crate::core::construction_lca_studio::ConstructionLcaStudioReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -385,6 +390,9 @@ impl Default for UniversalCanvasState {
             foundation_overlay_visible: false,
             foundation_studio_config: crate::core::foundation_studio::FoundationStudioConfig::default(),
             last_foundation_report: None,
+            construction_lca_overlay_visible: false,
+            construction_lca_config: crate::core::construction_lca_studio::ConstructionLcaConfig::default(),
+            last_construction_lca_report: None,
         }
     }
 }
@@ -1122,6 +1130,21 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates 4D CPM Sequence, 5D AHSP Cost S-Curve & 6D EN 15978 Carbon LCA coupled to BIM & site.
+    pub fn run_construction_lca_studio(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::construction_lca_studio::ConstructionLcaStudioReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::construction_lca_studio::evaluate_construction_lca_studio(
+            bim_project,
+            Some(&site),
+            &self.construction_lca_config,
+        );
+        self.last_construction_lca_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1458,6 +1481,7 @@ impl UniversalCanvasState {
             composite_studio_config: self.composite_studio_config.clone(),
             reliability_studio_config: self.reliability_studio_config.clone(),
             foundation_studio_config: self.foundation_studio_config.clone(),
+            construction_lca_config: self.construction_lca_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1596,6 +1620,8 @@ impl UniversalCanvasState {
         self.last_reliability_report = None;
         self.foundation_studio_config = archive.foundation_studio_config;
         self.last_foundation_report = None;
+        self.construction_lca_config = archive.construction_lca_config;
+        self.last_construction_lca_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2274,6 +2300,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let construction_lca_gpu_input = if self.construction_lca_overlay_visible {
+                self.last_construction_lca_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::ConstructionLcaGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -2314,6 +2351,7 @@ impl UniversalCanvasState {
                 composite_gpu_input,
                 reliability_gpu_input,
                 foundation_gpu_input,
+                construction_lca_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2401,6 +2439,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.foundation_overlay_visible {
                 self.paint_cpu_foundation_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.construction_lca_overlay_visible {
+                self.paint_cpu_construction_lca_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

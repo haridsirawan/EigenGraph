@@ -2945,6 +2945,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.construction_lca_drawer_open {
+                        self.render_construction_lca_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -5590,6 +5602,20 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_foundation_drawer(0);
                                                         actions.run_foundation_studio = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Clock),
+                                                        "4D/5D/6D",
+                                                        self.construction_lca_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Open 4D CPM Sequence, 5D Cost S-Curve & 6D Carbon LCA Studio (+ Sheet S-114)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_construction_lca_drawer(0);
+                                                        actions.run_construction_lca_studio = true;
                                                     }
                                                 },
                                             );

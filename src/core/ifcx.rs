@@ -75,6 +75,7 @@ pub mod ns {
     pub const EG_COMPOSITE_DECK: &str = "eigengraph::analysis::composite_deck";
     pub const EG_RELIABILITY_FORM: &str = "eigengraph::analysis::reliability_form";
     pub const EG_DEEP_FOUNDATION: &str = "eigengraph::analysis::deep_foundation";
+    pub const EG_CONSTRUCTION_4D5D6D: &str = "eigengraph::analysis::construction_4d5d6d";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
@@ -600,6 +601,10 @@ impl IfcxDocument {
         schemas.insert(
             ns::EG_DEEP_FOUNDATION.to_string(),
             json!({ "value": { "dataType": "Object", "spec": "EigenGraph Deep Foundation Pile Group, 6-DOF Winkler Springs & Two-Way Punching Shear" } }),
+        );
+        schemas.insert(
+            ns::EG_CONSTRUCTION_4D5D6D.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph 4D CPM Schedule, 5D AHSP Cost S-Curve & 6D EN 15978 Embodied Carbon LCA" } }),
         );
         Self {
             header: IfcxHeader {
@@ -1861,10 +1866,48 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_deep_foundation", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive 4D/5D/6D Construction Sequence & LCA overlay.
+    pub fn compose_with_construction_lca_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::construction_lca_studio::ConstructionLcaIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_construction_4d5d6d", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcStructuralAnalysisModel", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "4D/5D/6D Construction Sequence, Cost S-Curve & Embodied Carbon LCA Overlay",
+                "activeDay": overlay.active_day,
+                "totalDurationDays": overlay.total_duration_days,
+                "physicalProgressPct": overlay.physical_progress_pct,
+                "totalBudgetIdrBillion": overlay.total_budget_idr_billion,
+                "totalEmbodiedCarbonTon": overlay.total_embodied_carbon_ton,
+                "carbonReductionPct": overlay.carbon_reduction_pct,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_CONSTRUCTION_4D5D6D.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/analysis/construction_4d5d6d".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_construction_4d5d6d", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_DEEP_FOUNDATION) {
+    if node.attributes.contains_key(ns::EG_CONSTRUCTION_4D5D6D) {
+        "4D/5D/6D Sequence & LCA".to_string()
+    } else if node.attributes.contains_key(ns::EG_DEEP_FOUNDATION) {
         "Deep Foundation & Piles".to_string()
     } else if node.attributes.contains_key(ns::EG_RELIABILITY_FORM) {
         "Reliability FORM/SORM".to_string()

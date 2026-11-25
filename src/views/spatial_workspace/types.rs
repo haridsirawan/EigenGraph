@@ -521,6 +521,14 @@ pub enum PlannedProposalAction {
     },
     ToggleFoundation3d,
     ExportFoundationAnnex,
+    // Update v0.8.4.9 (9/10 -> v0.8.5): 4D/5D/6D Construction Sequence, Cost S-Curve & LCA + Sheet S-114
+    RunConstructionLca {
+        active_day: Option<usize>,
+        steel_route: Option<crate::core::construction_lca_studio::SteelSmeltingRoute>,
+        concrete_mix: Option<crate::core::construction_lca_studio::ConcreteMixGrade>,
+    },
+    ToggleConstruction3d,
+    ExportConstructionAnnex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -684,6 +692,14 @@ pub enum GeminiDirective {
     },
     ToggleFoundation3d,
     ExportFoundationAnnex,
+    // Update v0.8.4.9 (9/10 -> v0.8.5): 4D/5D/6D Construction Sequence, Cost S-Curve & LCA + Sheet S-114
+    RunConstructionLca {
+        active_day: Option<usize>,
+        steel_route: Option<crate::core::construction_lca_studio::SteelSmeltingRoute>,
+        concrete_mix: Option<crate::core::construction_lca_studio::ConcreteMixGrade>,
+    },
+    ToggleConstruction3d,
+    ExportConstructionAnnex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1228,6 +1244,48 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleFoundation3d);
             } else if upper == "EXPORT_FOUNDATION_ANNEX" {
                 directives.push(GeminiDirective::ExportFoundationAnnex);
+            } else if upper == "RUN_CONSTRUCTION_LCA" || upper.starts_with("RUN_CONSTRUCTION_LCA:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let mut active_day = None;
+                let mut steel_route = None;
+                let mut concrete_mix = None;
+                for tok in arg.split(':').map(str::trim).filter(|s| !s.is_empty()) {
+                    if tok.contains("DRI") || tok.contains("H2") {
+                        steel_route = Some(
+                            crate::core::construction_lca_studio::SteelSmeltingRoute::GreenHydrogenDri,
+                        );
+                    } else if tok.contains("EAF") {
+                        steel_route =
+                            Some(crate::core::construction_lca_studio::SteelSmeltingRoute::EafRecycled);
+                    } else if tok.contains("BOF") {
+                        steel_route = Some(
+                            crate::core::construction_lca_studio::SteelSmeltingRoute::BfBofStandard,
+                        );
+                    } else if tok.contains("GEO") {
+                        concrete_mix = Some(
+                            crate::core::construction_lca_studio::ConcreteMixGrade::GeopolymerGreen,
+                        );
+                    } else if tok.contains("GGBS") {
+                        concrete_mix = Some(
+                            crate::core::construction_lca_studio::ConcreteMixGrade::Ggbs30LowCarbon,
+                        );
+                    } else if tok.contains("OPC") {
+                        concrete_mix = Some(
+                            crate::core::construction_lca_studio::ConcreteMixGrade::OpcStandard,
+                        );
+                    } else if let Ok(day) = tok.trim_start_matches("DAY").parse::<usize>() {
+                        active_day = Some(day.min(540));
+                    }
+                }
+                directives.push(GeminiDirective::RunConstructionLca {
+                    active_day,
+                    steel_route,
+                    concrete_mix,
+                });
+            } else if upper == "TOGGLE_CONSTRUCTION_3D" {
+                directives.push(GeminiDirective::ToggleConstruction3d);
+            } else if upper == "EXPORT_CONSTRUCTION_ANNEX" {
+                directives.push(GeminiDirective::ExportConstructionAnnex);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -2422,6 +2480,48 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Printer,
     },
     SlashCommandSpec {
+        cmd: "/4d-studio",
+        category: "Schedule",
+        description: "Open 4D CPM Sequence, 5D Cost S-Curve & 6D Carbon LCA 3D Studio",
+        icon: AppIcon::Clock,
+    },
+    SlashCommandSpec {
+        cmd: "/sequence",
+        category: "Schedule",
+        description: "Set 4D day & material LCA mix (/sequence 120 dri geopolymer)",
+        icon: AppIcon::Clock,
+    },
+    SlashCommandSpec {
+        cmd: "/scurve",
+        category: "Schedule",
+        description: "Inspect 5D Permen PUPR AHSP cost S-curve & earned budget",
+        icon: AppIcon::Coins,
+    },
+    SlashCommandSpec {
+        cmd: "/lca",
+        category: "Sustainability",
+        description: "Inspect 6D EN 15978 A1-A5 embodied carbon LCA & GBCI/LEED tier",
+        icon: AppIcon::Leaf,
+    },
+    SlashCommandSpec {
+        cmd: "/4d-3d",
+        category: "Schedule",
+        description: "Toggle 3D Pure WebGPU story sequence prisms & slewing tower crane",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/4d-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::construction_4d5d6d IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/4d-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-114 Pure-Vector 4D/5D/6D & Carbon LCA Annex .svg",
+        icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -2589,6 +2689,11 @@ pub struct SpatialHudActions {
     pub toggle_foundation_3d: bool,
     pub export_foundation_ifcx: bool,
     pub export_foundation_svg: bool,
+    // Update v0.8.4.9 (9/10 -> v0.8.5): 4D/5D/6D Construction Sequence & Carbon LCA Studio
+    pub run_construction_lca_studio: bool,
+    pub toggle_construction_3d: bool,
+    pub export_construction_ifcx: bool,
+    pub export_construction_svg: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3032,5 +3137,9 @@ impl SpatialHudActions {
         self.toggle_foundation_3d |= other.toggle_foundation_3d;
         self.export_foundation_ifcx |= other.export_foundation_ifcx;
         self.export_foundation_svg |= other.export_foundation_svg;
+        self.run_construction_lca_studio |= other.run_construction_lca_studio;
+        self.toggle_construction_3d |= other.toggle_construction_3d;
+        self.export_construction_ifcx |= other.export_construction_ifcx;
+        self.export_construction_svg |= other.export_construction_svg;
     }
 }

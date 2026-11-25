@@ -492,6 +492,12 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 21.5) {
+        // Update v0.8.4.9: Pure Analytical WGSL 4D/5D/6D Construction Sequence & Crane (0% raster)
+        let scan = 0.78 + 0.22 * sin(f_in.world_pos.z * 3.0 - u_time * 3.6);
+        let ndotv = max(abs(dot(n, v)), 0.14);
+        let rim = pow(1.0 - ndotv, 1.5) * 0.44;
+        col = f_in.color.rgb * (0.74 + 0.26 * scan + rim);
     } else if (kind >= 20.5) {
         // Update v0.8.4.8: Pure Analytical WGSL Deep Foundation Pile Group & Winkler Springs (0% raster)
         let soil_wave = 0.76 + 0.24 * sin(f_in.world_pos.z * 2.2 - u_time * 3.2);
@@ -773,6 +779,7 @@ pub struct WebGpuEarthResources {
     composite_deck: GpuMeshSlot,
     reliability_form: GpuMeshSlot,
     deep_foundation: GpuMeshSlot,
+    construction_lca: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
 }
 
@@ -995,6 +1002,7 @@ impl WebGpuEarthResources {
             composite_deck: GpuMeshSlot::default(),
             reliability_form: GpuMeshSlot::default(),
             deep_foundation: GpuMeshSlot::default(),
+            construction_lca: GpuMeshSlot::default(),
             hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
@@ -1126,6 +1134,7 @@ impl WebGpuEarthResources {
             || self.composite_deck.index_count > 0
             || self.reliability_form.index_count > 0
             || self.deep_foundation.index_count > 0
+            || self.construction_lca.index_count > 0
             || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1175,6 +1184,7 @@ impl WebGpuEarthResources {
             self.composite_deck.draw(&mut pass);
             self.reliability_form.draw(&mut pass);
             self.deep_foundation.draw(&mut pass);
+            self.construction_lca.draw(&mut pass);
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
             self.hazard_compute.draw(&mut pass);
@@ -1210,6 +1220,7 @@ struct WebGpuEarthPaintCallback {
     pending_composite: Option<(u64, GpuMeshPayload)>,
     pending_reliability: Option<(u64, GpuMeshPayload)>,
     pending_foundation: Option<(u64, GpuMeshPayload)>,
+    pending_construction_lca: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
 }
 
@@ -1351,6 +1362,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
                     .upload(device, queue, "deep_foundation_mesh", fnd_in.0, &fnd_in.1);
             }
         }
+        if let Some(ref lca_in) = self.pending_construction_lca {
+            if res.construction_lca.revision_uploaded != lca_in.0 {
+                res.construction_lca
+                    .upload(device, queue, "construction_lca_mesh", lca_in.0, &lca_in.1);
+            }
+        }
         if let Some(ref h_cmp) = self.pending_hazard_compute {
             res.hazard_compute.dispatch(queue, egui_encoder, h_cmp);
         } else {
@@ -1448,6 +1465,7 @@ pub struct WebGpuEarthState {
     cached_composite_hash: u64,
     cached_reliability_hash: u64,
     cached_foundation_hash: u64,
+    cached_construction_lca_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1470,6 +1488,7 @@ pub struct WebGpuEarthState {
     pub last_composite_tris: usize,
     pub last_reliability_tris: usize,
     pub last_foundation_tris: usize,
+    pub last_construction_lca_tris: usize,
     pub last_compute_particles: u32,
     #[cfg(not(target_arch = "wasm32"))]
     wgpu_device: Option<wgpu::Device>,
@@ -1751,6 +1770,7 @@ impl WebGpuEarthState {
         composite_input: Option<CompositeGpuInput<'_>>,
         reliability_input: Option<ReliabilityGpuInput<'_>>,
         foundation_input: Option<FoundationGpuInput<'_>>,
+        construction_lca_input: Option<ConstructionLcaGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
@@ -2403,6 +2423,35 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_construction_lca = if render_site_pass {
+            if let Some(ref lca_in) = construction_lca_input {
+                let c = &lca_in.report.config;
+                let rev: u64 = (c.active_day as u64)
+                    ^ ((c.steel_route as u64) << 12)
+                    ^ ((c.concrete_mix as u64) << 16)
+                    ^ ((c.crane_crews as u64) << 20)
+                    ^ ((lca_in.report.story_zones_3d.len() as u64) << 28)
+                    ^ ((lca_in.heading_deg.round() as u64) << 44)
+                    ^ u64::from(lca_in.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                if rev != self.cached_construction_lca_hash {
+                    let mesh = build_rtc_construction_lca_mesh(lca_in);
+                    self.last_construction_lca_tris = mesh.indices.len() / 3;
+                    self.cached_construction_lca_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_construction_lca_hash != 0 {
+                self.cached_construction_lca_hash = 0;
+                self.last_construction_lca_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let pending_hazard_compute = if render_site_pass {
             if let Some(hc) = hazard_compute_input {
                 if hc.enabled {
@@ -2450,6 +2499,7 @@ impl WebGpuEarthState {
                 pending_composite,
                 pending_reliability,
                 pending_foundation,
+                pending_construction_lca,
                 pending_hazard_compute,
             },
         ));
@@ -2482,6 +2532,7 @@ impl WebGpuEarthState {
         let composite_animated = composite_input.as_ref().is_some_and(|cp| cp.visible);
         let reliability_animated = reliability_input.as_ref().is_some_and(|r| r.visible);
         let foundation_animated = foundation_input.as_ref().is_some_and(|f| f.visible);
+        let construction_lca_animated = construction_lca_input.as_ref().is_some_and(|l| l.visible);
         let frame_ms = if hazard_animated
             || compute_animated
             || subsurface_animated
@@ -2500,6 +2551,7 @@ impl WebGpuEarthState {
             || composite_animated
             || reliability_animated
             || foundation_animated
+            || construction_lca_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

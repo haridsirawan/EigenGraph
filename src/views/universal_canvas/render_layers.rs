@@ -3450,6 +3450,84 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Update `v0.8.4.9` (`9/10` -> `v0.8.5`): Pure-vector CPU fallback rendering 4D/5D/6D story erection zones & tower crane.
+    pub(super) fn paint_cpu_construction_lca_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.construction_lca_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_construction_lca_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |p: [f64; 3]| -> Option<Pos2> {
+            let ex = p[0] * cr - p[1] * sr;
+            let ny = p[0] * sr + p[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, p[2])
+                .and_then(|(sp, _, vis)| if vis { Some(sp) } else { None })
+        };
+
+        for z in &report.story_zones_3d {
+            let col = if z.completion_pct >= 99.5 {
+                Color32::from_rgb(16, 185, 129)
+            } else if z.completion_pct > 0.5 {
+                Color32::from_rgb(245, 158, 11)
+            } else {
+                Color32::from_rgb(56, 189, 248)
+            };
+            let z_top = z.min_enu_m[2]
+                + (z.max_enu_m[2] - z.min_enu_m[2]) * (z.completion_pct / 100.0).clamp(0.18, 1.0);
+            let pts: Vec<Pos2> = [
+                [z.min_enu_m[0], z.min_enu_m[1], z_top],
+                [z.max_enu_m[0], z.min_enu_m[1], z_top],
+                [z.max_enu_m[0], z.max_enu_m[1], z_top],
+                [z.min_enu_m[0], z.max_enu_m[1], z_top],
+            ]
+            .into_iter()
+            .filter_map(proj_enu)
+            .collect();
+            if pts.len() == 4 {
+                clip.add(egui::Shape::closed_line(pts, Stroke::new(2.2, col)));
+            }
+        }
+        let c = &report.crane_3d;
+        let top = [c.base_enu_m[0], c.base_enu_m[1], c.base_enu_m[2] + c.mast_height_m];
+        let jib_ang = c.slew_deg.to_radians();
+        let tip = [
+            c.base_enu_m[0] + c.jib_length_m * jib_ang.cos(),
+            c.base_enu_m[1] + c.jib_length_m * jib_ang.sin(),
+            top[2],
+        ];
+        if let (Some(a), Some(b), Some(d)) = (proj_enu(c.base_enu_m), proj_enu(top), proj_enu(tip)) {
+            let crane_col = Color32::from_rgb(250, 204, 21);
+            clip.line_segment([a, b], Stroke::new(3.0, crane_col));
+            clip.line_segment([b, d], Stroke::new(2.6, crane_col));
+            clip.circle_filled(d, 3.6, Color32::from_rgb(249, 115, 22));
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

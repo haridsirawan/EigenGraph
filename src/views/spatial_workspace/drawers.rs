@@ -5124,4 +5124,293 @@ impl SpatialWorkspaceState {
             }
         });
     }
+
+    /// Update `v0.8.4.9` (`9/10` -> `v0.8.5`): Width-first Dynamic Island drawer for 4D CPM Sequence, 5D Cost S-Curve & 6D Carbon LCA Studio.
+    pub(super) fn render_construction_lca_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::construction_lca_studio::{ConcreteMixGrade, SteelSmeltingRoute};
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Clock,
+                13.0,
+                theme.accent_blue,
+                "4D CPM Sequence, 5D AHSP Cost S-Curve & 6D Carbon LCA Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "4D Sequence & 5D S-Curve"),
+                (1usize, "6D Carbon LCA & QTO"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.construction_lca_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.construction_lca_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close 4D/5D/6D Studio drawer",
+            )
+            .clicked()
+            {
+                self.construction_lca_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for (sr, lbl) in [
+                    (SteelSmeltingRoute::BfBofStandard, "BF-BOF"),
+                    (SteelSmeltingRoute::EafRecycled, "EAF"),
+                    (SteelSmeltingRoute::GreenHydrogenDri, "DRI-H2"),
+                ] {
+                    let active = universal_canvas.construction_lca_config.steel_route == sr;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        lbl,
+                        active,
+                        theme.accent_green,
+                        "Select structural steel smelting LCA route",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.construction_lca_config.steel_route = sr;
+                        actions.run_construction_lca_studio = true;
+                    }
+                }
+                for (cm, lbl) in [
+                    (ConcreteMixGrade::OpcStandard, "OPC"),
+                    (ConcreteMixGrade::Ggbs30LowCarbon, "GGBS 30%"),
+                    (ConcreteMixGrade::GeopolymerGreen, "Geopolymer"),
+                ] {
+                    let active = universal_canvas.construction_lca_config.concrete_mix == cm;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        lbl,
+                        active,
+                        theme.accent_orange,
+                        "Select ready-mix concrete binder LCA blend",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.construction_lca_config.concrete_mix = cm;
+                        actions.run_construction_lca_studio = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Bolt),
+                    "Run 4D/5D/6D",
+                    true,
+                    theme.accent_green,
+                    "Evaluate CPM schedule, AHSP cost S-curve & EN 15978 carbon LCA",
+                )
+                .clicked()
+                {
+                    actions.run_construction_lca_studio = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Layers),
+                    if universal_canvas.construction_lca_overlay_visible {
+                        "3D 4D-Seq: ON"
+                    } else {
+                        "3D 4D-Seq: OFF"
+                    },
+                    universal_canvas.construction_lca_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU story sequence prisms & slewing crane",
+                )
+                .clicked()
+                {
+                    actions.toggle_construction_3d = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "IFCX",
+                    false,
+                    theme.accent_orange,
+                    "Export non-destructive eigengraph::analysis::construction_4d5d6d IFCX",
+                )
+                .clicked()
+                {
+                    actions.export_construction_ifcx = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Printer),
+                    "Sheet S-114",
+                    false,
+                    theme.accent_blue,
+                    "Export A3 Pure-Vector Sheet S-114 4D/5D/6D & Carbon LCA Annex SVG",
+                )
+                .clicked()
+                {
+                    actions.export_construction_svg = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let Some(ref studio) = universal_canvas.last_construction_lca_report else {
+            ui.label(
+                RichText::new("Click 'Run 4D/5D/6D' or toggle '3D 4D-Seq' to simulate CPM sequence, cost S-curve & EN 15978 carbon LCA.")
+                    .size(9.4)
+                    .color(theme.text_muted),
+            );
+            return;
+        };
+
+        let body_w = (deck_w - 6.0).max(160.0);
+        let col_w = if two_col {
+            ((body_w - 8.0) * 0.5).max(160.0)
+        } else {
+            body_w
+        };
+        let tab = self.construction_lca_drawer_tab;
+        let max_day = studio.total_duration_days.max(120);
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(body_w);
+            for is_left in [true, false] {
+                theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                    ui.set_width((col_w - 16.0).max(140.0));
+                    if is_left {
+                        ui.label(RichText::new("4D Timeline, Crews & Logistics Parameters").size(9.8).strong().color(theme.text_primary));
+                        let cfg = &mut universal_canvas.construction_lca_config;
+                        let mut changed = false;
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Active Day:").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::Slider::new(&mut cfg.active_day, 0..=max_day)).changed();
+                            ui.label(RichText::new("Crews:").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.crane_crews).range(1..=6).speed(1.0)).changed();
+                            ui.label(RichText::new("Haul (km):").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.transport_distance_km).range(5.0..=1500.0).speed(5.0)).changed();
+                            changed |= ui.checkbox(&mut cfg.include_rain_delay, "Site Rain Delay").changed();
+                        });
+                        if changed {
+                            actions.run_construction_lca_studio = true;
+                        }
+                        if tab == 0 {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Day {}/{} ({:.1}% Physical Progress) • {} Critical Tasks",
+                                    studio.config.active_day,
+                                    studio.total_duration_days,
+                                    studio.physical_progress_pct,
+                                    studio.critical_path_count,
+                                ))
+                                .size(8.6)
+                                .monospace()
+                                .color(theme.accent_blue),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Total Carbon: {:.1} tCO2e (-{:.1}% vs BOF/OPC) • {:.1} kg/m2",
+                                    studio.total_embodied_carbon_ton,
+                                    studio.carbon_reduction_pct,
+                                    studio.carbon_intensity_kg_m2,
+                                ))
+                                .size(8.6)
+                                .monospace()
+                                .color(theme.accent_green),
+                            );
+                        }
+                    } else if tab == 0 {
+                        ui.label(RichText::new("5D AHSP Budget & S-Curve Cashflow").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "Total Budget: {} ({} wks)",
+                                studio.total_budget_label,
+                                studio.scurve.len(),
+                            ))
+                            .size(8.7)
+                            .monospace()
+                            .color(theme.accent_green),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Earned Value to Day {}: IDR {:.0}M | QTO: {:.1}t steel, {:.0} m3 concrete",
+                                studio.config.active_day,
+                                studio.spent_to_date_idr / 1e6,
+                                studio.steel_tonnage,
+                                studio.concrete_m3,
+                            ))
+                            .size(8.5)
+                            .monospace()
+                            .color(theme.text_secondary),
+                        );
+                    } else {
+                        ui.label(RichText::new("6D EN 15978 A1-A5 Stages & Certification").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "A1-A3={:.1}t | A4={:.1}t | A5={:.1}t | Baseline={:.1}t",
+                                studio.a1_a3_carbon_ton,
+                                studio.a4_carbon_ton,
+                                studio.a5_carbon_ton,
+                                studio.baseline_carbon_ton,
+                            ))
+                            .size(8.6)
+                            .monospace()
+                            .color(theme.accent_orange),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Tier: {} • Crane Jib={:.1}m @ {:.0} deg",
+                                studio.greenship_leed_tier,
+                                studio.crane_3d.jib_length_m,
+                                studio.crane_3d.slew_deg,
+                            ))
+                            .size(8.4)
+                            .monospace()
+                            .color(theme.accent_green),
+                        );
+                    }
+                });
+            }
+        });
+    }
 }
