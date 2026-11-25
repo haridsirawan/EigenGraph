@@ -7,7 +7,11 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.6 (4/10)]
+## [Unreleased — Next: v0.8.6 (5/10)]
+
+### Update 5/10 (`v0.8.5.5` -> `v0.8.6`) — Horizontal EigenGate & EigenFlow Banner Logos & README Engine Documentation
+- Added horizontal `1024×571` rounded banner logos [`assets/eigengate-logo.png`](assets/eigengate-logo.png) and [`assets/eigenflow-logo.png`](assets/eigenflow-logo.png) matching `assets/logo.png`, with shared wordmark typography height and seamless white cards.
+- Placed **EigenGraph**, **EigenGate**, and **EigenFlow** horizontal banner logos side-by-side at the top of `README.md` alongside a dedicated **Core Computational Engines: EigenGate & EigenFlow** explanation section and `v0.8.5` header badges.
 
 ### Update 4/10 (`v0.8.5.4` -> `v0.8.6`) — High-Res EigenGraph, EigenGate & EigenFlow Brand Icon Triad Refresh
 - Replaced `assets/icon.png` (1024×1024), `assets/favicon-circle.png` (384×384), `assets/favicon-48.png` (48×48), root `favicon.ico` (48/32/16), and `assets/logo.png` (1024×571) with the high-resolution crimson-to-plum leaping horse `EigenGraph` brand artwork.

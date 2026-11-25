@@ -1,11 +1,11 @@
 <div align="center">
 
-<img src="assets/logo.png" width="360" alt="EigenGraph Logo" />
-
 <p>
-  <img src="assets/eigengate-icon.png" width="96" alt="EigenGate Icon" />
-  &nbsp;&nbsp;
-  <img src="assets/eigenflow-icon.png" width="96" alt="EigenFlow Icon" />
+  <a href="https://eigengraph.net/"><img src="assets/logo.png" width="265" alt="EigenGraph Logo" /></a>
+  &nbsp;
+  <a href="https://github.com/haridsirawan/EigenGate"><img src="assets/eigengate-logo.png" width="265" alt="EigenGate Logo" /></a>
+  &nbsp;
+  <a href="https://github.com/haridsirawan/EigenFlow"><img src="assets/eigenflow-logo.png" width="265" alt="EigenFlow Logo" /></a>
 </p>
 
 # EigenGraph Powered by EigenGate & EigenFlow
@@ -13,13 +13,20 @@
 ### Rust + WebGPU + IFCX
 
 [![Live Web App](https://img.shields.io/badge/web%20app-eigengraph.net-0A84FF?style=for-the-badge&logo=cloudflare&logoColor=white)](https://eigengraph.net/)
-[![Version](https://img.shields.io/badge/version-v0.8.2-5B92A5?style=for-the-badge)](docs/CHANGELOG.md)
-[![Engine](https://img.shields.io/badge/engine-Rust%20%2B%20Pure%20WebGPU%20(WGSL)-orange?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/EigenGraph/EigenGraph)
+[![Version](https://img.shields.io/badge/version-v0.8.5-5B92A5?style=for-the-badge)](docs/CHANGELOG.md)
+[![Engine](https://img.shields.io/badge/engine-Rust%20%2B%20Pure%20WebGPU%20(WGSL)-orange?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/haridsirawan/EigenGraph)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue?style=for-the-badge)](LICENSE)
 
 [**Launch Interactive Web Workstation ↗**](https://eigengraph.net/) • [**Mirror (`www`) ↗**](https://www.eigengraph.net/)
 
 </div>
+
+---
+
+## Core Computational Engines: EigenGate & EigenFlow
+
+- **What is EigenGate?** ([haridsirawan/EigenGate](https://github.com/haridsirawan/EigenGate) · [src/core/eigengate.rs](src/core/eigengate.rs)) — **Branch 1: Linear Pre-Analysis Gatekeeper & Spectral Kinematic Guard**. EigenGate computes the mechanics-informed **Adjusted Redundancy Index (ARI)** across three physical channels—kinematic stiffness reserve ($w_k = 0.25$), cross-section capacity ($w_c = 0.45$), and deformation control ($w_d = 0.30$)—combined with fast $O(N^2)$ Sherman–Morrison ($N-1$) and rank-2 Woodbury ($N-2$) disruption screening, geometric stiffness ($K_g$ / $P$-$\Delta$) buckling penalties, and an intact-model SVD Spectral Kinematic Guard to catch 100% of mechanism-inducing failures before expensive nonlinear or surrogate GNN simulation.
+- **What is EigenFlow?** ([haridsirawan/EigenFlow](https://github.com/haridsirawan/EigenFlow) · [src/core/eigenflow.rs](src/core/eigenflow.rs)) — **Branch 2: Non-Linear Woodbury Post-Yield Redistribution & Pushover Engine**. Built on top of EigenGate's intact screening, EigenFlow traces progressive post-yield alternative load paths (`P1 -> P2` 1-hop / 2-hop backup paths) using Rank-1 Woodbury stiffness updates ($\lambda \in [0, 0.90]$), quantifies topological leverage ($h_e$), stability margin ($m_s$), residual reserve ratio (`RRR`), ductility demand ($\mu$), and per-member redistributed forces ($\Delta N_j$), and executes site-coupled SNI 1726 / ASCE 41-17 Pushover + ATC-40 ADRS Capacity Spectrum plastic-hinge tracking in 3D ENU space with non-destructive `eigengraph::eigenflow` IFCX overlays.
 
 ---
 
@@ -45,7 +52,7 @@ Rather than relying on purely topological graph metrics, **ARI** combines stiffn
 
 ---
 
-## EigenGraph Computational Platform (`v0.8.2`)
+## EigenGraph Computational Platform (`v0.8.5`)
 
 **EigenGraph** operationalizes the dissertation's **EigenGate** (Linear Pre-Analysis & Gatekeeper, [haridsirawan/EigenGate](https://github.com/haridsirawan/EigenGate)), **EigenFlow** (Non-Linear Woodbury Post-Yield & Pushover, [haridsirawan/EigenFlow](https://github.com/haridsirawan/EigenFlow)), and Spectral Kinematic Guard engines inside a **100% Pure-Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL + `@compute`) • 100% IFCX (IFC 5 JSON ECS) • 0% WebGL • 0% External Raster** WebAssembly spatial engineering platform deployed to [eigengraph.net](https://eigengraph.net/) (requiring a WebGPU-enabled browser such as Chrome/Edge 113+, Safari 26+, or Firefox 141+ over HTTPS):
 
@@ -75,7 +82,7 @@ trunk build --release --public-url /
 
 ## Documentation & Citation
 
-- [Changelog (`v0.0.1` – `v0.8.2`)](docs/CHANGELOG.md)
+- [Changelog (`v0.0.1` – `v0.8.5`)](docs/CHANGELOG.md)
 - [IFCX Earth Architecture Roadmap](docs/IFCX%20Earth.md)
 - [Spatial UI Architecture Contract](docs/UI_ARCHITECTURE.md)
 - [Repository Guidelines](AGENTS.md)
