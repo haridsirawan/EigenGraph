@@ -480,6 +480,14 @@ pub enum PlannedProposalAction {
     },
     ToggleShearWall3d,
     ExportShearWallAnnex,
+    // Update v0.8.4.4 (4/10 -> v0.8.5): Steel Seismic Connection & Panel-Zone Studio + Sheet S-109
+    RunConnection {
+        conn_type: Option<crate::core::connection::ConnectionType>,
+        bolt_dia_mm: Option<f64>,
+        plate_thick_mm: Option<f64>,
+    },
+    ToggleConnection3d,
+    ExportConnectionAnnex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -602,6 +610,14 @@ pub enum GeminiDirective {
     },
     ToggleShearWall3d,
     ExportShearWallAnnex,
+    // Update v0.8.4.4 (4/10 -> v0.8.5): Steel Seismic Connection & Panel-Zone Studio + Sheet S-109
+    RunConnection {
+        conn_type: Option<crate::core::connection::ConnectionType>,
+        bolt_dia_mm: Option<f64>,
+        plate_thick_mm: Option<f64>,
+    },
+    ToggleConnection3d,
+    ExportConnectionAnnex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -992,6 +1008,33 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleShearWall3d);
             } else if upper == "EXPORT_SHEAR_WALL_ANNEX" {
                 directives.push(GeminiDirective::ExportShearWallAnnex);
+            } else if upper == "RUN_CONNECTION" || upper.starts_with("RUN_CONNECTION:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let mut conn_type = None;
+                let mut bolt_dia_mm = None;
+                let mut plate_thick_mm = None;
+                for tok in arg.split(':').map(str::trim).filter(|s| !s.is_empty()) {
+                    if tok.contains("SHEAR") || tok == "TAB" {
+                        conn_type = Some(crate::core::connection::ConnectionType::ShearTabSinglePlate);
+                    } else if tok.contains("ENDPLATE") || tok == "4E" || tok == "8ES" {
+                        conn_type = Some(crate::core::connection::ConnectionType::ExtendedEndPlate4E);
+                    } else if let Ok(v) = tok.parse::<f64>() {
+                        if bolt_dia_mm.is_none() {
+                            bolt_dia_mm = Some(v.clamp(16.0, 36.0));
+                        } else if plate_thick_mm.is_none() {
+                            plate_thick_mm = Some(v.clamp(10.0, 50.0));
+                        }
+                    }
+                }
+                directives.push(GeminiDirective::RunConnection {
+                    conn_type,
+                    bolt_dia_mm,
+                    plate_thick_mm,
+                });
+            } else if upper == "TOGGLE_CONNECTION_3D" {
+                directives.push(GeminiDirective::ToggleConnection3d);
+            } else if upper == "EXPORT_CONNECTION_ANNEX" {
+                directives.push(GeminiDirective::ExportConnectionAnnex);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -1994,6 +2037,42 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Printer,
     },
     SlashCommandSpec {
+        cmd: "/connection",
+        category: "Safety",
+        description: "Open Steel Seismic Connection, Bolts & Panel-Zone 3D Studio (AISC 358/360)",
+        icon: AppIcon::Wrench,
+    },
+    SlashCommandSpec {
+        cmd: "/endplate",
+        category: "Safety",
+        description: "Evaluate 4E Extended End-Plate moment connection (/endplate 24 24)",
+        icon: AppIcon::Wrench,
+    },
+    SlashCommandSpec {
+        cmd: "/shear-tab",
+        category: "Safety",
+        description: "Evaluate Single-Plate Shear Tab pinned connection (/shear-tab 20 12)",
+        icon: AppIcon::Wrench,
+    },
+    SlashCommandSpec {
+        cmd: "/connection-3d",
+        category: "Safety",
+        description: "Toggle 3D Pure WebGPU steel joint plates, bolt pins & panel-zone halos",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/connection-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::steel_connection IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/connection-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-109 Pure-Vector Steel Connection & Panel-Zone Annex .svg",
+        icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -2136,6 +2215,11 @@ pub struct SpatialHudActions {
     pub toggle_shear_wall_3d: bool,
     pub export_shear_wall_ifcx: bool,
     pub export_shear_wall_svg: bool,
+    // Update v0.8.4.4 (4/10 -> v0.8.5): Steel Seismic Connection & Panel-Zone Studio
+    pub run_connection_studio: bool,
+    pub toggle_connection_3d: bool,
+    pub export_connection_ifcx: bool,
+    pub export_connection_svg: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -2559,5 +2643,9 @@ impl SpatialHudActions {
         self.toggle_shear_wall_3d |= other.toggle_shear_wall_3d;
         self.export_shear_wall_ifcx |= other.export_shear_wall_ifcx;
         self.export_shear_wall_svg |= other.export_shear_wall_svg;
+        self.run_connection_studio |= other.run_connection_studio;
+        self.toggle_connection_3d |= other.toggle_connection_3d;
+        self.export_connection_ifcx |= other.export_connection_ifcx;
+        self.export_connection_svg |= other.export_connection_svg;
     }
 }

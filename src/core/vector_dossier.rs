@@ -3157,6 +3157,319 @@ pub fn build_shear_wall_annex_svg(
     }
 }
 
+/// Pure-Vector Steel Seismic Connection, Bolt Group & Panel Zone Annex SVG (`S-109`).
+pub fn build_steel_connection_annex_svg(
+    project_name: &str,
+    studio: &crate::core::connection_studio::ConnectionStudioReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(24_000);
+    let seal_token = "__EIGENGRAPH_STEEL_CONN_S109_SHA256__";
+    let r = &studio.report;
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH STEEL SEISMIC CONNECTION, BOLTS &amp; PANEL ZONE ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • AISC 358-16 / 360-16 / SNI 1729 &amp; 7860 • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: Connection Elevation & Bolt Pattern Detail (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. BEAM-TO-COLUMN CONNECTION DETAIL &amp; HIGH-STRENGTH BOLT GRID",
+        &format!(
+            "{} • {} M{:.0} ({} bolts) • tp={:.0} mm • Weld a={:.0} mm",
+            escape_xml(&truncate_clean(r.connection_type.label(), 36)),
+            escape_xml(&truncate_clean(r.bolt_grade.label(), 22)),
+            r.bolt_diameter_mm,
+            r.bolt_count_n,
+            r.plate_thickness_mm,
+            r.weld_size_mm,
+        ),
+    );
+    // Left half: side elevation (Column + Beam + Plate); Right half: front plate view with bolt circles
+    let col_x = p1x + 92.0;
+    let col_y = p1y + 84.0;
+    let col_w = 110.0;
+    let col_h = 330.0;
+    let beam_x = col_x + col_w + 18.0;
+    let beam_y = col_y + 78.0;
+    let beam_w = 195.0;
+    let beam_h = 174.0;
+    let pl_x = col_x + col_w;
+    let pl_y = beam_y - 42.0;
+    let pl_w = 18.0;
+    let pl_h = beam_h + 84.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{col_x:.1}" y="{col_y:.1}" width="{col_w:.1}" height="{col_h:.1}" fill="#cbd5e1" stroke="#0f172a" stroke-width="2.0"/>
+<line x1="{col_x:.1}" y1="{beam_y:.1}" x2="{:.1}" y2="{beam_y:.1}" stroke="#0284c7" stroke-width="3.0"/>
+<line x1="{col_x:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="#0284c7" stroke-width="3.0"/>
+<rect x="{pl_x:.1}" y="{pl_y:.1}" width="{pl_w:.1}" height="{pl_h:.1}" fill="#93c5fd" stroke="#1e3a8a" stroke-width="1.8"/>
+<rect x="{beam_x:.1}" y="{beam_y:.1}" width="{beam_w:.1}" height="{beam_h:.1}" fill="#e2e8f0" stroke="#0f172a" stroke-width="2.0"/>
+<line x1="{beam_x:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="#334155" stroke-width="2.2"/>
+<line x1="{beam_x:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="#334155" stroke-width="2.2"/>
+<text x="{:.1}" y="{:.1}" font-size="9" font-family="monospace" text-anchor="middle" fill="#0f172a">SIDE ELEVATION (d_beam={:.0}mm, d_col={:.0}mm)</text>"##,
+        col_x + col_w,
+        beam_y + beam_h,
+        col_x + col_w,
+        beam_y + beam_h,
+        beam_y + 14.0,
+        beam_x + beam_w,
+        beam_y + 14.0,
+        beam_y + beam_h - 14.0,
+        beam_x + beam_w,
+        beam_y + beam_h - 14.0,
+        p1x + 225.0,
+        p1y + 448.0,
+        studio.config.beam_depth_mm,
+        studio.config.col_depth_mm,
+    );
+    let fp_x = p1x + 485.0;
+    let fp_y = p1y + 92.0;
+    let fp_w = 190.0;
+    let fp_h = 310.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{fp_x:.1}" y="{fp_y:.1}" width="{fp_w:.1}" height="{fp_h:.1}" rx="4" fill="#f8fafc" stroke="#1e3a8a" stroke-width="2.2"/>
+<text x="{:.1}" y="{:.1}" font-size="9" font-family="monospace" text-anchor="middle" fill="#1e3a8a">PLATE FRONT VIEW ({:.0}x{:.0}mm)</text>"##,
+        fp_x + fp_w * 0.5,
+        fp_y + fp_h + 24.0,
+        studio.config.plate_width_mm,
+        r.plate_thickness_mm,
+    );
+    let b_rows = r.bolt_rows.clamp(2, 8);
+    let b_cols = r.bolt_cols.clamp(1, 2);
+    for ri in 0..b_rows {
+        let by = fp_y + 34.0 + (ri as f64) * ((fp_h - 68.0) / (b_rows.saturating_sub(1).max(1) as f64));
+        for ci in 0..b_cols {
+            let bx = if b_cols == 1 {
+                fp_x + fp_w * 0.5
+            } else {
+                fp_x + 54.0 + (ci as f64) * (fp_w - 108.0)
+            };
+            let _ = writeln!(
+                svg,
+                r##"<circle cx="{bx:.1}" cy="{by:.1}" r="10.5" fill="#0284c7" stroke="#0f172a" stroke-width="1.6"/>
+<circle cx="{bx:.1}" cy="{by:.1}" r="4.0" fill="#ffffff"/>"##,
+            );
+        }
+    }
+
+    // Panel 2: Column Panel Zone Shear Audit & Governance Seal (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. COLUMN PANEL ZONE SHEAR AUDIT (AISC 360 §J10.6) &amp; SEAL",
+        &format!(
+            "Mu={:.0} kNm • Vu={:.0} kN • Governing: {} (DCR={:.2})",
+            r.applied_moment_mu_knm,
+            r.applied_shear_vu_kn,
+            escape_xml(&truncate_clean(&r.governing_limit_state, 32)),
+            r.governing_dcr
+        ),
+    );
+    let pz_cards = if let Some(ref pz) = r.panel_zone {
+        vec![
+            ("Panel Zone Shear Demand Vpz vs phi*Vn", format!("{:.1} kN vs {:.1} kN (DCR = {:.2})", pz.applied_shear_vpz_kn, pz.design_shear_capacity_phi_vn_kn, pz.panel_zone_dcr), if pz.is_panel_zone_safe { "#059669" } else { "#d97706" }),
+            ("Column Web Doubler Plate Requirement", if pz.doubler_plate_required { format!("REQUIRED: +{:.1} mm Doubler Plate", pz.recommended_doubler_thickness_mm) } else { "NOT REQUIRED (Web Adequate)".to_string() }, if pz.doubler_plate_required { "#d97706" } else { "#059669" }),
+            ("Continuity (Transverse Stiffener) Plates", if pz.continuity_plates_required { "REQUIRED at Beam Flanges (AISC J10.1/J10.2)".to_string() } else { "NOT REQUIRED".to_string() }, if pz.continuity_plates_required { "#0284c7" } else { "#059669" }),
+            ("Web Local Yielding / Web Crippling phi*Rn", format!("{:.0} kN / {:.0} kN", pz.web_local_yielding_phi_rn_kn, pz.web_crippling_phi_rn_kn), "#0369a1"),
+            ("Total High-Strength Bolts in Building", format!("{} Bolts across {} Beam-Column Joints", studio.total_bolts_building, studio.joints_3d.len()), "#0f172a"),
+        ]
+    } else {
+        vec![
+            ("Connection Shear Mode", "Pinned Single-Plate Shear Tab (Mu = 0 kNm)".to_string(), "#0284c7"),
+            ("Applied Gravity/Seismic Shear Vu", format!("{:.1} kN | Axial Pu = {:.1} kN", r.applied_shear_vu_kn, r.applied_axial_pu_kn), "#0369a1"),
+            ("Panel Zone Moment Transfer", "N/A — Pinned Web Shear Release Only".to_string(), "#475569"),
+            ("Plate Yield & Fu Grade", format!("Fy={:.0} MPa / Fu={:.0} MPa (tp={:.0} mm)", r.plate_fy_mpa, r.plate_fu_mpa, r.plate_thickness_mm), "#0f172a"),
+            ("Total High-Strength Bolts in Building", format!("{} Bolts across {} Beam-Column Joints", studio.total_bolts_building, studio.joints_3d.len()), "#059669"),
+        ]
+    };
+    for (idx, (lbl, val, col)) in pz_cards.iter().enumerate() {
+        let ry = p2y + 54.0 + (idx as f64) * 60.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="48" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.6" font-weight="bold" fill="#334155">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.5" font-weight="bold" font-family="monospace" text-anchor="end" fill="{col}">{val}</text>"##,
+            p2x + 16.0,
+            p2w - 32.0,
+            p2x + 26.0,
+            ry + 29.0,
+            p2x + p2w - 26.0,
+            ry + 29.0,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="118" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#1e3a8a">ARCHITECTURAL &amp; GOVERNANCE SEAL</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p2x + 16.0,
+        p2y + 382.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 404.0,
+        p2x + 26.0,
+        p2y + 428.0,
+        escape_xml(&truncate_clean(&studio.summary_verdict, 86)),
+        p2x + 26.0,
+        p2y + 454.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live Steel Connection Studio".to_string()),
+        ),
+        p2x + 26.0,
+        p2y + 478.0,
+    );
+
+    // Panel 3: AISC 358/360 Limit States Verification Matrix (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. AISC 358-16 / 360-16 / SNI 1729 LIMIT STATES VERIFICATION",
+        &format!(
+            "{} Limit States Audited • Overall Status: {}",
+            r.limit_states.len(),
+            if r.is_compliant { "COMPLIANT" } else { "REVIEW REQUIRED" }
+        ),
+    );
+    for (idx, ls) in r.limit_states.iter().take(7).enumerate() {
+        let ry = p3y + 52.0 + (idx as f64) * 62.0;
+        let badge = if ls.is_safe { "#059669" } else { "#dc2626" };
+        let st = if ls.is_safe { "PASS" } else { "FAIL" };
+        let bar_w = (ls.demand_capacity_ratio.clamp(0.0, 1.25) / 1.25) * 140.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="52" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#0f172a">{} ({})</text>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-family="monospace" fill="#475569">Demand {:.1} vs phi*Rn {:.1} | DCR = {:.2} — {}</text>
+<rect x="{:.1}" y="{:.1}" width="140" height="10" rx="3" fill="#e2e8f0"/>
+<rect x="{:.1}" y="{:.1}" width="{bar_w:.1}" height="10" rx="3" fill="{badge}"/>
+<rect x="{:.1}" y="{:.1}" width="60" height="22" rx="4" fill="{badge}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p3x + 14.0,
+            p3w - 28.0,
+            p3x + 22.0,
+            ry + 19.0,
+            escape_xml(&truncate_clean(&ls.limit_state_name, 42)),
+            escape_xml(&truncate_clean(&ls.standard_code_ref, 22)),
+            p3x + 22.0,
+            ry + 39.0,
+            ls.factored_demand,
+            ls.design_capacity,
+            ls.demand_capacity_ratio,
+            escape_xml(&truncate_clean(&ls.technical_notes, 34)),
+            p3x + p3w - 246.0,
+            ry + 21.0,
+            p3x + p3w - 246.0,
+            ry + 21.0,
+            p3x + p3w - 90.0,
+            ry + 15.0,
+            p3x + p3w - 60.0,
+            ry + 29.5,
+        );
+    }
+
+    // Panel 4: 3D Beam-Column Joint ENU Schedule (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. 3D BEAM-COLUMN JOINT SCHEDULE &amp; BOLT QUANTITY SUMMARY",
+        &format!(
+            "{} Joints • {} Total Bolts • Plate {:.0}x{:.0}x{:.0} mm",
+            studio.joints_3d.len(),
+            studio.total_bolts_building,
+            r.plate_thickness_mm,
+            studio.config.plate_width_mm,
+            studio.config.beam_depth_mm,
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#0369a1">JOINT       ENU (E, N, Z) m       BOLTS   PLATE(m)    GOV DCR   PANEL ZONE   STATUS</text>"##,
+        p4x + 18.0,
+        p4y + 48.0,
+    );
+    for (idx, j) in studio.joints_3d.iter().take(9).enumerate() {
+        let ry = p4y + 58.0 + (idx as f64) * 47.0;
+        let hex = if j.is_compliant { "#059669" } else { "#dc2626" };
+        let st = if j.is_compliant { "PASS" } else { "CHECK" };
+        let pz_lbl = if j.doubler_required { "DOUBLER" } else { "OK" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="38" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#0f172a">{:<10} ({:>5.1},{:>5.1},{:>4.1})   {:>3}    {:.2}x{:.2}    {:>5.2}     {:<7}</text>
+<rect x="{:.1}" y="{:.1}" width="62" height="22" rx="4" fill="{hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 20.0,
+            ry + 23.0,
+            escape_xml(&truncate_clean(&j.joint_id, 10)),
+            j.pos_enu_m[0],
+            j.pos_enu_m[1],
+            j.pos_enu_m[2],
+            j.bolt_count,
+            j.plate_width_m,
+            j.plate_height_m,
+            j.governing_dcr,
+            pz_lbl,
+            p4x + p4w - 90.0,
+            ry + 8.0,
+            p4x + p4w - 59.0,
+            ry + 22.5,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_STEEL_CONN_S109");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = studio.joints_3d.len() + studio.bolts_3d.len();
+    let summary = format!(
+        "Exported Steel Seismic Connection & Panel Zone Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3508,5 +3821,24 @@ mod tests {
         assert!(!s108.svg_content.contains("<image"));
         assert!(!s108.svg_content.contains("ARI"));
         assert_eq!(s108.sha256_seal.len(), 64);
+
+        let conn_rep = crate::core::connection_studio::evaluate_connection_studio(
+            &field_proj,
+            None,
+            &crate::core::connection_studio::ConnectionStudioConfig::default(),
+        );
+        let s109 = build_steel_connection_annex_svg(
+            &field_proj.project_name,
+            &conn_rep,
+            "S-109",
+            Some("conn844seal"),
+        );
+        assert!(s109.svg_content.starts_with("<svg"));
+        assert!(s109.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s109.svg_content.contains("SHEET S-109"));
+        assert!(s109.svg_content.contains("<circle"));
+        assert!(!s109.svg_content.contains("<image"));
+        assert!(!s109.svg_content.contains("ARI"));
+        assert_eq!(s109.sha256_seal.len(), 64);
     }
 }

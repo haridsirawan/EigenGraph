@@ -7,7 +7,15 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.5 (3/10)]
+## [Unreleased — Next: v0.8.5 (4/10)]
+
+### Update 4/10 (`v0.8.4.4`) — Steel Seismic Connection (`AISC 358-16` / `360-16` / `SNI 1729 & 7860`) & Bolt/Panel-Zone 3D Studio + Sheet `S-109`
+- **BIM-Coupled Steel Connection & Panel-Zone Engine (`src/core/connection_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_connection_studio`](src/core/connection_studio.rs) coupling active `BimProject` beam-column joints and site seismic accelerations into [`ConnectionEngine`](src/core/connection.rs) (`ExtendedEndPlate4E` & `ShearTabSinglePlate`), computing high-strength bolt groups (`BoltPin3D`), Panel Zone shear & doubler/continuity plate requirements (`ConnectionJoint3D`), building-wide bolt quantities, `.eigen.json` persistence (`UnifiedWorkspaceArchive::connection_studio_config`), and non-destructive `eigengraph::analysis::steel_connection` IFCX overlays (`IfcxStage::compose_with_connection_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Joint Plates, Bolts & Panel-Zone Halos + Sheet `S-109` (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added [`build_rtc_connection_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`ConnectionGpuInput`, `material_kind = 17.0`, WGSL `kind >= 16.5` metallic glint & panel-zone DCR rim glow shader, 0% raster), dedicated `steel_connection` GPU slot inside `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_connection_fallback`), and archival A3 landscape Sheet `S-109` Pure-Vector Annex SVG (`build_steel_connection_annex_svg`, 0 `<image>` tags).
+- **Width-First Dynamic Island `Steel Connection & Panel-Zone Studio`, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the 2-tab width-first Dynamic Island drawer (`Joint Sizing & Bolt Pattern` + `Limit States & Panel Zone`), `Connections` toolbar pill, `/connection`, `/endplate`, `/shear-tab`, `/connection-3d`, `/connection-ifcx`, `/connection-svg` slash commands, and `[[RUN_CONNECTION:...]]` / `[[TOGGLE_CONNECTION_3D]]` / `[[EXPORT_CONNECTION_ANNEX]]` Gemini directives.
 
 ### Update 3/10 (`v0.8.4.3`) — Special RC Shear Wall, Boundary Element (SBE) & Diagonal Coupling Beam 3D Studio (`ACI 318-19 §18.10` / `SNI 2847:2019`) + Sheet `S-108`
 - **BIM-Coupled Special RC Shear Wall & Coupling Beam Engine (`src/core/shear_wall_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

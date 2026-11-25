@@ -632,6 +632,32 @@ impl SpatialWorkspaceState {
                     self.open_shear_wall_drawer(0);
                     out.export_shear_wall_svg = true;
                 }
+                PlannedProposalAction::RunConnection {
+                    conn_type,
+                    bolt_dia_mm,
+                    plate_thick_mm,
+                } => {
+                    if let Some(ct) = conn_type {
+                        universal_canvas.connection_studio_config.connection_type = *ct;
+                    }
+                    if let Some(db) = bolt_dia_mm {
+                        universal_canvas.connection_studio_config.bolt_diameter_mm = *db;
+                    }
+                    if let Some(tp) = plate_thick_mm {
+                        universal_canvas.connection_studio_config.plate_thickness_mm = *tp;
+                    }
+                    universal_canvas.connection_overlay_visible = true;
+                    self.open_connection_drawer(0);
+                    out.run_connection_studio = true;
+                }
+                PlannedProposalAction::ToggleConnection3d => {
+                    self.open_connection_drawer(0);
+                    out.toggle_connection_3d = true;
+                }
+                PlannedProposalAction::ExportConnectionAnnex => {
+                    self.open_connection_drawer(0);
+                    out.export_connection_svg = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -949,6 +975,21 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportShearWallAnnex => {
                                 PlannedProposalAction::ExportShearWallAnnex
                             }
+                            GeminiDirective::RunConnection {
+                                conn_type,
+                                bolt_dia_mm,
+                                plate_thick_mm,
+                            } => PlannedProposalAction::RunConnection {
+                                conn_type: *conn_type,
+                                bolt_dia_mm: *bolt_dia_mm,
+                                plate_thick_mm: *plate_thick_mm,
+                            },
+                            GeminiDirective::ToggleConnection3d => {
+                                PlannedProposalAction::ToggleConnection3d
+                            }
+                            GeminiDirective::ExportConnectionAnnex => {
+                                PlannedProposalAction::ExportConnectionAnnex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1081,6 +1122,17 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ToggleShearWall3d => "ToggleShearWall3d".to_string(),
                             GeminiDirective::ExportShearWallAnnex => {
                                 "ExportShearWallAnnex(S-108)".to_string()
+                            }
+                            GeminiDirective::RunConnection {
+                                conn_type,
+                                bolt_dia_mm,
+                                plate_thick_mm,
+                            } => format!("RunConnection({conn_type:?}/{bolt_dia_mm:?}/{plate_thick_mm:?})"),
+                            GeminiDirective::ToggleConnection3d => {
+                                "ToggleConnection3d".to_string()
+                            }
+                            GeminiDirective::ExportConnectionAnnex => {
+                                "ExportConnectionAnnex(S-109)".to_string()
                             }
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -2896,6 +2948,39 @@ impl SpatialWorkspaceState {
                 }
                 "/shear-wall-svg" => {
                     actions.export_shear_wall_svg = true;
+                }
+                "/connection" | "/endplate" | "/shear-tab" => {
+                    if cmd == "/shear-tab" {
+                        universal_canvas.connection_studio_config.connection_type =
+                            crate::core::connection::ConnectionType::ShearTabSinglePlate;
+                    } else if cmd == "/endplate" {
+                        universal_canvas.connection_studio_config.connection_type =
+                            crate::core::connection::ConnectionType::ExtendedEndPlate4E;
+                    }
+                    let nums: Vec<f64> = arg
+                        .split_whitespace()
+                        .filter_map(|t| t.parse::<f64>().ok())
+                        .collect();
+                    if let Some(&db) = nums.first() {
+                        universal_canvas.connection_studio_config.bolt_diameter_mm =
+                            db.clamp(16.0, 36.0);
+                    }
+                    if let Some(&tp) = nums.get(1) {
+                        universal_canvas.connection_studio_config.plate_thickness_mm =
+                            tp.clamp(10.0, 50.0);
+                    }
+                    self.open_connection_drawer(0);
+                    actions.run_connection_studio = true;
+                }
+                "/connection-3d" => {
+                    self.open_connection_drawer(0);
+                    actions.toggle_connection_3d = true;
+                }
+                "/connection-ifcx" => {
+                    actions.export_connection_ifcx = true;
+                }
+                "/connection-svg" => {
+                    actions.export_connection_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

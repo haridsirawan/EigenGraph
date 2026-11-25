@@ -70,6 +70,7 @@ pub mod ns {
     pub const EG_SEISMIC_ISOLATION: &str = "eigengraph::analysis::seismic_isolation";
     pub const EG_WIND_AEROELASTICITY: &str = "eigengraph::analysis::wind_aeroelasticity";
     pub const EG_SHEAR_WALL_SBE: &str = "eigengraph::analysis::shear_wall_sbe";
+    pub const EG_STEEL_CONNECTION: &str = "eigengraph::analysis::steel_connection";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
@@ -575,6 +576,10 @@ impl IfcxDocument {
         schemas.insert(
             ns::EG_SHEAR_WALL_SBE.to_string(),
             json!({ "value": { "dataType": "Object", "spec": "EigenGraph Special RC Shear Wall, Boundary Element & Diagonal Coupling Beam (ACI 318-19 §18.10)" } }),
+        );
+        schemas.insert(
+            ns::EG_STEEL_CONNECTION.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph Steel Seismic Connection, Bolts & Panel Zone (AISC 358-16 / 360-16)" } }),
         );
         Self {
             header: IfcxHeader {
@@ -1652,10 +1657,49 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_shear_wall_sbe", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Steel Seismic Connection & Panel-Zone overlay.
+    pub fn compose_with_connection_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::connection_studio::SteelConnectionIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc =
+            IfcxDocument::new(&format!("{}_steel_connection", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcStructuralAnalysisModel", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Steel Seismic Connection & Panel Zone Overlay",
+                "connectionType": overlay.connection_type,
+                "boltDiameterMm": overlay.bolt_diameter_mm,
+                "totalJoints": overlay.total_joints,
+                "governingDcr": overlay.governing_dcr,
+                "panelZoneDcr": overlay.panel_zone_dcr,
+                "isCompliant": overlay.is_compliant,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_STEEL_CONNECTION.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/analysis/steel_connection".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_steel_connection", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_SHEAR_WALL_SBE) {
+    if node.attributes.contains_key(ns::EG_STEEL_CONNECTION) {
+        "Steel Connection".to_string()
+    } else if node.attributes.contains_key(ns::EG_SHEAR_WALL_SBE) {
         "Shear Wall & SBE".to_string()
     } else if node.attributes.contains_key(ns::EG_WIND_AEROELASTICITY) {
         "Wind Aeroelasticity".to_string()

@@ -3119,6 +3119,64 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Pure-vector CPU fallback rendering Update `v0.8.4.4` Steel Connection Joint Plates & Bolt Clusters.
+    pub(super) fn paint_cpu_connection_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.connection_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_connection_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |p: [f64; 3]| -> Option<Pos2> {
+            let ex = p[0] * cr - p[1] * sr;
+            let ny = p[0] * sr + p[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, p[2])
+                .and_then(|(sp, _, vis)| if vis { Some(sp) } else { None })
+        };
+
+        for j in &report.joints_3d {
+            if let Some(sp) = proj_enu(j.pos_enu_m) {
+                let col = if !j.is_compliant {
+                    Color32::from_rgb(255, 69, 58)
+                } else if j.doubler_required {
+                    Color32::from_rgb(255, 179, 64)
+                } else {
+                    Color32::from_rgb(48, 224, 255)
+                };
+                clip.rect_filled(Rect::from_center_size(sp, Vec2::splat(9.0)), 2.0, col);
+            }
+        }
+        for b in &report.bolts_3d {
+            if let Some(sp) = proj_enu(b.pos_enu_m) {
+                clip.circle_filled(sp, 2.5, Color32::from_rgb(250, 204, 21));
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

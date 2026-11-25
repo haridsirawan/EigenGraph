@@ -3718,4 +3718,274 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.4.4` (`4/10` -> `v0.8.5`): Width-first Dynamic Island drawer for Steel Seismic Connection & Panel-Zone Studio.
+    pub(super) fn render_connection_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::connection::{BoltGrade, ConnectionType};
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Wrench,
+                13.0,
+                theme.accent_blue,
+                "Steel Seismic Connection & Panel-Zone Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "Joint Sizing & Bolt Pattern"),
+                (1usize, "Limit States & Panel Zone"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.connection_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.connection_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Steel Connection Studio drawer",
+            )
+            .clicked()
+            {
+                self.connection_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for (ct, lbl) in [
+                    (ConnectionType::ExtendedEndPlate4E, "4E End-Plate"),
+                    (ConnectionType::ShearTabSinglePlate, "Shear Tab"),
+                ] {
+                    let active = universal_canvas.connection_studio_config.connection_type == ct;
+                    if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_blue, "Select connection archetype").clicked() {
+                        universal_canvas.connection_studio_config.connection_type = ct;
+                        actions.run_connection_studio = true;
+                    }
+                }
+                for (bg, lbl) in [
+                    (BoltGrade::A325X, "A325-X"),
+                    (BoltGrade::A490X, "A490-X"),
+                    (BoltGrade::Grade10_9, "Class 10.9"),
+                ] {
+                    let active = universal_canvas.connection_studio_config.bolt_grade == bg;
+                    if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_orange, "High-strength structural bolt grade").clicked() {
+                        universal_canvas.connection_studio_config.bolt_grade = bg;
+                        actions.run_connection_studio = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Layers),
+                    if universal_canvas.connection_overlay_visible { "Joints 3D: ON" } else { "Joints 3D" },
+                    universal_canvas.connection_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU steel end-plates, bolts & panel zones",
+                )
+                .clicked()
+                {
+                    actions.toggle_connection_3d = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Document), ".ifcx", false, theme.accent_blue, "Export eigengraph::analysis::steel_connection IFCX").clicked() {
+                    actions.export_connection_ifcx = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Printer), "Sheet S-109 .svg", false, theme.accent_green, "Export A3 Sheet S-109 Steel Connection Annex SVG").clicked() {
+                    actions.export_connection_svg = true;
+                }
+            });
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                let mut db = universal_canvas.connection_studio_config.bolt_diameter_mm;
+                ui.label(RichText::new("Bolt M (mm)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut db, 16.0..=36.0).max_decimals(0)).changed() {
+                    universal_canvas.connection_studio_config.bolt_diameter_mm = db;
+                    actions.run_connection_studio = true;
+                }
+                let mut tp = universal_canvas.connection_studio_config.plate_thickness_mm;
+                ui.label(RichText::new("Plate tp (mm)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut tp, 10.0..=50.0).max_decimals(0)).changed() {
+                    universal_canvas.connection_studio_config.plate_thickness_mm = tp;
+                    actions.run_connection_studio = true;
+                }
+                let mut bd = universal_canvas.connection_studio_config.beam_depth_mm;
+                ui.label(RichText::new("Beam d (mm)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut bd, 250.0..=800.0).max_decimals(0)).changed() {
+                    universal_canvas.connection_studio_config.beam_depth_mm = bd;
+                    actions.run_connection_studio = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.connection_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(9, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    let Some(ref studio) = universal_canvas.last_connection_report else {
+                        ui.label(RichText::new("Evaluating Steel Connection Studio...").size(9.5).color(theme.text_muted));
+                        return;
+                    };
+                    let r = &studio.report;
+                    if tab == 0 {
+                        if is_left {
+                            ui.label(RichText::new("Connection Plate & High-Strength Bolt Grid").size(9.8).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}x M{:.0} {} | tp={:.0} mm | Weld a={:.0} mm | Gov DCR={:.2}",
+                                    r.bolt_count_n,
+                                    r.bolt_diameter_mm,
+                                    r.bolt_grade.label(),
+                                    r.plate_thickness_mm,
+                                    r.weld_size_mm,
+                                    r.governing_dcr,
+                                ))
+                                .size(8.6)
+                                .monospace()
+                                .color(if r.is_compliant { theme.accent_blue } else { theme.accent_red }),
+                            );
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, 72.0), egui::Sense::hover());
+                            let p = ui.painter_at(rect);
+                            p.rect_filled(rect, 5.0, Color32::from_rgba_unmultiplied(15, 23, 42, 42));
+                            let pl = Rect::from_min_size(
+                                egui::pos2(rect.center().x - 28.0, rect.top() + 8.0),
+                                Vec2::new(56.0, 56.0),
+                            );
+                            p.rect_stroke(pl, 3.0, Stroke::new(1.5, theme.accent_blue), egui::StrokeKind::Inside);
+                            let rows = r.bolt_rows.clamp(2, 6);
+                            let cols = r.bolt_cols.clamp(1, 2);
+                            for ri in 0..rows {
+                                let by = pl.top() + 8.0 + (ri as f32) * (40.0 / (rows.saturating_sub(1).max(1) as f32));
+                                for ci in 0..cols {
+                                    let bx = if cols == 1 { pl.center().x } else { pl.left() + 16.0 + (ci as f32) * 24.0 };
+                                    p.circle_filled(egui::pos2(bx, by), 3.0, theme.accent_orange);
+                                }
+                            }
+                        } else {
+                            ui.label(RichText::new("Joint Demands & Building Bolt Quantity").size(9.8).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "Mu={:.0} kNm | Vu={:.0} kN | {} Joints ({} Total Bolts)",
+                                    r.applied_moment_mu_knm,
+                                    r.applied_shear_vu_kn,
+                                    studio.joints_3d.len(),
+                                    studio.total_bolts_building,
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(theme.accent_blue),
+                            );
+                            for j in studio.joints_3d.iter().take(3) {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} ({:.1},{:.1},{:.1})m | DCR {:.2} | {}",
+                                        j.joint_id,
+                                        j.pos_enu_m[0],
+                                        j.pos_enu_m[1],
+                                        j.pos_enu_m[2],
+                                        j.governing_dcr,
+                                        if j.doubler_required { "DOUBLER REQ" } else { "OK" },
+                                    ))
+                                    .size(8.5)
+                                    .monospace()
+                                    .color(if j.is_compliant { theme.accent_green } else { theme.accent_red }),
+                                );
+                            }
+                        }
+                    } else if is_left {
+                        ui.label(RichText::new("AISC 358/360 Limit States Audit").size(9.8).strong().color(theme.text_primary));
+                        for ls in r.limit_states.iter().take(5) {
+                            ui.label(
+                                RichText::new(format!(
+                                    "[{}] {} ({:.2})",
+                                    if ls.is_safe { "PASS" } else { "FAIL" },
+                                    ls.limit_state_name,
+                                    ls.demand_capacity_ratio
+                                ))
+                                .size(8.5)
+                                .monospace()
+                                .color(if ls.is_safe { theme.accent_green } else { theme.accent_red }),
+                            );
+                        }
+                    } else {
+                        ui.label(RichText::new("Column Panel Zone & Continuity Plates").size(9.8).strong().color(theme.text_primary));
+                        if let Some(ref pz) = r.panel_zone {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Vpz={:.0}/{:.0} kN (DCR={:.2}) | Doubler: {}",
+                                    pz.applied_shear_vpz_kn,
+                                    pz.design_shear_capacity_phi_vn_kn,
+                                    pz.panel_zone_dcr,
+                                    if pz.doubler_plate_required {
+                                        format!("{:.1} mm", pz.recommended_doubler_thickness_mm)
+                                    } else {
+                                        "NO".to_string()
+                                    },
+                                ))
+                                .size(8.7)
+                                .monospace()
+                                .color(if pz.is_panel_zone_safe { theme.accent_green } else { theme.accent_orange }),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Continuity: {} | Web Yield {:.0} kN | Crippling {:.0} kN",
+                                    if pz.continuity_plates_required { "YES" } else { "NO" },
+                                    pz.web_local_yielding_phi_rn_kn,
+                                    pz.web_crippling_phi_rn_kn,
+                                ))
+                                .size(8.5)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new("Pinned Shear Tab mode — column panel zone moment shear is zero.")
+                                    .size(8.8)
+                                    .color(theme.text_muted),
+                            );
+                        }
+                    }
+                });
+            });
+        });
+    }
 }

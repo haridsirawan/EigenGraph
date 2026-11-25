@@ -3347,3 +3347,82 @@ pub fn build_rtc_shear_wall_mesh(input: &ShearWallGpuInput<'_>) -> GpuMeshPayloa
     }
 }
 
+/// GPU input payload for Update `v0.8.4.4` Steel Seismic Connection Joint Plates, Panel Zones & Bolt Pins (`material_kind = 17.0`).
+pub struct ConnectionGpuInput<'a> {
+    pub report: &'a crate::core::connection_studio::ConnectionStudioReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU steel end-plate / shear-tab boxes, column panel-zone halos,
+/// and high-strength bolt pin clusters (`material_kind = 17.0`, 0% raster).
+pub fn build_rtc_connection_mesh(input: &ConnectionGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+
+    let rep = input.report;
+    let mut verts = Vec::with_capacity(rep.joints_3d.len() * 48 + rep.bolts_3d.len() * 16);
+    let mut idxs = Vec::with_capacity(rep.joints_3d.len() * 72 + rep.bolts_3d.len() * 24);
+
+    // 1. Beam-column joint plates & panel zone envelopes
+    for j in &rep.joints_3d {
+        let (col, sev) = if !j.is_compliant {
+            ([1.0_f32, 0.26, 0.24, 0.94], 0.95_f32)
+        } else if j.doubler_required {
+            ([1.0_f32, 0.70, 0.16, 0.90], 0.65_f32)
+        } else {
+            ([0.16_f32, 0.88, 0.96, 0.88], 0.30_f32)
+        };
+        let hw = j.plate_width_m * 0.65;
+        let ht = j.plate_thick_m.max(0.08);
+        let fp = [
+            rot_xy(j.pos_enu_m[0] - ht, j.pos_enu_m[1] - hw),
+            rot_xy(j.pos_enu_m[0] + ht, j.pos_enu_m[1] - hw),
+            rot_xy(j.pos_enu_m[0] + ht, j.pos_enu_m[1] + hw),
+            rot_xy(j.pos_enu_m[0] - ht, j.pos_enu_m[1] + hw),
+        ];
+        let z0 = (j.pos_enu_m[2] - j.plate_height_m * 0.5) as f32;
+        let z1 = (j.pos_enu_m[2] + j.plate_height_m * 0.5) as f32;
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z1, col, 17.0);
+
+        let cxy = rot_xy(j.pos_enu_m[0], j.pos_enu_m[1]);
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [cxy[0] as f32, cxy[1] as f32, j.pos_enu_m[2] as f32],
+            0.22,
+            col,
+            sev,
+            17.0,
+        );
+    }
+
+    // 2. High-strength bolt head beacons around primary joints
+    for b in &rep.bolts_3d {
+        let col = if b.is_tension_zone {
+            [0.24_f32, 0.92, 1.0, 0.96]
+        } else {
+            [0.98_f32, 0.82, 0.24, 0.94]
+        };
+        let cxy = rot_xy(b.pos_enu_m[0], b.pos_enu_m[1]);
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [cxy[0] as f32, cxy[1] as f32, b.pos_enu_m[2] as f32],
+            (b.diameter_m as f32 * 2.2).clamp(0.05, 0.12),
+            col,
+            0.5,
+            17.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

@@ -5312,3 +5312,118 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn phase84_4_connection_studio_drawer_responsive_and_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = crate::views::build::BuildView::default();
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_ep = spatial.execute_spatial_input(
+            "/endplate 27 28",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_ep.run_connection_studio);
+        assert_eq!(
+            canvas.connection_studio_config.connection_type,
+            crate::core::connection::ConnectionType::ExtendedEndPlate4E
+        );
+        assert!((canvas.connection_studio_config.bolt_diameter_mm - 27.0).abs() < 1e-6);
+        assert!((canvas.connection_studio_config.plate_thickness_mm - 28.0).abs() < 1e-6);
+        assert!(spatial.connection_drawer_open);
+
+        assert!(spatial
+            .execute_spatial_input(
+                "/connection-3d",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .toggle_connection_3d);
+        assert!(spatial
+            .execute_spatial_input(
+                "/connection-ifcx",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_connection_ifcx);
+        assert!(spatial
+            .execute_spatial_input(
+                "/connection-svg",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_connection_svg);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Check joints [[RUN_CONNECTION:ENDPLATE:24:26]] [[TOGGLE_CONNECTION_3D]] [[EXPORT_CONNECTION_ANNEX]]",
+        );
+        assert_eq!(clean, "Check joints");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunConnection {
+                    conn_type: Some(crate::core::connection::ConnectionType::ExtendedEndPlate4E),
+                    bolt_dia_mm: Some(24.0),
+                    plate_thick_mm: Some(26.0),
+                },
+                GeminiDirective::ToggleConnection3d,
+                GeminiDirective::ExportConnectionAnnex,
+            ]
+        );
+
+        let _ = canvas.run_connection_studio(&build.bim_bus.project);
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_connection_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 84.4 Connection Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

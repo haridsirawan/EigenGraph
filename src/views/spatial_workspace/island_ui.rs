@@ -2885,6 +2885,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.connection_drawer_open {
+                        self.render_connection_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -5460,6 +5472,20 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_shear_wall_drawer(0);
                                                         actions.run_shear_wall_studio = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Wrench),
+                                                        "Connections",
+                                                        self.connection_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Open Steel Seismic Connection, Bolts & Panel-Zone Studio (AISC 358/360 + Sheet S-109)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_connection_drawer(0);
+                                                        actions.run_connection_studio = true;
                                                     }
                                                 },
                                             );

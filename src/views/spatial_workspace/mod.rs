@@ -149,6 +149,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.4.3 (3/10 -> v0.8.5): Special RC Shear Wall, SBE & Coupling Beam Drawer
     pub shear_wall_drawer_open: bool,
     pub shear_wall_drawer_tab: usize,
+    // Update v0.8.4.4 (4/10 -> v0.8.5): Steel Seismic Connection & Panel-Zone Drawer
+    pub connection_drawer_open: bool,
+    pub connection_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -261,6 +264,8 @@ impl Default for SpatialWorkspaceState {
             wind_drawer_tab: 0,
             shear_wall_drawer_open: false,
             shear_wall_drawer_tab: 0,
+            connection_drawer_open: false,
+            connection_drawer_tab: 0,
         }
     }
 }
@@ -294,6 +299,7 @@ impl SpatialWorkspaceState {
             || self.isolation_drawer_open
             || self.wind_drawer_open
             || self.shear_wall_drawer_open
+            || self.connection_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -321,6 +327,7 @@ impl SpatialWorkspaceState {
         self.isolation_drawer_open = false;
         self.wind_drawer_open = false;
         self.shear_wall_drawer_open = false;
+        self.connection_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -415,6 +422,11 @@ impl SpatialWorkspaceState {
         } else {
             self.shear_wall_drawer_open = !self.shear_wall_drawer_open;
         }
+        if drawer != "connection" {
+            self.connection_drawer_open = false;
+        } else {
+            self.connection_drawer_open = !self.connection_drawer_open;
+        }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
@@ -487,6 +499,14 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.shear_wall_drawer_tab = tab.min(1);
         self.shear_wall_drawer_open = true;
+    }
+
+    /// Idempotently opens the Update `v0.8.4.4` Steel Seismic Connection & Panel-Zone Studio drawer
+    /// (`0` = Joint Sizing & Bolt Pattern, `1` = Limit States & Panel Zone).
+    pub fn open_connection_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.connection_drawer_tab = tab.min(1);
+        self.connection_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

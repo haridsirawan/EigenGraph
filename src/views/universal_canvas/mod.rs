@@ -196,6 +196,10 @@ pub struct UniversalCanvasState {
     pub shear_wall_overlay_visible: bool,
     pub shear_wall_studio_config: crate::core::shear_wall_studio::ShearWallStudioConfig,
     pub last_shear_wall_report: Option<crate::core::shear_wall_studio::ShearWallStudioReport>,
+    // Update v0.8.4.4 (4/10 -> v0.8.5): Steel Seismic Connection, Bolts & Panel Zone
+    pub connection_overlay_visible: bool,
+    pub connection_studio_config: crate::core::connection_studio::ConnectionStudioConfig,
+    pub last_connection_report: Option<crate::core::connection_studio::ConnectionStudioReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -350,6 +354,9 @@ impl Default for UniversalCanvasState {
             shear_wall_overlay_visible: false,
             shear_wall_studio_config: crate::core::shear_wall_studio::ShearWallStudioConfig::default(),
             last_shear_wall_report: None,
+            connection_overlay_visible: false,
+            connection_studio_config: crate::core::connection_studio::ConnectionStudioConfig::default(),
+            last_connection_report: None,
         }
     }
 }
@@ -1012,6 +1019,21 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Steel Seismic Connection, High-Strength Bolts & Panel Zone coupled to BIM & site.
+    pub fn run_connection_studio(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::connection_studio::ConnectionStudioReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::connection_studio::evaluate_connection_studio(
+            bim_project,
+            Some(&site),
+            &self.connection_studio_config,
+        );
+        self.last_connection_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1343,6 +1365,7 @@ impl UniversalCanvasState {
             isolation_studio_config: self.isolation_studio_config.clone(),
             wind_studio_config: self.wind_studio_config.clone(),
             shear_wall_studio_config: self.shear_wall_studio_config.clone(),
+            connection_studio_config: self.connection_studio_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1471,6 +1494,8 @@ impl UniversalCanvasState {
         self.last_wind_report = None;
         self.shear_wall_studio_config = archive.shear_wall_studio_config;
         self.last_shear_wall_report = None;
+        self.connection_studio_config = archive.connection_studio_config;
+        self.last_connection_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2094,6 +2119,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let connection_gpu_input = if self.connection_overlay_visible {
+                self.last_connection_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::ConnectionGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -2129,6 +2165,7 @@ impl UniversalCanvasState {
                 isolation_gpu_input,
                 wind_gpu_input,
                 shear_wall_gpu_input,
+                connection_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2201,6 +2238,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.shear_wall_overlay_visible {
                 self.paint_cpu_shear_wall_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.connection_overlay_visible {
+                self.paint_cpu_connection_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)
