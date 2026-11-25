@@ -208,6 +208,10 @@ pub struct UniversalCanvasState {
     pub composite_overlay_visible: bool,
     pub composite_studio_config: crate::core::composite_studio::CompositeStudioConfig,
     pub last_composite_report: Option<crate::core::composite_studio::CompositeStudioReport>,
+    // Update v0.8.4.7 (7/10 -> v0.8.5): Structural Reliability FORM/SORM & FEMA P-58 Fragility
+    pub reliability_overlay_visible: bool,
+    pub reliability_studio_config: crate::core::reliability_studio::ReliabilityStudioConfig,
+    pub last_reliability_report: Option<crate::core::reliability_studio::ReliabilityStudioReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -371,6 +375,9 @@ impl Default for UniversalCanvasState {
             composite_overlay_visible: false,
             composite_studio_config: crate::core::composite_studio::CompositeStudioConfig::default(),
             last_composite_report: None,
+            reliability_overlay_visible: false,
+            reliability_studio_config: crate::core::reliability_studio::ReliabilityStudioConfig::default(),
+            last_reliability_report: None,
         }
     }
 }
@@ -1078,6 +1085,21 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Structural Reliability (`FORM/SORM` beta-index, Sensitivity & FEMA P-58 Fragility) coupled to BIM & site.
+    pub fn run_reliability_studio(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::reliability_studio::ReliabilityStudioReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::reliability_studio::evaluate_reliability_studio(
+            bim_project,
+            Some(&site),
+            &self.reliability_studio_config,
+        );
+        self.last_reliability_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1412,6 +1434,7 @@ impl UniversalCanvasState {
             connection_studio_config: self.connection_studio_config.clone(),
             prestress_studio_config: self.prestress_studio_config.clone(),
             composite_studio_config: self.composite_studio_config.clone(),
+            reliability_studio_config: self.reliability_studio_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1546,6 +1569,8 @@ impl UniversalCanvasState {
         self.last_prestress_report = None;
         self.composite_studio_config = archive.composite_studio_config;
         self.last_composite_report = None;
+        self.reliability_studio_config = archive.reliability_studio_config;
+        self.last_reliability_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2202,6 +2227,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let reliability_gpu_input = if self.reliability_overlay_visible {
+                self.last_reliability_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::ReliabilityGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -2240,6 +2276,7 @@ impl UniversalCanvasState {
                 connection_gpu_input,
                 prestress_gpu_input,
                 composite_gpu_input,
+                reliability_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2321,6 +2358,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.composite_overlay_visible {
                 self.paint_cpu_composite_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.reliability_overlay_visible {
+                self.paint_cpu_reliability_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

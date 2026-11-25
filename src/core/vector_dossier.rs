@@ -4048,6 +4048,325 @@ pub fn build_composite_deck_annex_svg(
     }
 }
 
+/// Pure-Vector Structural Reliability (`FORM/SORM` Beta-Index, Sensitivity & FEMA P-58 Fragility) Annex SVG (`S-112`).
+pub fn build_reliability_form_annex_svg(
+    project_name: &str,
+    studio: &crate::core::reliability_studio::ReliabilityStudioReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(26_000);
+    let seal_token = "__EIGENGRAPH_RELIABILITY_S112_SHA256__";
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#ea580c" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH STRUCTURAL RELIABILITY FORM/SORM &amp; FEMA P-58 FRAGILITY ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#c2410c">SHEET {} • ASCE 7-22 / EN 1990 / ISO 2394 / FEMA P-58 • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: FORM/SORM Standard-Normal U-Space Beta-Sphere & Design Point MPP (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. FORM/SORM U-SPACE BETA-SPHERE &amp; DESIGN POINT (MPP)",
+        &format!(
+            "{} • {} • Active beta={:.2} (Target {:.2}, Pf={:.2e})",
+            escape_xml(studio.config.method.label()),
+            escape_xml(studio.config.limit_state.label()),
+            studio.active_beta,
+            studio.config.target_beta,
+            studio.active_pf,
+        ),
+    );
+    let ucx = p1x + 380.0;
+    let ucy = p1y + 224.0;
+    let r_px = (studio.active_beta.clamp(1.2, 5.5) * 26.0).clamp(38.0, 142.0);
+    let ang = -std::f64::consts::FRAC_PI_4;
+    let mpp_x = ucx + r_px * ang.cos();
+    let mpp_y = ucy + r_px * ang.sin();
+    let tx = -ang.sin() * 110.0;
+    let ty = ang.cos() * 110.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="540" height="296" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>
+<line x1="{:.1}" y1="{ucy:.1}" x2="{:.1}" y2="{ucy:.1}" stroke="#94a3b8" stroke-width="1.1"/>
+<line x1="{ucx:.1}" y1="{:.1}" x2="{ucx:.1}" y2="{:.1}" stroke="#94a3b8" stroke-width="1.1"/>
+<circle cx="{ucx:.1}" cy="{ucy:.1}" r="{r_px:.1}" fill="none" stroke="#0284c7" stroke-width="2.0" stroke-dasharray="6,4"/>
+<path d="M {:.1} {:.1} Q {:.1} {:.1} {:.1} {:.1}" fill="none" stroke="#ea580c" stroke-width="2.4"/>
+<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="#64748b" stroke-width="1.4" stroke-dasharray="4,3"/>
+<line x1="{ucx:.1}" y1="{ucy:.1}" x2="{mpp_x:.1}" y2="{mpp_y:.1}" stroke="#0f172a" stroke-width="2.2"/>
+<circle cx="{ucx:.1}" cy="{ucy:.1}" r="4.5" fill="#0f172a"/>
+<circle cx="{mpp_x:.1}" cy="{mpp_y:.1}" r="6.5" fill="#dc2626" stroke="#ffffff" stroke-width="1.5"/>
+<text x="{:.1}" y="{:.1}" font-size="9.5" font-weight="bold" fill="#b91c1c">MPP Design Point u* (beta = {:.2})</text>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-family="monospace" fill="#475569">Safe Domain g(u) &gt; 0</text>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-family="monospace" fill="#c2410c">Failure Boundary g(u) = 0</text>"##,
+        p1x + 110.0,
+        p1y + 62.0,
+        ucx - 240.0,
+        ucx + 240.0,
+        ucy - 135.0,
+        ucy + 135.0,
+        mpp_x - tx,
+        mpp_y - ty + 18.0,
+        mpp_x - 10.0,
+        mpp_y - 10.0,
+        mpp_x + tx,
+        mpp_y + ty + 18.0,
+        mpp_x - tx,
+        mpp_y - ty,
+        mpp_x + tx,
+        mpp_y + ty,
+        mpp_x + 10.0,
+        mpp_y - 8.0,
+        studio.active_beta,
+        ucx - 190.0,
+        ucy + 108.0,
+        ucx + 70.0,
+        ucy - 112.0,
+    );
+    let method_cards = [
+        ("Method Comparison (FOSM / FORM / SORM)", format!("FOSM={:.2} (Pf {:.2e}) | FORM={:.2} ({} it) | SORM={:.2}", studio.fosm_beta, studio.fosm_pf, studio.form_beta, studio.iterations, studio.sorm_beta)),
+        ("Breitung Curvature & Target Check", format!("kappa={:+.4} | Min Member beta={:.2} | Below Target={}/{}", studio.curvature_kappa, studio.min_member_beta, studio.below_target_count, studio.members_3d.len())),
+    ];
+    for (idx, (lbl, val)) in method_cards.iter().enumerate() {
+        let ry = p1y + 392.0 + (idx as f64) * 54.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="44" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.3" font-weight="bold" fill="#334155">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-weight="bold" font-family="monospace" text-anchor="end" fill="#0f172a">{val}</text>"##,
+            p1x + 16.0,
+            p1w - 32.0,
+            p1x + 26.0,
+            ry + 26.0,
+            p1x + p1w - 26.0,
+            ry + 26.0,
+        );
+    }
+
+    // Panel 2: Sensitivity Importance Tornado (alpha^2 %) & Governance Seal (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. SENSITIVITY IMPORTANCE TORNADO (ALPHA^2 %) &amp; GOVERNANCE SEAL",
+        &format!(
+            "DCR={:.2} • V_R={:.0}% • V_D={:.0}% • V_L={:.0}% • V_E={:.0}%",
+            studio.config.demand_to_capacity_ratio,
+            studio.config.resistance_cov * 100.0,
+            studio.config.dead_load_cov * 100.0,
+            studio.config.live_load_cov * 100.0,
+            studio.config.seismic_load_cov * 100.0,
+        ),
+    );
+    let max_bar_w = 420.0;
+    for (idx, s) in studio.sensitivities.iter().enumerate() {
+        let ry = p2y + 72.0 + (idx as f64) * 76.0;
+        let bw = (s.importance_pct / 100.0).clamp(0.02, 1.0) * max_bar_w;
+        let bar_col = if s.alpha < 0.0 { "#0284c7" } else { "#ea580c" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="62" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.8" font-weight="bold" fill="#0f172a">{} [{}]</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#475569">alpha = {:+.3} | u* = {:+.2} | x* = {:.3}</text>
+<rect x="{:.1}" y="{:.1}" width="{max_bar_w:.1}" height="18" rx="3" fill="#e2e8f0"/>
+<rect x="{:.1}" y="{:.1}" width="{bw:.1}" height="18" rx="3" fill="{bar_col}"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" font-family="monospace" text-anchor="end" fill="#0f172a">{:.1}%</text>"##,
+            p2x + 16.0,
+            p2w - 32.0,
+            p2x + 26.0,
+            ry + 22.0,
+            escape_xml(&s.variable_name),
+            escape_xml(&s.symbol),
+            p2x + 26.0,
+            ry + 44.0,
+            s.alpha,
+            s.design_point_u,
+            s.design_point_x,
+            p2x + 260.0,
+            ry + 22.0,
+            p2x + 260.0,
+            ry + 22.0,
+            p2x + p2w - 26.0,
+            ry + 35.0,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="92" rx="5" fill="#fff7ed" stroke="#fdba74" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="10.0" font-weight="bold" fill="#9a3412">VERDICT: {}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.7" font-family="monospace" fill="#334155">SHA-256 SEAL: {seal_token}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-family="monospace" fill="#475569">{}</text>"##,
+        p2x + 16.0,
+        p2y + 402.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 426.0,
+        escape_xml(&truncate_clean(&studio.summary_verdict, 84)),
+        p2x + 26.0,
+        p2y + 452.0,
+        p2x + 26.0,
+        p2y + 476.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live Structural Reliability Studio".to_string()),
+        ),
+    );
+
+    // Panel 3: FEMA P-58 Multi-State Seismic Fragility Curves (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. FEMA P-58 MULTI-STATE SEISMIC FRAGILITY CURVES",
+        "Exceedance Probability P(DS >= ds | PGA) across Slight / Moderate / Extensive / Collapse",
+    );
+    let gx = p3x + 76.0;
+    let gy = p3y + 70.0;
+    let gw = p3w - 116.0;
+    let gh = 340.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{gx:.1}" y="{gy:.1}" width="{gw:.1}" height="{gh:.1}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>"##
+    );
+    for tick in 0..=4 {
+        let frac = (tick as f64) * 0.25;
+        let ty = gy + gh * (1.0 - frac);
+        let _ = writeln!(
+            svg,
+            r##"<line x1="{gx:.1}" y1="{ty:.1}" x2="{:.1}" y2="{ty:.1}" stroke="#e2e8f0" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" text-anchor="end" fill="#475569">{:.0}%</text>"##,
+            gx + gw,
+            gx - 8.0,
+            ty + 3.0,
+            frac * 100.0,
+        );
+    }
+    let build_pts = |extract: fn(&crate::core::reliability_studio::FragilityPointDto) -> f64| -> String {
+        studio
+            .fragility_curve
+            .iter()
+            .map(|pt| {
+                let px = gx + ((pt.pga_g - 0.05) / 1.45).clamp(0.0, 1.0) * gw;
+                let py = gy + (1.0 - extract(pt).clamp(0.0, 1.0)) * gh;
+                format!("{px:.1},{py:.1}")
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let curves = [
+        ("Slight", "#10b981", build_pts(|p| p.prob_slight)),
+        ("Moderate", "#0284c7", build_pts(|p| p.prob_moderate)),
+        ("Extensive", "#f59e0b", build_pts(|p| p.prob_extensive)),
+        ("Collapse", "#dc2626", build_pts(|p| p.prob_complete_collapse)),
+    ];
+    for (idx, (lbl, col, pts)) in curves.iter().enumerate() {
+        let _ = writeln!(
+            svg,
+            r##"<polyline fill="none" stroke="{col}" stroke-width="2.4" points="{pts}"/>
+<rect x="{:.1}" y="{:.1}" width="16" height="4" fill="{col}"/>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-weight="bold" fill="#0f172a">{lbl}</text>"##,
+            gx + (idx as f64) * 155.0,
+            gy + gh + 32.0,
+            gx + 22.0 + (idx as f64) * 155.0,
+            gy + gh + 37.0,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9.0" font-family="monospace" text-anchor="middle" fill="#475569">Peak Ground Acceleration PGA (0.05g -> 1.50g)</text>"##,
+        gx + gw * 0.5,
+        gy + gh + 64.0,
+    );
+
+    // Panel 4: Member Reliability Audit Table & Code Compliance (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. 3D STRUCTURAL MEMBER RELIABILITY AUDIT &amp; CODE COMPLIANCE",
+        &format!(
+            "{} Members • Target beta >= {:.2} • Below Target: {}",
+            studio.members_3d.len(),
+            studio.config.target_beta,
+            studio.below_target_count
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#c2410c">MEMBER       ENU (m)             DCR      BETA     PF             STATUS</text>"##,
+        p4x + 18.0,
+        p4y + 48.0,
+    );
+    for (idx, m) in studio.members_3d.iter().take(7).enumerate() {
+        let ry = p4y + 58.0 + (idx as f64) * 58.0;
+        let ok = !m.is_below_target;
+        let hex = if ok { "#059669" } else { "#dc2626" };
+        let st = if ok { "PASS" } else { "REVIEW" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="48" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#0f172a">{:<11} ({:>4.1},{:>4.1},{:>4.1})   {:.2}     {:.2}     {:.2e}</text>
+<rect x="{:.1}" y="{:.1}" width="64" height="22" rx="4" fill="{hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 20.0,
+            ry + 28.0,
+            escape_xml(&truncate_clean(&m.member_id, 11)),
+            m.p0_enu_m[0],
+            m.p0_enu_m[1],
+            m.p0_enu_m[2],
+            m.dcr,
+            m.beta_index,
+            m.failure_probability,
+            p4x + p4w - 92.0,
+            ry + 13.0,
+            p4x + p4w - 60.0,
+            ry + 27.5,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_RELIABILITY_S112");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = studio.members_3d.len() + studio.hotspots_3d.len() + studio.sensitivities.len();
+    let summary = format!(
+        "Exported Structural Reliability FORM/SORM & Fragility Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4456,5 +4775,25 @@ mod tests {
         assert!(!s111.svg_content.contains("<image"));
         assert!(!s111.svg_content.contains("ARI"));
         assert_eq!(s111.sha256_seal.len(), 64);
+
+        let rel_rep = crate::core::reliability_studio::evaluate_reliability_studio(
+            &field_proj,
+            None,
+            &crate::core::reliability_studio::ReliabilityStudioConfig::default(),
+        );
+        let s112 = build_reliability_form_annex_svg(
+            &field_proj.project_name,
+            &rel_rep,
+            "S-112",
+            Some("rel847seal"),
+        );
+        assert!(s112.svg_content.starts_with("<svg"));
+        assert!(s112.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s112.svg_content.contains("SHEET S-112"));
+        assert!(s112.svg_content.contains("FORM/SORM"));
+        assert!(s112.svg_content.contains("<polyline"));
+        assert!(!s112.svg_content.contains("<image"));
+        assert!(!s112.svg_content.contains("ARI"));
+        assert_eq!(s112.sha256_seal.len(), 64);
     }
 }

@@ -710,6 +710,32 @@ impl SpatialWorkspaceState {
                     self.open_composite_drawer(0);
                     out.export_composite_svg = true;
                 }
+                PlannedProposalAction::RunReliability {
+                    method,
+                    target_beta,
+                    limit_state,
+                } => {
+                    if let Some(m) = method {
+                        universal_canvas.reliability_studio_config.method = *m;
+                    }
+                    if let Some(tb) = target_beta {
+                        universal_canvas.reliability_studio_config.target_beta = tb.clamp(2.0, 5.5);
+                    }
+                    if let Some(ls) = limit_state {
+                        universal_canvas.reliability_studio_config.limit_state = *ls;
+                    }
+                    universal_canvas.reliability_overlay_visible = true;
+                    self.open_reliability_drawer(0);
+                    out.run_reliability_studio = true;
+                }
+                PlannedProposalAction::ToggleReliability3d => {
+                    self.open_reliability_drawer(0);
+                    out.toggle_reliability_3d = true;
+                }
+                PlannedProposalAction::ExportReliabilityAnnex => {
+                    self.open_reliability_drawer(0);
+                    out.export_reliability_svg = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -1072,6 +1098,21 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportCompositeAnnex => {
                                 PlannedProposalAction::ExportCompositeAnnex
                             }
+                            GeminiDirective::RunReliability {
+                                method,
+                                target_beta,
+                                limit_state,
+                            } => PlannedProposalAction::RunReliability {
+                                method: *method,
+                                target_beta: *target_beta,
+                                limit_state: *limit_state,
+                            },
+                            GeminiDirective::ToggleReliability3d => {
+                                PlannedProposalAction::ToggleReliability3d
+                            }
+                            GeminiDirective::ExportReliabilityAnnex => {
+                                PlannedProposalAction::ExportReliabilityAnnex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1233,6 +1274,17 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ToggleComposite3d => "ToggleComposite3d".to_string(),
                             GeminiDirective::ExportCompositeAnnex => {
                                 "ExportCompositeAnnex(S-111)".to_string()
+                            }
+                            GeminiDirective::RunReliability {
+                                method,
+                                target_beta,
+                                limit_state,
+                            } => format!("RunReliability({method:?}/{target_beta:?}/{limit_state:?})"),
+                            GeminiDirective::ToggleReliability3d => {
+                                "ToggleReliability3d".to_string()
+                            }
+                            GeminiDirective::ExportReliabilityAnnex => {
+                                "ExportReliabilityAnnex(S-112)".to_string()
                             }
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -3142,6 +3194,52 @@ impl SpatialWorkspaceState {
                 }
                 "/composite-svg" => {
                     actions.export_composite_svg = true;
+                }
+                "/reliability" | "/form" | "/sorm" | "/fragility" => {
+                    let lo = arg.to_ascii_lowercase();
+                    if cmd == "/form" || lo.contains("form") {
+                        universal_canvas.reliability_studio_config.method =
+                            crate::core::reliability_studio::ReliabilityMethod::FormHasoferLind;
+                    } else if cmd == "/sorm" || lo.contains("sorm") {
+                        universal_canvas.reliability_studio_config.method =
+                            crate::core::reliability_studio::ReliabilityMethod::SormBreitung;
+                    } else if lo.contains("fosm") {
+                        universal_canvas.reliability_studio_config.method =
+                            crate::core::reliability_studio::ReliabilityMethod::FosmLogNormal;
+                    }
+                    if lo.contains("drift") {
+                        universal_canvas.reliability_studio_config.limit_state =
+                            crate::core::reliability_studio::LimitStateKind::InterstoryDrift;
+                    } else if lo.contains("col") || lo.contains("axial") {
+                        universal_canvas.reliability_studio_config.limit_state =
+                            crate::core::reliability_studio::LimitStateKind::AxialColumn;
+                    } else if lo.contains("shear") {
+                        universal_canvas.reliability_studio_config.limit_state =
+                            crate::core::reliability_studio::LimitStateKind::ShearBrittle;
+                    } else if lo.contains("flex") {
+                        universal_canvas.reliability_studio_config.limit_state =
+                            crate::core::reliability_studio::LimitStateKind::FlexurePlastic;
+                    }
+                    if let Some(tb) = arg
+                        .split_whitespace()
+                        .filter_map(|t| t.parse::<f64>().ok())
+                        .next()
+                    {
+                        universal_canvas.reliability_studio_config.target_beta =
+                            tb.clamp(2.0, 5.5);
+                    }
+                    self.open_reliability_drawer(if cmd == "/fragility" { 1 } else { 0 });
+                    actions.run_reliability_studio = true;
+                }
+                "/reliability-3d" => {
+                    self.open_reliability_drawer(0);
+                    actions.toggle_reliability_3d = true;
+                }
+                "/reliability-ifcx" => {
+                    actions.export_reliability_ifcx = true;
+                }
+                "/reliability-svg" => {
+                    actions.export_reliability_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

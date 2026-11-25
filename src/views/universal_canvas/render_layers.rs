@@ -3299,6 +3299,77 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Update `v0.8.4.7` (`7/10` -> `v0.8.5`): Pure-vector CPU fallback rendering Structural Reliability member beta contours & risk hotspots.
+    pub(super) fn paint_cpu_reliability_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.reliability_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_reliability_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |p: [f64; 3]| -> Option<Pos2> {
+            let ex = p[0] * cr - p[1] * sr;
+            let ny = p[0] * sr + p[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, p[2])
+                .and_then(|(sp, _, vis)| if vis { Some(sp) } else { None })
+        };
+
+        let target = report.config.target_beta;
+        for m in &report.members_3d {
+            if let (Some(a), Some(b)) = (proj_enu(m.p0_enu_m), proj_enu(m.p1_enu_m)) {
+                let col = if m.is_below_target {
+                    Color32::from_rgb(239, 68, 68)
+                } else if m.beta_index < target + 0.5 {
+                    Color32::from_rgb(245, 158, 11)
+                } else {
+                    Color32::from_rgb(16, 185, 129)
+                };
+                clip.line_segment([a, b], Stroke::new(3.6, col));
+            }
+        }
+        for hs in &report.hotspots_3d {
+            if let Some(sp) = proj_enu(hs.pos_enu_m) {
+                let col = if hs.is_critical {
+                    Color32::from_rgb(248, 113, 113)
+                } else {
+                    Color32::from_rgb(251, 191, 36)
+                };
+                let r = if hs.is_critical { 5.2 } else { 3.8 };
+                let pts = vec![
+                    sp + Vec2::new(0.0, -r),
+                    sp + Vec2::new(r, 0.0),
+                    sp + Vec2::new(0.0, r),
+                    sp + Vec2::new(-r, 0.0),
+                ];
+                clip.add(egui::Shape::closed_line(pts, Stroke::new(1.8, col)));
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

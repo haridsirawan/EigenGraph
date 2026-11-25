@@ -5655,3 +5655,121 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn phase84_7_reliability_studio_drawer_responsive_and_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = crate::views::build::BuildView::default();
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_rel = spatial.execute_spatial_input(
+            "/sorm 3.8 drift",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_rel.run_reliability_studio);
+        assert!((canvas.reliability_studio_config.target_beta - 3.8).abs() < 1e-6);
+        assert_eq!(
+            canvas.reliability_studio_config.method,
+            crate::core::reliability_studio::ReliabilityMethod::SormBreitung
+        );
+        assert_eq!(
+            canvas.reliability_studio_config.limit_state,
+            crate::core::reliability_studio::LimitStateKind::InterstoryDrift
+        );
+        assert!(spatial.reliability_drawer_open);
+
+        assert!(spatial
+            .execute_spatial_input(
+                "/reliability-3d",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .toggle_reliability_3d);
+        assert!(spatial
+            .execute_spatial_input(
+                "/reliability-ifcx",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_reliability_ifcx);
+        assert!(spatial
+            .execute_spatial_input(
+                "/reliability-svg",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_reliability_svg);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Probabilistic audit [[RUN_RELIABILITY:FORM:3.8:DRIFT]] [[TOGGLE_RELIABILITY_3D]] [[EXPORT_RELIABILITY_ANNEX]]",
+        );
+        assert_eq!(clean, "Probabilistic audit");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunReliability {
+                    method: Some(crate::core::reliability_studio::ReliabilityMethod::FormHasoferLind),
+                    target_beta: Some(3.8),
+                    limit_state: Some(crate::core::reliability_studio::LimitStateKind::InterstoryDrift),
+                },
+                GeminiDirective::ToggleReliability3d,
+                GeminiDirective::ExportReliabilityAnnex,
+            ]
+        );
+
+        let _ = canvas.run_reliability_studio(&build.bim_bus.project);
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_reliability_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 84.7 Reliability Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

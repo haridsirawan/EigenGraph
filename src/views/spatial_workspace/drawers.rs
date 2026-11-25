@@ -4526,4 +4526,304 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.4.7` (`7/10` -> `v0.8.5`): Width-first Dynamic Island drawer for Structural Reliability `FORM/SORM` & FEMA P-58 Fragility Studio.
+    pub(super) fn render_reliability_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::reliability_studio::{LimitStateKind, ReliabilityMethod};
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Target,
+                13.0,
+                theme.accent_orange,
+                "Structural Reliability FORM/SORM & Fragility Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "FORM/SORM & Sensitivity"),
+                (1usize, "FEMA P-58 Fragility & Audit"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.reliability_drawer_tab == idx,
+                    theme.accent_orange,
+                    "",
+                )
+                .clicked()
+                {
+                    self.reliability_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Structural Reliability Studio drawer",
+            )
+            .clicked()
+            {
+                self.reliability_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for (m, lbl) in [
+                    (ReliabilityMethod::FormHasoferLind, "FORM"),
+                    (ReliabilityMethod::SormBreitung, "SORM"),
+                    (ReliabilityMethod::FosmLogNormal, "FOSM"),
+                ] {
+                    let active = universal_canvas.reliability_studio_config.method == m;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        lbl,
+                        active,
+                        theme.accent_orange,
+                        "Select probabilistic reliability solver",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.reliability_studio_config.method = m;
+                        actions.run_reliability_studio = true;
+                    }
+                }
+                for (ls, lbl) in [
+                    (LimitStateKind::FlexurePlastic, "Flexure"),
+                    (LimitStateKind::AxialColumn, "Column"),
+                    (LimitStateKind::InterstoryDrift, "Drift"),
+                    (LimitStateKind::ShearBrittle, "Shear"),
+                ] {
+                    let active = universal_canvas.reliability_studio_config.limit_state == ls;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        lbl,
+                        active,
+                        theme.accent_blue,
+                        "Select limit-state formulation",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.reliability_studio_config.limit_state = ls;
+                        actions.run_reliability_studio = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Bolt),
+                    "Run FORM/SORM",
+                    true,
+                    theme.accent_green,
+                    "Evaluate Rackwitz-Fiessler FORM, Breitung SORM & sensitivities",
+                )
+                .clicked()
+                {
+                    actions.run_reliability_studio = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Layers),
+                    if universal_canvas.reliability_overlay_visible {
+                        "3D Risk: ON"
+                    } else {
+                        "3D Risk: OFF"
+                    },
+                    universal_canvas.reliability_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU beta contour members & risk beacons",
+                )
+                .clicked()
+                {
+                    actions.toggle_reliability_3d = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "IFCX",
+                    false,
+                    theme.accent_orange,
+                    "Export non-destructive eigengraph::analysis::reliability_form IFCX",
+                )
+                .clicked()
+                {
+                    actions.export_reliability_ifcx = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Printer),
+                    "Sheet S-112",
+                    false,
+                    theme.accent_blue,
+                    "Export A3 Pure-Vector Sheet S-112 Reliability Annex SVG",
+                )
+                .clicked()
+                {
+                    actions.export_reliability_svg = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let Some(ref studio) = universal_canvas.last_reliability_report else {
+            ui.label(
+                RichText::new("Click 'Run FORM/SORM' or toggle '3D Risk' to evaluate member beta indices & sensitivity factors.")
+                    .size(9.4)
+                    .color(theme.text_muted),
+            );
+            return;
+        };
+
+        let body_w = (deck_w - 6.0).max(160.0);
+        let col_w = if two_col {
+            ((body_w - 8.0) * 0.5).max(160.0)
+        } else {
+            body_w
+        };
+        let tab = self.reliability_drawer_tab;
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(body_w);
+            for is_left in [true, false] {
+                theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                    ui.set_width((col_w - 16.0).max(140.0));
+                    if is_left {
+                        ui.label(RichText::new("Random Variables & Target Beta Parameters").size(9.8).strong().color(theme.text_primary));
+                        let cfg = &mut universal_canvas.reliability_studio_config;
+                        let mut changed = false;
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Target beta:").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.target_beta).range(2.0..=5.5).speed(0.05)).changed();
+                            ui.label(RichText::new("Mean DCR:").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.demand_to_capacity_ratio).range(0.25..=1.25).speed(0.02)).changed();
+                            ui.label(RichText::new("V_R:").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.resistance_cov).range(0.05..=0.30).speed(0.01)).changed();
+                            ui.label(RichText::new("V_L:").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.live_load_cov).range(0.10..=0.45).speed(0.01)).changed();
+                            ui.label(RichText::new("V_E:").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.seismic_load_cov).range(0.15..=0.65).speed(0.02)).changed();
+                            ui.label(RichText::new("Seismic %:").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.seismic_fraction).range(0.0..=0.80).speed(0.02)).changed();
+                        });
+                        if changed {
+                            actions.run_reliability_studio = true;
+                        }
+                        if tab == 0 {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Active beta={:.2} (Pf={:.2e}) | kappa={:+.4} ({} iter)",
+                                    studio.active_beta,
+                                    studio.active_pf,
+                                    studio.curvature_kappa,
+                                    studio.iterations,
+                                ))
+                                .size(8.6)
+                                .monospace()
+                                .color(if studio.is_overall_compliant { theme.accent_green } else { theme.accent_red }),
+                            );
+                        } else {
+                            let mid_frag = studio
+                                .fragility_curve
+                                .get(studio.fragility_curve.len() / 2);
+                            if let Some(pt) = mid_frag {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "@ {:.2}g: Slight={:.0}% Mod={:.0}% Ext={:.0}% Col={:.0}%",
+                                        pt.pga_g,
+                                        pt.prob_slight * 100.0,
+                                        pt.prob_moderate * 100.0,
+                                        pt.prob_extensive * 100.0,
+                                        pt.prob_complete_collapse * 100.0,
+                                    ))
+                                    .size(8.5)
+                                    .monospace()
+                                    .color(theme.accent_orange),
+                                );
+                            }
+                        }
+                    } else if tab == 0 {
+                        ui.label(RichText::new("FORM/SORM Comparison & Sensitivity (alpha^2 %)").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "FOSM={:.2} (Pf {:.2e}) | FORM={:.2} | SORM={:.2}",
+                                studio.fosm_beta, studio.fosm_pf, studio.form_beta, studio.sorm_beta
+                            ))
+                            .size(8.7)
+                            .monospace()
+                            .color(if studio.is_overall_compliant { theme.accent_green } else { theme.accent_red }),
+                        );
+                        for s in &studio.sensitivities {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{:<16} alpha={:+.3} | Imp={:>5.1}% | u*={:+.2}",
+                                    s.variable_name, s.alpha, s.importance_pct, s.design_point_u
+                                ))
+                                .size(8.3)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                        }
+                    } else {
+                        ui.label(RichText::new("3D Member Beta & Code Compliance Audit").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "Min Member beta={:.2} | Below Target={}/{} [{}]",
+                                studio.min_member_beta,
+                                studio.below_target_count,
+                                studio.members_3d.len(),
+                                if studio.is_overall_compliant { "PASS" } else { "REVIEW" }
+                            ))
+                            .size(8.8)
+                            .monospace()
+                            .color(if studio.is_overall_compliant { theme.accent_green } else { theme.accent_red }),
+                        );
+                        for hs in studio.hotspots_3d.iter().take(3) {
+                            ui.label(
+                                RichText::new(format!(
+                                    "• {} ({})",
+                                    hs.label,
+                                    if hs.is_critical { "CRITICAL" } else { "OK" }
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(if hs.is_critical { theme.accent_red } else { theme.accent_green }),
+                            );
+                        }
+                    }
+                });
+            }
+        });
+    }
 }

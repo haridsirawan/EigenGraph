@@ -3587,3 +3587,72 @@ pub fn build_rtc_composite_mesh(input: &CompositeGpuInput<'_>) -> GpuMeshPayload
     }
 }
 
+/// GPU input payload for Update `v0.8.4.7` Structural Reliability `FORM/SORM` Member Beta & Hotspots (`material_kind = 20.0`).
+pub struct ReliabilityGpuInput<'a> {
+    pub report: &'a crate::core::reliability_studio::ReliabilityStudioReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU structural reliability member contours & critical beta hotspot beacons
+/// (`material_kind = 20.0`, 0% raster).
+pub fn build_rtc_reliability_mesh(input: &ReliabilityGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+
+    let rep = input.report;
+    let target = rep.config.target_beta;
+    let mut verts = Vec::with_capacity(rep.members_3d.len() * 24 + rep.hotspots_3d.len() * 16);
+    let mut idxs = Vec::with_capacity(rep.members_3d.len() * 36 + rep.hotspots_3d.len() * 24);
+
+    for m in &rep.members_3d {
+        let p0_xy = rot_xy(m.p0_enu_m[0], m.p0_enu_m[1]);
+        let p1_xy = rot_xy(m.p1_enu_m[0], m.p1_enu_m[1]);
+        let (col, severity) = if m.is_below_target {
+            ([1.0_f32, 0.22, 0.28, 0.92], 0.95_f32)
+        } else if m.beta_index < target + 0.5 {
+            ([1.0_f32, 0.72, 0.16, 0.86], 0.55_f32)
+        } else {
+            ([0.16_f32, 0.88, 0.68, 0.78], 0.25_f32)
+        };
+        push_animated_flow_strut_enu(
+            &mut verts,
+            &mut idxs,
+            [p0_xy[0], p0_xy[1], m.p0_enu_m[2]],
+            [p1_xy[0], p1_xy[1], m.p1_enu_m[2]],
+            0.22,
+            0.22,
+            col,
+            severity,
+            20.0,
+        );
+    }
+
+    for hs in &rep.hotspots_3d {
+        let cxy = rot_xy(hs.pos_enu_m[0], hs.pos_enu_m[1]);
+        let (col, severity) = if hs.is_critical {
+            ([1.0_f32, 0.20, 0.26, 0.96], 0.98_f32)
+        } else {
+            ([1.0_f32, 0.76, 0.18, 0.92], 0.58_f32)
+        };
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [cxy[0] as f32, cxy[1] as f32, hs.pos_enu_m[2] as f32],
+            if hs.is_critical { 0.42 } else { 0.28 },
+            col,
+            severity,
+            20.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

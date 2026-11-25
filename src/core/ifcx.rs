@@ -73,6 +73,7 @@ pub mod ns {
     pub const EG_STEEL_CONNECTION: &str = "eigengraph::analysis::steel_connection";
     pub const EG_PRESTRESS_TENDON: &str = "eigengraph::analysis::prestress_tendon";
     pub const EG_COMPOSITE_DECK: &str = "eigengraph::analysis::composite_deck";
+    pub const EG_RELIABILITY_FORM: &str = "eigengraph::analysis::reliability_form";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
@@ -590,6 +591,10 @@ impl IfcxDocument {
         schemas.insert(
             ns::EG_COMPOSITE_DECK.to_string(),
             json!({ "value": { "dataType": "Object", "spec": "EigenGraph Composite Steel-Concrete Deck, Shear Studs & AISC DG11 Floor Vibration" } }),
+        );
+        schemas.insert(
+            ns::EG_RELIABILITY_FORM.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph Structural Reliability FORM/SORM Beta-Index, Sensitivity & FEMA P-58 Fragility" } }),
         );
         Self {
             header: IfcxHeader {
@@ -1777,10 +1782,49 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_composite_deck", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Structural Reliability FORM/SORM overlay.
+    pub fn compose_with_reliability_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::reliability_studio::ReliabilityIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_reliability_form", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcStructuralAnalysisModel", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Structural Reliability FORM/SORM & FEMA P-58 Fragility Overlay",
+                "method": overlay.method,
+                "limitState": overlay.limit_state,
+                "activeBeta": overlay.active_beta,
+                "targetBeta": overlay.target_beta,
+                "failureProbability": overlay.failure_probability,
+                "dominantVariable": overlay.dominant_variable,
+                "isCompliant": overlay.is_overall_compliant,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_RELIABILITY_FORM.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/analysis/reliability_form".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_reliability_form", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_COMPOSITE_DECK) {
+    if node.attributes.contains_key(ns::EG_RELIABILITY_FORM) {
+        "Reliability FORM/SORM".to_string()
+    } else if node.attributes.contains_key(ns::EG_COMPOSITE_DECK) {
         "Composite Deck".to_string()
     } else if node.attributes.contains_key(ns::EG_PRESTRESS_TENDON) {
         "Prestressed / PT".to_string()

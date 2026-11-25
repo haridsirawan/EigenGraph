@@ -7,7 +7,15 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.5 (6/10)]
+## [Unreleased — Next: v0.8.5 (7/10)]
+
+### Update 7/10 (`v0.8.4.7`) — Structural Reliability (`FORM/SORM` β-Index, Sensitivity & FEMA P-58 Fragility) 3D Studio (`ASCE 7-22` / `EN 1990` / `ISO 2394`) + Sheet `S-112`
+- **BIM-Coupled Probabilistic Reliability & Fragility Engine (`src/core/reliability_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_reliability_studio`](src/core/reliability_studio.rs) coupling `BimProject` columns/levels and site seismic demands into Rackwitz-Fiessler Hasofer-Lind First-Order Reliability Method (`FORM`), Breitung curvature-corrected Second-Order Reliability Method (`SORM`), Log-Normal `FOSM`, 4-variable Hasofer-Lind directional sensitivity importance tornado (`alpha^2 %`), FEMA P-58 multi-state seismic fragility curves, `.eigen.json` persistence (`UnifiedWorkspaceArchive::reliability_studio_config`), and non-destructive `eigengraph::analysis::reliability_form` IFCX overlays (`IfcxStage::compose_with_reliability_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Member Beta Contours & Risk Beacons + Sheet `S-112` (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added [`build_rtc_reliability_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`ReliabilityGpuInput`, `material_kind = 20.0`, WGSL `kind >= 19.5` beta-risk pulse & Fresnel rim glow shader, 0% raster), dedicated `reliability_form` GPU slot inside `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_reliability_fallback`), and archival A3 landscape Sheet `S-112` Pure-Vector Annex SVG (`build_reliability_form_annex_svg`, 0 `<image>` tags).
+- **Width-First Dynamic Island `Reliability Studio`, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the 2-tab width-first Dynamic Island drawer (`FORM/SORM & Sensitivity` + `FEMA P-58 Fragility & Audit`), `Reliability` toolbar pill, `/reliability`, `/form`, `/sorm`, `/fragility`, `/reliability-3d`, `/reliability-ifcx`, `/reliability-svg` slash commands, and `[[RUN_RELIABILITY:...]]` / `[[TOGGLE_RELIABILITY_3D]]` / `[[EXPORT_RELIABILITY_ANNEX]]` Gemini directives.
 
 ### Update 6/10 (`v0.8.4.6`) — Composite Steel-Concrete Deck, Shear Stud Layout & AISC DG11 Floor Vibration 3D Studio (`AISC 360-16 Ch. I` / `DG11`) + Sheet `S-111`
 - **BIM-Coupled Composite Deck & DG11 Vibration Engine (`src/core/composite_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

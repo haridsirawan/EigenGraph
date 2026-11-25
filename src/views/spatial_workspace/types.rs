@@ -504,6 +504,14 @@ pub enum PlannedProposalAction {
     },
     ToggleComposite3d,
     ExportCompositeAnnex,
+    // Update v0.8.4.7 (7/10 -> v0.8.5): Structural Reliability FORM/SORM & Sensitivity Studio + Sheet S-112
+    RunReliability {
+        method: Option<crate::core::reliability_studio::ReliabilityMethod>,
+        target_beta: Option<f64>,
+        limit_state: Option<crate::core::reliability_studio::LimitStateKind>,
+    },
+    ToggleReliability3d,
+    ExportReliabilityAnnex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -650,6 +658,14 @@ pub enum GeminiDirective {
     },
     ToggleComposite3d,
     ExportCompositeAnnex,
+    // Update v0.8.4.7 (7/10 -> v0.8.5): Structural Reliability FORM/SORM & Sensitivity Studio + Sheet S-112
+    RunReliability {
+        method: Option<crate::core::reliability_studio::ReliabilityMethod>,
+        target_beta: Option<f64>,
+        limit_state: Option<crate::core::reliability_studio::LimitStateKind>,
+    },
+    ToggleReliability3d,
+    ExportReliabilityAnnex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1125,6 +1141,39 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleComposite3d);
             } else if upper == "EXPORT_COMPOSITE_ANNEX" {
                 directives.push(GeminiDirective::ExportCompositeAnnex);
+            } else if upper == "RUN_RELIABILITY" || upper.starts_with("RUN_RELIABILITY:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let mut method = None;
+                let mut target_beta = None;
+                let mut limit_state = None;
+                for tok in arg.split(':').map(str::trim).filter(|s| !s.is_empty()) {
+                    if tok.contains("FORM") {
+                        method = Some(crate::core::reliability_studio::ReliabilityMethod::FormHasoferLind);
+                    } else if tok.contains("SORM") {
+                        method = Some(crate::core::reliability_studio::ReliabilityMethod::SormBreitung);
+                    } else if tok.contains("FOSM") {
+                        method = Some(crate::core::reliability_studio::ReliabilityMethod::FosmLogNormal);
+                    } else if tok.contains("FLEX") {
+                        limit_state = Some(crate::core::reliability_studio::LimitStateKind::FlexurePlastic);
+                    } else if tok.contains("COL") || tok.contains("AXIAL") {
+                        limit_state = Some(crate::core::reliability_studio::LimitStateKind::AxialColumn);
+                    } else if tok.contains("DRIFT") {
+                        limit_state = Some(crate::core::reliability_studio::LimitStateKind::InterstoryDrift);
+                    } else if tok.contains("SHEAR") {
+                        limit_state = Some(crate::core::reliability_studio::LimitStateKind::ShearBrittle);
+                    } else if let Ok(b) = tok.parse::<f64>() {
+                        target_beta = Some(b.clamp(2.0, 5.5));
+                    }
+                }
+                directives.push(GeminiDirective::RunReliability {
+                    method,
+                    target_beta,
+                    limit_state,
+                });
+            } else if upper == "TOGGLE_RELIABILITY_3D" {
+                directives.push(GeminiDirective::ToggleReliability3d);
+            } else if upper == "EXPORT_RELIABILITY_ANNEX" {
+                directives.push(GeminiDirective::ExportReliabilityAnnex);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -2235,6 +2284,48 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Printer,
     },
     SlashCommandSpec {
+        cmd: "/reliability",
+        category: "Analysis",
+        description: "Open Structural Reliability FORM/SORM Beta-Index & Sensitivity 3D Studio",
+        icon: AppIcon::Target,
+    },
+    SlashCommandSpec {
+        cmd: "/form",
+        category: "Analysis",
+        description: "Run Rackwitz-Fiessler Hasofer-Lind FORM reliability index (/form 3.5)",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/sorm",
+        category: "Analysis",
+        description: "Run Breitung curvature-corrected SORM reliability index (/sorm 3.8)",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/fragility",
+        category: "Analysis",
+        description: "Inspect FEMA P-58 multi-state fragility curves & sensitivity alpha^2 tornado",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/reliability-3d",
+        category: "Analysis",
+        description: "Toggle 3D Pure WebGPU structural member beta contours & risk hotspot beacons",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/reliability-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::reliability_form IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/reliability-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-112 Pure-Vector Reliability FORM/SORM & Fragility Annex .svg",
+        icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -2392,6 +2483,11 @@ pub struct SpatialHudActions {
     pub toggle_composite_3d: bool,
     pub export_composite_ifcx: bool,
     pub export_composite_svg: bool,
+    // Update v0.8.4.7 (7/10 -> v0.8.5): Structural Reliability FORM/SORM & Fragility Studio
+    pub run_reliability_studio: bool,
+    pub toggle_reliability_3d: bool,
+    pub export_reliability_ifcx: bool,
+    pub export_reliability_svg: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -2827,5 +2923,9 @@ impl SpatialHudActions {
         self.toggle_composite_3d |= other.toggle_composite_3d;
         self.export_composite_ifcx |= other.export_composite_ifcx;
         self.export_composite_svg |= other.export_composite_svg;
+        self.run_reliability_studio |= other.run_reliability_studio;
+        self.toggle_reliability_3d |= other.toggle_reliability_3d;
+        self.export_reliability_ifcx |= other.export_reliability_ifcx;
+        self.export_reliability_svg |= other.export_reliability_svg;
     }
 }
