@@ -7,7 +7,11 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.6 (2/10)]
+## [Unreleased — Next: v0.8.6 (3/10)]
+
+### Update 3/10 (`v0.8.5.3` -> `v0.8.6`) — Root `favicon.ico`, Canonical URL & Google Favicon Cache-Busting
+- Added multi-resolution root `favicon.ico` (48×48, 32×32, 16×16) generated from the circular crimson graph-horse emblem and copied via Trunk so `/favicon.ico` serves a real `image/x-icon` instead of the SPA HTML fallback.
+- Added `<link rel="canonical" href="https://eigengraph.net/" />`, `?v=2` favicon cache-buster URLs in `index.html`, and refreshed PWA cache key (`eigengraph-pwa-v0.8.5-3`) in `sw.js`.
 
 ### Update 2/10 (`v0.8.5.2` -> `v0.8.6`) — Unified Crimson Graph-Horse Brand Icons & Logo Refresh
 - Replaced all application, web, PWA, and documentation brand icons (`assets/icon.png` 1024×1024, `assets/favicon-circle.png` 384×384, `assets/favicon-48.png` 48×48, and `assets/logo.png` 1024×571) with the unified crimson triangulated graph-horse emblem.
