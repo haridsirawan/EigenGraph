@@ -7,6 +7,14 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [Unreleased — Next: v0.8.6 (1/10)]
+
+### Update 1/10 (`v0.8.5.1` -> `v0.8.6`) — Circular Google Search Favicon & Building Information Modeling Web Metadata
+- Added circular anti-aliased search favicons (`assets/favicon-circle.png` 384×384 and `assets/favicon-48.png` 48×48, exact 48px multiples per Google Search favicon guidelines) cropped cleanly from the white-backed 3D graph emblem without drop-shadow borders, while preserving `assets/icon.png` for desktop and PWA app icons.
+- Updated `index.html`, `manifest.webmanifest`, and `sw.js` with `<title>EigenGraph — Building Information Modeling</title>`, Open Graph tags, `WebSite` JSON-LD structured data, Trunk favicon asset copy links, and PWA cache refresh (`v0.8.5`).
+
+---
+
 ## [v0.8.5] — 2026-11-25
 
 ### Update 10/10 (`v0.8.5` Milestone Release) — Master Engineering Dossier Index (`S-000` / `S-100`–`S-114`), Unified Verification & Production Deployment

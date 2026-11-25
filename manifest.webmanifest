@@ -1,7 +1,7 @@
 {
   "name": "EigenGraph",
   "short_name": "EigenGraph",
-  "description": "100% Pure-Rust Vector Earth, Pure WebGPU (WGSL), OpenBIM IFCX (IFC 5), EigenGate & EigenFlow Structural Engineering Workstation.",
+  "description": "Building Information Modeling — 100% Pure-Rust Vector Earth, Pure WebGPU (WGSL), OpenBIM IFCX (IFC 5), EigenGate & EigenFlow Structural Engineering Workstation.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

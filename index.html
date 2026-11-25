@@ -3,17 +3,36 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>EigenGraph</title>
-  <meta name="description" content="EigenGraph — 100% Pure-Rust Vector Earth, Pure WebGPU (WGSL), OpenBIM IFCX (IFC 5), EigenGate &amp; EigenFlow Structural Engineering Workstation running natively in WebAssembly." />
+  <title>EigenGraph — Building Information Modeling</title>
+  <meta name="description" content="EigenGraph — Building Information Modeling, 100% Pure-Rust Vector Earth, Pure WebGPU (WGSL), OpenBIM IFCX (IFC 5), EigenGate &amp; EigenFlow Structural Engineering Workstation running natively in WebAssembly." />
+  <meta property="og:site_name" content="EigenGraph" />
+  <meta property="og:title" content="EigenGraph — Building Information Modeling" />
+  <meta property="og:description" content="EigenGraph — Building Information Modeling, 100% Pure-Rust Vector Earth, Pure WebGPU (WGSL), OpenBIM IFCX (IFC 5), EigenGate &amp; EigenFlow Structural Engineering Workstation running natively in WebAssembly." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://eigengraph.net/" />
+  <meta property="og:image" content="https://eigengraph.net/assets/favicon-circle.png" />
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "EigenGraph",
+      "alternateName": "EigenGraph — Building Information Modeling",
+      "url": "https://eigengraph.net/"
+    }
+  </script>
   <meta name="theme-color" content="#0f1117" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="manifest" href="manifest.webmanifest" />
 
-  <link rel="icon" type="image/png" href="/assets/icon.png" />
+  <link rel="icon" type="image/png" sizes="384x384" href="/assets/favicon-circle.png" />
+  <link rel="icon" type="image/png" sizes="48x48" href="/assets/favicon-48.png" />
+  <link rel="apple-touch-icon" sizes="1024x1024" href="/assets/icon.png" />
   <link data-trunk rel="copy-file" href="manifest.webmanifest" />
   <link data-trunk rel="copy-file" href="sw.js" />
   <link data-trunk rel="copy-file" href="assets/icon.png" data-target-path="assets" />
+  <link data-trunk rel="copy-file" href="assets/favicon-circle.png" data-target-path="assets" />
+  <link data-trunk rel="copy-file" href="assets/favicon-48.png" data-target-path="assets" />
   <link data-trunk rel="rust" data-bin="eigengraph" data-wasm-opt="0" />
 
   <script>
