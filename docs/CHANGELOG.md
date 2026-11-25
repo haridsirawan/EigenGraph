@@ -7,7 +7,13 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.5 (9/10)]
+## [v0.8.5] — 2026-11-25
+
+### Update 10/10 (`v0.8.5` Milestone Release) — Master Engineering Dossier Index (`S-000` / `S-100`–`S-114`), Unified Verification & Production Deployment
+- **Master Engineering Dossier Index (`src/core/vector_dossier.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_master_dossier_entries`](src/core/vector_dossier.rs) and [`build_master_dossier_index_svg`](src/core/vector_dossier.rs) (`SHEET S-000`, `1600 x 1131` pure vector, 0 `<image>` tags) indexing all 15 sheets (`S-100` through `S-114`) with SHA-256 governance sealing and non-destructive `eigengraph::governance::master_dossier_index` IFCX composition (`IfcxStage::compose_with_master_dossier_overlay`).
+- **Dynamic Island, Slash Commands & Version Bump (`Cargo.toml`, `src/views/settings.rs`, `docs/IFCX Earth.md`, `src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added `Dossier S-000` toolbar pill, `/master-dossier` & `/dossier-index` commands, `[[EXPORT_MASTER_DOSSIER_INDEX]]` Gemini directive, and bumped semantic version across `Cargo.toml`, `Settings -> About EigenGraph`, `docs/CHANGELOG.md`, and `docs/IFCX Earth.md` to `v0.8.5`.
 
 ### Update 9/10 (`v0.8.4.9`) — 4D/5D/6D Construction Sequence, Cost S-Curve & Embodied Carbon LCA 3D Studio (`CPM` / `AHSP` / `EN 15978`) + Sheet `S-114`
 - **BIM-Coupled 4D/5D/6D Construction & LCA Engine (`src/core/construction_lca_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

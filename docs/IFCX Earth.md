@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.4` Delivered**  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.5` Delivered**  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% External Raster**  
-> **Current Platform**: EigenGraph `v0.8.4` (Extreme Events Studio — 3D WebGPU Blast `UFC 3-340-02` & Structural Fire `ISO 834/EC`, EigenFlow Coupling & Sheet `S-105` on Pure WebGPU/WGSL)  
+> **Current Platform**: EigenGraph `v0.8.5` (9-Studio Engineering Suite `S-106`–`S-114` & Master Dossier Drawing Index `S-000` on Pure WebGPU/WGSL)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -246,3 +246,16 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
   - Evaluates 3D ENU standoff Kingery–Bulmash blast pressures ($P_{so}$, $P_r$, $i_r$, `UfcDamageLevel`) and ISO 834 / ASTM E119 / Eurocode HC compartment heating (`0–180 min`, $T_g(t)$, $T_m(t)$, $k_E(T)$, $k_y(T)$) coupled directly into Branch 2 **EigenFlow** Woodbury (`P1 -> P2`) stability checks, exporting non-destructive `eigengraph::hazard::extreme_events` IFCX overlays (`IfcxStage::compose_with_extreme_events_overlay`) and archival Sheet `S-105` Pure-Vector Annex SVGs (`build_extreme_events_annex_svg`, 0 `<image>` tags).
 - **3D Pure WebGPU (`wgpu` + WGSL) Shockwave Rings, Fire Compartments & Dynamic Island (`src/views/webgpu_earth/`, `src/views/spatial_workspace/`)**:
   - Adds `build_rtc_extreme_events_mesh` (`material_kind = 13.0`, WGSL `kind >= 12.5` shockwave pulse & thermal glow, `extreme_events` GPU slot) + CPU fallback + 2-tab width-first **`Extreme Events (Blast & Fire)`** drawer (`/extreme`, `/blast`, `/fire`, `/fire-story`, `/extreme-3d`, `/extreme-ifcx`, `/extreme-svg`).
+
+### Phase 85 (`v0.8.5`) — 9-Studio Specialized Engineering Suite (`S-106`–`S-114`) & Master Dossier Index (`S-000`) *(Implemented)*
+- **Nine BIM-Coupled Pure WebGPU (`material_kind = 14.0`–`22.0`) & IFCX Studio Overlays (`src/core/*_studio.rs`, `src/core/ifcx.rs`, `src/core/vector_dossier.rs`)**:
+  - **S-106 (`v0.8.4.1`)**: Seismic Base Isolation (LRB/FPS) & FVD Damper Studio (`eigengraph::analysis::seismic_isolation`)
+  - **S-107 (`v0.8.4.2`)**: Wind Aeroelasticity, Facade Cladding Pressure & ISO 10137 Comfort Studio (`eigengraph::analysis::wind_aeroelasticity`)
+  - **S-108 (`v0.8.4.3`)**: Special RC Shear Wall, Boundary Element (SBE) & Diagonal X-Cage Coupling Beam (`eigengraph::analysis::shear_wall_sbe`)
+  - **S-109 (`v0.8.4.4`)**: Steel Seismic Connection (`4E` End-Plate / Shear Tab), Bolts & Panel Zone (`eigengraph::analysis::steel_connection`)
+  - **S-110 (`v0.8.4.5`)**: Post-Tensioned Tendon Drape, Prestress Losses & Camber (`eigengraph::analysis::prestress_tendon`)
+  - **S-111 (`v0.8.4.6`)**: Composite Steel-Concrete Deck, Headed Shear Studs & AISC DG11 Vibration (`eigengraph::analysis::composite_deck`)
+  - **S-112 (`v0.8.4.7`)**: Structural Reliability `FORM/SORM` $\beta$-Index, Sensitivity & FEMA P-58 Fragility (`eigengraph::analysis::reliability_form`)
+  - **S-113 (`v0.8.4.8`)**: Deep Foundation Pile Group, 6-DOF Winkler Springs & Two-Way Punching Shear (`eigengraph::analysis::deep_foundation`)
+  - **S-114 (`v0.8.4.9`)**: 4D CPM Construction Sequence, 5D AHSP Cost S-Curve & 6D EN 15978 Carbon LCA (`eigengraph::analysis::construction_4d5d6d`)
+  - **S-000 (`v0.8.5`)**: Master Engineering Dossier Drawing Index (`evaluate_master_dossier_entries`, `build_master_dossier_index_svg`, `eigengraph::governance::master_dossier_index`, `/master-dossier`).

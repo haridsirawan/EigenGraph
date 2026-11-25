@@ -232,10 +232,12 @@ pub use vector_dossier::{
     build_composite_deck_annex_svg, build_construction_lca_annex_svg,
     build_deep_foundation_annex_svg, build_eigenflow_nonlinear_annex_svg,
     build_extreme_events_annex_svg, build_fabrication_bbs_shop_svg,
-    build_permit_compliance_annex_svg, build_prestress_tendon_annex_svg,
-    build_pure_vector_engineering_dossier_svg, build_reliability_form_annex_svg,
-    build_seismic_isolation_annex_svg, build_shear_wall_annex_svg, build_steel_connection_annex_svg,
-    build_wind_aero_annex_svg, VectorDossierExport, VectorDossierInput,
+    build_master_dossier_index_svg, build_permit_compliance_annex_svg,
+    build_prestress_tendon_annex_svg, build_pure_vector_engineering_dossier_svg,
+    build_reliability_form_annex_svg, build_seismic_isolation_annex_svg,
+    build_shear_wall_annex_svg, build_steel_connection_annex_svg, build_wind_aero_annex_svg,
+    evaluate_master_dossier_entries, MasterDossierSheetEntry, VectorDossierExport,
+    VectorDossierInput,
 };
 pub use portfolio_retrofit::{
     optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,

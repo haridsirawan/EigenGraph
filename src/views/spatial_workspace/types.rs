@@ -529,6 +529,8 @@ pub enum PlannedProposalAction {
     },
     ToggleConstruction3d,
     ExportConstructionAnnex,
+    // Update 10/10 (v0.8.5): Master Engineering Dossier Index (S-000 / S-100..S-114)
+    ExportMasterDossierIndex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -700,6 +702,8 @@ pub enum GeminiDirective {
     },
     ToggleConstruction3d,
     ExportConstructionAnnex,
+    // Update 10/10 (v0.8.5): Master Engineering Dossier Index (S-000 / S-100..S-114)
+    ExportMasterDossierIndex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1286,6 +1290,8 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleConstruction3d);
             } else if upper == "EXPORT_CONSTRUCTION_ANNEX" {
                 directives.push(GeminiDirective::ExportConstructionAnnex);
+            } else if upper == "EXPORT_MASTER_DOSSIER_INDEX" {
+                directives.push(GeminiDirective::ExportMasterDossierIndex);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -2414,9 +2420,9 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::ChartLine,
     },
     SlashCommandSpec {
-        cmd: "/fragility",
+        cmd: "/beta-fragility",
         category: "Analysis",
-        description: "Inspect FEMA P-58 multi-state fragility curves & sensitivity alpha^2 tornado",
+        description: "Inspect Reliability FORM/SORM sensitivity alpha^2 tornado & fragility curves",
         icon: AppIcon::ChartLine,
     },
     SlashCommandSpec {
@@ -2456,7 +2462,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Shield,
     },
     SlashCommandSpec {
-        cmd: "/winkler",
+        cmd: "/winkler-cap",
         category: "Geotech",
         description: "Inspect 6-DOF Winkler subgrade springs & Wolf/Veletsos-Meek SSI shift",
         icon: AppIcon::Layers,
@@ -2520,6 +2526,18 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         category: "Export",
         description: "Export A3 Sheet S-114 Pure-Vector 4D/5D/6D & Carbon LCA Annex .svg",
         icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
+        cmd: "/master-dossier",
+        category: "Export",
+        description: "Export Sheet S-000 Master Engineering Dossier Index (S-100..S-114) .svg",
+        icon: AppIcon::Book,
+    },
+    SlashCommandSpec {
+        cmd: "/dossier-index",
+        category: "Export",
+        description: "Alias for /master-dossier — export Master Drawing Index Sheet S-000",
+        icon: AppIcon::Book,
     },
     SlashCommandSpec {
         cmd: "/bbs",
@@ -2694,6 +2712,8 @@ pub struct SpatialHudActions {
     pub toggle_construction_3d: bool,
     pub export_construction_ifcx: bool,
     pub export_construction_svg: bool,
+    // Update 10/10 (v0.8.5): Master Engineering Dossier Index (S-000)
+    pub export_master_dossier_svg: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3141,5 +3161,6 @@ impl SpatialHudActions {
         self.toggle_construction_3d |= other.toggle_construction_3d;
         self.export_construction_ifcx |= other.export_construction_ifcx;
         self.export_construction_svg |= other.export_construction_svg;
+        self.export_master_dossier_svg |= other.export_master_dossier_svg;
     }
 }

@@ -792,6 +792,9 @@ impl SpatialWorkspaceState {
                     self.open_construction_lca_drawer(0);
                     out.export_construction_svg = true;
                 }
+                PlannedProposalAction::ExportMasterDossierIndex => {
+                    out.export_master_dossier_svg = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -1201,6 +1204,9 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportConstructionAnnex => {
                                 PlannedProposalAction::ExportConstructionAnnex
                             }
+                            GeminiDirective::ExportMasterDossierIndex => {
+                                PlannedProposalAction::ExportMasterDossierIndex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1396,6 +1402,9 @@ impl SpatialWorkspaceState {
                             }
                             GeminiDirective::ExportConstructionAnnex => {
                                 "ExportConstructionAnnex(S-114)".to_string()
+                            }
+                            GeminiDirective::ExportMasterDossierIndex => {
+                                "ExportMasterDossierIndex(S-000)".to_string()
                             }
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -3306,7 +3315,7 @@ impl SpatialWorkspaceState {
                 "/composite-svg" => {
                     actions.export_composite_svg = true;
                 }
-                "/reliability" | "/form" | "/sorm" | "/fragility" => {
+                "/reliability" | "/form" | "/sorm" | "/beta-fragility" => {
                     let lo = arg.to_ascii_lowercase();
                     if cmd == "/form" || lo.contains("form") {
                         universal_canvas.reliability_studio_config.method =
@@ -3339,7 +3348,7 @@ impl SpatialWorkspaceState {
                         universal_canvas.reliability_studio_config.target_beta =
                             tb.clamp(2.0, 5.5);
                     }
-                    self.open_reliability_drawer(if cmd == "/fragility" { 1 } else { 0 });
+                    self.open_reliability_drawer(if cmd == "/beta-fragility" { 1 } else { 0 });
                     actions.run_reliability_studio = true;
                 }
                 "/reliability-3d" => {
@@ -3352,7 +3361,7 @@ impl SpatialWorkspaceState {
                 "/reliability-svg" => {
                     actions.export_reliability_svg = true;
                 }
-                "/foundation" | "/pile-group" | "/punching" | "/winkler" => {
+                "/foundation" | "/pile-group" | "/punching" | "/winkler-cap" => {
                     let lo = arg.to_ascii_lowercase();
                     if lo.contains("soft") {
                         universal_canvas.foundation_studio_config.soil_type =
@@ -3381,7 +3390,7 @@ impl SpatialWorkspaceState {
                                 len_m.clamp(6.0, 48.0);
                         }
                     }
-                    self.open_foundation_drawer(if cmd == "/punching" || cmd == "/winkler" {
+                    self.open_foundation_drawer(if cmd == "/punching" || cmd == "/winkler-cap" {
                         1
                     } else {
                         0
@@ -3439,6 +3448,9 @@ impl SpatialWorkspaceState {
                 }
                 "/4d-svg" => {
                     actions.export_construction_svg = true;
+                }
+                "/master-dossier" | "/dossier-index" => {
+                    actions.export_master_dossier_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

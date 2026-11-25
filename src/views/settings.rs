@@ -689,7 +689,7 @@ impl SettingsView {
                 ui.label(RichText::new("Version:").strong().size(13.0).color(theme.text_primary));
                 ui.label(
                     RichText::new(format!(
-                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL + @compute Particles/Monte Carlo, Field QA/QC Spatial Waypoints & 1D Rebar BBS Cut-List, Sheet S-103 Shop Annex, Parametric Trade-Study & SNI/ASCE Permit Annex, Signed Collaborative IFCX Relay & 3D District Risk Heatmap, 6-DOF FEM + EigenGate Linear & EigenFlow Non-Linear Woodbury Engines, SHM Watchdog, ATC-20 Triage, Evacuation Lifelines & Width-First Dynamic Island)",
+                        "v{} — 100% Pure-Rust Vector & IFCX (IFC 5 JSON ECS) Living Earth (Pure WebGPU WGSL + @compute Particles/Monte Carlo, 9 Specialized Engineering Studios [Seismic Isolation S-106, Wind Comfort S-107, RC Shear Wall S-108, Steel Connections S-109, PT/Prestress S-110, Composite Deck & DG11 S-111, Reliability FORM/SORM S-112, Deep Foundation S-113, 4D/5D/6D Sequence & Carbon LCA S-114], Master Dossier Index S-000, Field QA/QC & 1D Rebar BBS, 6-DOF FEM + EigenGate Linear & EigenFlow Non-Linear Woodbury Engines, SHM Watchdog & Width-First Dynamic Island)",
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(13.0)
@@ -719,10 +719,16 @@ impl SettingsView {
             ui.separator();
             ui.add_space(6.0);
 
-            let releases: [(&str, bool, &str, &str); 15] = [
+            let releases: [(&str, bool, &str, &str); 16] = [
+                (
+                    "v0.8.5",
+                    true,
+                    "9-Studio Structural Engineering Suite (S-106..S-114) & Master Dossier Index (S-000)",
+                    "Unifies nine BIM-coupled 3D Pure WebGPU/WGSL studios (Seismic Base Isolation & Dampers S-106, Wind Aeroelasticity & ISO 10137 Comfort S-107, Special RC Shear Wall SBE & Coupling Beams S-108, Steel Seismic Connections & Panel Zones S-109, Post-Tensioned Tendon Drape & Losses S-110, Composite Steel-Concrete Deck & DG11 Vibration S-111, Structural Reliability FORM/SORM & FEMA P-58 Fragility S-112, Deep Foundation Pile Group & Punching Shear S-113, and 4D CPM / 5D AHSP Cost S-Curve / 6D Carbon LCA S-114) alongside Master Dossier Drawing Index Sheet S-000 (S-100..S-114) and eigengraph::governance::master_dossier_index IFCX overlay.",
+                ),
                 (
                     "v0.8.4",
-                    true,
+                    false,
                     "Extreme Events Studio — Blast (UFC 3-340-02) & Structural Fire (ISO 834/EC) + Sheet S-105",
                     "Couples physical BIM geometry to Kingery-Bulmash blast wave physics (TNT/ANFO/C-4, Surface vs. FreeAir bursts, SDOF response, UFC B1-B5 damage levels) and ISO 834 / ASTM E119 / Eurocode HC compartment fires (0-180 min exposure, Bare/SFRM/Intumescent protection, kE/ky stiffness-yield retention), with 3D Pure WebGPU WGSL shockwave rings & thermal plumes (material_kind 13.0), closed-loop P1->P2 EigenFlow progressive collapse handoff, eigengraph::hazard::extreme_events IFCX overlay, A3 Sheet S-105 Pure-Vector Annex SVG, and the 2-tab width-first Extreme Events Dynamic Island drawer.",
                 ),

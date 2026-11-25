@@ -6012,3 +6012,43 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn phase85_0_master_dossier_index_s000_to_s114_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = crate::views::build::BuildView::default();
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        assert!(spatial
+            .execute_spatial_input(
+                "/master-dossier",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_master_dossier_svg);
+        assert!(spatial
+            .execute_spatial_input(
+                "/dossier-index",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_master_dossier_svg);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Full index [[EXPORT_MASTER_DOSSIER_INDEX]]",
+        );
+        assert_eq!(clean, "Full index");
+        assert_eq!(dirs, vec![GeminiDirective::ExportMasterDossierIndex]);
+    }

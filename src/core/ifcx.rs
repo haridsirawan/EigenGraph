@@ -76,6 +76,7 @@ pub mod ns {
     pub const EG_RELIABILITY_FORM: &str = "eigengraph::analysis::reliability_form";
     pub const EG_DEEP_FOUNDATION: &str = "eigengraph::analysis::deep_foundation";
     pub const EG_CONSTRUCTION_4D5D6D: &str = "eigengraph::analysis::construction_4d5d6d";
+    pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
@@ -605,6 +606,10 @@ impl IfcxDocument {
         schemas.insert(
             ns::EG_CONSTRUCTION_4D5D6D.to_string(),
             json!({ "value": { "dataType": "Object", "spec": "EigenGraph 4D CPM Schedule, 5D AHSP Cost S-Curve & 6D EN 15978 Embodied Carbon LCA" } }),
+        );
+        schemas.insert(
+            ns::EG_MASTER_DOSSIER_INDEX.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph v0.8.5 Master Engineering Dossier Drawing Index (S-000 / S-100..S-114)" } }),
         );
         Self {
             header: IfcxHeader {
@@ -1902,10 +1907,46 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_construction_4d5d6d", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with the `v0.8.5` Master Engineering Dossier Index (`S-000`).
+    pub fn compose_with_master_dossier_overlay(
+        base_doc: &IfcxDocument,
+        entries: &[crate::core::vector_dossier::MasterDossierSheetEntry],
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_master_dossier_index", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcDocumentInformation", "version": "IFC5-IFCX" }),
+        );
+        let compliant_count = entries.iter().filter(|e| e.is_compliant).count();
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "EigenGraph v0.8.5 Master Engineering Dossier Index (S-000)",
+                "sheetRange": "S-100..S-114",
+                "totalSheets": entries.len(),
+                "compliantSheets": compliant_count,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(entries) {
+            attrs.insert(ns::EG_MASTER_DOSSIER_INDEX.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/governance/master_dossier_index".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_master_dossier_index", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_CONSTRUCTION_4D5D6D) {
+    if node.attributes.contains_key(ns::EG_MASTER_DOSSIER_INDEX) {
+        "Master Dossier Index".to_string()
+    } else if node.attributes.contains_key(ns::EG_CONSTRUCTION_4D5D6D) {
         "4D/5D/6D Sequence & LCA".to_string()
     } else if node.attributes.contains_key(ns::EG_DEEP_FOUNDATION) {
         "Deep Foundation & Piles".to_string()

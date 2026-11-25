@@ -4208,6 +4208,46 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if hud_actions.export_master_dossier_svg {
+            let site = self.universal_canvas.active_site_coupling();
+            let entries = crate::core::evaluate_master_dossier_entries(
+                &self.build_view.bim_bus.project,
+                Some(&site),
+                self.universal_canvas.last_isolation_report.as_ref(),
+                self.universal_canvas.last_wind_report.as_ref(),
+                self.universal_canvas.last_shear_wall_report.as_ref(),
+                self.universal_canvas.last_connection_report.as_ref(),
+                self.universal_canvas.last_prestress_report.as_ref(),
+                self.universal_canvas.last_composite_report.as_ref(),
+                self.universal_canvas.last_reliability_report.as_ref(),
+                self.universal_canvas.last_foundation_report.as_ref(),
+                self.universal_canvas.last_construction_lca_report.as_ref(),
+            );
+            let cp_hash = self
+                .universal_canvas
+                .collab_state
+                .active_checkpoint()
+                .map(|c| c.short_sha256());
+            let annex = crate::core::build_master_dossier_index_svg(
+                &self.build_view.bim_bus.project.project_name,
+                &entries,
+                cp_hash.as_deref(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_sheet_S000_master_dossier_index.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &annex.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(annex.sha256_seal);
+                    self.spatial_workspace.push_trace(annex.summary, true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {

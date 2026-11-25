@@ -5617,6 +5617,19 @@ impl SpatialWorkspaceState {
                                                         self.open_construction_lca_drawer(0);
                                                         actions.run_construction_lca_studio = true;
                                                     }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Book),
+                                                        "Dossier S-000",
+                                                        false,
+                                                        theme.accent_green,
+                                                        "Export Sheet S-000 Master Engineering Dossier Drawing Index (S-100..S-114)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.export_master_dossier_svg = true;
+                                                    }
                                                 },
                                             );
                                         }

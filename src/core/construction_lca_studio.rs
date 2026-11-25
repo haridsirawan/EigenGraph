@@ -319,7 +319,7 @@ pub fn evaluate_construction_lca_studio(
             total_float: 0,
             free_float: 0,
             is_critical: false,
-            weight_pct: 12.0,
+            weight_percentage: 12.0,
         },
         ConstructionActivity {
             id: 2,
@@ -333,7 +333,7 @@ pub fn evaluate_construction_lca_studio(
             total_float: 0,
             free_float: 0,
             is_critical: false,
-            weight_pct: 14.0,
+            weight_percentage: 14.0,
         },
     ];
     let story_weight = 52.0 / (stories as f64);
@@ -352,7 +352,7 @@ pub fn evaluate_construction_lca_studio(
             total_float: 0,
             free_float: 0,
             is_critical: false,
-            weight_pct: story_weight,
+            weight_percentage: story_weight,
         });
     }
     let last_story_id = 2 + stories;
@@ -370,7 +370,7 @@ pub fn evaluate_construction_lca_studio(
         total_float: 0,
         free_float: 0,
         is_critical: false,
-        weight_pct: 14.0,
+        weight_percentage: 14.0,
     });
     raw_acts.push(ConstructionActivity {
         id: hand_id,
@@ -384,7 +384,7 @@ pub fn evaluate_construction_lca_studio(
         total_float: 0,
         free_float: 0,
         is_critical: false,
-        weight_pct: 8.0,
+        weight_percentage: 8.0,
     });
 
     let cpm_acts = ScheduleEngine::compute_cpm(raw_acts).unwrap_or_default();
@@ -466,13 +466,13 @@ pub fn evaluate_construction_lca_studio(
         .collect();
 
     let mut physical_progress_pct = 0.0_f64;
-    let total_w: f64 = cpm_acts.iter().map(|a| a.weight_pct).sum::<f64>().max(1.0);
+    let total_w: f64 = cpm_acts.iter().map(|a| a.weight_percentage).sum::<f64>().max(1.0);
     let mut activities = Vec::with_capacity(cpm_acts.len());
     for a in &cpm_acts {
         let dur = a.duration_days.max(1) as f64;
         let done_days = cfg.active_day.saturating_sub(a.early_start).min(a.duration_days) as f64;
         let frac = (done_days / dur).clamp(0.0, 1.0);
-        physical_progress_pct += frac * (a.weight_pct / total_w) * 100.0;
+        physical_progress_pct += frac * (a.weight_percentage / total_w) * 100.0;
         let status = if cfg.active_day >= a.early_finish {
             "DONE".to_string()
         } else if cfg.active_day >= a.early_start {
@@ -488,7 +488,7 @@ pub fn evaluate_construction_lca_studio(
             early_finish: a.early_finish,
             total_float: a.total_float,
             is_critical: a.is_critical,
-            weight_pct: a.weight_pct,
+            weight_pct: a.weight_percentage,
             status,
         });
     }

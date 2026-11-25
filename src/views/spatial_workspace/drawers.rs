@@ -3222,7 +3222,7 @@ impl SpatialWorkspaceState {
                 AppIcon::Wind,
                 13.0,
                 theme.accent_blue,
-                "Wind Aeroelasticity & ISO 10137 Comfort Studio",
+                "Wind Aeroelasticity & Comfort",
                 11.0,
                 theme.text_primary,
                 true,
@@ -3328,21 +3328,30 @@ impl SpatialWorkspaceState {
                 }
             });
             ui.add_space(3.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.set_max_width(strip_w);
-                let mut spd = universal_canvas.wind_studio_config.basic_wind_speed_ms;
-                ui.label(RichText::new("Speed V (m/s)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut spd, 20.0..=90.0).max_decimals(0)).changed() {
-                    universal_canvas.wind_studio_config.basic_wind_speed_ms = spd;
-                    actions.run_wind_studio = true;
-                }
-                let mut az = universal_canvas.wind_studio_config.wind_azimuth_deg;
-                ui.label(RichText::new("Azimuth (deg)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut az, 0.0..=360.0).max_decimals(0)).changed() {
-                    universal_canvas.wind_studio_config.wind_azimuth_deg = az;
-                    actions.run_wind_studio = true;
-                }
-            });
+            ui.spacing_mut().slider_width = (strip_w * 0.28).clamp(58.0, 96.0);
+            let render_sliders = |ui: &mut Ui| {
+                ui.horizontal(|ui| {
+                    let mut spd = universal_canvas.wind_studio_config.basic_wind_speed_ms;
+                    ui.label(RichText::new("Speed V (m/s)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut spd, 20.0..=90.0).max_decimals(0)).changed() {
+                        universal_canvas.wind_studio_config.basic_wind_speed_ms = spd;
+                        actions.run_wind_studio = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let mut az = universal_canvas.wind_studio_config.wind_azimuth_deg;
+                    ui.label(RichText::new("Azimuth (deg)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut az, 0.0..=360.0).max_decimals(0)).changed() {
+                        universal_canvas.wind_studio_config.wind_azimuth_deg = az;
+                        actions.run_wind_studio = true;
+                    }
+                });
+            };
+            if strip_w >= 640.0 {
+                ui.horizontal(render_sliders);
+            } else {
+                ui.vertical(render_sliders);
+            }
         });
 
         ui.add_space(4.0);
@@ -3352,6 +3361,7 @@ impl SpatialWorkspaceState {
                 let inner_w = (col_w - 20.0).max(150.0);
                 ui.set_width(inner_w);
                 ui.set_max_width(inner_w);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 ui.vertical(|ui| {
                     ui.set_max_width(inner_w);
                     let Some(ref studio) = universal_canvas.last_wind_report else {
@@ -3487,7 +3497,7 @@ impl SpatialWorkspaceState {
                 AppIcon::Layers,
                 13.0,
                 theme.accent_blue,
-                "Special RC Shear Wall, SBE & Coupling Beam Studio",
+                "RC Shear Wall & SBE Studio",
                 11.0,
                 theme.text_primary,
                 true,
@@ -3566,27 +3576,38 @@ impl SpatialWorkspaceState {
                 }
             });
             ui.add_space(3.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.set_max_width(strip_w);
-                let mut tw = universal_canvas.shear_wall_studio_config.wall_thickness_mm;
-                ui.label(RichText::new("Web tw (mm)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut tw, 250.0..=600.0).max_decimals(0)).changed() {
-                    universal_canvas.shear_wall_studio_config.wall_thickness_mm = tw;
-                    actions.run_shear_wall_studio = true;
-                }
-                let mut drift_pct = universal_canvas.shear_wall_studio_config.design_drift_ratio * 100.0;
-                ui.label(RichText::new("Drift (%)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut drift_pct, 0.5..=2.5).max_decimals(2)).changed() {
-                    universal_canvas.shear_wall_studio_config.design_drift_ratio = drift_pct * 0.01;
-                    actions.run_shear_wall_studio = true;
-                }
-                let mut ln = universal_canvas.shear_wall_studio_config.cb_clear_span_m;
-                ui.label(RichText::new("CB ln (m)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut ln, 1.0..=3.2).max_decimals(2)).changed() {
-                    universal_canvas.shear_wall_studio_config.cb_clear_span_m = ln;
-                    actions.run_shear_wall_studio = true;
-                }
-            });
+            ui.spacing_mut().slider_width = (strip_w * 0.28).clamp(58.0, 96.0);
+            let render_sliders = |ui: &mut Ui| {
+                ui.horizontal(|ui| {
+                    let mut tw = universal_canvas.shear_wall_studio_config.wall_thickness_mm;
+                    ui.label(RichText::new("Web tw (mm)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut tw, 250.0..=600.0).max_decimals(0)).changed() {
+                        universal_canvas.shear_wall_studio_config.wall_thickness_mm = tw;
+                        actions.run_shear_wall_studio = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let mut drift_pct = universal_canvas.shear_wall_studio_config.design_drift_ratio * 100.0;
+                    ui.label(RichText::new("Drift (%)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut drift_pct, 0.5..=2.5).max_decimals(2)).changed() {
+                        universal_canvas.shear_wall_studio_config.design_drift_ratio = drift_pct * 0.01;
+                        actions.run_shear_wall_studio = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let mut ln = universal_canvas.shear_wall_studio_config.cb_clear_span_m;
+                    ui.label(RichText::new("CB ln (m)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut ln, 1.0..=3.2).max_decimals(2)).changed() {
+                        universal_canvas.shear_wall_studio_config.cb_clear_span_m = ln;
+                        actions.run_shear_wall_studio = true;
+                    }
+                });
+            };
+            if strip_w >= 640.0 {
+                ui.horizontal(render_sliders);
+            } else {
+                ui.vertical(render_sliders);
+            }
         });
 
         ui.add_space(4.0);
@@ -3596,6 +3617,7 @@ impl SpatialWorkspaceState {
                 let inner_w = (col_w - 20.0).max(150.0);
                 ui.set_width(inner_w);
                 ui.set_max_width(inner_w);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 ui.vertical(|ui| {
                     ui.set_max_width(inner_w);
                     let Some(ref studio) = universal_canvas.last_shear_wall_report else {
@@ -3743,7 +3765,7 @@ impl SpatialWorkspaceState {
                 AppIcon::Wrench,
                 13.0,
                 theme.accent_blue,
-                "Steel Seismic Connection & Panel-Zone Studio",
+                "Steel Connection & Panel-Zone",
                 11.0,
                 theme.text_primary,
                 true,
@@ -3829,27 +3851,38 @@ impl SpatialWorkspaceState {
                 }
             });
             ui.add_space(3.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.set_max_width(strip_w);
-                let mut db = universal_canvas.connection_studio_config.bolt_diameter_mm;
-                ui.label(RichText::new("Bolt M (mm)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut db, 16.0..=36.0).max_decimals(0)).changed() {
-                    universal_canvas.connection_studio_config.bolt_diameter_mm = db;
-                    actions.run_connection_studio = true;
-                }
-                let mut tp = universal_canvas.connection_studio_config.plate_thickness_mm;
-                ui.label(RichText::new("Plate tp (mm)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut tp, 10.0..=50.0).max_decimals(0)).changed() {
-                    universal_canvas.connection_studio_config.plate_thickness_mm = tp;
-                    actions.run_connection_studio = true;
-                }
-                let mut bd = universal_canvas.connection_studio_config.beam_depth_mm;
-                ui.label(RichText::new("Beam d (mm)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut bd, 250.0..=800.0).max_decimals(0)).changed() {
-                    universal_canvas.connection_studio_config.beam_depth_mm = bd;
-                    actions.run_connection_studio = true;
-                }
-            });
+            ui.spacing_mut().slider_width = (strip_w * 0.28).clamp(58.0, 96.0);
+            let render_sliders = |ui: &mut Ui| {
+                ui.horizontal(|ui| {
+                    let mut db = universal_canvas.connection_studio_config.bolt_diameter_mm;
+                    ui.label(RichText::new("Bolt M (mm)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut db, 16.0..=36.0).max_decimals(0)).changed() {
+                        universal_canvas.connection_studio_config.bolt_diameter_mm = db;
+                        actions.run_connection_studio = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let mut tp = universal_canvas.connection_studio_config.plate_thickness_mm;
+                    ui.label(RichText::new("Plate tp (mm)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut tp, 10.0..=50.0).max_decimals(0)).changed() {
+                        universal_canvas.connection_studio_config.plate_thickness_mm = tp;
+                        actions.run_connection_studio = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let mut bd = universal_canvas.connection_studio_config.beam_depth_mm;
+                    ui.label(RichText::new("Beam d (mm)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut bd, 250.0..=800.0).max_decimals(0)).changed() {
+                        universal_canvas.connection_studio_config.beam_depth_mm = bd;
+                        actions.run_connection_studio = true;
+                    }
+                });
+            };
+            if strip_w >= 640.0 {
+                ui.horizontal(render_sliders);
+            } else {
+                ui.vertical(render_sliders);
+            }
         });
 
         ui.add_space(4.0);
@@ -3859,6 +3892,7 @@ impl SpatialWorkspaceState {
                 let inner_w = (col_w - 20.0).max(150.0);
                 ui.set_width(inner_w);
                 ui.set_max_width(inner_w);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 ui.vertical(|ui| {
                     ui.set_max_width(inner_w);
                     let Some(ref studio) = universal_canvas.last_connection_report else {
@@ -4013,7 +4047,7 @@ impl SpatialWorkspaceState {
                 AppIcon::ChartLine,
                 13.0,
                 theme.accent_blue,
-                "Post-Tensioned & Prestressed Tendon Drape Studio",
+                "PT & Prestressed Tendon Studio",
                 11.0,
                 theme.text_primary,
                 true,
@@ -4099,27 +4133,38 @@ impl SpatialWorkspaceState {
                 }
             });
             ui.add_space(3.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.set_max_width(strip_w);
-                let mut strands = universal_canvas.prestress_studio_config.num_strands as f64;
-                ui.label(RichText::new("Strands").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut strands, 4.0..=48.0).max_decimals(0)).changed() {
-                    universal_canvas.prestress_studio_config.num_strands = strands.round() as usize;
-                    actions.run_prestress_studio = true;
-                }
-                let mut e_mid = universal_canvas.prestress_studio_config.eccentricity_mid_mm;
-                ui.label(RichText::new("e_mid (mm)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut e_mid, 100.0..=650.0).max_decimals(0)).changed() {
-                    universal_canvas.prestress_studio_config.eccentricity_mid_mm = e_mid;
-                    actions.run_prestress_studio = true;
-                }
-                let mut fc = universal_canvas.prestress_studio_config.fc_prime_mpa;
-                ui.label(RichText::new("f'c (MPa)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut fc, 30.0..=75.0).max_decimals(0)).changed() {
-                    universal_canvas.prestress_studio_config.fc_prime_mpa = fc;
-                    actions.run_prestress_studio = true;
-                }
-            });
+            ui.spacing_mut().slider_width = (strip_w * 0.28).clamp(58.0, 96.0);
+            let render_sliders = |ui: &mut Ui| {
+                ui.horizontal(|ui| {
+                    let mut strands = universal_canvas.prestress_studio_config.num_strands as f64;
+                    ui.label(RichText::new("Strands").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut strands, 4.0..=48.0).max_decimals(0)).changed() {
+                        universal_canvas.prestress_studio_config.num_strands = strands.round() as usize;
+                        actions.run_prestress_studio = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let mut e_mid = universal_canvas.prestress_studio_config.eccentricity_mid_mm;
+                    ui.label(RichText::new("e_mid (mm)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut e_mid, 100.0..=650.0).max_decimals(0)).changed() {
+                        universal_canvas.prestress_studio_config.eccentricity_mid_mm = e_mid;
+                        actions.run_prestress_studio = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let mut fc = universal_canvas.prestress_studio_config.fc_prime_mpa;
+                    ui.label(RichText::new("f'c (MPa)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut fc, 30.0..=75.0).max_decimals(0)).changed() {
+                        universal_canvas.prestress_studio_config.fc_prime_mpa = fc;
+                        actions.run_prestress_studio = true;
+                    }
+                });
+            };
+            if strip_w >= 640.0 {
+                ui.horizontal(render_sliders);
+            } else {
+                ui.vertical(render_sliders);
+            }
         });
 
         ui.add_space(4.0);
@@ -4129,6 +4174,7 @@ impl SpatialWorkspaceState {
                 let inner_w = (col_w - 20.0).max(150.0);
                 ui.set_width(inner_w);
                 ui.set_max_width(inner_w);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 ui.vertical(|ui| {
                     ui.set_max_width(inner_w);
                     let Some(ref studio) = universal_canvas.last_prestress_report else {
@@ -4291,7 +4337,7 @@ impl SpatialWorkspaceState {
                 AppIcon::Grid,
                 13.0,
                 theme.accent_blue,
-                "Composite Deck, Shear Studs & DG11 Vibration Studio",
+                "Composite Deck & DG11 Studio",
                 11.0,
                 theme.text_primary,
                 true,
@@ -4381,27 +4427,38 @@ impl SpatialWorkspaceState {
                 }
             });
             ui.add_space(3.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.set_max_width(strip_w);
-                let mut studs = universal_canvas.composite_studio_config.studs_provided as f64;
-                ui.label(RichText::new("Studs/Bay").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut studs, 12.0..=120.0).max_decimals(0)).changed() {
-                    universal_canvas.composite_studio_config.studs_provided = studs.round() as usize;
-                    actions.run_composite_studio = true;
-                }
-                let mut slab_h = universal_canvas.composite_studio_config.total_slab_h_mm;
-                ui.label(RichText::new("Slab h (mm)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut slab_h, 110.0..=240.0).max_decimals(0)).changed() {
-                    universal_canvas.composite_studio_config.total_slab_h_mm = slab_h;
-                    actions.run_composite_studio = true;
-                }
-                let mut beta = universal_canvas.composite_studio_config.floor_damping_beta * 100.0;
-                ui.label(RichText::new("Damping (%)").size(9.0).color(theme.text_secondary));
-                if ui.add(egui::Slider::new(&mut beta, 1.5..=6.0).max_decimals(1)).changed() {
-                    universal_canvas.composite_studio_config.floor_damping_beta = beta * 0.01;
-                    actions.run_composite_studio = true;
-                }
-            });
+            ui.spacing_mut().slider_width = (strip_w * 0.28).clamp(58.0, 96.0);
+            let render_sliders = |ui: &mut Ui| {
+                ui.horizontal(|ui| {
+                    let mut studs = universal_canvas.composite_studio_config.studs_provided as f64;
+                    ui.label(RichText::new("Studs/Bay").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut studs, 12.0..=120.0).max_decimals(0)).changed() {
+                        universal_canvas.composite_studio_config.studs_provided = studs.round() as usize;
+                        actions.run_composite_studio = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let mut slab_h = universal_canvas.composite_studio_config.total_slab_h_mm;
+                    ui.label(RichText::new("Slab h (mm)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut slab_h, 110.0..=240.0).max_decimals(0)).changed() {
+                        universal_canvas.composite_studio_config.total_slab_h_mm = slab_h;
+                        actions.run_composite_studio = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let mut beta = universal_canvas.composite_studio_config.floor_damping_beta * 100.0;
+                    ui.label(RichText::new("Damping (%)").size(9.0).color(theme.text_secondary));
+                    if ui.add(egui::Slider::new(&mut beta, 1.5..=6.0).max_decimals(1)).changed() {
+                        universal_canvas.composite_studio_config.floor_damping_beta = beta * 0.01;
+                        actions.run_composite_studio = true;
+                    }
+                });
+            };
+            if strip_w >= 640.0 {
+                ui.horizontal(render_sliders);
+            } else {
+                ui.vertical(render_sliders);
+            }
         });
 
         ui.add_space(4.0);
@@ -4411,6 +4468,7 @@ impl SpatialWorkspaceState {
                 let inner_w = (col_w - 20.0).max(150.0);
                 ui.set_width(inner_w);
                 ui.set_max_width(inner_w);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 ui.vertical(|ui| {
                     ui.set_max_width(inner_w);
                     let Some(ref studio) = universal_canvas.last_composite_report else {
@@ -4551,7 +4609,7 @@ impl SpatialWorkspaceState {
                 AppIcon::Target,
                 13.0,
                 theme.accent_orange,
-                "Structural Reliability FORM/SORM & Fragility Studio",
+                "Reliability FORM/SORM Studio",
                 11.0,
                 theme.text_primary,
                 true,
@@ -4707,23 +4765,21 @@ impl SpatialWorkspaceState {
             return;
         };
 
-        let body_w = (deck_w - 6.0).max(160.0);
-        let col_w = if two_col {
-            ((body_w - 8.0) * 0.5).max(160.0)
-        } else {
-            body_w
-        };
         let tab = self.reliability_drawer_tab;
-        ui.horizontal_wrapped(|ui| {
-            ui.set_max_width(body_w);
-            for is_left in [true, false] {
-                theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
-                    ui.set_width((col_w - 16.0).max(140.0));
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                     if is_left {
                         ui.label(RichText::new("Random Variables & Target Beta Parameters").size(9.8).strong().color(theme.text_primary));
                         let cfg = &mut universal_canvas.reliability_studio_config;
                         let mut changed = false;
                         ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
                             ui.label(RichText::new("Target beta:").size(8.8).color(theme.text_muted));
                             changed |= ui.add(egui::DragValue::new(&mut cfg.target_beta).range(2.0..=5.5).speed(0.05)).changed();
                             ui.label(RichText::new("Mean DCR:").size(8.8).color(theme.text_muted));
@@ -4787,7 +4843,7 @@ impl SpatialWorkspaceState {
                         for s in &studio.sensitivities {
                             ui.label(
                                 RichText::new(format!(
-                                    "{:<16} alpha={:+.3} | Imp={:>5.1}% | u*={:+.2}",
+                                    "{} a={:+.3} | {:.1}% | u*={:+.2}",
                                     s.variable_name, s.alpha, s.importance_pct, s.design_point_u
                                 ))
                                 .size(8.3)
@@ -4823,7 +4879,7 @@ impl SpatialWorkspaceState {
                         }
                     }
                 });
-            }
+            });
         });
     }
 
@@ -4851,7 +4907,7 @@ impl SpatialWorkspaceState {
                 AppIcon::Hammer,
                 13.0,
                 theme.accent_green,
-                "Deep Foundation Pile Group, Winkler SSI & Punching Studio",
+                "Deep Foundation & Winkler Studio",
                 11.0,
                 theme.text_primary,
                 true,
@@ -5005,23 +5061,21 @@ impl SpatialWorkspaceState {
             return;
         };
 
-        let body_w = (deck_w - 6.0).max(160.0);
-        let col_w = if two_col {
-            ((body_w - 8.0) * 0.5).max(160.0)
-        } else {
-            body_w
-        };
         let tab = self.foundation_drawer_tab;
-        ui.horizontal_wrapped(|ui| {
-            ui.set_max_width(body_w);
-            for is_left in [true, false] {
-                theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
-                    ui.set_width((col_w - 16.0).max(140.0));
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                     if is_left {
                         ui.label(RichText::new("Pile Geometry, Cap & Column Loads").size(9.8).strong().color(theme.text_primary));
                         let cfg = &mut universal_canvas.foundation_studio_config;
                         let mut changed = false;
                         ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
                             ui.label(RichText::new("Dia (m):").size(8.8).color(theme.text_muted));
                             changed |= ui.add(egui::DragValue::new(&mut cfg.pile_diameter_m).range(0.35..=1.80).speed(0.05)).changed();
                             ui.label(RichText::new("Spacing (m):").size(8.8).color(theme.text_muted));
@@ -5121,7 +5175,7 @@ impl SpatialWorkspaceState {
                         );
                     }
                 });
-            }
+            });
         });
     }
 
@@ -5149,7 +5203,7 @@ impl SpatialWorkspaceState {
                 AppIcon::Clock,
                 13.0,
                 theme.accent_blue,
-                "4D CPM Sequence, 5D AHSP Cost S-Curve & 6D Carbon LCA Studio",
+                "4D/5D/6D Sequence & Carbon LCA",
                 11.0,
                 theme.text_primary,
                 true,
@@ -5304,26 +5358,27 @@ impl SpatialWorkspaceState {
             return;
         };
 
-        let body_w = (deck_w - 6.0).max(160.0);
-        let col_w = if two_col {
-            ((body_w - 8.0) * 0.5).max(160.0)
-        } else {
-            body_w
-        };
         let tab = self.construction_lca_drawer_tab;
         let max_day = studio.total_duration_days.max(120);
-        ui.horizontal_wrapped(|ui| {
-            ui.set_max_width(body_w);
-            for is_left in [true, false] {
-                theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
-                    ui.set_width((col_w - 16.0).max(140.0));
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                     if is_left {
                         ui.label(RichText::new("4D Timeline, Crews & Logistics Parameters").size(9.8).strong().color(theme.text_primary));
                         let cfg = &mut universal_canvas.construction_lca_config;
                         let mut changed = false;
                         ui.horizontal_wrapped(|ui| {
-                            ui.label(RichText::new("Active Day:").size(8.8).color(theme.text_muted));
-                            changed |= ui.add(egui::Slider::new(&mut cfg.active_day, 0..=max_day)).changed();
+                            ui.set_max_width(inner_w);
+                            ui.spacing_mut().slider_width = (inner_w * 0.38).clamp(58.0, 105.0);
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("Day:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::Slider::new(&mut cfg.active_day, 0..=max_day)).changed();
+                            });
                             ui.label(RichText::new("Crews:").size(8.8).color(theme.text_muted));
                             changed |= ui.add(egui::DragValue::new(&mut cfg.crane_crews).range(1..=6).speed(1.0)).changed();
                             ui.label(RichText::new("Haul (km):").size(8.8).color(theme.text_muted));
@@ -5410,7 +5465,7 @@ impl SpatialWorkspaceState {
                         );
                     }
                 });
-            }
+            });
         });
     }
 }
