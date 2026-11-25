@@ -51,11 +51,12 @@ Keep the 15 engineering workflow modules accessible in navigation (sidebar/drawe
        - Keep the current patch version in `Cargo.toml` unchanged and log each milestone in `docs/CHANGELOG.md` under `## [Unreleased — Next: vX.Y.Z (k/10)]`.
        - Verify with `cargo test --lib` and `cargo check --bin eigengraph --target wasm32-unknown-unknown`.
        - Stage and **commit locally only** (`git commit`); **do NOT push to `origin main`** until the 10th update is reached (unless explicitly requested by the user).
+       - Keep the local `target/` build cache intact between intermediate updates for fast incremental compilation (do **NOT** run `cargo clean` until the `10/10` release push completes).
     2. **Milestone Release Update (`10/10`)**:
        - Bump the patch version by `+0.0.1` in `Cargo.toml`, `Settings -> About EigenGraph`, `docs/CHANGELOG.md`, and `docs/IFCX Earth.md`.
        - Run full verification (`cargo test --lib`, `cargo check --bin eigengraph --target wasm32-unknown-unknown`, and `cargo build --bin eigengraph --target wasm32-unknown-unknown --release` or `trunk build`).
        - **Automatically stage, commit, and push all changes to `origin main`** so `./dist` deploys to Cloudflare Workers (`eigengraph.net` and `www.eigengraph.net`).
-       - Clean up local build cache (`cargo clean`) and stray OS metadata files (`find . -name ".DS_Store" -not -path "./.git/*" -delete`) after pushing to keep local storage lean.
+       - Immediately after the `10/10` `git push origin main` succeeds, automatically run `cargo clean` and remove stray OS metadata files (`find . -name ".DS_Store" -not -path "./.git/*" -delete`) to keep local storage lean.
 
 ---
 
