@@ -7,7 +7,11 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.6 (1/10)]
+## [Unreleased — Next: v0.8.6 (2/10)]
+
+### Update 2/10 (`v0.8.5.2` -> `v0.8.6`) — Unified Crimson Graph-Horse Brand Icons & Logo Refresh
+- Replaced all application, web, PWA, and documentation brand icons (`assets/icon.png` 1024×1024, `assets/favicon-circle.png` 384×384, `assets/favicon-48.png` 48×48, and `assets/logo.png` 1024×571) with the unified crimson triangulated graph-horse emblem.
+- Bumped PWA Service Worker cache key (`eigengraph-pwa-v0.8.5-2`) in `sw.js` to refresh cached icons immediately upon deployment.
 
 ### Update 1/10 (`v0.8.5.1` -> `v0.8.6`) — Circular Google Search Favicon & Building Information Modeling Web Metadata
 - Added circular anti-aliased search favicons (`assets/favicon-circle.png` 384×384 and `assets/favicon-48.png` 48×48, exact 48px multiples per Google Search favicon guidelines) cropped cleanly from the white-backed 3D graph emblem without drop-shadow borders, while preserving `assets/icon.png` for desktop and PWA app icons.
