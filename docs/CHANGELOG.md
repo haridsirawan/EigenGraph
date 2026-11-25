@@ -7,7 +7,15 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.5 (7/10)]
+## [Unreleased — Next: v0.8.5 (8/10)]
+
+### Update 8/10 (`v0.8.4.8`) — Deep Foundation Pile Group, Winkler Springs & Punching Shear 3D Studio (`ACI 318-19 §22.6` / `SNI 8460:2017`) + Sheet `S-113`
+- **BIM-Coupled Deep Foundation & SSI Engine (`src/core/foundation_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_foundation_studio`](src/core/foundation_studio.rs) coupling `BimProject` footings/columns/levels and site seismic hazard into [`GeotechEngine::evaluate_pile_group`](src/core/geotech.rs), [`GeotechEngine::compute_winkler_springs`](src/core/geotech.rs), [`GeotechEngine::audit_punching_shear`](src/core/geotech.rs), and [`GeotechEngine::evaluate_ssi_modal_shift`](src/core/geotech.rs), computing Converse-Labarre group efficiency (`Eg`), biaxial pile load envelopes, 6-DOF Winkler subgrade springs, two-way punching shear `vu` vs `phi*Vc`, 3D ENU pile caps/shafts/spring nodes, `.eigen.json` persistence (`UnifiedWorkspaceArchive::foundation_studio_config`), and non-destructive `eigengraph::analysis::deep_foundation` IFCX overlays (`IfcxStage::compose_with_foundation_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Pile Caps, Shafts & Springs + Sheet `S-113` (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added [`build_rtc_foundation_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`FoundationGpuInput`, `material_kind = 21.0`, WGSL `kind >= 20.5` subsurface soil wave & load rim glow shader, 0% raster), dedicated `deep_foundation` GPU slot inside `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_foundation_fallback`), and archival A3 landscape Sheet `S-113` Pure-Vector Annex SVG (`build_deep_foundation_annex_svg`, 0 `<image>` tags).
+- **Width-First Dynamic Island `Foundation Studio`, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the 2-tab width-first Dynamic Island drawer (`Pile Group & Cap` + `Winkler SSI & Punching`), `Foundation` toolbar pill, `/foundation`, `/pile-group`, `/punching`, `/winkler`, `/foundation-3d`, `/foundation-ifcx`, `/foundation-svg` slash commands, and `[[RUN_FOUNDATION:...]]` / `[[TOGGLE_FOUNDATION_3D]]` / `[[EXPORT_FOUNDATION_ANNEX]]` Gemini directives.
 
 ### Update 7/10 (`v0.8.4.7`) — Structural Reliability (`FORM/SORM` β-Index, Sensitivity & FEMA P-58 Fragility) 3D Studio (`ASCE 7-22` / `EN 1990` / `ISO 2394`) + Sheet `S-112`
 - **BIM-Coupled Probabilistic Reliability & Fragility Engine (`src/core/reliability_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

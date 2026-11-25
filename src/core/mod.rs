@@ -47,6 +47,7 @@ pub mod connection_studio;
 pub mod prestress_studio;
 pub mod composite_studio;
 pub mod reliability_studio;
+pub mod foundation_studio;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -227,12 +228,13 @@ pub use lifecycle_ops::{
     VariationOrderRow,
 };
 pub use vector_dossier::{
-    build_composite_deck_annex_svg, build_eigenflow_nonlinear_annex_svg,
-    build_extreme_events_annex_svg, build_fabrication_bbs_shop_svg,
-    build_permit_compliance_annex_svg, build_prestress_tendon_annex_svg,
-    build_pure_vector_engineering_dossier_svg, build_reliability_form_annex_svg,
-    build_seismic_isolation_annex_svg, build_shear_wall_annex_svg, build_steel_connection_annex_svg,
-    build_wind_aero_annex_svg, VectorDossierExport, VectorDossierInput,
+    build_composite_deck_annex_svg, build_deep_foundation_annex_svg,
+    build_eigenflow_nonlinear_annex_svg, build_extreme_events_annex_svg,
+    build_fabrication_bbs_shop_svg, build_permit_compliance_annex_svg,
+    build_prestress_tendon_annex_svg, build_pure_vector_engineering_dossier_svg,
+    build_reliability_form_annex_svg, build_seismic_isolation_annex_svg,
+    build_shear_wall_annex_svg, build_steel_connection_annex_svg, build_wind_aero_annex_svg,
+    VectorDossierExport, VectorDossierInput,
 };
 pub use portfolio_retrofit::{
     optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,
@@ -323,6 +325,10 @@ pub use reliability_studio::{
     evaluate_reliability_studio, standard_normal_inv_cdf, BetaHotspot3D, FragilityPointDto,
     LimitStateKind, ReliabilityIfcxOverlay, ReliabilityMember3D, ReliabilityMethod,
     ReliabilityStudioConfig, ReliabilityStudioReport, SensitivityFactor, NS_EG_RELIABILITY_FORM,
+};
+pub use foundation_studio::{
+    evaluate_foundation_studio, DeepFoundationIfcxOverlay, FoundationStudioConfig,
+    FoundationStudioReport, PileCap3D, PileShaft3D, WinklerSpringNode3D, NS_EG_DEEP_FOUNDATION,
 };
 
 

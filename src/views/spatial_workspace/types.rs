@@ -512,6 +512,15 @@ pub enum PlannedProposalAction {
     },
     ToggleReliability3d,
     ExportReliabilityAnnex,
+    // Update v0.8.4.8 (8/10 -> v0.8.5): Deep Foundation Pile Group, Winkler Springs & Punching Shear + Sheet S-113
+    RunFoundation {
+        soil_type: Option<crate::core::geotech::SoilType>,
+        piles_x: Option<usize>,
+        piles_y: Option<usize>,
+        pile_length_m: Option<f64>,
+    },
+    ToggleFoundation3d,
+    ExportFoundationAnnex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -666,6 +675,15 @@ pub enum GeminiDirective {
     },
     ToggleReliability3d,
     ExportReliabilityAnnex,
+    // Update v0.8.4.8 (8/10 -> v0.8.5): Deep Foundation Pile Group, Winkler Springs & Punching Shear + Sheet S-113
+    RunFoundation {
+        soil_type: Option<crate::core::geotech::SoilType>,
+        piles_x: Option<usize>,
+        piles_y: Option<usize>,
+        pile_length_m: Option<f64>,
+    },
+    ToggleFoundation3d,
+    ExportFoundationAnnex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1174,6 +1192,42 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleReliability3d);
             } else if upper == "EXPORT_RELIABILITY_ANNEX" {
                 directives.push(GeminiDirective::ExportReliabilityAnnex);
+            } else if upper == "RUN_FOUNDATION" || upper.starts_with("RUN_FOUNDATION:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let mut soil_type = None;
+                let mut piles_x = None;
+                let mut piles_y = None;
+                let mut pile_length_m = None;
+                for tok in arg.split(':').map(str::trim).filter(|s| !s.is_empty()) {
+                    if tok.contains("SOFT") {
+                        soil_type = Some(crate::core::geotech::SoilType::SoftClay);
+                    } else if tok.contains("STIFF") {
+                        soil_type = Some(crate::core::geotech::SoilType::StiffClay);
+                    } else if tok.contains("LOOSE") {
+                        soil_type = Some(crate::core::geotech::SoilType::LooseSand);
+                    } else if tok.contains("DENSE") {
+                        soil_type = Some(crate::core::geotech::SoilType::DenseSand);
+                    } else if tok.contains("ROCK") || tok.contains("BED") {
+                        soil_type = Some(crate::core::geotech::SoilType::Bedrock);
+                    } else if let Some((lx, ly)) = tok.split_once('X') {
+                        if let (Ok(nx), Ok(ny)) = (lx.parse::<usize>(), ly.parse::<usize>()) {
+                            piles_x = Some(nx.clamp(1, 5));
+                            piles_y = Some(ny.clamp(1, 5));
+                        }
+                    } else if let Ok(len_m) = tok.trim_end_matches('M').parse::<f64>() {
+                        pile_length_m = Some(len_m.clamp(6.0, 48.0));
+                    }
+                }
+                directives.push(GeminiDirective::RunFoundation {
+                    soil_type,
+                    piles_x,
+                    piles_y,
+                    pile_length_m,
+                });
+            } else if upper == "TOGGLE_FOUNDATION_3D" {
+                directives.push(GeminiDirective::ToggleFoundation3d);
+            } else if upper == "EXPORT_FOUNDATION_ANNEX" {
+                directives.push(GeminiDirective::ExportFoundationAnnex);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -2326,6 +2380,48 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Printer,
     },
     SlashCommandSpec {
+        cmd: "/foundation",
+        category: "Geotech",
+        description: "Open Deep Foundation Pile Group, Winkler Springs & Punching Shear 3D Studio",
+        icon: AppIcon::Hammer,
+    },
+    SlashCommandSpec {
+        cmd: "/pile-group",
+        category: "Geotech",
+        description: "Size pile group layout & embedment (/pile-group 3x3 24m soft)",
+        icon: AppIcon::Hammer,
+    },
+    SlashCommandSpec {
+        cmd: "/punching",
+        category: "Geotech",
+        description: "Audit ACI 318-19 / SNI 2847 two-way punching shear around column base",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/winkler",
+        category: "Geotech",
+        description: "Inspect 6-DOF Winkler subgrade springs & Wolf/Veletsos-Meek SSI shift",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/foundation-3d",
+        category: "Geotech",
+        description: "Toggle 3D Pure WebGPU deep pile caps, pile shafts & Winkler spring nodes",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/foundation-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::deep_foundation IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/foundation-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-113 Pure-Vector Deep Foundation & Punching Annex .svg",
+        icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -2488,6 +2584,11 @@ pub struct SpatialHudActions {
     pub toggle_reliability_3d: bool,
     pub export_reliability_ifcx: bool,
     pub export_reliability_svg: bool,
+    // Update v0.8.4.8 (8/10 -> v0.8.5): Deep Foundation Pile Group & Punching Studio
+    pub run_foundation_studio: bool,
+    pub toggle_foundation_3d: bool,
+    pub export_foundation_ifcx: bool,
+    pub export_foundation_svg: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -2927,5 +3028,9 @@ impl SpatialHudActions {
         self.toggle_reliability_3d |= other.toggle_reliability_3d;
         self.export_reliability_ifcx |= other.export_reliability_ifcx;
         self.export_reliability_svg |= other.export_reliability_svg;
+        self.run_foundation_studio |= other.run_foundation_studio;
+        self.toggle_foundation_3d |= other.toggle_foundation_3d;
+        self.export_foundation_ifcx |= other.export_foundation_ifcx;
+        self.export_foundation_svg |= other.export_foundation_svg;
     }
 }

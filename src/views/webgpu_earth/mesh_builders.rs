@@ -3656,3 +3656,91 @@ pub fn build_rtc_reliability_mesh(input: &ReliabilityGpuInput<'_>) -> GpuMeshPay
     }
 }
 
+/// GPU input payload for Update `v0.8.4.8` Deep Foundation Pile Group, Pile Caps & Winkler Springs (`material_kind = 21.0`).
+pub struct FoundationGpuInput<'a> {
+    pub report: &'a crate::core::foundation_studio::FoundationStudioReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU deep foundation pile caps, subsurface pile shafts, and 6-DOF Winkler spring nodes
+/// (`material_kind = 21.0`, 0% raster).
+pub fn build_rtc_foundation_mesh(input: &FoundationGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+
+    let rep = input.report;
+    let mut verts = Vec::with_capacity(
+        rep.caps_3d.len() * 32 + rep.piles_3d.len() * 24 + rep.springs_3d.len() * 16,
+    );
+    let mut idxs = Vec::with_capacity(
+        rep.caps_3d.len() * 48 + rep.piles_3d.len() * 36 + rep.springs_3d.len() * 24,
+    );
+
+    for cap in &rep.caps_3d {
+        let hw = cap.width_m * 0.5;
+        let hl = cap.length_m * 0.5;
+        let cx = cap.center_enu_m[0];
+        let cy = cap.center_enu_m[1];
+        let z0 = (cap.center_enu_m[2] - cap.thickness_m * 0.5) as f32;
+        let z1 = (cap.center_enu_m[2] + cap.thickness_m * 0.5) as f32;
+        let col = if cap.is_compliant {
+            [0.18_f32, 0.78, 0.56, 0.44]
+        } else {
+            [1.0_f32, 0.28, 0.24, 0.52]
+        };
+        let fp = [
+            rot_xy(cx - hw, cy - hl),
+            rot_xy(cx + hw, cy - hl),
+            rot_xy(cx + hw, cy + hl),
+            rot_xy(cx - hw, cy + hl),
+        ];
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z1, col, 21.0);
+    }
+
+    for pile in &rep.piles_3d {
+        let top_xy = rot_xy(pile.top_enu_m[0], pile.top_enu_m[1]);
+        let tip_xy = rot_xy(pile.tip_enu_m[0], pile.tip_enu_m[1]);
+        let (col, severity) = if !pile.is_safe {
+            ([1.0_f32, 0.20, 0.26, 0.94], 0.95_f32)
+        } else if pile.is_uplift {
+            ([0.22_f32, 0.68, 1.0, 0.88], 0.60_f32)
+        } else {
+            ([0.14_f32, 0.86, 0.74, 0.84], 0.35_f32)
+        };
+        push_animated_flow_strut_enu(
+            &mut verts,
+            &mut idxs,
+            [top_xy[0], top_xy[1], pile.top_enu_m[2]],
+            [tip_xy[0], tip_xy[1], pile.tip_enu_m[2]],
+            pile.diameter_m,
+            pile.diameter_m,
+            col,
+            severity,
+            21.0,
+        );
+    }
+
+    for sp in &rep.springs_3d {
+        let cxy = rot_xy(sp.pos_enu_m[0], sp.pos_enu_m[1]);
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [cxy[0] as f32, cxy[1] as f32, sp.pos_enu_m[2] as f32],
+            0.24,
+            [0.98_f32, 0.78, 0.22, 0.90],
+            0.50,
+            21.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

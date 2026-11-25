@@ -492,6 +492,13 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 20.5) {
+        // Update v0.8.4.8: Pure Analytical WGSL Deep Foundation Pile Group & Winkler Springs (0% raster)
+        let soil_wave = 0.76 + 0.24 * sin(f_in.world_pos.z * 2.2 - u_time * 3.2);
+        let load_norm = clamp(height_m, 0.0, 1.0);
+        let ndotv = max(abs(dot(n, v)), 0.14);
+        let rim = pow(1.0 - ndotv, 1.5) * (0.40 + 0.30 * load_norm);
+        col = f_in.color.rgb * (0.74 + 0.28 * soil_wave + rim);
     } else if (kind >= 19.5) {
         // Update v0.8.4.7: Pure Analytical WGSL Structural Reliability FORM/SORM Beta & Risk Beacons (0% raster)
         let pulse = 0.74 + 0.28 * sin(phase * 1.8 - u_time * 4.2);
@@ -765,6 +772,7 @@ pub struct WebGpuEarthResources {
     prestress: GpuMeshSlot,
     composite_deck: GpuMeshSlot,
     reliability_form: GpuMeshSlot,
+    deep_foundation: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
 }
 
@@ -986,6 +994,7 @@ impl WebGpuEarthResources {
             prestress: GpuMeshSlot::default(),
             composite_deck: GpuMeshSlot::default(),
             reliability_form: GpuMeshSlot::default(),
+            deep_foundation: GpuMeshSlot::default(),
             hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
@@ -1116,6 +1125,7 @@ impl WebGpuEarthResources {
             || self.prestress.index_count > 0
             || self.composite_deck.index_count > 0
             || self.reliability_form.index_count > 0
+            || self.deep_foundation.index_count > 0
             || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1164,6 +1174,7 @@ impl WebGpuEarthResources {
             self.prestress.draw(&mut pass);
             self.composite_deck.draw(&mut pass);
             self.reliability_form.draw(&mut pass);
+            self.deep_foundation.draw(&mut pass);
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
             self.hazard_compute.draw(&mut pass);
@@ -1198,6 +1209,7 @@ struct WebGpuEarthPaintCallback {
     pending_prestress: Option<(u64, GpuMeshPayload)>,
     pending_composite: Option<(u64, GpuMeshPayload)>,
     pending_reliability: Option<(u64, GpuMeshPayload)>,
+    pending_foundation: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
 }
 
@@ -1333,6 +1345,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
                     .upload(device, queue, "reliability_form_mesh", rel_in.0, &rel_in.1);
             }
         }
+        if let Some(ref fnd_in) = self.pending_foundation {
+            if res.deep_foundation.revision_uploaded != fnd_in.0 {
+                res.deep_foundation
+                    .upload(device, queue, "deep_foundation_mesh", fnd_in.0, &fnd_in.1);
+            }
+        }
         if let Some(ref h_cmp) = self.pending_hazard_compute {
             res.hazard_compute.dispatch(queue, egui_encoder, h_cmp);
         } else {
@@ -1429,6 +1447,7 @@ pub struct WebGpuEarthState {
     cached_prestress_hash: u64,
     cached_composite_hash: u64,
     cached_reliability_hash: u64,
+    cached_foundation_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1450,6 +1469,7 @@ pub struct WebGpuEarthState {
     pub last_prestress_tris: usize,
     pub last_composite_tris: usize,
     pub last_reliability_tris: usize,
+    pub last_foundation_tris: usize,
     pub last_compute_particles: u32,
     #[cfg(not(target_arch = "wasm32"))]
     wgpu_device: Option<wgpu::Device>,
@@ -1730,6 +1750,7 @@ impl WebGpuEarthState {
         prestress_input: Option<PrestressGpuInput<'_>>,
         composite_input: Option<CompositeGpuInput<'_>>,
         reliability_input: Option<ReliabilityGpuInput<'_>>,
+        foundation_input: Option<FoundationGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
@@ -2350,6 +2371,38 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_foundation = if render_site_pass {
+            if let Some(ref fnd_in) = foundation_input {
+                let c = &fnd_in.report.config;
+                let rev: u64 = ((c.soil_type as u64) << 4)
+                    ^ ((c.piles_x as u64) << 8)
+                    ^ ((c.piles_y as u64) << 12)
+                    ^ c.pile_length_m.to_bits()
+                    ^ c.pile_diameter_m.to_bits().rotate_left(13)
+                    ^ c.cap_thickness_m.to_bits().rotate_left(23)
+                    ^ c.column_pu_kn.to_bits().rotate_left(31)
+                    ^ ((fnd_in.report.piles_3d.len() as u64) << 28)
+                    ^ ((fnd_in.heading_deg.round() as u64) << 44)
+                    ^ u64::from(fnd_in.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                if rev != self.cached_foundation_hash {
+                    let mesh = build_rtc_foundation_mesh(fnd_in);
+                    self.last_foundation_tris = mesh.indices.len() / 3;
+                    self.cached_foundation_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_foundation_hash != 0 {
+                self.cached_foundation_hash = 0;
+                self.last_foundation_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let pending_hazard_compute = if render_site_pass {
             if let Some(hc) = hazard_compute_input {
                 if hc.enabled {
@@ -2396,6 +2449,7 @@ impl WebGpuEarthState {
                 pending_prestress,
                 pending_composite,
                 pending_reliability,
+                pending_foundation,
                 pending_hazard_compute,
             },
         ));
@@ -2427,6 +2481,7 @@ impl WebGpuEarthState {
         let prestress_animated = prestress_input.as_ref().is_some_and(|p| p.visible);
         let composite_animated = composite_input.as_ref().is_some_and(|cp| cp.visible);
         let reliability_animated = reliability_input.as_ref().is_some_and(|r| r.visible);
+        let foundation_animated = foundation_input.as_ref().is_some_and(|f| f.visible);
         let frame_ms = if hazard_animated
             || compute_animated
             || subsurface_animated
@@ -2444,6 +2499,7 @@ impl WebGpuEarthState {
             || prestress_animated
             || composite_animated
             || reliability_animated
+            || foundation_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

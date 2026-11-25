@@ -74,6 +74,7 @@ pub mod ns {
     pub const EG_PRESTRESS_TENDON: &str = "eigengraph::analysis::prestress_tendon";
     pub const EG_COMPOSITE_DECK: &str = "eigengraph::analysis::composite_deck";
     pub const EG_RELIABILITY_FORM: &str = "eigengraph::analysis::reliability_form";
+    pub const EG_DEEP_FOUNDATION: &str = "eigengraph::analysis::deep_foundation";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
@@ -595,6 +596,10 @@ impl IfcxDocument {
         schemas.insert(
             ns::EG_RELIABILITY_FORM.to_string(),
             json!({ "value": { "dataType": "Object", "spec": "EigenGraph Structural Reliability FORM/SORM Beta-Index, Sensitivity & FEMA P-58 Fragility" } }),
+        );
+        schemas.insert(
+            ns::EG_DEEP_FOUNDATION.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph Deep Foundation Pile Group, 6-DOF Winkler Springs & Two-Way Punching Shear" } }),
         );
         Self {
             header: IfcxHeader {
@@ -1819,10 +1824,49 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_reliability_form", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Deep Foundation & Pile Group overlay.
+    pub fn compose_with_foundation_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::foundation_studio::DeepFoundationIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_deep_foundation", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcStructuralAnalysisModel", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Deep Foundation Pile Group, Winkler Springs & Punching Shear Overlay",
+                "pileLayout": overlay.pile_layout,
+                "totalPilesBuilding": overlay.total_piles_building,
+                "converseLabarreEfficiency": overlay.converse_labarre_efficiency,
+                "pileGoverningDcr": overlay.pile_governing_dcr,
+                "punchingDcr": overlay.punching_dcr,
+                "winklerKzKnM": overlay.winkler_kz_kn_m,
+                "isCompliant": overlay.is_overall_compliant,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_DEEP_FOUNDATION.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/analysis/deep_foundation".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_deep_foundation", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_RELIABILITY_FORM) {
+    if node.attributes.contains_key(ns::EG_DEEP_FOUNDATION) {
+        "Deep Foundation & Piles".to_string()
+    } else if node.attributes.contains_key(ns::EG_RELIABILITY_FORM) {
         "Reliability FORM/SORM".to_string()
     } else if node.attributes.contains_key(ns::EG_COMPOSITE_DECK) {
         "Composite Deck".to_string()

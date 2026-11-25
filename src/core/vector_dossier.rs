@@ -4367,6 +4367,297 @@ pub fn build_reliability_form_annex_svg(
     }
 }
 
+/// Pure-Vector Deep Foundation Pile Group, 6-DOF Winkler Springs & Two-Way Punching Shear Annex SVG (`S-113`).
+pub fn build_deep_foundation_annex_svg(
+    project_name: &str,
+    studio: &crate::core::foundation_studio::FoundationStudioReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(28_000);
+    let seal_token = "__EIGENGRAPH_FOUNDATION_S113_SHA256__";
+    let pg = &studio.pile_group;
+    let ps = &studio.punching_shear;
+    let ws = &studio.winkler_springs;
+    let ssi = &studio.ssi_modal_shift;
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#059669" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH DEEP FOUNDATION PILE GROUP, WINKLER SSI &amp; PUNCHING SHEAR ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#047857">SHEET {} • ACI 318-19 §22.6 / SNI 8460:2017 / SNI 2847:2019 • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: Pile Cap Plan, Critical Punching Perimeter (bo) & Pile Grid (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. PILE CAP PLAN, CRITICAL PUNCHING PERIMETER (bo) &amp; PILE GRID",
+        &format!(
+            "{}x{} Piles (D={:.0}mm, s={:.2}m, L={:.1}m) • Cap {:.2}x{:.2}x{:.2}m • Eg={:.3}",
+            pg.piles_count_x,
+            pg.piles_count_y,
+            pg.pile_diameter_m * 1000.0,
+            pg.pile_spacing_m,
+            studio.config.pile_length_m,
+            pg.cap_width_m,
+            pg.cap_length_m,
+            pg.cap_thickness_m,
+            pg.converse_labarre_efficiency,
+        ),
+    );
+    let box_cx = p1x + p1w * 0.5;
+    let box_cy = p1y + 230.0;
+    let scale = (260.0 / pg.cap_width_m.max(pg.cap_length_m).max(2.0)).clamp(16.0, 72.0);
+    let cw_px = pg.cap_width_m * scale;
+    let cl_px = pg.cap_length_m * scale;
+    let col_w_px = (ps.column_dim_c1_mm * 0.001 * scale).clamp(18.0, cw_px * 0.45);
+    let col_h_px = (ps.column_dim_c2_mm * 0.001 * scale).clamp(18.0, cl_px * 0.45);
+    let bo_w_px = ((ps.column_dim_c1_mm + ps.slab_effective_depth_d_mm) * 0.001 * scale).min(cw_px * 0.88);
+    let bo_h_px = ((ps.column_dim_c2_mm + ps.slab_effective_depth_d_mm) * 0.001 * scale).min(cl_px * 0.88);
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{cw_px:.1}" height="{cl_px:.1}" rx="6" fill="#ecfdf5" stroke="#065f46" stroke-width="2.2"/>
+<rect x="{:.1}" y="{:.1}" width="{bo_w_px:.1}" height="{bo_h_px:.1}" fill="none" stroke="#dc2626" stroke-width="1.8" stroke-dasharray="6,4"/>
+<rect x="{:.1}" y="{:.1}" width="{col_w_px:.1}" height="{col_h_px:.1}" fill="#94a3b8" stroke="#0f172a" stroke-width="1.6"/>"##,
+        box_cx - cw_px * 0.5,
+        box_cy - cl_px * 0.5,
+        box_cx - bo_w_px * 0.5,
+        box_cy - bo_h_px * 0.5,
+        box_cx - col_w_px * 0.5,
+        box_cy - col_h_px * 0.5,
+    );
+    let pile_r_px = (pg.pile_diameter_m * 0.5 * scale).clamp(9.0, 24.0);
+    for p in &pg.pile_details {
+        let px = box_cx + p.x_coord_m * scale;
+        let py = box_cy - p.y_coord_m * scale;
+        let pcol = if !p.is_safe {
+            "#dc2626"
+        } else if p.factored_axial_demand_pu_kn < 0.0 {
+            "#0284c7"
+        } else {
+            "#059669"
+        };
+        let _ = writeln!(
+            svg,
+            r##"<circle cx="{px:.1}" cy="{py:.1}" r="{pile_r_px:.1}" fill="{pcol}" fill-opacity="0.22" stroke="{pcol}" stroke-width="2.0"/>
+<text x="{px:.1}" y="{:.1}" font-size="8.0" font-weight="bold" font-family="monospace" text-anchor="middle" fill="#0f172a">P{:02}</text>"##,
+            py + 3.0,
+            p.pile_id,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="82" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#0f172a">Biaxial Demand Envelope: Pu={:.0} kN | Mux={:.0} kNm | Muy={:.0} kNm</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#334155">Max Pile={:.1} kN | Min Pile={:.1} kN | Governing Pile DCR={:.3} [{}]</text>"##,
+        p1x + 16.0,
+        p1y + 414.0,
+        p1w - 32.0,
+        p1x + 26.0,
+        p1y + 442.0,
+        pg.applied_pu_kn,
+        pg.applied_mux_knm,
+        pg.applied_muy_knm,
+        p1x + 26.0,
+        p1y + 468.0,
+        pg.max_pile_axial_load_kn,
+        pg.min_pile_axial_load_kn,
+        pg.governing_dcr,
+        if pg.is_group_safe { "SAFE" } else { "OVERSTRESS" },
+    );
+
+    // Panel 2: Biaxial Pile Axial Demands & Governance Seal (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. BIAXIAL PILE AXIAL DEMANDS &amp; GOVERNANCE SEAL",
+        &format!(
+            "Soil: {} • Qall={:.0} kN/pile • Tuplift={:.0} kN",
+            escape_xml(studio.soil_layer.soil_type.label()),
+            pg.pile_details.first().map(|p| p.allowable_compression_all_kn).unwrap_or(0.0),
+            pg.pile_details.first().map(|p| p.allowable_tension_uplift_kn).unwrap_or(0.0),
+        ),
+    );
+    let max_bar_w = 390.0;
+    for (idx, p) in pg.pile_details.iter().take(6).enumerate() {
+        let ry = p2y + 68.0 + (idx as f64) * 52.0;
+        let frac = p.axial_dcr.clamp(0.03, 1.0);
+        let bw = frac * max_bar_w;
+        let bar_col = if p.is_safe { "#059669" } else { "#dc2626" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="44" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-weight="bold" font-family="monospace" fill="#0f172a">P{:02} ({:+.2},{:+.2})m</text>
+<rect x="{:.1}" y="{:.1}" width="{max_bar_w:.1}" height="16" rx="3" fill="#e2e8f0"/>
+<rect x="{:.1}" y="{:.1}" width="{bw:.1}" height="16" rx="3" fill="{bar_col}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.7" font-weight="bold" font-family="monospace" text-anchor="end" fill="#0f172a">{:.0} kN (DCR {:.2})</text>"##,
+            p2x + 16.0,
+            p2w - 32.0,
+            p2x + 24.0,
+            ry + 27.0,
+            p.pile_id,
+            p.x_coord_m,
+            p.y_coord_m,
+            p2x + 190.0,
+            ry + 14.0,
+            p2x + 190.0,
+            ry + 14.0,
+            p2x + p2w - 24.0,
+            ry + 27.0,
+            p.factored_axial_demand_pu_kn,
+            p.axial_dcr,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="96" rx="5" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.8" font-weight="bold" fill="#065f46">VERDICT: {}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.7" font-family="monospace" fill="#334155">SHA-256 SEAL: {seal_token}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-family="monospace" fill="#475569">{}</text>"##,
+        p2x + 16.0,
+        p2y + 398.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 422.0,
+        escape_xml(&truncate_clean(&studio.summary_verdict, 84)),
+        p2x + 26.0,
+        p2y + 448.0,
+        p2x + 26.0,
+        p2y + 474.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live Deep Foundation & Winkler Studio".to_string()),
+        ),
+    );
+
+    // Panel 3: 6-DOF Winkler Subgrade Springs & Wolf / Veletsos-Meek SSI (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. 6-DOF WINKLER SUBGRADE SPRINGS &amp; WOLF / VELETSOS-MEEK SSI",
+        &format!(
+            "ks={:.0} kN/m3 • T_fixed={:.3}s -> T_tilde={:.3}s ({:.3}x) • Damping beta_ssi={:.1}%",
+            ws.subgrade_modulus_ks,
+            ssi.fixed_base_period_t_s,
+            ssi.flexible_ssi_period_t_tilde_s,
+            ssi.period_lengthening_ratio,
+            ssi.foundation_damping_factor * 100.0,
+        ),
+    );
+    let spring_rows = [
+        ("Vertical Subgrade Spring Kz", format!("{:.1} MN/m", ws.kz_trans_kn_m / 1000.0), "BOWLES / VESIC"),
+        ("Lateral Translational Springs Kx / Ky", format!("{:.1} / {:.1} MN/m", ws.kx_trans_kn_m / 1000.0, ws.ky_trans_kn_m / 1000.0), "82% KZ"),
+        ("Rocking Rotational Stiffness K_rx / K_ry", format!("{:.1} / {:.1} MNm/rad", ws.k_theta_x_knm_rad / 1000.0, ws.k_theta_y_knm_rad / 1000.0), "OVERTURNING"),
+        ("Torsional Rotational Stiffness K_rz", format!("{:.1} MNm/rad", ws.k_theta_z_knm_rad / 1000.0), "TWIST"),
+        ("ASCE 7-22 Ch. 19 Base Shear & Drift Shift", format!("V_ssi={:.1}% V_fixed | Drift Ratio={:.2}x", ssi.base_shear_reduction_ratio * 100.0, ssi.lateral_drift_amplification_ratio), "SSI MODAL"),
+    ];
+    for (idx, (nm, val, tag)) in spring_rows.iter().enumerate() {
+        let ry = p3y + 62.0 + (idx as f64) * 82.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="68" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.6" font-weight="bold" fill="#0f172a">{nm}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-family="monospace" fill="#047857">{val}</text>
+<rect x="{:.1}" y="{:.1}" width="110" height="22" rx="4" fill="#0284c7"/>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-weight="bold" text-anchor="middle" fill="#ffffff">{tag}</text>"##,
+            p3x + 14.0,
+            p3w - 28.0,
+            p3x + 24.0,
+            ry + 25.0,
+            p3x + 24.0,
+            ry + 49.0,
+            p3x + p3w - 134.0,
+            ry + 22.0,
+            p3x + p3w - 79.0,
+            ry + 36.5,
+        );
+    }
+
+    // Panel 4: ACI 318-19 / SNI 2847 Two-Way Punching Shear & Quantity Schedule (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. TWO-WAY PUNCHING SHEAR AUDIT (ACI 318 / SNI 2847) &amp; QUANTITIES",
+        &format!(
+            "{} Pile Caps • {} Building Piles • Total Concrete = {:.1} m3",
+            studio.caps_3d.len(),
+            studio.total_piles_building,
+            studio.total_concrete_m3,
+        ),
+    );
+    let audit_rows = [
+        ("Critical Shear Perimeter bo (d/2)", format!("{:.0} mm | Acrit = {:.2} m2", ps.critical_perimeter_bo_mm, ps.critical_area_acrit_m2), true),
+        ("Punching Shear Stress vu vs phi*Vc", format!("{:.3} MPa vs {:.3} MPa (DCR = {:.3})", ps.punching_stress_vu_mpa, ps.concrete_capacity_phi_vc_mpa, ps.punching_dcr), ps.is_punching_safe),
+        ("Pile Group Governing Axial DCR", format!("DCR = {:.3} (Eg = {:.3})", pg.governing_dcr, pg.converse_labarre_efficiency), pg.is_group_safe),
+        ("Building Foundation Quantity Take-Off", format!("{} Caps + {} Piles = {:.1} m3 Concrete (fc'={:.0} MPa)", studio.caps_3d.len(), studio.total_piles_building, studio.total_concrete_m3, ps.concrete_fc_mpa), studio.is_overall_compliant),
+    ];
+    for (idx, (nm, det, ok)) in audit_rows.iter().enumerate() {
+        let ry = p4y + 66.0 + (idx as f64) * 98.0;
+        let hex = if *ok { "#059669" } else { "#dc2626" };
+        let st = if *ok { "PASS" } else { "REVIEW" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="80" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.6" font-weight="bold" fill="#0f172a">{nm}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#475569">{det}</text>
+<rect x="{:.1}" y="{:.1}" width="66" height="24" rx="4" fill="{hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 24.0,
+            ry + 28.0,
+            p4x + 24.0,
+            ry + 55.0,
+            p4x + p4w - 94.0,
+            ry + 28.0,
+            p4x + p4w - 61.0,
+            ry + 43.5,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_FOUNDATION_S113");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = studio.caps_3d.len() + studio.piles_3d.len() + studio.springs_3d.len();
+    let summary = format!(
+        "Exported Deep Foundation, Winkler SSI & Punching Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4795,5 +5086,24 @@ mod tests {
         assert!(!s112.svg_content.contains("<image"));
         assert!(!s112.svg_content.contains("ARI"));
         assert_eq!(s112.sha256_seal.len(), 64);
+
+        let fnd_rep = crate::core::foundation_studio::evaluate_foundation_studio(
+            &field_proj,
+            None,
+            &crate::core::foundation_studio::FoundationStudioConfig::default(),
+        );
+        let s113 = build_deep_foundation_annex_svg(
+            &field_proj.project_name,
+            &fnd_rep,
+            "S-113",
+            Some("fnd848seal"),
+        );
+        assert!(s113.svg_content.starts_with("<svg"));
+        assert!(s113.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s113.svg_content.contains("SHEET S-113"));
+        assert!(s113.svg_content.contains("<circle"));
+        assert!(!s113.svg_content.contains("<image"));
+        assert!(!s113.svg_content.contains("ARI"));
+        assert_eq!(s113.sha256_seal.len(), 64);
     }
 }

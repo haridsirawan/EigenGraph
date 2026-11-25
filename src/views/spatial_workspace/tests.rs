@@ -5773,3 +5773,120 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn phase84_8_foundation_studio_drawer_responsive_and_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = crate::views::build::BuildView::default();
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_fnd = spatial.execute_spatial_input(
+            "/pile-group 3x3 24m soft",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_fnd.run_foundation_studio);
+        assert_eq!(canvas.foundation_studio_config.piles_x, 3);
+        assert_eq!(canvas.foundation_studio_config.piles_y, 3);
+        assert!((canvas.foundation_studio_config.pile_length_m - 24.0).abs() < 1e-6);
+        assert_eq!(
+            canvas.foundation_studio_config.soil_type,
+            crate::core::geotech::SoilType::SoftClay
+        );
+        assert!(spatial.foundation_drawer_open);
+
+        assert!(spatial
+            .execute_spatial_input(
+                "/foundation-3d",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .toggle_foundation_3d);
+        assert!(spatial
+            .execute_spatial_input(
+                "/foundation-ifcx",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_foundation_ifcx);
+        assert!(spatial
+            .execute_spatial_input(
+                "/foundation-svg",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_foundation_svg);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Deep piles [[RUN_FOUNDATION:SOFT_CLAY:3X3:24]] [[TOGGLE_FOUNDATION_3D]] [[EXPORT_FOUNDATION_ANNEX]]",
+        );
+        assert_eq!(clean, "Deep piles");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunFoundation {
+                    soil_type: Some(crate::core::geotech::SoilType::SoftClay),
+                    piles_x: Some(3),
+                    piles_y: Some(3),
+                    pile_length_m: Some(24.0),
+                },
+                GeminiDirective::ToggleFoundation3d,
+                GeminiDirective::ExportFoundationAnnex,
+            ]
+        );
+
+        let _ = canvas.run_foundation_studio(&build.bim_bus.project);
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_foundation_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 84.8 Deep Foundation Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

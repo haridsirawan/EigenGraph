@@ -2933,6 +2933,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.foundation_drawer_open {
+                        self.render_foundation_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -5564,6 +5576,20 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_reliability_drawer(0);
                                                         actions.run_reliability_studio = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Hammer),
+                                                        "Foundation",
+                                                        self.foundation_drawer_open,
+                                                        theme.accent_green,
+                                                        "Open Deep Foundation Pile Group, Winkler Springs & Punching Shear Studio (+ Sheet S-113)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_foundation_drawer(0);
+                                                        actions.run_foundation_studio = true;
                                                     }
                                                 },
                                             );

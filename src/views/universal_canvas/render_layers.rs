@@ -3370,6 +3370,86 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Update `v0.8.4.8` (`8/10` -> `v0.8.5`): Pure-vector CPU fallback rendering Deep Foundation pile caps, pile shafts & Winkler spring nodes.
+    pub(super) fn paint_cpu_foundation_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.foundation_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_foundation_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |p: [f64; 3]| -> Option<Pos2> {
+            let ex = p[0] * cr - p[1] * sr;
+            let ny = p[0] * sr + p[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, p[2])
+                .and_then(|(sp, _, vis)| if vis { Some(sp) } else { None })
+        };
+
+        for pile in &report.piles_3d {
+            if let (Some(a), Some(b)) = (proj_enu(pile.top_enu_m), proj_enu(pile.tip_enu_m)) {
+                let col = if !pile.is_safe {
+                    Color32::from_rgb(239, 68, 68)
+                } else if pile.is_uplift {
+                    Color32::from_rgb(56, 189, 248)
+                } else {
+                    Color32::from_rgb(16, 185, 129)
+                };
+                clip.line_segment([a, b], Stroke::new(3.2, col));
+            }
+        }
+        for cap in &report.caps_3d {
+            let hw = cap.width_m * 0.5;
+            let hl = cap.length_m * 0.5;
+            let z = cap.center_enu_m[2];
+            let corners: Vec<Pos2> = [
+                [cap.center_enu_m[0] - hw, cap.center_enu_m[1] - hl, z],
+                [cap.center_enu_m[0] + hw, cap.center_enu_m[1] - hl, z],
+                [cap.center_enu_m[0] + hw, cap.center_enu_m[1] + hl, z],
+                [cap.center_enu_m[0] - hw, cap.center_enu_m[1] + hl, z],
+            ]
+            .into_iter()
+            .filter_map(proj_enu)
+            .collect();
+            if corners.len() == 4 {
+                let col = if cap.is_compliant {
+                    Color32::from_rgb(52, 211, 153)
+                } else {
+                    Color32::from_rgb(248, 113, 113)
+                };
+                clip.add(egui::Shape::closed_line(corners, Stroke::new(2.0, col)));
+            }
+        }
+        for sp in &report.springs_3d {
+            if let Some(pt) = proj_enu(sp.pos_enu_m) {
+                clip.circle_filled(pt, 2.8, Color32::from_rgb(250, 204, 21));
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

@@ -290,6 +290,8 @@ pub struct UnifiedWorkspaceArchive {
     pub composite_studio_config: crate::core::composite_studio::CompositeStudioConfig,
     #[serde(default)]
     pub reliability_studio_config: crate::core::reliability_studio::ReliabilityStudioConfig,
+    #[serde(default)]
+    pub foundation_studio_config: crate::core::foundation_studio::FoundationStudioConfig,
     pub sha256_seal: String,
 }
 

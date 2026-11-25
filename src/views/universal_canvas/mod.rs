@@ -212,6 +212,10 @@ pub struct UniversalCanvasState {
     pub reliability_overlay_visible: bool,
     pub reliability_studio_config: crate::core::reliability_studio::ReliabilityStudioConfig,
     pub last_reliability_report: Option<crate::core::reliability_studio::ReliabilityStudioReport>,
+    // Update v0.8.4.8 (8/10 -> v0.8.5): Deep Foundation Pile Group, Winkler Springs & Punching Shear
+    pub foundation_overlay_visible: bool,
+    pub foundation_studio_config: crate::core::foundation_studio::FoundationStudioConfig,
+    pub last_foundation_report: Option<crate::core::foundation_studio::FoundationStudioReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -378,6 +382,9 @@ impl Default for UniversalCanvasState {
             reliability_overlay_visible: false,
             reliability_studio_config: crate::core::reliability_studio::ReliabilityStudioConfig::default(),
             last_reliability_report: None,
+            foundation_overlay_visible: false,
+            foundation_studio_config: crate::core::foundation_studio::FoundationStudioConfig::default(),
+            last_foundation_report: None,
         }
     }
 }
@@ -1100,6 +1107,21 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Deep Foundation Pile Group, 6-DOF Winkler Springs & Punching Shear coupled to BIM & site.
+    pub fn run_foundation_studio(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::foundation_studio::FoundationStudioReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::foundation_studio::evaluate_foundation_studio(
+            bim_project,
+            Some(&site),
+            &self.foundation_studio_config,
+        );
+        self.last_foundation_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1435,6 +1457,7 @@ impl UniversalCanvasState {
             prestress_studio_config: self.prestress_studio_config.clone(),
             composite_studio_config: self.composite_studio_config.clone(),
             reliability_studio_config: self.reliability_studio_config.clone(),
+            foundation_studio_config: self.foundation_studio_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1571,6 +1594,8 @@ impl UniversalCanvasState {
         self.last_composite_report = None;
         self.reliability_studio_config = archive.reliability_studio_config;
         self.last_reliability_report = None;
+        self.foundation_studio_config = archive.foundation_studio_config;
+        self.last_foundation_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2238,6 +2263,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let foundation_gpu_input = if self.foundation_overlay_visible {
+                self.last_foundation_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::FoundationGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -2277,6 +2313,7 @@ impl UniversalCanvasState {
                 prestress_gpu_input,
                 composite_gpu_input,
                 reliability_gpu_input,
+                foundation_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2361,6 +2398,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.reliability_overlay_visible {
                 self.paint_cpu_reliability_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.foundation_overlay_visible {
+                self.paint_cpu_foundation_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

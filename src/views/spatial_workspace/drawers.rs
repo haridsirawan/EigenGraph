@@ -4826,4 +4826,302 @@ impl SpatialWorkspaceState {
             }
         });
     }
+
+    /// Update `v0.8.4.8` (`8/10` -> `v0.8.5`): Width-first Dynamic Island drawer for Deep Foundation Pile Group, Winkler Springs & Punching Shear Studio.
+    pub(super) fn render_foundation_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::geotech::SoilType;
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Hammer,
+                13.0,
+                theme.accent_green,
+                "Deep Foundation Pile Group, Winkler SSI & Punching Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "Pile Group & Cap"),
+                (1usize, "Winkler SSI & Punching"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.foundation_drawer_tab == idx,
+                    theme.accent_green,
+                    "",
+                )
+                .clicked()
+                {
+                    self.foundation_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Deep Foundation Studio drawer",
+            )
+            .clicked()
+            {
+                self.foundation_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for (st, lbl) in [
+                    (SoilType::SoftClay, "Soft Clay"),
+                    (SoilType::MediumSand, "Med Sand"),
+                    (SoilType::DenseSand, "Dense Sand"),
+                    (SoilType::Bedrock, "Bedrock"),
+                ] {
+                    let active = universal_canvas.foundation_studio_config.soil_type == st;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        lbl,
+                        active,
+                        theme.accent_orange,
+                        "Select bearing soil stratum",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.foundation_studio_config.soil_type = st;
+                        actions.run_foundation_studio = true;
+                    }
+                }
+                for (nx, ny, lbl) in [(2usize, 2usize, "2x2"), (3, 3, "3x3"), (4, 4, "4x4")] {
+                    let cfg = &universal_canvas.foundation_studio_config;
+                    let active = cfg.piles_x == nx && cfg.piles_y == ny;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        lbl,
+                        active,
+                        theme.accent_blue,
+                        "Select pile group grid",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.foundation_studio_config.piles_x = nx;
+                        universal_canvas.foundation_studio_config.piles_y = ny;
+                        actions.run_foundation_studio = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Bolt),
+                    "Run Piles",
+                    true,
+                    theme.accent_green,
+                    "Evaluate Converse-Labarre pile group, Winkler springs & punching shear",
+                )
+                .clicked()
+                {
+                    actions.run_foundation_studio = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Layers),
+                    if universal_canvas.foundation_overlay_visible {
+                        "3D Piles: ON"
+                    } else {
+                        "3D Piles: OFF"
+                    },
+                    universal_canvas.foundation_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU deep pile caps, shafts & Winkler springs",
+                )
+                .clicked()
+                {
+                    actions.toggle_foundation_3d = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "IFCX",
+                    false,
+                    theme.accent_orange,
+                    "Export non-destructive eigengraph::analysis::deep_foundation IFCX",
+                )
+                .clicked()
+                {
+                    actions.export_foundation_ifcx = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Printer),
+                    "Sheet S-113",
+                    false,
+                    theme.accent_blue,
+                    "Export A3 Pure-Vector Sheet S-113 Deep Foundation Annex SVG",
+                )
+                .clicked()
+                {
+                    actions.export_foundation_svg = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let Some(ref studio) = universal_canvas.last_foundation_report else {
+            ui.label(
+                RichText::new("Click 'Run Piles' or toggle '3D Piles' to compute Converse-Labarre group efficiency, 6-DOF Winkler springs & punching shear.")
+                    .size(9.4)
+                    .color(theme.text_muted),
+            );
+            return;
+        };
+
+        let body_w = (deck_w - 6.0).max(160.0);
+        let col_w = if two_col {
+            ((body_w - 8.0) * 0.5).max(160.0)
+        } else {
+            body_w
+        };
+        let tab = self.foundation_drawer_tab;
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(body_w);
+            for is_left in [true, false] {
+                theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                    ui.set_width((col_w - 16.0).max(140.0));
+                    if is_left {
+                        ui.label(RichText::new("Pile Geometry, Cap & Column Loads").size(9.8).strong().color(theme.text_primary));
+                        let cfg = &mut universal_canvas.foundation_studio_config;
+                        let mut changed = false;
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Dia (m):").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.pile_diameter_m).range(0.35..=1.80).speed(0.05)).changed();
+                            ui.label(RichText::new("Spacing (m):").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.pile_spacing_m).range(1.20..=5.00).speed(0.1)).changed();
+                            ui.label(RichText::new("Length (m):").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.pile_length_m).range(6.0..=48.0).speed(0.5)).changed();
+                            ui.label(RichText::new("Cap h (m):").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.cap_thickness_m).range(0.60..=3.20).speed(0.05)).changed();
+                            ui.label(RichText::new("Pu (kN):").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.column_pu_kn).range(400.0..=24000.0).speed(50.0)).changed();
+                            ui.label(RichText::new("Mux (kNm):").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.column_mux_knm).range(0.0..=6000.0).speed(25.0)).changed();
+                        });
+                        if changed {
+                            actions.run_foundation_studio = true;
+                        }
+                        if tab == 0 {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Converse-Labarre Eg={:.3} | {}x{} Cap={:.2}x{:.2}x{:.2}m",
+                                    studio.pile_group.converse_labarre_efficiency,
+                                    studio.pile_group.piles_count_x,
+                                    studio.pile_group.piles_count_y,
+                                    studio.pile_group.cap_width_m,
+                                    studio.pile_group.cap_length_m,
+                                    studio.pile_group.cap_thickness_m,
+                                ))
+                                .size(8.6)
+                                .monospace()
+                                .color(if studio.pile_group.is_group_safe { theme.accent_green } else { theme.accent_red }),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Winkler Kz={:.1} MN/m | Kx={:.1} MN/m | Kry={:.1} MNm/rad",
+                                    studio.winkler_springs.kz_trans_kn_m / 1000.0,
+                                    studio.winkler_springs.kx_trans_kn_m / 1000.0,
+                                    studio.winkler_springs.k_theta_y_knm_rad / 1000.0,
+                                ))
+                                .size(8.5)
+                                .monospace()
+                                .color(theme.accent_blue),
+                            );
+                        }
+                    } else if tab == 0 {
+                        let pg = &studio.pile_group;
+                        ui.label(RichText::new("Pile Group Axial Distribution & Take-Off").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "Max Pile={:.0} kN | Min Pile={:.0} kN | Gov DCR={:.3}",
+                                pg.max_pile_axial_load_kn, pg.min_pile_axial_load_kn, pg.governing_dcr
+                            ))
+                            .size(8.7)
+                            .monospace()
+                            .color(if pg.is_group_safe { theme.accent_green } else { theme.accent_red }),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Building: {} Caps, {} Piles | Concrete={:.1} m3 | {}",
+                                studio.caps_3d.len(),
+                                studio.total_piles_building,
+                                studio.total_concrete_m3,
+                                if studio.is_overall_compliant { "PASS" } else { "REVIEW" }
+                            ))
+                            .size(8.5)
+                            .monospace()
+                            .color(theme.text_secondary),
+                        );
+                    } else {
+                        let ps = &studio.punching_shear;
+                        let ssi = &studio.ssi_modal_shift;
+                        ui.label(RichText::new("ACI 318 Punching Shear & Wolf/Veletsos-Meek SSI").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "bo={:.0} mm | vu={:.3} / phi*Vc={:.3} MPa (DCR={:.3})",
+                                ps.critical_perimeter_bo_mm,
+                                ps.punching_stress_vu_mpa,
+                                ps.concrete_capacity_phi_vc_mpa,
+                                ps.punching_dcr,
+                            ))
+                            .size(8.6)
+                            .monospace()
+                            .color(if ps.is_punching_safe { theme.accent_green } else { theme.accent_red }),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "SSI T={:.2}s -> T~={:.2}s ({:.2}x) | V_base={:.0}% | Drift={:.2}x",
+                                ssi.fixed_base_period_t_s,
+                                ssi.flexible_ssi_period_t_tilde_s,
+                                ssi.period_lengthening_ratio,
+                                ssi.base_shear_reduction_ratio * 100.0,
+                                ssi.lateral_drift_amplification_ratio,
+                            ))
+                            .size(8.5)
+                            .monospace()
+                            .color(theme.text_secondary),
+                        );
+                    }
+                });
+            }
+        });
+    }
 }

@@ -161,6 +161,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.4.7 (7/10 -> v0.8.5): Structural Reliability FORM/SORM Drawer
     pub reliability_drawer_open: bool,
     pub reliability_drawer_tab: usize,
+    // Update v0.8.4.8 (8/10 -> v0.8.5): Deep Foundation Pile Group Drawer
+    pub foundation_drawer_open: bool,
+    pub foundation_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -281,6 +284,8 @@ impl Default for SpatialWorkspaceState {
             composite_drawer_tab: 0,
             reliability_drawer_open: false,
             reliability_drawer_tab: 0,
+            foundation_drawer_open: false,
+            foundation_drawer_tab: 0,
         }
     }
 }
@@ -318,6 +323,7 @@ impl SpatialWorkspaceState {
             || self.prestress_drawer_open
             || self.composite_drawer_open
             || self.reliability_drawer_open
+            || self.foundation_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -349,6 +355,7 @@ impl SpatialWorkspaceState {
         self.prestress_drawer_open = false;
         self.composite_drawer_open = false;
         self.reliability_drawer_open = false;
+        self.foundation_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -463,6 +470,11 @@ impl SpatialWorkspaceState {
         } else {
             self.reliability_drawer_open = !self.reliability_drawer_open;
         }
+        if drawer != "foundation" {
+            self.foundation_drawer_open = false;
+        } else {
+            self.foundation_drawer_open = !self.foundation_drawer_open;
+        }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
@@ -567,6 +579,14 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.reliability_drawer_tab = tab.min(1);
         self.reliability_drawer_open = true;
+    }
+
+    /// Idempotently opens the Update `v0.8.4.8` Deep Foundation Pile Group, Winkler Springs & Punching Shear drawer
+    /// (`0` = Pile Group & Cap, `1` = Winkler SSI & Punching).
+    pub fn open_foundation_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.foundation_drawer_tab = tab.min(1);
+        self.foundation_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

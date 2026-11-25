@@ -736,6 +736,36 @@ impl SpatialWorkspaceState {
                     self.open_reliability_drawer(0);
                     out.export_reliability_svg = true;
                 }
+                PlannedProposalAction::RunFoundation {
+                    soil_type,
+                    piles_x,
+                    piles_y,
+                    pile_length_m,
+                } => {
+                    if let Some(st) = soil_type {
+                        universal_canvas.foundation_studio_config.soil_type = *st;
+                    }
+                    if let Some(nx) = piles_x {
+                        universal_canvas.foundation_studio_config.piles_x = *nx;
+                    }
+                    if let Some(ny) = piles_y {
+                        universal_canvas.foundation_studio_config.piles_y = *ny;
+                    }
+                    if let Some(lm) = pile_length_m {
+                        universal_canvas.foundation_studio_config.pile_length_m = lm.clamp(6.0, 48.0);
+                    }
+                    universal_canvas.foundation_overlay_visible = true;
+                    self.open_foundation_drawer(0);
+                    out.run_foundation_studio = true;
+                }
+                PlannedProposalAction::ToggleFoundation3d => {
+                    self.open_foundation_drawer(0);
+                    out.toggle_foundation_3d = true;
+                }
+                PlannedProposalAction::ExportFoundationAnnex => {
+                    self.open_foundation_drawer(0);
+                    out.export_foundation_svg = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -1113,6 +1143,23 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportReliabilityAnnex => {
                                 PlannedProposalAction::ExportReliabilityAnnex
                             }
+                            GeminiDirective::RunFoundation {
+                                soil_type,
+                                piles_x,
+                                piles_y,
+                                pile_length_m,
+                            } => PlannedProposalAction::RunFoundation {
+                                soil_type: *soil_type,
+                                piles_x: *piles_x,
+                                piles_y: *piles_y,
+                                pile_length_m: *pile_length_m,
+                            },
+                            GeminiDirective::ToggleFoundation3d => {
+                                PlannedProposalAction::ToggleFoundation3d
+                            }
+                            GeminiDirective::ExportFoundationAnnex => {
+                                PlannedProposalAction::ExportFoundationAnnex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1285,6 +1332,18 @@ impl SpatialWorkspaceState {
                             }
                             GeminiDirective::ExportReliabilityAnnex => {
                                 "ExportReliabilityAnnex(S-112)".to_string()
+                            }
+                            GeminiDirective::RunFoundation {
+                                soil_type,
+                                piles_x,
+                                piles_y,
+                                pile_length_m,
+                            } => format!("RunFoundation({soil_type:?}/{piles_x:?}x{piles_y:?}/{pile_length_m:?}m)"),
+                            GeminiDirective::ToggleFoundation3d => {
+                                "ToggleFoundation3d".to_string()
+                            }
+                            GeminiDirective::ExportFoundationAnnex => {
+                                "ExportFoundationAnnex(S-113)".to_string()
                             }
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -3240,6 +3299,52 @@ impl SpatialWorkspaceState {
                 }
                 "/reliability-svg" => {
                     actions.export_reliability_svg = true;
+                }
+                "/foundation" | "/pile-group" | "/punching" | "/winkler" => {
+                    let lo = arg.to_ascii_lowercase();
+                    if lo.contains("soft") {
+                        universal_canvas.foundation_studio_config.soil_type =
+                            crate::core::geotech::SoilType::SoftClay;
+                    } else if lo.contains("stiff") {
+                        universal_canvas.foundation_studio_config.soil_type =
+                            crate::core::geotech::SoilType::StiffClay;
+                    } else if lo.contains("loose") {
+                        universal_canvas.foundation_studio_config.soil_type =
+                            crate::core::geotech::SoilType::LooseSand;
+                    } else if lo.contains("dense") {
+                        universal_canvas.foundation_studio_config.soil_type =
+                            crate::core::geotech::SoilType::DenseSand;
+                    } else if lo.contains("rock") || lo.contains("bed") {
+                        universal_canvas.foundation_studio_config.soil_type =
+                            crate::core::geotech::SoilType::Bedrock;
+                    }
+                    for tok in lo.split_whitespace() {
+                        if let Some((lx, ly)) = tok.split_once('x') {
+                            if let (Ok(nx), Ok(ny)) = (lx.parse::<usize>(), ly.parse::<usize>()) {
+                                universal_canvas.foundation_studio_config.piles_x = nx.clamp(1, 5);
+                                universal_canvas.foundation_studio_config.piles_y = ny.clamp(1, 5);
+                            }
+                        } else if let Ok(len_m) = tok.trim_end_matches('m').parse::<f64>() {
+                            universal_canvas.foundation_studio_config.pile_length_m =
+                                len_m.clamp(6.0, 48.0);
+                        }
+                    }
+                    self.open_foundation_drawer(if cmd == "/punching" || cmd == "/winkler" {
+                        1
+                    } else {
+                        0
+                    });
+                    actions.run_foundation_studio = true;
+                }
+                "/foundation-3d" => {
+                    self.open_foundation_drawer(0);
+                    actions.toggle_foundation_3d = true;
+                }
+                "/foundation-ifcx" => {
+                    actions.export_foundation_ifcx = true;
+                }
+                "/foundation-svg" => {
+                    actions.export_foundation_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {
