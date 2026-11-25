@@ -1,5 +1,5 @@
-// EigenGraph Progressive Web App Service Worker (v0.8.5-3)
-const CACHE_NAME = 'eigengraph-pwa-v0.8.5-3';
+// EigenGraph Progressive Web App Service Worker (v0.8.5-4)
+const CACHE_NAME = 'eigengraph-pwa-v0.8.5-4';
 const PRECACHE_URLS = [
   '/',
   '/index.html',

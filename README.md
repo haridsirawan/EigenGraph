@@ -2,6 +2,14 @@
 
 <img src="assets/logo.png" width="360" alt="EigenGraph Logo" />
 
+<p>
+  <img src="assets/eigengate-icon.png" width="96" alt="EigenGate Icon" />
+  &nbsp;&nbsp;
+  <img src="assets/icon.png" width="96" alt="EigenGraph Icon" />
+  &nbsp;&nbsp;
+  <img src="assets/eigenflow-icon.png" width="96" alt="EigenFlow Icon" />
+</p>
+
 # EigenGraph Powered by EigenGate & EigenFlow
 
 ### Rust + WebGPU + IFCX

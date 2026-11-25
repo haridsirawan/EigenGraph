@@ -7,7 +7,12 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.6 (3/10)]
+## [Unreleased — Next: v0.8.6 (4/10)]
+
+### Update 4/10 (`v0.8.5.4` -> `v0.8.6`) — High-Res EigenGraph, EigenGate & EigenFlow Brand Icon Triad Refresh
+- Replaced `assets/icon.png` (1024×1024), `assets/favicon-circle.png` (384×384), `assets/favicon-48.png` (48×48), root `favicon.ico` (48/32/16), and `assets/logo.png` (1024×571) with the high-resolution crimson-to-plum leaping horse `EigenGraph` brand artwork.
+- Added companion `assets/eigengate-icon.png` and `assets/eigenflow-icon.png` (1024×1024) brand icons to `assets/` and showcased the EigenGate / EigenGraph / EigenFlow triad in `README.md`.
+- Bumped favicon cache-busters to `?v=3` in `index.html` and PWA Service Worker cache key to `eigengraph-pwa-v0.8.5-4` in `sw.js`.
 
 ### Update 3/10 (`v0.8.5.3` -> `v0.8.6`) — Root `favicon.ico`, Canonical URL & Google Favicon Cache-Busting
 - Added multi-resolution root `favicon.ico` (48×48, 32×32, 16×16) generated from the circular crimson graph-horse emblem and copied via Trunk so `/favicon.ico` serves a real `image/x-icon` instead of the SPA HTML fallback.
