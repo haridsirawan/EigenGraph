@@ -178,6 +178,12 @@ pub struct UniversalCanvasState {
     pub last_eigenflow_report: Option<crate::core::eigenflow::EigenFlowStudioReport>,
     pub eigenflow_pushover_playing: bool,
     pub eigenflow_play_accum_sec: f32,
+    // Phase 84: Extreme Events Studio (Blast UFC 3-340-02 & Structural Fire ISO 834/EC)
+    pub extreme_events_overlay_visible: bool,
+    pub extreme_events_config: crate::core::extreme_events::ExtremeEventsConfig,
+    pub last_extreme_events_report: Option<crate::core::extreme_events::ExtremeEventsReport>,
+    pub fire_sim_playing: bool,
+    pub fire_play_accum_sec: f32,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -318,6 +324,11 @@ impl Default for UniversalCanvasState {
             last_eigenflow_report: None,
             eigenflow_pushover_playing: false,
             eigenflow_play_accum_sec: 0.0,
+            extreme_events_overlay_visible: false,
+            extreme_events_config: crate::core::extreme_events::ExtremeEventsConfig::default(),
+            last_extreme_events_report: None,
+            fire_sim_playing: false,
+            fire_play_accum_sec: 0.0,
         }
     }
 }
@@ -920,6 +931,21 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Phase 84 Extreme Events (Blast `UFC 3-340-02` & Fire `ISO 834/EC`) + EigenFlow coupling.
+    pub fn run_extreme_events_audit(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::extreme_events::ExtremeEventsReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::extreme_events::evaluate_extreme_events(
+            bim_project,
+            Some(&site),
+            &self.extreme_events_config,
+        );
+        self.last_extreme_events_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1247,6 +1273,7 @@ impl UniversalCanvasState {
             collab_config: self.collab_state.config.clone(),
             trade_study_config: self.trade_study_config.clone(),
             eigenflow_config: self.eigenflow_config.clone(),
+            extreme_events_config: self.extreme_events_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1367,6 +1394,8 @@ impl UniversalCanvasState {
         self.last_permit_report = None;
         self.eigenflow_config = archive.eigenflow_config;
         self.last_eigenflow_report = None;
+        self.extreme_events_config = archive.extreme_events_config;
+        self.last_extreme_events_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -1946,6 +1975,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let extreme_events_gpu_input = if self.extreme_events_overlay_visible {
+                self.last_extreme_events_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::ExtremeEventsGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -1977,6 +2017,7 @@ impl UniversalCanvasState {
                 risk_heatmap_gpu_input,
                 field_qaqc_gpu_input,
                 eigenflow_gpu_input,
+                extreme_events_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2037,6 +2078,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.eigenflow_overlay_visible {
                 self.paint_cpu_eigenflow_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.extreme_events_overlay_visible {
+                self.paint_cpu_extreme_events_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

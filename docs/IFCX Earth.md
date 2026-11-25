@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.3` Delivered**  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.4` Delivered**  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% External Raster**  
-> **Current Platform**: EigenGraph `v0.8.3` (EigenFlow Non-Linear Studio, 3D WebGPU Woodbury Load-Path `P1 -> P2`, Pushover ADRS Capacity Spectrum & Sheet `S-104` on Pure WebGPU/WGSL)  
+> **Current Platform**: EigenGraph `v0.8.4` (Extreme Events Studio — 3D WebGPU Blast `UFC 3-340-02` & Structural Fire `ISO 834/EC`, EigenFlow Coupling & Sheet `S-105` on Pure WebGPU/WGSL)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -240,3 +240,9 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
   - Evaluates node-adjacent 1-hop/2-hop backup paths `P1 -> P2`, stiffness-weighted leverage $h_e$, kinematic stability margin $m_s$, residual reserve ratio (`RRR`), ductility demand $\mu$, and ATC-40/ASCE 41-17 Pushover ADRS Capacity Spectrum intersection coupled to live BIM geometry, exporting non-destructive `eigengraph::eigenflow` IFCX layers (`IfcxStage::compose_with_eigenflow_overlay`) and archival Sheet `S-104` Pure-Vector Annex SVGs (`build_eigenflow_nonlinear_annex_svg`, 0 `<image>` tags).
 - **3D Pure WebGPU (`wgpu` + WGSL) Animated Flow Conduits & Width-First Studio (`src/views/webgpu_earth/`, `src/views/spatial_workspace/`)**:
   - Adds `build_rtc_eigenflow_mesh` (`material_kind = 12.0`, WGSL `kind >= 11.5` animated directional flow waves & hinge beacons, `eigenflow` GPU slot) + CPU fallback + 2-tab width-first **`EigenFlow Non-Linear Studio`** drawer (`/eigenflow-studio`, `/pushover`, `/adrs`, `/eigenflow-3d`, `/eigenflow-ifcx`, `/eigenflow-svg`).
+
+### Phase 84 (`v0.8.4`) — Extreme Events Studio: Blast (`UFC 3-340-02`) & Structural Fire (`ISO 834 / Eurocode`) + Sheet `S-105` *(Implemented)*
+- **Coupled Blast/Fire → EigenFlow Assessment & Archival Exports (`src/core/extreme_events.rs`, `src/core/ifcx.rs`, `src/core/vector_dossier.rs`)**:
+  - Evaluates 3D ENU standoff Kingery–Bulmash blast pressures ($P_{so}$, $P_r$, $i_r$, `UfcDamageLevel`) and ISO 834 / ASTM E119 / Eurocode HC compartment heating (`0–180 min`, $T_g(t)$, $T_m(t)$, $k_E(T)$, $k_y(T)$) coupled directly into Branch 2 **EigenFlow** Woodbury (`P1 -> P2`) stability checks, exporting non-destructive `eigengraph::hazard::extreme_events` IFCX overlays (`IfcxStage::compose_with_extreme_events_overlay`) and archival Sheet `S-105` Pure-Vector Annex SVGs (`build_extreme_events_annex_svg`, 0 `<image>` tags).
+- **3D Pure WebGPU (`wgpu` + WGSL) Shockwave Rings, Fire Compartments & Dynamic Island (`src/views/webgpu_earth/`, `src/views/spatial_workspace/`)**:
+  - Adds `build_rtc_extreme_events_mesh` (`material_kind = 13.0`, WGSL `kind >= 12.5` shockwave pulse & thermal glow, `extreme_events` GPU slot) + CPU fallback + 2-tab width-first **`Extreme Events (Blast & Fire)`** drawer (`/extreme`, `/blast`, `/fire`, `/fire-story`, `/extreme-3d`, `/extreme-ifcx`, `/extreme-svg`).

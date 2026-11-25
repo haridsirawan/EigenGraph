@@ -922,6 +922,22 @@ impl App for EigenGraphApp {
             }
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }
+        if self.universal_canvas.fire_sim_playing {
+            let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.25);
+            self.universal_canvas.fire_play_accum_sec += dt;
+            if self.universal_canvas.fire_play_accum_sec >= 0.35 {
+                self.universal_canvas.fire_play_accum_sec = 0.0;
+                let mut next_m = self.universal_canvas.extreme_events_config.exposure_minutes + 15.0;
+                if next_m > 180.0 {
+                    next_m = 0.0;
+                }
+                self.universal_canvas.extreme_events_config.exposure_minutes = next_m;
+                let _ = self
+                    .universal_canvas
+                    .run_extreme_events_audit(&self.build_view.bim_bus.project);
+            }
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        }
         if self.planning_view.simulation_day != self.last_planning_sim_day {
             self.last_planning_sim_day = self.planning_view.simulation_day;
             if self.planning_view.simulation_day > 0 {
@@ -3385,6 +3401,99 @@ impl EigenGraphApp {
             let raw_name =
                 Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
             let fname = format!("{raw_name}_sheet_S104_eigenflow.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &annex.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(annex.sha256_seal);
+                    self.spatial_workspace.push_trace(annex.summary, true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.run_extreme_events {
+            let rep = self
+                .universal_canvas
+                .run_extreme_events_audit(&self.build_view.bim_bus.project);
+            self.spatial_workspace.push_trace(rep.summary_verdict, true);
+        }
+        if hud_actions.toggle_extreme_events_3d {
+            self.universal_canvas.extreme_events_overlay_visible =
+                !self.universal_canvas.extreme_events_overlay_visible;
+            if self.universal_canvas.extreme_events_overlay_visible {
+                let rep = self
+                    .universal_canvas
+                    .run_extreme_events_audit(&self.build_view.bim_bus.project);
+                self.spatial_workspace.push_trace(
+                    format!("3D Extreme Events Overlay ON — {}", rep.summary_verdict),
+                    true,
+                );
+            } else {
+                self.spatial_workspace
+                    .push_trace("3D Extreme Events Overlay OFF", true);
+            }
+        }
+        if let Some((eid, lam)) = hud_actions.extreme_send_to_eigenflow {
+            self.universal_canvas.eigenflow_config.disrupted_element_id = Some(eid);
+            self.universal_canvas
+                .eigenflow_config
+                .stiffness_retention_lambda = lam.clamp(0.0, 0.90);
+            self.universal_canvas.eigenflow_overlay_visible = true;
+            let rep = self
+                .universal_canvas
+                .run_eigenflow_studio(&self.build_view.bim_bus.project);
+            self.spatial_workspace.open_eigenflow_drawer(0);
+            self.spatial_workspace.push_trace(
+                format!("Handoff P1 #{eid} (lambda={lam:.2}) -> {}", rep.summary_verdict),
+                true,
+            );
+        }
+        if hud_actions.export_extreme_events_ifcx {
+            let rep = self
+                .universal_canvas
+                .run_extreme_events_audit(&self.build_view.bim_bus.project);
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_extreme_events_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_extreme_events.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported Extreme Events Blast & Fire IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.export_extreme_events_svg {
+            let rep = self
+                .universal_canvas
+                .run_extreme_events_audit(&self.build_view.bim_bus.project);
+            let cp_hash = self
+                .universal_canvas
+                .collab_state
+                .active_checkpoint()
+                .map(|c| c.short_sha256());
+            let annex = crate::core::build_extreme_events_annex_svg(
+                &self.build_view.bim_bus.project.project_name,
+                &rep,
+                "S-105",
+                cp_hash.as_deref(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_sheet_S105_extreme_events.svg");
             match crate::core::web_bridge::save_text_file(
                 &fname,
                 &annex.svg_content,

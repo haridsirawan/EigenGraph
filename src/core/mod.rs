@@ -39,6 +39,7 @@ pub mod gpu_fragility_mc;
 pub mod ifcx_collab;
 pub mod field_fabrication;
 pub mod eigenflow;
+pub mod extreme_events;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -219,9 +220,9 @@ pub use lifecycle_ops::{
     VariationOrderRow,
 };
 pub use vector_dossier::{
-    build_eigenflow_nonlinear_annex_svg, build_fabrication_bbs_shop_svg,
-    build_permit_compliance_annex_svg, build_pure_vector_engineering_dossier_svg,
-    VectorDossierExport, VectorDossierInput,
+    build_eigenflow_nonlinear_annex_svg, build_extreme_events_annex_svg,
+    build_fabrication_bbs_shop_svg, build_permit_compliance_annex_svg,
+    build_pure_vector_engineering_dossier_svg, VectorDossierExport, VectorDossierInput,
 };
 pub use portfolio_retrofit::{
     optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,
@@ -278,6 +279,11 @@ pub use field_fabrication::{
 pub use eigenflow::{
     evaluate_eigenflow_studio, EigenFlowConfig, EigenFlowHingeMarker3D, EigenFlowIfcxOverlay,
     EigenFlowStudioReport, EigenFlowWoodburyResult, RedistributedMemberFlow, NS_EG_EIGENFLOW,
+};
+pub use extreme_events::{
+    evaluate_extreme_events, BlastMemberImpact3D, ExtremeEventEigenFlowCoupling,
+    ExtremeEventMode, ExtremeEventsConfig, ExtremeEventsIfcxOverlay, ExtremeEventsReport,
+    FireCompartmentZone3D, NS_EG_EXTREME_EVENTS,
 };
 
 

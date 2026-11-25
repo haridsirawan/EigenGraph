@@ -455,6 +455,11 @@ pub enum PlannedProposalAction {
     RunPushover(crate::core::pushover::LateralLoadPattern),
     ToggleEigenFlow3d,
     ExportEigenFlowAnnex,
+    // Phase 84: Extreme Events Studio (Blast UFC 3-340-02 & Fire ISO 834/EC) & Sheet S-105
+    RunBlast { mass_kg: f64, standoff_m: f64 },
+    RunFire { minutes: f64, story: Option<usize> },
+    ToggleExtreme3d,
+    ExportExtremeAnnex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -552,6 +557,11 @@ pub enum GeminiDirective {
     RunPushover(crate::core::pushover::LateralLoadPattern),
     ToggleEigenFlow3d,
     ExportEigenFlowAnnex,
+    // Phase 84: Extreme Events Studio (Blast UFC 3-340-02 & Fire ISO 834/EC) & Sheet S-105
+    RunBlast { mass_kg: f64, standoff_m: f64 },
+    RunFire { minutes: f64, story: Option<usize> },
+    ToggleExtreme3d,
+    ExportExtremeAnnex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -843,6 +853,45 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                     crate::core::pushover::LateralLoadPattern::FirstModeModal
                 };
                 directives.push(GeminiDirective::RunPushover(pat));
+            } else if upper == "RUN_BLAST" || upper.starts_with("RUN_BLAST:") {
+                let mut sp = upper
+                    .split_once(':')
+                    .map(|(_, r)| r)
+                    .unwrap_or("")
+                    .split([',', ':'])
+                    .map(|s| s.trim());
+                let mass_kg = sp
+                    .next()
+                    .and_then(|s| s.trim_end_matches("KG").parse::<f64>().ok())
+                    .unwrap_or(250.0)
+                    .clamp(10.0, 5_000.0);
+                let standoff_m = sp
+                    .next()
+                    .and_then(|s| s.trim_end_matches('M').parse::<f64>().ok())
+                    .unwrap_or(12.0)
+                    .clamp(3.0, 120.0);
+                directives.push(GeminiDirective::RunBlast { mass_kg, standoff_m });
+            } else if upper == "RUN_FIRE" || upper.starts_with("RUN_FIRE:") {
+                let mut sp = upper
+                    .split_once(':')
+                    .map(|(_, r)| r)
+                    .unwrap_or("")
+                    .split([',', ':'])
+                    .map(|s| s.trim());
+                let minutes = sp
+                    .next()
+                    .and_then(|s| s.trim_end_matches("MIN").parse::<f64>().ok())
+                    .unwrap_or(90.0)
+                    .clamp(0.0, 180.0);
+                let story = sp
+                    .next()
+                    .and_then(|s| s.trim_start_matches('L').parse::<usize>().ok())
+                    .map(|n| n.saturating_sub(1));
+                directives.push(GeminiDirective::RunFire { minutes, story });
+            } else if upper == "TOGGLE_EXTREME_3D" {
+                directives.push(GeminiDirective::ToggleExtreme3d);
+            } else if upper == "EXPORT_EXTREME_ANNEX" {
+                directives.push(GeminiDirective::ExportExtremeAnnex);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -1689,6 +1738,48 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Printer,
     },
     SlashCommandSpec {
+        cmd: "/extreme",
+        category: "Safety",
+        description: "Open Extreme Events Studio (Blast UFC 3-340-02 & Structural Fire ISO 834/EC)",
+        icon: AppIcon::AlertTriangle,
+    },
+    SlashCommandSpec {
+        cmd: "/blast",
+        category: "Safety",
+        description: "Run Kingery-Bulmash Blast & EigenFlow coupling (/blast <kg> <standoff_m>)",
+        icon: AppIcon::Target,
+    },
+    SlashCommandSpec {
+        cmd: "/fire",
+        category: "Safety",
+        description: "Run ISO 834 / Eurocode Structural Fire & thermal EigenFlow (/fire <minutes>)",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/fire-story",
+        category: "Safety",
+        description: "Select ignited building story for 3D Structural Fire compartment (/fire-story <1..n>)",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/extreme-3d",
+        category: "Safety",
+        description: "Toggle 3D Pure WebGPU Blast shockwave rings & Fire thermal plume",
+        icon: AppIcon::Shield,
+    },
+    SlashCommandSpec {
+        cmd: "/extreme-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::hazard::extreme_events IFCX layer (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/extreme-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-105 Pure-Vector Extreme Events Blast & Fire Annex .svg",
+        icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -1810,6 +1901,12 @@ pub struct SpatialHudActions {
     pub eigenflow_select_element: Option<usize>,
     pub eigenflow_set_lambda: Option<f64>,
     pub eigenflow_set_pattern: Option<crate::core::pushover::LateralLoadPattern>,
+    // Phase 84: Extreme Events Studio (Blast & Structural Fire)
+    pub run_extreme_events: bool,
+    pub toggle_extreme_events_3d: bool,
+    pub export_extreme_events_ifcx: bool,
+    pub export_extreme_events_svg: bool,
+    pub extreme_send_to_eigenflow: Option<(usize, f64)>,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -2213,6 +2310,13 @@ impl SpatialHudActions {
         }
         if other.eigenflow_set_pattern.is_some() {
             self.eigenflow_set_pattern = other.eigenflow_set_pattern;
+        }
+        self.run_extreme_events |= other.run_extreme_events;
+        self.toggle_extreme_events_3d |= other.toggle_extreme_events_3d;
+        self.export_extreme_events_ifcx |= other.export_extreme_events_ifcx;
+        self.export_extreme_events_svg |= other.export_extreme_events_svg;
+        if other.extreme_send_to_eigenflow.is_some() {
+            self.extreme_send_to_eigenflow = other.extreme_send_to_eigenflow;
         }
     }
 }

@@ -2604,4 +2604,362 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Phase 84 (`v0.8.4`): Width-first Dynamic Island drawer for Extreme Events Studio
+    /// (Blast `UFC 3-340-02` Kingery-Bulmash + Structural Fire `ISO 834/EC` + EigenFlow Coupling).
+    pub(super) fn render_extreme_events_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::blast::{BurstType, ExplosiveType};
+        use crate::core::extreme_events::ExtremeEventMode;
+        use crate::core::fire::{FireCurveKind, FireProtectionKind};
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::AlertTriangle,
+                13.0,
+                theme.accent_orange,
+                "Extreme Events (Blast & Fire)",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl, mode) in [
+                (0usize, "Blast UFC 3-340-02", ExtremeEventMode::Blast),
+                (1usize, "Structural Fire ISO 834", ExtremeEventMode::StructuralFire),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.extreme_events_drawer_tab == idx,
+                    theme.accent_orange,
+                    "",
+                )
+                .clicked()
+                {
+                    self.extreme_events_drawer_tab = idx;
+                    if universal_canvas.extreme_events_config.mode != ExtremeEventMode::Combined {
+                        universal_canvas.extreme_events_config.mode = mode;
+                    }
+                    actions.run_extreme_events = true;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Extreme Events drawer",
+            )
+            .clicked()
+            {
+                self.extreme_events_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        let tab = self.extreme_events_drawer_tab;
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                if tab == 0 {
+                    for (ex, lbl) in [
+                        (ExplosiveType::Tnt, "TNT"),
+                        (ExplosiveType::Anfo, "ANFO"),
+                        (ExplosiveType::C4, "C-4"),
+                    ] {
+                        let active = universal_canvas.extreme_events_config.explosive_type == ex;
+                        if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_red, ex.label()).clicked() {
+                            universal_canvas.extreme_events_config.explosive_type = ex;
+                            universal_canvas.extreme_events_config.mode = ExtremeEventMode::Blast;
+                            actions.run_extreme_events = true;
+                        }
+                    }
+                    for (kg, lbl) in [(100.0_f64, "100kg"), (250.0, "250kg"), (500.0, "500kg")] {
+                        let active = (universal_canvas.extreme_events_config.explosive_mass_kg - kg).abs() < 10.0;
+                        if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_orange, "Charge mass W").clicked() {
+                            universal_canvas.extreme_events_config.explosive_mass_kg = kg;
+                            actions.run_extreme_events = true;
+                        }
+                    }
+                    for (r_m, lbl) in [(8.0_f64, "R 8m"), (12.0, "R 12m"), (20.0, "R 20m")] {
+                        let active = (universal_canvas.extreme_events_config.standoff_distance_m - r_m).abs() < 1.0;
+                        if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_blue, "Standoff distance R").clicked() {
+                            universal_canvas.extreme_events_config.standoff_distance_m = r_m;
+                            actions.run_extreme_events = true;
+                        }
+                    }
+                    let burst_lbl = match universal_canvas.extreme_events_config.burst_type {
+                        BurstType::SurfaceBurst => "Surface",
+                        BurstType::FreeAirBurst => "FreeAir",
+                    };
+                    if Self::glass_pill_button(ui, theme, None, burst_lbl, false, theme.accent_blue, "Toggle Surface / FreeAir burst").clicked() {
+                        universal_canvas.extreme_events_config.burst_type = match universal_canvas.extreme_events_config.burst_type {
+                            BurstType::SurfaceBurst => BurstType::FreeAirBurst,
+                            BurstType::FreeAirBurst => BurstType::SurfaceBurst,
+                        };
+                        actions.run_extreme_events = true;
+                    }
+                } else {
+                    for (cv, lbl) in [
+                        (FireCurveKind::Iso834Standard, "ISO 834"),
+                        (FireCurveKind::AstmE119, "ASTM E119"),
+                        (FireCurveKind::EurocodeHydrocarbon, "HC Rapid"),
+                    ] {
+                        let active = universal_canvas.extreme_events_config.fire_curve == cv;
+                        if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_red, cv.label()).clicked() {
+                            universal_canvas.extreme_events_config.fire_curve = cv;
+                            universal_canvas.extreme_events_config.mode = ExtremeEventMode::StructuralFire;
+                            actions.run_extreme_events = true;
+                        }
+                    }
+                    for (pr, lbl) in [
+                        (FireProtectionKind::Unprotected, "Bare"),
+                        (FireProtectionKind::SprayedMineralFiber, "SFRM"),
+                        (FireProtectionKind::IntumescentCoating, "Intum"),
+                    ] {
+                        let active = universal_canvas.extreme_events_config.protection_kind == pr;
+                        if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_orange, pr.label()).clicked() {
+                            universal_canvas.extreme_events_config.protection_kind = pr;
+                            actions.run_extreme_events = true;
+                        }
+                    }
+                    for st_idx in 0..3usize {
+                        let active = universal_canvas.extreme_events_config.fire_story_idx == st_idx;
+                        if Self::glass_pill_button(ui, theme, None, &format!("L{}", st_idx + 1), active, theme.accent_blue, "Select ignited story").clicked() {
+                            universal_canvas.extreme_events_config.fire_story_idx = st_idx;
+                            actions.run_extreme_events = true;
+                        }
+                    }
+                    if Self::glass_pill_button(ui, theme, None, "-15m", false, theme.accent_blue, "Step fire exposure -15 min").clicked() {
+                        universal_canvas.fire_sim_playing = false;
+                        universal_canvas.extreme_events_config.exposure_minutes =
+                            (universal_canvas.extreme_events_config.exposure_minutes - 15.0).max(0.0);
+                        actions.run_extreme_events = true;
+                    }
+                    let fplay = if universal_canvas.fire_sim_playing { "Pause" } else { "Play" };
+                    if Self::glass_pill_button(ui, theme, None, fplay, universal_canvas.fire_sim_playing, theme.accent_green, "Animate 0..180 min fire curve").clicked() {
+                        universal_canvas.fire_sim_playing = !universal_canvas.fire_sim_playing;
+                        if universal_canvas.fire_sim_playing {
+                            universal_canvas.extreme_events_overlay_visible = true;
+                            universal_canvas.extreme_events_config.mode = ExtremeEventMode::StructuralFire;
+                        }
+                    }
+                    if Self::glass_pill_button(ui, theme, None, "+15m", false, theme.accent_blue, "Step fire exposure +15 min").clicked() {
+                        universal_canvas.fire_sim_playing = false;
+                        universal_canvas.extreme_events_config.exposure_minutes =
+                            (universal_canvas.extreme_events_config.exposure_minutes + 15.0).min(180.0);
+                        actions.run_extreme_events = true;
+                    }
+                    ui.label(
+                        RichText::new(format!("{:.0} min", universal_canvas.extreme_events_config.exposure_minutes))
+                            .size(8.8)
+                            .monospace()
+                            .color(theme.text_primary),
+                    );
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Target),
+                    if universal_canvas.extreme_events_overlay_visible { "Extreme 3D: ON" } else { "Extreme 3D" },
+                    universal_canvas.extreme_events_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU Blast shockwave & Fire compartment plume",
+                )
+                .clicked()
+                {
+                    actions.toggle_extreme_events_3d = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Document), ".ifcx", false, theme.accent_blue, "Export eigengraph::hazard::extreme_events IFCX").clicked() {
+                    actions.export_extreme_events_ifcx = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Printer), "Sheet S-105 .svg", false, theme.accent_green, "Export A3 Sheet S-105 Extreme Events Annex SVG").clicked() {
+                    actions.export_extreme_events_svg = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(9, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    let Some(ref rep) = universal_canvas.last_extreme_events_report else {
+                        ui.label(RichText::new("Evaluating Extreme Events...").size(9.5).color(theme.text_muted));
+                        return;
+                    };
+                    if tab == 0 {
+                        let bw = &rep.blast_report.blast_wave;
+                        let be = &rep.blast_eigenflow;
+                        if is_left {
+                            ui.label(RichText::new("Blast Wave & Closed-Loop EigenFlow Audit").size(10.0).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "Z={:.2} | Pso={:.0} kPa | Pr={:.0} kPa | ir={:.0} kPa-ms | mu={:.2}",
+                                    bw.scaled_distance_z,
+                                    bw.peak_incident_overpressure_kpa,
+                                    bw.peak_reflected_overpressure_kpa,
+                                    bw.reflected_impulse_kpa_ms,
+                                    rep.blast_report.dynamic_ductility_ratio
+                                ))
+                                .size(9.0)
+                                .monospace()
+                                .color(theme.accent_orange),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Damage: {} | P1 #{} (lam={:.2}) -> Woodbury m_s={:.3}, EigenFlow {:.3}",
+                                    rep.worst_blast_damage.label(),
+                                    be.critical_p1_element_id,
+                                    be.derived_lambda,
+                                    be.woodbury_ms,
+                                    be.eigenflow_score
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(if be.is_progressive_collapse_risk { theme.accent_red } else { theme.accent_green }),
+                            );
+                            ui.add_space(4.0);
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Bolt),
+                                "Send P1 to EigenFlow Studio",
+                                false,
+                                theme.accent_blue,
+                                "Open EigenFlow Woodbury P1->P2 with blast-damaged stiffness ratio lambda",
+                            )
+                            .clicked()
+                            {
+                                actions.extreme_send_to_eigenflow =
+                                    Some((be.critical_p1_element_id, be.derived_lambda));
+                            }
+                        } else {
+                            ui.label(RichText::new("Blast Pressure P(t) & Midspan SDOF Response y(t)").size(9.6).strong().color(theme.text_primary));
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, 118.0), egui::Sense::hover());
+                            let p = ui.painter_at(rect);
+                            p.rect_filled(rect, 5.0, Color32::from_rgba_unmultiplied(15, 23, 42, 42));
+                            let th = &rep.blast_report.time_history_samples;
+                            let max_t = th.iter().map(|s| s.time_ms).fold(1.0_f64, f64::max).max(1.0);
+                            let max_p = th.iter().map(|s| s.blast_pressure_kpa.max(0.0)).fold(bw.peak_reflected_overpressure_kpa, f64::max).max(10.0);
+                            let max_y = th.iter().map(|s| s.displacement_mm.abs()).fold(1.0_f64, f64::max);
+                            let to_p = |t: f64, v: f64, vmax: f64| -> egui::Pos2 {
+                                egui::pos2(
+                                    rect.left() + 8.0 + ((t / max_t).clamp(0.0, 1.0) as f32) * (rect.width() - 16.0),
+                                    rect.bottom() - 8.0 - ((v / vmax).clamp(0.0, 1.0) as f32) * (rect.height() - 18.0),
+                                )
+                            };
+                            let p_pts: Vec<_> = th.iter().map(|s| to_p(s.time_ms, s.blast_pressure_kpa.max(0.0), max_p)).collect();
+                            if p_pts.len() >= 2 {
+                                p.add(egui::Shape::line(p_pts, Stroke::new(2.0, theme.accent_red)));
+                            }
+                            let y_pts: Vec<_> = th.iter().map(|s| to_p(s.time_ms, s.displacement_mm.abs(), max_y)).collect();
+                            if y_pts.len() >= 2 {
+                                p.add(egui::Shape::line(y_pts, Stroke::new(1.8, theme.accent_blue)));
+                            }
+                        }
+                    } else {
+                        let fc = &rep.fire_compartment;
+                        let fe = &rep.fire_eigenflow;
+                        if is_left {
+                            ui.label(RichText::new("Thermal Fire Endurance & EigenFlow Stability").size(10.0).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} @ {:.0} min: Tg={:.0}C | Tm={:.0}C | kE={:.2} | ky={:.2} | FRR={:.0} min",
+                                    fc.story_label,
+                                    rep.config.exposure_minutes,
+                                    fc.gas_temp_c,
+                                    fc.member_temp_c,
+                                    fc.ke_factor,
+                                    fc.ky_factor,
+                                    fc.frr_minutes
+                                ))
+                                .size(9.0)
+                                .monospace()
+                                .color(theme.accent_orange),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Thermal P1 #{} (lam=kE={:.2}) -> m_s={:.3}, EigenFlow {:.3}",
+                                    fe.critical_p1_element_id,
+                                    fe.derived_lambda,
+                                    fe.woodbury_ms,
+                                    fe.eigenflow_score
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(if fe.is_progressive_collapse_risk { theme.accent_red } else { theme.accent_green }),
+                            );
+                            ui.add_space(4.0);
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Bolt),
+                                "Check Thermal EigenFlow",
+                                false,
+                                theme.accent_blue,
+                                "Open EigenFlow Studio with thermal stiffness retention lambda = kE(T)",
+                            )
+                            .clicked()
+                            {
+                                actions.extreme_send_to_eigenflow =
+                                    Some((fe.critical_p1_element_id, fe.derived_lambda));
+                            }
+                        } else {
+                            ui.label(RichText::new("Gas/Core Temp Tg(t)/Tm(t) & Stiffness kE(T)").size(9.6).strong().color(theme.text_primary));
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, 118.0), egui::Sense::hover());
+                            let p = ui.painter_at(rect);
+                            p.rect_filled(rect, 5.0, Color32::from_rgba_unmultiplied(15, 23, 42, 42));
+                            let fs = &rep.fire_report.time_history_samples;
+                            let max_t = fs.iter().map(|s| s.time_minutes).fold(180.0_f64, f64::max).max(30.0);
+                            let max_temp = fs.iter().map(|s| s.gas_temp_c).fold(1100.0_f64, f64::max).max(600.0);
+                            let to_ft = |t: f64, val: f64, vmax: f64| -> egui::Pos2 {
+                                egui::pos2(
+                                    rect.left() + 8.0 + ((t / max_t).clamp(0.0, 1.0) as f32) * (rect.width() - 16.0),
+                                    rect.bottom() - 8.0 - ((val / vmax).clamp(0.0, 1.0) as f32) * (rect.height() - 18.0),
+                                )
+                            };
+                            let tg_line: Vec<_> = fs.iter().map(|s| to_ft(s.time_minutes, s.gas_temp_c, max_temp)).collect();
+                            if tg_line.len() >= 2 {
+                                p.add(egui::Shape::line(tg_line, Stroke::new(1.8, theme.accent_red)));
+                            }
+                            let tm_line: Vec<_> = fs.iter().map(|s| to_ft(s.time_minutes, s.member_temp_c, max_temp)).collect();
+                            if tm_line.len() >= 2 {
+                                p.add(egui::Shape::line(tm_line, Stroke::new(1.8, theme.accent_orange)));
+                            }
+                            let ke_line: Vec<_> = fs.iter().map(|s| to_ft(s.time_minutes, s.ke_factor, 1.0)).collect();
+                            if ke_line.len() >= 2 {
+                                p.add(egui::Shape::line(ke_line, Stroke::new(1.6, theme.accent_blue)));
+                            }
+                            let mx = rect.left() + 8.0 + ((rep.config.exposure_minutes / max_t).clamp(0.0, 1.0) as f32) * (rect.width() - 16.0);
+                            p.line_segment([egui::pos2(mx, rect.top() + 4.0), egui::pos2(mx, rect.bottom() - 4.0)], Stroke::new(1.3, theme.accent_green));
+                        }
+                    }
+                });
+            });
+        });
+    }
 }

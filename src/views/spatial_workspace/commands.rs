@@ -538,6 +538,34 @@ impl SpatialWorkspaceState {
                     self.open_eigenflow_drawer(1);
                     out.export_eigenflow_svg = true;
                 }
+                PlannedProposalAction::RunBlast { mass_kg, standoff_m } => {
+                    universal_canvas.extreme_events_config.mode =
+                        crate::core::extreme_events::ExtremeEventMode::Blast;
+                    universal_canvas.extreme_events_config.explosive_mass_kg = *mass_kg;
+                    universal_canvas.extreme_events_config.standoff_distance_m = *standoff_m;
+                    universal_canvas.extreme_events_overlay_visible = true;
+                    self.open_extreme_events_drawer(0);
+                    out.run_extreme_events = true;
+                }
+                PlannedProposalAction::RunFire { minutes, story } => {
+                    universal_canvas.extreme_events_config.mode =
+                        crate::core::extreme_events::ExtremeEventMode::StructuralFire;
+                    universal_canvas.extreme_events_config.exposure_minutes = *minutes;
+                    if let Some(st) = story {
+                        universal_canvas.extreme_events_config.fire_story_idx = *st;
+                    }
+                    universal_canvas.extreme_events_overlay_visible = true;
+                    self.open_extreme_events_drawer(1);
+                    out.run_extreme_events = true;
+                }
+                PlannedProposalAction::ToggleExtreme3d => {
+                    self.open_extreme_events_drawer(0);
+                    out.toggle_extreme_events_3d = true;
+                }
+                PlannedProposalAction::ExportExtremeAnnex => {
+                    self.open_extreme_events_drawer(0);
+                    out.export_extreme_events_svg = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -800,6 +828,24 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportEigenFlowAnnex => {
                                 PlannedProposalAction::ExportEigenFlowAnnex
                             }
+                            GeminiDirective::RunBlast { mass_kg, standoff_m } => {
+                                PlannedProposalAction::RunBlast {
+                                    mass_kg: *mass_kg,
+                                    standoff_m: *standoff_m,
+                                }
+                            }
+                            GeminiDirective::RunFire { minutes, story } => {
+                                PlannedProposalAction::RunFire {
+                                    minutes: *minutes,
+                                    story: *story,
+                                }
+                            }
+                            GeminiDirective::ToggleExtreme3d => {
+                                PlannedProposalAction::ToggleExtreme3d
+                            }
+                            GeminiDirective::ExportExtremeAnnex => {
+                                PlannedProposalAction::ExportExtremeAnnex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -897,6 +943,16 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ToggleEigenFlow3d => "ToggleEigenFlow3d".to_string(),
                             GeminiDirective::ExportEigenFlowAnnex => {
                                 "ExportEigenFlowAnnex(S-104)".to_string()
+                            }
+                            GeminiDirective::RunBlast { mass_kg, standoff_m } => {
+                                format!("RunBlast({mass_kg:.0}kg@{standoff_m:.1}m)")
+                            }
+                            GeminiDirective::RunFire { minutes, .. } => {
+                                format!("RunFire({minutes:.0}m)")
+                            }
+                            GeminiDirective::ToggleExtreme3d => "ToggleExtreme3d".to_string(),
+                            GeminiDirective::ExportExtremeAnnex => {
+                                "ExportExtremeAnnex(S-105)".to_string()
                             }
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -2550,6 +2606,54 @@ impl SpatialWorkspaceState {
                 }
                 "/eigenflow-svg" => {
                     actions.export_eigenflow_svg = true;
+                }
+                "/extreme" => {
+                    self.open_extreme_events_drawer(0);
+                    actions.run_extreme_events = true;
+                }
+                "/blast" => {
+                    let nums: Vec<f64> = arg
+                        .split_whitespace()
+                        .filter_map(|s| s.trim_end_matches("kg").trim_end_matches('m').parse::<f64>().ok())
+                        .collect();
+                    if let Some(&mass) = nums.first() {
+                        universal_canvas.extreme_events_config.explosive_mass_kg = mass.clamp(10.0, 5_000.0);
+                    }
+                    if let Some(&standoff) = nums.get(1) {
+                        universal_canvas.extreme_events_config.standoff_distance_m = standoff.clamp(3.0, 120.0);
+                    }
+                    universal_canvas.extreme_events_config.mode =
+                        crate::core::extreme_events::ExtremeEventMode::Blast;
+                    self.open_extreme_events_drawer(0);
+                    actions.run_extreme_events = true;
+                }
+                "/fire" => {
+                    if let Ok(mins) = arg.trim().trim_end_matches("min").trim_end_matches('m').parse::<f64>() {
+                        universal_canvas.extreme_events_config.exposure_minutes = mins.clamp(0.0, 180.0);
+                    }
+                    universal_canvas.extreme_events_config.mode =
+                        crate::core::extreme_events::ExtremeEventMode::StructuralFire;
+                    self.open_extreme_events_drawer(1);
+                    actions.run_extreme_events = true;
+                }
+                "/fire-story" => {
+                    if let Ok(story_1b) = arg.trim().trim_start_matches('L').parse::<usize>() {
+                        universal_canvas.extreme_events_config.fire_story_idx = story_1b.saturating_sub(1);
+                    }
+                    universal_canvas.extreme_events_config.mode =
+                        crate::core::extreme_events::ExtremeEventMode::StructuralFire;
+                    self.open_extreme_events_drawer(1);
+                    actions.run_extreme_events = true;
+                }
+                "/extreme-3d" => {
+                    self.open_extreme_events_drawer(0);
+                    actions.toggle_extreme_events_3d = true;
+                }
+                "/extreme-ifcx" => {
+                    actions.export_extreme_events_ifcx = true;
+                }
+                "/extreme-svg" => {
+                    actions.export_extreme_events_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

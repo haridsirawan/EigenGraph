@@ -2822,6 +2822,94 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Pure-vector CPU fallback rendering Phase 84 Extreme Events Blast shockwave & Fire compartment.
+    pub(super) fn paint_cpu_extreme_events_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.extreme_events_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_extreme_events_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |p: [f64; 3]| -> Option<Pos2> {
+            let ex = p[0] * cr - p[1] * sr;
+            let ny = p[0] * sr + p[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, p[2])
+                .and_then(|(sp, _, vis)| if vis { Some(sp) } else { None })
+        };
+
+        if matches!(
+            report.config.mode,
+            crate::core::extreme_events::ExtremeEventMode::Blast
+                | crate::core::extreme_events::ExtremeEventMode::Combined
+        ) {
+            if let (Some(cp), Some(fp)) = (
+                proj_enu(report.charge_pos_enu_m),
+                proj_enu(report.target_face_enu_m),
+            ) {
+                clip.line_segment([cp, fp], Stroke::new(2.0, Color32::from_rgb(255, 149, 0)));
+                clip.circle_filled(cp, 6.5, Color32::from_rgb(255, 69, 58));
+                clip.circle_stroke(cp, 18.0, Stroke::new(1.4, Color32::from_rgb(255, 120, 40)));
+                clip.circle_stroke(cp, 32.0, Stroke::new(1.0, Color32::from_rgb(255, 179, 64)));
+            }
+            for m in &report.blast_member_impacts {
+                if let (Some(a), Some(b)) = (proj_enu(m.p0_enu_m), proj_enu(m.p1_enu_m)) {
+                    let (r, g, b_col) = m.damage_level.color_rgb();
+                    clip.line_segment([a, b], Stroke::new(3.0, Color32::from_rgb(r, g, b_col)));
+                }
+            }
+        }
+        if matches!(
+            report.config.mode,
+            crate::core::extreme_events::ExtremeEventMode::StructuralFire
+                | crate::core::extreme_events::ExtremeEventMode::Combined
+        ) {
+            let fc = &report.fire_compartment;
+            let hw = fc.width_m * 0.5;
+            let hd = fc.depth_m * 0.5;
+            let z_mid = 0.5 * (fc.z_bottom_m + fc.z_top_m);
+            let pts: Vec<Pos2> = [
+                [fc.center_x_m - hw, fc.center_y_m - hd, z_mid],
+                [fc.center_x_m + hw, fc.center_y_m - hd, z_mid],
+                [fc.center_x_m + hw, fc.center_y_m + hd, z_mid],
+                [fc.center_x_m - hw, fc.center_y_m + hd, z_mid],
+            ]
+            .iter()
+            .filter_map(|&p| proj_enu(p))
+            .collect();
+            if pts.len() == 4 {
+                clip.add(egui::Shape::convex_polygon(
+                    pts,
+                    Color32::from_rgba_unmultiplied(255, 110, 20, 68),
+                    Stroke::new(1.6, Color32::from_rgb(255, 149, 0)),
+                ));
+            }
+        }
+    }
+
     /// Screen-space click picking against LOD 0 regional clusters or LOD 1/2 3D neighbor buildings.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_domain_overlay(

@@ -1877,6 +1877,325 @@ pub fn build_eigenflow_nonlinear_annex_svg(
     }
 }
 
+/// Phase 84 (`v0.8.4`): Generates an archival A3 landscape (`1600 x 1131`, 0% raster pixels)
+/// Pure-Vector Extreme Events Blast (`UFC 3-340-02`) & Structural Fire (`ISO 834/EC`) Annex SVG (`S-105`).
+pub fn build_extreme_events_annex_svg(
+    project_name: &str,
+    report: &crate::core::extreme_events::ExtremeEventsReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(24_000);
+    let seal_token = "__EIGENGRAPH_EXTREME_EVENTS_S105_SHA256__";
+    let bw = &report.blast_report.blast_wave;
+    let fc = &report.fire_compartment;
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#dc2626" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH EXTREME EVENTS (BLAST UFC 3-340-02 &amp; FIRE ISO 834/EC) ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#b91c1c">SHEET {} • EigenGate + EigenFlow • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: Blast Pressure-Time & SDOF Response (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. UFC 3-340-02 KINGERY-BULMASH BLAST WAVEFORM & SDOF RESPONSE",
+        &format!(
+            "{:.0} kg {} @ {:.1} m | Z={:.2} m/kg^(1/3) | Pso={:.0} kPa | Pr={:.0} kPa | ir={:.0} kPa-ms",
+            report.config.explosive_mass_kg,
+            escape_xml(report.config.explosive_type.label()),
+            report.config.standoff_distance_m,
+            bw.scaled_distance_z,
+            bw.peak_incident_overpressure_kpa,
+            bw.peak_reflected_overpressure_kpa,
+            bw.reflected_impulse_kpa_ms
+        ),
+    );
+    let gx0 = p1x + 74.0;
+    let gy0 = p1y + 58.0;
+    let gw = p1w - 110.0;
+    let gh = p1h - 120.0;
+    let th = &report.blast_report.time_history_samples;
+    let max_t = th.iter().map(|s| s.time_ms).fold(1.0_f64, f64::max).max(1.0);
+    let max_p = th
+        .iter()
+        .map(|s| s.blast_pressure_kpa.max(0.0))
+        .fold(bw.peak_reflected_overpressure_kpa, f64::max)
+        .max(10.0);
+    let max_y = th
+        .iter()
+        .map(|s| s.displacement_mm.abs())
+        .fold(report.blast_report.max_displacement_mm.abs(), f64::max)
+        .max(1.0);
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{gx0:.1}" y="{gy0:.1}" width="{gw:.1}" height="{gh:.1}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>"##
+    );
+    let p_poly: String = th
+        .iter()
+        .map(|s| {
+            let x = gx0 + (s.time_ms / max_t).clamp(0.0, 1.0) * gw;
+            let y = gy0 + gh - (s.blast_pressure_kpa.max(0.0) / max_p).clamp(0.0, 1.0) * gh;
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let d_poly: String = th
+        .iter()
+        .map(|s| {
+            let x = gx0 + (s.time_ms / max_t).clamp(0.0, 1.0) * gw;
+            let y = gy0 + gh - (s.displacement_mm.abs() / max_y).clamp(0.0, 1.0) * gh;
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let _ = writeln!(
+        svg,
+        r##"<polyline fill="none" stroke="#dc2626" stroke-width="2.4" points="{p_poly}"/>
+<polyline fill="none" stroke="#0284c7" stroke-width="2.2" stroke-dasharray="5,3" points="{d_poly}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#334155">Red Solid: Blast Overpressure P(t) [0..{:.0} kPa] | Blue Dash: Midspan Deflection y(t) [max {:.1} mm, mu={:.2}] • Damage: {}</text>"##,
+        gx0 + 4.0,
+        gy0 + gh + 24.0,
+        max_p,
+        report.blast_report.max_displacement_mm,
+        report.blast_report.dynamic_ductility_ratio,
+        escape_xml(report.worst_blast_damage.label()),
+    );
+
+    // Panel 2: Structural Fire Time-Temperature & kE Retention Curves (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. ISO 834 / EUROCODE STRUCTURAL FIRE THERMAL & kE(T) DEGRADATION",
+        &format!(
+            "{} • FRR {:.0} min • @ {:.0} min: Tg={:.0}C Tm={:.0}C kE={:.2} ky={:.2}",
+            escape_xml(report.config.fire_curve.label()),
+            fc.frr_minutes,
+            report.config.exposure_minutes,
+            fc.gas_temp_c,
+            fc.member_temp_c,
+            fc.ke_factor,
+            fc.ky_factor
+        ),
+    );
+    let fx0 = p2x + 74.0;
+    let fy0 = p2y + 58.0;
+    let fw = p2w - 110.0;
+    let fh = p2h - 120.0;
+    let f_samples = &report.fire_report.time_history_samples;
+    let max_ft = f_samples.iter().map(|s| s.time_minutes).fold(180.0_f64, f64::max).max(30.0);
+    let max_temp = f_samples
+        .iter()
+        .map(|s| s.gas_temp_c)
+        .fold(1150.0_f64, f64::max)
+        .max(600.0);
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{fx0:.1}" y="{fy0:.1}" width="{fw:.1}" height="{fh:.1}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>"##
+    );
+    let tg_poly: String = f_samples
+        .iter()
+        .map(|s| {
+            let x = fx0 + (s.time_minutes / max_ft).clamp(0.0, 1.0) * fw;
+            let y = fy0 + fh - (s.gas_temp_c / max_temp).clamp(0.0, 1.0) * fh;
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let tm_poly: String = f_samples
+        .iter()
+        .map(|s| {
+            let x = fx0 + (s.time_minutes / max_ft).clamp(0.0, 1.0) * fw;
+            let y = fy0 + fh - (s.member_temp_c / max_temp).clamp(0.0, 1.0) * fh;
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let ke_poly: String = f_samples
+        .iter()
+        .map(|s| {
+            let x = fx0 + (s.time_minutes / max_ft).clamp(0.0, 1.0) * fw;
+            let y = fy0 + fh - s.ke_factor.clamp(0.0, 1.0) * fh;
+            format!("{x:.1},{y:.1}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cur_fx = fx0 + (report.config.exposure_minutes / max_ft).clamp(0.0, 1.0) * fw;
+    let _ = writeln!(
+        svg,
+        r##"<polyline fill="none" stroke="#ef4444" stroke-width="2.4" points="{tg_poly}"/>
+<polyline fill="none" stroke="#f59e0b" stroke-width="2.4" points="{tm_poly}"/>
+<polyline fill="none" stroke="#0284c7" stroke-width="2.0" stroke-dasharray="5,3" points="{ke_poly}"/>
+<line x1="{cur_fx:.1}" y1="{fy0:.1}" x2="{cur_fx:.1}" y2="{:.1}" stroke="#0b1427" stroke-width="1.4" stroke-dasharray="4,3"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" fill="#0b1427">t={:.0} min</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#334155">Red: Gas Tg(t) | Amber: Core Tm(t) [0..{:.0}C] | Blue Dash: Stiffness kE(T) [0..1.0]</text>"##,
+        fy0 + fh,
+        (cur_fx + 4.0).min(fx0 + fw - 70.0),
+        fy0 + 14.0,
+        report.config.exposure_minutes,
+        fx0 + 4.0,
+        fy0 + fh + 24.0,
+        max_temp,
+    );
+
+    // Panel 3: Closed-Loop Blast & Fire -> EigenFlow Progressive Collapse Audit (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 620.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. CLOSED-LOOP EXTREME HAZARD -> EIGENFLOW WOODBURY (UFC 4-023-03)",
+        "Triggered P1 Stiffness Loss & P2 Load-Path Survival Index",
+    );
+    let be = &report.blast_eigenflow;
+    let fe = &report.fire_eigenflow;
+    let rows = [
+        ("Blast Trigger Target P1", format!("#{} ({})", be.critical_p1_element_id, escape_xml(&truncate_clean(&be.critical_p1_element_name, 18))), "#dc2626"),
+        ("Blast Derived lambda / m_s / RRR", format!("lam={:.2} | m_s={:.3} | RRR={:.2}", be.derived_lambda, be.woodbury_ms, be.woodbury_rrr), "#1e293b"),
+        ("Blast EigenFlow Score & Risk", format!("{:.3} ({})", be.eigenflow_score, if be.is_progressive_collapse_risk { "AT RISK" } else { "ARRESTED" }), if be.is_progressive_collapse_risk { "#dc2626" } else { "#059669" }),
+        ("Fire Compartment Target P1", format!("#{} ({} @ L{})", fe.critical_p1_element_id, escape_xml(&truncate_clean(&fe.critical_p1_element_name, 12)), fc.story_idx + 1), "#d97706"),
+        ("Fire Thermal lambda=kE(T) / m_s", format!("lam={:.2} | m_s={:.3} | RRR={:.2}", fe.derived_lambda, fe.woodbury_ms, fe.woodbury_rrr), "#1e293b"),
+        ("Fire EigenFlow Score & Risk", format!("{:.3} ({})", fe.eigenflow_score, if fe.is_progressive_collapse_risk { "AT RISK" } else { "STABLE" }), if fe.is_progressive_collapse_risk { "#dc2626" } else { "#059669" }),
+    ];
+    for (idx, (lbl, val, col)) in rows.iter().enumerate() {
+        let ry = p3y + 52.0 + (idx as f64) * 46.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="38" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#334155">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" font-family="monospace" text-anchor="end" fill="{col}">{val}</text>"##,
+            p3x + 14.0,
+            p3w - 28.0,
+            p3x + 24.0,
+            ry + 23.0,
+            p3x + p3w - 24.0,
+            ry + 23.0,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="156" rx="5" fill="#fef2f2" stroke="#dc2626" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#991b1b">EXTREME EVENTS PRESCRIPTIVE ACTION &amp; SHA-256 SEAL</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#b91c1c">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p3x + 14.0,
+        p3y + 334.0,
+        p3w - 28.0,
+        p3x + 24.0,
+        p3y + 358.0,
+        p3x + 24.0,
+        p3y + 382.0,
+        escape_xml(&truncate_clean(&be.recommendation, 84)),
+        p3x + 24.0,
+        p3y + 404.0,
+        escape_xml(&truncate_clean(&fe.recommendation, 84)),
+        p3x + 24.0,
+        p3y + 432.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live Extreme Events Baseline".to_string()),
+        ),
+        p3x + 24.0,
+        p3y + 462.0,
+    );
+
+    // Panel 4: Perimeter Blast Impact & Fire Exposed Member Triage Table (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (668.0, 592.0, 900.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. PERIMETER BLAST & THERMAL EXPOSURE MEMBER TRIAGE SCHEDULE",
+        &format!(
+            "{} Blast-Audited Elements • {} Fire-Exposed Compartment Members",
+            report.blast_member_impacts.len(),
+            report.exposed_fire_members.len()
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#b91c1c">ID    MEMBER NAME                  DIST(m)   Pr(kPa)   ir(kPa-ms)   mu     lambda    UFC DAMAGE</text>"##,
+        p4x + 18.0,
+        p4y + 48.0,
+    );
+    for (idx, m) in report.blast_member_impacts.iter().take(8).enumerate() {
+        use crate::core::blast::UfcDamageLevel;
+        let ry = p4y + 58.0 + (idx as f64) * 52.0;
+        let (cr, cg, cb) = m.damage_level.color_rgb();
+        let hex = format!("#{cr:02x}{cg:02x}{cb:02x}");
+        let short_dmg = match m.damage_level {
+            UfcDamageLevel::Superficial => "B1 SUPERF",
+            UfcDamageLevel::Low => "B2 LOW",
+            UfcDamageLevel::Medium => "B3 MEDIUM",
+            UfcDamageLevel::High => "B4 HIGH",
+            UfcDamageLevel::Hazardous => "B5 HAZARD",
+        };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="42" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-family="monospace" fill="#0f172a">#{:<4} {:<26} {:>6.1}    {:>7.0}    {:>8.0}   {:>5.2}   {:>5.2}</text>
+<rect x="{:.1}" y="{:.1}" width="92" height="22" rx="4" fill="{hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-weight="bold" text-anchor="middle" fill="#ffffff">{short_dmg}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 20.0,
+            ry + 25.0,
+            m.element_id,
+            escape_xml(&truncate_clean(&m.element_name, 25)),
+            m.distance_m,
+            m.reflected_overpressure_kpa,
+            m.reflected_impulse_kpa_ms,
+            m.ductility_ratio,
+            m.residual_stiffness_lambda,
+            p4x + p4w - 118.0,
+            ry + 10.0,
+            p4x + p4w - 72.0,
+            ry + 24.5,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_EXTREME_S105");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = report.blast_member_impacts.len() + report.exposed_fire_members.len();
+    let summary = format!(
+        "Exported Extreme Events Blast & Fire Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2152,5 +2471,24 @@ mod tests {
         assert!(!s104.svg_content.contains("<image"));
         assert!(!s104.svg_content.contains("ARI"));
         assert_eq!(s104.sha256_seal.len(), 64);
+
+        let ext_rep = crate::core::extreme_events::evaluate_extreme_events(
+            &field_proj,
+            None,
+            &crate::core::extreme_events::ExtremeEventsConfig::default(),
+        );
+        let s105 = build_extreme_events_annex_svg(
+            &field_proj.project_name,
+            &ext_rep,
+            "S-105",
+            Some("ext84seal"),
+        );
+        assert!(s105.svg_content.starts_with("<svg"));
+        assert!(s105.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s105.svg_content.contains("SHEET S-105"));
+        assert!(s105.svg_content.contains("<polyline"));
+        assert!(!s105.svg_content.contains("<image"));
+        assert!(!s105.svg_content.contains("ARI"));
+        assert_eq!(s105.sha256_seal.len(), 64);
     }
 }

@@ -274,6 +274,8 @@ pub struct UnifiedWorkspaceArchive {
     pub trade_study_config: crate::core::trade_study::TradeStudyConfig,
     #[serde(default)]
     pub eigenflow_config: crate::core::eigenflow::EigenFlowConfig,
+    #[serde(default)]
+    pub extreme_events_config: crate::core::extreme_events::ExtremeEventsConfig,
     pub sha256_seal: String,
 }
 

@@ -66,6 +66,7 @@ pub mod ns {
     pub const EG_EIGENGATE_LEGACY: &str = "eigengraph::ari::v2";
     pub const EG_EIGENFLOW: &str = "eigengraph::eigenflow";
     pub const EG_FIELD_QAQC_BBS: &str = "eigengraph::construction::field_qaqc_bbs";
+    pub const EG_EXTREME_EVENTS: &str = "eigengraph::hazard::extreme_events";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
@@ -555,6 +556,10 @@ impl IfcxDocument {
         schemas.insert(
             ns::EG_FIELD_QAQC_BBS.to_string(),
             json!({ "value": { "dataType": "Object", "spec": "EigenGraph Field Construction QA/QC & 1D Rebar BBS Cut-List" } }),
+        );
+        schemas.insert(
+            ns::EG_EXTREME_EVENTS.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph Extreme Events (Blast UFC 3-340-02 & Structural Fire ISO 834/EC)" } }),
         );
         Self {
             header: IfcxHeader {
@@ -1488,10 +1493,46 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_eigenflow_nonlinear", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with a non-destructive Extreme Events (Blast & Fire) overlay.
+    pub fn compose_with_extreme_events_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::extreme_events::ExtremeEventsIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_extreme_events", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcStructuralAnalysisModel", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Extreme Events (Blast UFC 3-340-02 & Structural Fire ISO 834/EC) Overlay",
+                "peakReflectedPressureKpa": overlay.peak_reflected_pressure_kpa,
+                "worstBlastDamage": overlay.worst_blast_damage,
+                "fireGasTempC": overlay.fire_gas_temp_c,
+                "fireKeRetention": overlay.fire_ke_retention,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_EXTREME_EVENTS.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/hazard/extreme_events".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_extreme_events", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_EIGENFLOW) {
+    if node.attributes.contains_key(ns::EG_EXTREME_EVENTS) {
+        "Extreme Events (Blast/Fire)".to_string()
+    } else if node.attributes.contains_key(ns::EG_EIGENFLOW) {
         "EigenFlow".to_string()
     } else if node.attributes.contains_key(ns::EG_FIELD_QAQC_BBS) {
         "Field QA/QC & BBS".to_string()

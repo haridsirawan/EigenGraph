@@ -2849,3 +2849,162 @@ pub fn build_rtc_eigenflow_mesh(input: &EigenFlowGpuInput<'_>) -> GpuMeshPayload
     }
 }
 
+/// GPU input payload for Phase 84 Extreme Events (Blast Shockwave Rings & Structural Fire Plumes, `material_kind = 13.0`).
+pub struct ExtremeEventsGpuInput<'a> {
+    pub report: &'a crate::core::extreme_events::ExtremeEventsReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU Extreme Events detonation shockwave rings, blast standoff/damage sleeves,
+/// incandescent fire compartment volume, and thermally weakened column/beam halos (`material_kind = 13.0`, 0% raster).
+pub fn build_rtc_extreme_events_mesh(input: &ExtremeEventsGpuInput<'_>) -> GpuMeshPayload {
+    use crate::core::extreme_events::ExtremeEventMode;
+
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_enu = |p: [f64; 3]| -> [f64; 3] {
+        [p[0] * cr - p[1] * sr, p[0] * sr + p[1] * cr, p[2]]
+    };
+
+    let rep = input.report;
+    let show_blast = matches!(rep.config.mode, ExtremeEventMode::Blast | ExtremeEventMode::Combined);
+    let show_fire = matches!(
+        rep.config.mode,
+        ExtremeEventMode::StructuralFire | ExtremeEventMode::Combined
+    );
+
+    let mut verts = Vec::with_capacity(512);
+    let mut idxs = Vec::with_capacity(1024);
+
+    if show_blast {
+        let charge = rot_enu(rep.charge_pos_enu_m);
+        let face = rot_enu(rep.target_face_enu_m);
+        // Detonation beacon + standoff vector
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [charge[0] as f32, charge[1] as f32, charge[2] as f32],
+            0.85,
+            [1.0, 0.28, 0.14, 0.96],
+            1.0,
+            13.0,
+        );
+        push_animated_flow_strut_enu(
+            &mut verts,
+            &mut idxs,
+            charge,
+            face,
+            0.22,
+            0.22,
+            [1.0, 0.62, 0.16, 0.88],
+            0.85,
+            13.0,
+        );
+
+        // 3 Concentric Kingery-Bulmash Shockwave Rings on ground plane (z = 0.22 m)
+        let r_base = rep.config.standoff_distance_m.clamp(3.0, 60.0);
+        for (ring_idx, (frac, alpha)) in [(0.38_f64, 0.84_f32), (0.72, 0.62), (1.06, 0.42)]
+            .iter()
+            .enumerate()
+        {
+            let rad_m = (r_base * frac).max(1.8);
+            let segs = 16usize;
+            for s in 0..segs {
+                let a0 = (s as f64 / segs as f64) * std::f64::consts::TAU;
+                let a1 = ((s + 1) as f64 / segs as f64) * std::f64::consts::TAU;
+                let q0 = [charge[0] + rad_m * a0.cos(), charge[1] + rad_m * a0.sin(), 0.22];
+                let q1 = [charge[0] + rad_m * a1.cos(), charge[1] + rad_m * a1.sin(), 0.22];
+                let sev = (1.0 - (ring_idx as f32) * 0.25).clamp(0.25, 1.0);
+                push_animated_flow_strut_enu(
+                    &mut verts,
+                    &mut idxs,
+                    q0,
+                    q1,
+                    0.26,
+                    0.20,
+                    [1.0, 0.36 + (ring_idx as f32) * 0.16, 0.12, *alpha],
+                    sev,
+                    13.0,
+                );
+            }
+        }
+
+        // Blast-damaged perimeter members color-coded by UFC Damage Level
+        for m in &rep.blast_member_impacts {
+            let (cr_u, cg_u, cb_u) = m.damage_level.color_rgb();
+            let col = [
+                cr_u as f32 / 255.0,
+                cg_u as f32 / 255.0,
+                cb_u as f32 / 255.0,
+                0.92,
+            ];
+            let sev = (1.0 - m.residual_stiffness_lambda as f32).clamp(0.15, 1.0);
+            push_animated_flow_strut_enu(
+                &mut verts,
+                &mut idxs,
+                rot_enu(m.p0_enu_m),
+                rot_enu(m.p1_enu_m),
+                0.38,
+                0.38,
+                col,
+                sev,
+                13.0,
+            );
+        }
+    }
+
+    if show_fire {
+        let fc = &rep.fire_compartment;
+        let heat_norm = ((fc.gas_temp_c - 100.0) / 900.0).clamp(0.15, 1.0) as f32;
+        let fire_col = [
+            1.0_f32,
+            (0.68 - 0.38 * heat_norm).clamp(0.20, 0.72),
+            0.10,
+            0.28 + 0.16 * heat_norm,
+        ];
+        let hw = fc.width_m * 0.5;
+        let hd = fc.depth_m * 0.5;
+        let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+        let fp = [
+            rot_xy(fc.center_x_m - hw, fc.center_y_m - hd),
+            rot_xy(fc.center_x_m + hw, fc.center_y_m - hd),
+            rot_xy(fc.center_x_m + hw, fc.center_y_m + hd),
+            rot_xy(fc.center_x_m - hw, fc.center_y_m + hd),
+        ];
+        push_box_prism_enu(
+            &mut verts,
+            &mut idxs,
+            &fp,
+            (fc.z_bottom_m + 0.15) as f32,
+            (fc.z_top_m - 0.15).max(fc.z_bottom_m + 1.0) as f32,
+            fire_col,
+            13.0,
+        );
+
+        for &(p0, p1, sev) in &rep.exposed_fire_members {
+            let sev_f = sev as f32;
+            let m_col = [1.0, (0.72 - 0.45 * sev_f).clamp(0.18, 0.75), 0.12, 0.90];
+            push_animated_flow_strut_enu(
+                &mut verts,
+                &mut idxs,
+                rot_enu(p0),
+                rot_enu(p1),
+                0.34,
+                0.34,
+                m_col,
+                sev_f,
+                13.0,
+            );
+        }
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

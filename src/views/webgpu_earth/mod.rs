@@ -492,6 +492,14 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 12.5) {
+        // Phase 84: Pure Analytical WGSL Extreme Events Blast Wavefront & Fire Thermal Plume (0% raster)
+        let wave_ring = 0.70 + 0.38 * smoothstep(0.15, 0.95, sin(phase * 1.1 - u_time * 6.0));
+        let heat = clamp(height_m, 0.0, 1.0);
+        let flicker = 0.84 + 0.24 * sin(u_time * (3.5 + heat * 6.0) + f_in.world_pos.x * 0.7 + f_in.world_pos.z * 1.1);
+        let ndotv = max(abs(dot(n, v)), 0.10);
+        let rim = pow(1.0 - ndotv, 1.5) * 0.52;
+        col = f_in.color.rgb * (wave_ring * 0.62 + flicker * 0.58 + rim);
     } else if (kind >= 11.5) {
         // Phase 83: Pure Analytical WGSL EigenFlow Woodbury P1->P2 Load-Path & Pushover Hinges (0% raster)
         let flow_wave = 0.72 + 0.36 * smoothstep(0.25, 0.95, sin(phase * 1.4 - u_time * 5.2));
@@ -702,6 +710,7 @@ pub struct WebGpuEarthResources {
     risk_heatmap: GpuMeshSlot,
     field_qaqc: GpuMeshSlot,
     eigenflow: GpuMeshSlot,
+    extreme_events: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
 }
 
@@ -915,6 +924,7 @@ impl WebGpuEarthResources {
             risk_heatmap: GpuMeshSlot::default(),
             field_qaqc: GpuMeshSlot::default(),
             eigenflow: GpuMeshSlot::default(),
+            extreme_events: GpuMeshSlot::default(),
             hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
@@ -1037,6 +1047,7 @@ impl WebGpuEarthResources {
             || self.risk_heatmap.index_count > 0
             || self.field_qaqc.index_count > 0
             || self.eigenflow.index_count > 0
+            || self.extreme_events.index_count > 0
             || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1077,6 +1088,7 @@ impl WebGpuEarthResources {
             self.risk_heatmap.draw(&mut pass);
             self.field_qaqc.draw(&mut pass);
             self.eigenflow.draw(&mut pass);
+            self.extreme_events.draw(&mut pass);
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
             self.hazard_compute.draw(&mut pass);
@@ -1103,6 +1115,7 @@ struct WebGpuEarthPaintCallback {
     pending_risk_heatmap: Option<(u64, GpuMeshPayload)>,
     pending_field_qaqc: Option<(u64, GpuMeshPayload)>,
     pending_eigenflow: Option<(u64, GpuMeshPayload)>,
+    pending_extreme_events: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
 }
 
@@ -1188,6 +1201,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
             if res.eigenflow.revision_uploaded != ef_in.0 {
                 res.eigenflow
                     .upload(device, queue, "eigenflow_mesh", ef_in.0, &ef_in.1);
+            }
+        }
+        if let Some(ref ex_in) = self.pending_extreme_events {
+            if res.extreme_events.revision_uploaded != ex_in.0 {
+                res.extreme_events
+                    .upload(device, queue, "extreme_events_mesh", ex_in.0, &ex_in.1);
             }
         }
         if let Some(ref h_cmp) = self.pending_hazard_compute {
@@ -1278,6 +1297,7 @@ pub struct WebGpuEarthState {
     cached_risk_heatmap_hash: u64,
     cached_field_qaqc_hash: u64,
     cached_eigenflow_hash: u64,
+    cached_extreme_events_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1291,6 +1311,7 @@ pub struct WebGpuEarthState {
     pub last_risk_heatmap_tris: usize,
     pub last_field_qaqc_tris: usize,
     pub last_eigenflow_tris: usize,
+    pub last_extreme_events_tris: usize,
     pub last_compute_particles: u32,
     #[cfg(not(target_arch = "wasm32"))]
     wgpu_device: Option<wgpu::Device>,
@@ -1563,6 +1584,7 @@ impl WebGpuEarthState {
         risk_heatmap_input: Option<DistrictRiskHeatmapGpuInput<'_>>,
         field_qaqc_input: Option<FieldQaqcGpuInput<'_>>,
         eigenflow_input: Option<EigenFlowGpuInput<'_>>,
+        extreme_events_input: Option<ExtremeEventsGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
@@ -1934,6 +1956,38 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_extreme_events = if render_site_pass {
+            if let Some(ref ex_in) = extreme_events_input {
+                let c = &ex_in.report.config;
+                let rev: u64 = ((c.mode as u64) << 4)
+                    ^ ((c.explosive_type as u64) << 8)
+                    ^ c.explosive_mass_kg.to_bits()
+                    ^ c.standoff_distance_m.to_bits().rotate_left(7)
+                    ^ c.exposure_minutes.to_bits().rotate_left(13)
+                    ^ ((c.fire_story_idx as u64) << 28)
+                    ^ ((c.fire_curve as u64) << 36)
+                    ^ ((c.protection_kind as u64) << 40)
+                    ^ ((ex_in.heading_deg.round() as u64) << 46)
+                    ^ u64::from(ex_in.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                if rev != self.cached_extreme_events_hash {
+                    let mesh = build_rtc_extreme_events_mesh(ex_in);
+                    self.last_extreme_events_tris = mesh.indices.len() / 3;
+                    self.cached_extreme_events_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_extreme_events_hash != 0 {
+                self.cached_extreme_events_hash = 0;
+                self.last_extreme_events_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let pending_hazard_compute = if render_site_pass {
             if let Some(hc) = hazard_compute_input {
                 if hc.enabled {
@@ -1972,6 +2026,7 @@ impl WebGpuEarthState {
                 pending_risk_heatmap,
                 pending_field_qaqc,
                 pending_eigenflow,
+                pending_extreme_events,
                 pending_hazard_compute,
             },
         ));
@@ -1995,6 +2050,7 @@ impl WebGpuEarthState {
         let risk_heatmap_animated = risk_heatmap_input.as_ref().is_some_and(|r| r.visible);
         let field_qaqc_animated = field_qaqc_input.as_ref().is_some_and(|f| f.visible);
         let eigenflow_animated = eigenflow_input.as_ref().is_some_and(|e| e.visible);
+        let extreme_events_animated = extreme_events_input.as_ref().is_some_and(|x| x.visible);
         let frame_ms = if hazard_animated
             || compute_animated
             || subsurface_animated
@@ -2004,6 +2060,7 @@ impl WebGpuEarthState {
             || risk_heatmap_animated
             || field_qaqc_animated
             || eigenflow_animated
+            || extreme_events_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

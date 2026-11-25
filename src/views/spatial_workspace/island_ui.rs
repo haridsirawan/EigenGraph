@@ -2837,6 +2837,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.extreme_events_drawer_open {
+                        self.render_extreme_events_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -5356,6 +5368,20 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_eigenflow_drawer(0);
                                                         actions.run_eigenflow_studio = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::AlertTriangle),
+                                                        "Blast / Fire",
+                                                        self.extreme_events_drawer_open,
+                                                        theme.accent_orange,
+                                                        "Open Extreme Events Studio (Blast UFC 3-340-02 & Fire ISO 834 + Sheet S-105)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_extreme_events_drawer(0);
+                                                        actions.run_extreme_events = true;
                                                     }
                                                 },
                                             );

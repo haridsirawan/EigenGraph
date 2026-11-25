@@ -7,6 +7,19 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [v0.8.4] - 2026-11-25 — Extreme Events Studio: 3D WebGPU Blast (`UFC 3-340-02`) & Structural Fire (`ISO 834 / Eurocode`), Closed-Loop `EigenFlow` Coupling & Sheet `S-105`
+
+### Added & Changed
+- **Extreme Events Core Engine (`BlastEngine` & `FireEngine` Coupled to BIM + EigenFlow) (`src/core/extreme_events.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_extreme_events`](src/core/extreme_events.rs) coupling live BIM structural members to UFC 3-340-02 / Kingery–Bulmash 3D standoff blast scaling (`TNT`/`ANFO`/`C-4`, `SurfaceBurst`/`FreeAirBurst`, SDOF ductility & `UfcDamageLevel`) and ISO 834 / ASTM E119 / Eurocode Hydrocarbon thermal compartment exposure (`0–180 min`, `Unprotected`/`SFRM`/`Intumescent`, $T_g(t)$, $T_m(t)$, $k_E(T)$, $k_y(T)$).
+  - Automatically derives residual stiffness retention $\lambda$ from blast damage and thermal softening $k_E(T)$ for closed-loop **EigenFlow** Woodbury (`P1 -> P2`) progressive collapse screening (`UFC 4-023-03`), persisted in `.eigen.json` (`UnifiedWorkspaceArchive::extreme_events_config`) and exported non-destructively via `IfcxStage::compose_with_extreme_events_overlay` (`eigengraph::hazard::extreme_events`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Shockwave Rings & Thermal Plume Renderer + Sheet `S-105` (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added [`build_rtc_extreme_events_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`ExtremeEventsGpuInput`, `material_kind = 13.0`, analytical WGSL `kind >= 12.5` expanding shockwave pulse & thermal flicker, 0% raster), dedicated `extreme_events` GPU slot inside `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_extreme_events_fallback`), and archival A3 landscape Sheet `S-105` Pure-Vector Annex SVG (`build_extreme_events_annex_svg`, 0 `<image>` tags).
+- **Width-First Dynamic Island `Extreme Events (Blast & Fire)` Studio, Commands & About EigenGraph (`src/views/spatial_workspace/`, `src/views/settings.rs`, `src/app.rs`)**:
+  - Added the 2-tab width-first **`Extreme Events (Blast & Fire)`** Dynamic Island drawer (`Blast UFC 3-340-02` with $P(t)/y(t)$ chart + 1-click **"Send P1 to EigenFlow Studio"** & `Structural Fire ISO 834` with story selector, `0–180 min` Play/Pause scrubber, $T_g/T_m/k_E$ curves + **"Check Thermal EigenFlow"**), `/extreme`, `/blast`, `/fire`, `/fire-story`, `/extreme-3d`, `/extreme-ifcx`, `/extreme-svg` slash commands, `[[RUN_BLAST:...]]` / `[[RUN_FIRE:...]]` / `[[TOGGLE_EXTREME_3D]]` / `[[EXPORT_EXTREME_ANNEX]]` Gemini directives, and updated `Settings -> About EigenGraph` (`v0.8.4 • LATEST`).
+
+---
+
 ## [v0.8.3] - 2026-11-24 — EigenFlow Non-Linear Studio, 3D WebGPU Woodbury Load-Path (`P1 -> P2`), Pushover ADRS & Sheet `S-104`
 
 ### Added & Changed

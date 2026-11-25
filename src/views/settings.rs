@@ -719,10 +719,16 @@ impl SettingsView {
             ui.separator();
             ui.add_space(6.0);
 
-            let releases: [(&str, bool, &str, &str); 14] = [
+            let releases: [(&str, bool, &str, &str); 15] = [
+                (
+                    "v0.8.4",
+                    true,
+                    "Extreme Events Studio — Blast (UFC 3-340-02) & Structural Fire (ISO 834/EC) + Sheet S-105",
+                    "Couples physical BIM geometry to Kingery-Bulmash blast wave physics (TNT/ANFO/C-4, Surface vs. FreeAir bursts, SDOF response, UFC B1-B5 damage levels) and ISO 834 / ASTM E119 / Eurocode HC compartment fires (0-180 min exposure, Bare/SFRM/Intumescent protection, kE/ky stiffness-yield retention), with 3D Pure WebGPU WGSL shockwave rings & thermal plumes (material_kind 13.0), closed-loop P1->P2 EigenFlow progressive collapse handoff, eigengraph::hazard::extreme_events IFCX overlay, A3 Sheet S-105 Pure-Vector Annex SVG, and the 2-tab width-first Extreme Events Dynamic Island drawer.",
+                ),
                 (
                     "v0.8.3",
-                    true,
+                    false,
                     "EigenFlow Non-Linear Studio — 3D WebGPU Woodbury P1->P2, Pushover ADRS & Sheet S-104",
                     "Promotes Branch 2 EigenFlow to a first-class interactive studio coupled to live BIM geometry and site seismic spectra: real node-adjacent 1-hop/2-hop topological Woodbury Rank-1 load-path redistribution (P1 -> P2, stiffness retention lambda, leverage h_e, m_s, RRR, ductility mu), P-Delta Pushover capacity curves & ATC-40/ASCE 41-17 ADRS Capacity Spectrum intersection, 3D Pure WebGPU WGSL directional flow conduits & Pushover plastic hinge octahedra (material_kind 12.0), eigengraph::eigenflow IFCX overlays, A3 Sheet S-104 Pure-Vector Annex SVG, and the 2-tab width-first EigenFlow Studio Dynamic Island drawer.",
                 ),

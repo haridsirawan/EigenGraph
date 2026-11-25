@@ -137,6 +137,9 @@ pub struct SpatialWorkspaceState {
     // Phase 83: EigenFlow Non-Linear Studio Drawer (Woodbury P1->P2 & Pushover ADRS)
     pub eigenflow_drawer_open: bool,
     pub eigenflow_drawer_tab: usize,
+    // Phase 84: Extreme Events Studio Drawer (Blast UFC 3-340-02 & Fire ISO 834/EC)
+    pub extreme_events_drawer_open: bool,
+    pub extreme_events_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -241,6 +244,8 @@ impl Default for SpatialWorkspaceState {
             field_qaqc_drawer_tab: 0,
             eigenflow_drawer_open: false,
             eigenflow_drawer_tab: 0,
+            extreme_events_drawer_open: false,
+            extreme_events_drawer_tab: 0,
         }
     }
 }
@@ -270,6 +275,7 @@ impl SpatialWorkspaceState {
             || self.collab_drawer_open
             || self.field_qaqc_drawer_open
             || self.eigenflow_drawer_open
+            || self.extreme_events_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -293,6 +299,7 @@ impl SpatialWorkspaceState {
         self.collab_drawer_open = false;
         self.field_qaqc_drawer_open = false;
         self.eigenflow_drawer_open = false;
+        self.extreme_events_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -367,6 +374,11 @@ impl SpatialWorkspaceState {
         } else {
             self.eigenflow_drawer_open = !self.eigenflow_drawer_open;
         }
+        if drawer != "extreme_events" {
+            self.extreme_events_drawer_open = false;
+        } else {
+            self.extreme_events_drawer_open = !self.extreme_events_drawer_open;
+        }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
@@ -409,6 +421,13 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.eigenflow_drawer_tab = tab.min(1);
         self.eigenflow_drawer_open = true;
+    }
+
+    /// Idempotently opens the Phase 84 Extreme Events Studio drawer (`0` = Blast `UFC 3-340-02`, `1` = Fire `ISO 834/EC`).
+    pub fn open_extreme_events_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.extreme_events_drawer_tab = tab.min(1);
+        self.extreme_events_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

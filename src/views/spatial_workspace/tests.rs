@@ -4811,3 +4811,143 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn phase84_extreme_events_drawer_responsive_and_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = crate::views::build::BuildView::default();
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_blast = spatial.execute_spatial_input(
+            "/blast 400 9",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_blast.run_extreme_events);
+        assert_eq!(canvas.extreme_events_config.explosive_mass_kg, 400.0);
+        assert_eq!(canvas.extreme_events_config.standoff_distance_m, 9.0);
+        assert!(spatial.extreme_events_drawer_open);
+        assert_eq!(spatial.extreme_events_drawer_tab, 0);
+
+        let act_fire = spatial.execute_spatial_input(
+            "/fire 120",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_fire.run_extreme_events);
+        assert_eq!(canvas.extreme_events_config.exposure_minutes, 120.0);
+        assert_eq!(spatial.extreme_events_drawer_tab, 1);
+
+        let act_story = spatial.execute_spatial_input(
+            "/fire-story 2",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_story.run_extreme_events);
+        assert_eq!(canvas.extreme_events_config.fire_story_idx, 1);
+
+        assert!(spatial
+            .execute_spatial_input(
+                "/extreme-3d",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .toggle_extreme_events_3d);
+        assert!(spatial
+            .execute_spatial_input(
+                "/extreme-ifcx",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_extreme_events_ifcx);
+        assert!(spatial
+            .execute_spatial_input(
+                "/extreme-svg",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_extreme_events_svg);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Hazard audit [[RUN_BLAST:500kg,8m]] [[RUN_FIRE:120min,L2]] [[TOGGLE_EXTREME_3D]] [[EXPORT_EXTREME_ANNEX]]",
+        );
+        assert_eq!(clean, "Hazard audit");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunBlast {
+                    mass_kg: 500.0,
+                    standoff_m: 8.0,
+                },
+                GeminiDirective::RunFire {
+                    minutes: 120.0,
+                    story: Some(1),
+                },
+                GeminiDirective::ToggleExtreme3d,
+                GeminiDirective::ExportExtremeAnnex,
+            ]
+        );
+
+        let _ = canvas.run_extreme_events_audit(&build.bim_bus.project);
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_extreme_events_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 84 Extreme Events Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }
