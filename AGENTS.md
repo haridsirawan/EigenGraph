@@ -44,23 +44,31 @@ Keep the 15 engineering workflow modules accessible in navigation (sidebar/drawe
 
 ---
 
-## ⚡ Continuous Deployment & Verification Protocol
-- Validate UI modifications, `cargo test --lib`, `cargo check --bin eigengraph --target wasm32-unknown-unknown`, and `trunk build` before publishing.
-- **Automatic Git Commit & Push Rule**: Upon completing and verifying any implementation or documentation task, agents **must automatically stage, commit (with a concise professional English commit message), and push changes to `origin main`** without waiting for a separate user prompt.
-- Every push to `main` automatically deploys `./dist` to Cloudflare Workers (`eigengraph.net` and `www.eigengraph.net`).
+## ⚡ Continuous Deployment, Release Cadence & Local Cleanup Protocol
+- **10-Update Patch Release & Push Rule**:
+  - Patch versions advance by `+0.0.1` once every **10 completed updates** (starting after `v0.8.4`, so Updates `1/10` through `10/10` accumulate toward `v0.8.5`, then the next 10 toward `v0.8.6`, and so on):
+    1. **Intermediate Updates (`1/10` – `9/10`)**:
+       - Keep the current patch version in `Cargo.toml` unchanged and log each milestone in `docs/CHANGELOG.md` under `## [Unreleased — Next: vX.Y.Z (k/10)]`.
+       - Verify with `cargo test --lib` and `cargo check --bin eigengraph --target wasm32-unknown-unknown`.
+       - Stage and **commit locally only** (`git commit`); **do NOT push to `origin main`** until the 10th update is reached (unless explicitly requested by the user).
+    2. **Milestone Release Update (`10/10`)**:
+       - Bump the patch version by `+0.0.1` in `Cargo.toml`, `Settings -> About EigenGraph`, `docs/CHANGELOG.md`, and `docs/IFCX Earth.md`.
+       - Run full verification (`cargo test --lib`, `cargo check --bin eigengraph --target wasm32-unknown-unknown`, and `cargo build --bin eigengraph --target wasm32-unknown-unknown --release` or `trunk build`).
+       - **Automatically stage, commit, and push all changes to `origin main`** so `./dist` deploys to Cloudflare Workers (`eigengraph.net` and `www.eigengraph.net`).
+       - Clean up local build cache (`cargo clean`) and stray OS metadata files (`find . -name ".DS_Store" -not -path "./.git/*" -delete`) after pushing to keep local storage lean.
 
 ---
 
 ## 🔢 STRICT SEMANTIC VERSIONING PROGRESSION RULE
 
-To maintain predictable engineering cadence and transparent release lineage, the project follows a **mandatory three-tier numerical progression and 1-to-1 Phase mapping rule**:
+To maintain predictable engineering cadence and transparent release lineage, the project follows a **mandatory three-tier numerical progression rule** (at **10 updates per patch version** starting from `v0.8.4`):
 
-1. **Patch Level Progression (Initial Releases):**
-   - Versioning begins at initial baseline `v0.0.1` and advances one patch digit at a time (`v0.0.1` → `v0.0.2` → ... → `v0.0.9`).
+1. **Patch Level Progression:**
+   - Initial phases progressed `v0.0.1` → ... → `v0.8.4`; from `v0.8.4` onward, every **10 completed updates** advance the patch digit by one (`v0.8.4` → `v0.8.5` → ... → `v0.8.9`).
    - Skipping intermediate patch versions is prohibited.
 
-2. **Minor Level Progression (After v0.0.9):**
-   - Advances to `v0.1.0` → `v0.1.1` → ... → `v0.2.5` (Phase 25) → ... → `v0.9.9`.
+2. **Minor Level Progression (After vX.Y.9):**
+   - Advances sequentially (`v0.8.9` → `v0.9.0` → ... → `v0.9.9`).
 
 3. **Major Level Progression (Production Milestone v1.0.0):**
    - Only after `v0.9.9` completes does the version advance to `v1.0.0`.
