@@ -45,6 +45,7 @@ pub mod wind_studio;
 pub mod shear_wall_studio;
 pub mod connection_studio;
 pub mod prestress_studio;
+pub mod composite_studio;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -225,12 +226,12 @@ pub use lifecycle_ops::{
     VariationOrderRow,
 };
 pub use vector_dossier::{
-    build_eigenflow_nonlinear_annex_svg, build_extreme_events_annex_svg,
-    build_fabrication_bbs_shop_svg, build_permit_compliance_annex_svg,
-    build_prestress_tendon_annex_svg, build_pure_vector_engineering_dossier_svg,
-    build_seismic_isolation_annex_svg, build_shear_wall_annex_svg,
-    build_steel_connection_annex_svg, build_wind_aero_annex_svg, VectorDossierExport,
-    VectorDossierInput,
+    build_composite_deck_annex_svg, build_eigenflow_nonlinear_annex_svg,
+    build_extreme_events_annex_svg, build_fabrication_bbs_shop_svg,
+    build_permit_compliance_annex_svg, build_prestress_tendon_annex_svg,
+    build_pure_vector_engineering_dossier_svg, build_seismic_isolation_annex_svg,
+    build_shear_wall_annex_svg, build_steel_connection_annex_svg, build_wind_aero_annex_svg,
+    VectorDossierExport, VectorDossierInput,
 };
 pub use portfolio_retrofit::{
     optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,
@@ -312,6 +313,10 @@ pub use connection_studio::{
 pub use prestress_studio::{
     evaluate_prestress_studio, AnchorageZone3D, PrestressIfcxOverlay, PrestressStudioConfig,
     PrestressStudioReport, TendonBay3D, NS_EG_PRESTRESS_TENDON,
+};
+pub use composite_studio::{
+    evaluate_composite_studio, CompositeBay3D, CompositeDeckIfcxOverlay, CompositeStudioConfig,
+    CompositeStudioReport, FloorVibrationDg11, ShearStudPin3D, NS_EG_COMPOSITE_DECK,
 };
 
 

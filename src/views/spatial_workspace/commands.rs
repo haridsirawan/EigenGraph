@@ -684,6 +684,32 @@ impl SpatialWorkspaceState {
                     self.open_prestress_drawer(0);
                     out.export_prestress_svg = true;
                 }
+                PlannedProposalAction::RunComposite {
+                    studs,
+                    orientation,
+                    unshored,
+                } => {
+                    if let Some(st) = studs {
+                        universal_canvas.composite_studio_config.studs_provided = *st;
+                    }
+                    if let Some(or) = orientation {
+                        universal_canvas.composite_studio_config.deck_orientation = *or;
+                    }
+                    if let Some(un) = unshored {
+                        universal_canvas.composite_studio_config.unshored = *un;
+                    }
+                    universal_canvas.composite_overlay_visible = true;
+                    self.open_composite_drawer(0);
+                    out.run_composite_studio = true;
+                }
+                PlannedProposalAction::ToggleComposite3d => {
+                    self.open_composite_drawer(0);
+                    out.toggle_composite_3d = true;
+                }
+                PlannedProposalAction::ExportCompositeAnnex => {
+                    self.open_composite_drawer(0);
+                    out.export_composite_svg = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -1031,6 +1057,21 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportPrestressAnnex => {
                                 PlannedProposalAction::ExportPrestressAnnex
                             }
+                            GeminiDirective::RunComposite {
+                                studs,
+                                orientation,
+                                unshored,
+                            } => PlannedProposalAction::RunComposite {
+                                studs: *studs,
+                                orientation: *orientation,
+                                unshored: *unshored,
+                            },
+                            GeminiDirective::ToggleComposite3d => {
+                                PlannedProposalAction::ToggleComposite3d
+                            }
+                            GeminiDirective::ExportCompositeAnnex => {
+                                PlannedProposalAction::ExportCompositeAnnex
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1183,6 +1224,15 @@ impl SpatialWorkspaceState {
                             GeminiDirective::TogglePrestress3d => "TogglePrestress3d".to_string(),
                             GeminiDirective::ExportPrestressAnnex => {
                                 "ExportPrestressAnnex(S-110)".to_string()
+                            }
+                            GeminiDirective::RunComposite {
+                                studs,
+                                orientation,
+                                unshored,
+                            } => format!("RunComposite({studs:?}/{orientation:?}/{unshored:?})"),
+                            GeminiDirective::ToggleComposite3d => "ToggleComposite3d".to_string(),
+                            GeminiDirective::ExportCompositeAnnex => {
+                                "ExportCompositeAnnex(S-111)".to_string()
                             }
                             GeminiDirective::InjectShmFault {
                                 scenario,
@@ -3063,6 +3113,35 @@ impl SpatialWorkspaceState {
                 }
                 "/prestress-svg" => {
                     actions.export_prestress_svg = true;
+                }
+                "/composite" | "/studs" | "/floor-vib" => {
+                    let lo = arg.to_ascii_lowercase();
+                    if lo.contains("para") {
+                        universal_canvas.composite_studio_config.deck_orientation =
+                            crate::core::composite::DeckOrientation::Parallel;
+                    } else if lo.contains("perp") {
+                        universal_canvas.composite_studio_config.deck_orientation =
+                            crate::core::composite::DeckOrientation::Perpendicular;
+                    }
+                    if let Some(st) = arg
+                        .split_whitespace()
+                        .filter_map(|t| t.parse::<usize>().ok())
+                        .next()
+                    {
+                        universal_canvas.composite_studio_config.studs_provided = st.clamp(12, 160);
+                    }
+                    self.open_composite_drawer(if cmd == "/floor-vib" { 1 } else { 0 });
+                    actions.run_composite_studio = true;
+                }
+                "/composite-3d" => {
+                    self.open_composite_drawer(0);
+                    actions.toggle_composite_3d = true;
+                }
+                "/composite-ifcx" => {
+                    actions.export_composite_ifcx = true;
+                }
+                "/composite-svg" => {
+                    actions.export_composite_svg = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

@@ -286,6 +286,8 @@ pub struct UnifiedWorkspaceArchive {
     pub connection_studio_config: crate::core::connection_studio::ConnectionStudioConfig,
     #[serde(default)]
     pub prestress_studio_config: crate::core::prestress_studio::PrestressStudioConfig,
+    #[serde(default)]
+    pub composite_studio_config: crate::core::composite_studio::CompositeStudioConfig,
     pub sha256_seal: String,
 }
 

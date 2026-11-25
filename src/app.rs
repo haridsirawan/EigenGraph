@@ -3896,6 +3896,84 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if hud_actions.run_composite_studio {
+            let rep = self
+                .universal_canvas
+                .run_composite_studio(&self.build_view.bim_bus.project);
+            self.spatial_workspace.push_trace(rep.summary_verdict, true);
+        }
+        if hud_actions.toggle_composite_3d {
+            self.universal_canvas.composite_overlay_visible =
+                !self.universal_canvas.composite_overlay_visible;
+            if self.universal_canvas.composite_overlay_visible {
+                let rep = self
+                    .universal_canvas
+                    .run_composite_studio(&self.build_view.bim_bus.project);
+                self.spatial_workspace.push_trace(
+                    format!("3D Composite Deck ON — {}", rep.summary_verdict),
+                    true,
+                );
+            } else {
+                self.spatial_workspace
+                    .push_trace("3D Composite Deck OFF", true);
+            }
+        }
+        if hud_actions.export_composite_ifcx {
+            let rep = self
+                .universal_canvas
+                .run_composite_studio(&self.build_view.bim_bus.project);
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_composite_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_composite_deck.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported Composite Deck IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.export_composite_svg {
+            let rep = self
+                .universal_canvas
+                .run_composite_studio(&self.build_view.bim_bus.project);
+            let cp_hash = self
+                .universal_canvas
+                .collab_state
+                .active_checkpoint()
+                .map(|c| c.short_sha256());
+            let annex = crate::core::build_composite_deck_annex_svg(
+                &self.build_view.bim_bus.project.project_name,
+                &rep,
+                "S-111",
+                cp_hash.as_deref(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_sheet_S111_composite.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &annex.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(annex.sha256_seal);
+                    self.spatial_workspace.push_trace(annex.summary, true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {

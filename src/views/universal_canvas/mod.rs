@@ -204,6 +204,10 @@ pub struct UniversalCanvasState {
     pub prestress_overlay_visible: bool,
     pub prestress_studio_config: crate::core::prestress_studio::PrestressStudioConfig,
     pub last_prestress_report: Option<crate::core::prestress_studio::PrestressStudioReport>,
+    // Update v0.8.4.6 (6/10 -> v0.8.5): Composite Deck, Shear Studs & AISC DG11 Vibration
+    pub composite_overlay_visible: bool,
+    pub composite_studio_config: crate::core::composite_studio::CompositeStudioConfig,
+    pub last_composite_report: Option<crate::core::composite_studio::CompositeStudioReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -364,6 +368,9 @@ impl Default for UniversalCanvasState {
             prestress_overlay_visible: false,
             prestress_studio_config: crate::core::prestress_studio::PrestressStudioConfig::default(),
             last_prestress_report: None,
+            composite_overlay_visible: false,
+            composite_studio_config: crate::core::composite_studio::CompositeStudioConfig::default(),
+            last_composite_report: None,
         }
     }
 }
@@ -1056,6 +1063,21 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Composite Deck, Headed Shear Studs & AISC DG11 Vibration coupled to BIM & site.
+    pub fn run_composite_studio(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::composite_studio::CompositeStudioReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::composite_studio::evaluate_composite_studio(
+            bim_project,
+            Some(&site),
+            &self.composite_studio_config,
+        );
+        self.last_composite_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1389,6 +1411,7 @@ impl UniversalCanvasState {
             shear_wall_studio_config: self.shear_wall_studio_config.clone(),
             connection_studio_config: self.connection_studio_config.clone(),
             prestress_studio_config: self.prestress_studio_config.clone(),
+            composite_studio_config: self.composite_studio_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1521,6 +1544,8 @@ impl UniversalCanvasState {
         self.last_connection_report = None;
         self.prestress_studio_config = archive.prestress_studio_config;
         self.last_prestress_report = None;
+        self.composite_studio_config = archive.composite_studio_config;
+        self.last_composite_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2166,6 +2191,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let composite_gpu_input = if self.composite_overlay_visible {
+                self.last_composite_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::CompositeGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -2203,6 +2239,7 @@ impl UniversalCanvasState {
                 shear_wall_gpu_input,
                 connection_gpu_input,
                 prestress_gpu_input,
+                composite_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2281,6 +2318,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.prestress_overlay_visible {
                 self.paint_cpu_prestress_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.composite_overlay_visible {
+                self.paint_cpu_composite_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

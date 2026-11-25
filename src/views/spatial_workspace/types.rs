@@ -496,6 +496,14 @@ pub enum PlannedProposalAction {
     },
     TogglePrestress3d,
     ExportPrestressAnnex,
+    // Update v0.8.4.6 (6/10 -> v0.8.5): Composite Deck, Shear Studs & AISC DG11 Studio + Sheet S-111
+    RunComposite {
+        studs: Option<usize>,
+        orientation: Option<crate::core::composite::DeckOrientation>,
+        unshored: Option<bool>,
+    },
+    ToggleComposite3d,
+    ExportCompositeAnnex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -634,6 +642,14 @@ pub enum GeminiDirective {
     },
     TogglePrestress3d,
     ExportPrestressAnnex,
+    // Update v0.8.4.6 (6/10 -> v0.8.5): Composite Deck, Shear Studs & AISC DG11 Studio + Sheet S-111
+    RunComposite {
+        studs: Option<usize>,
+        orientation: Option<crate::core::composite::DeckOrientation>,
+        unshored: Option<bool>,
+    },
+    ToggleComposite3d,
+    ExportCompositeAnnex,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1082,6 +1098,33 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::TogglePrestress3d);
             } else if upper == "EXPORT_PRESTRESS_ANNEX" {
                 directives.push(GeminiDirective::ExportPrestressAnnex);
+            } else if upper == "RUN_COMPOSITE" || upper.starts_with("RUN_COMPOSITE:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let mut studs = None;
+                let mut orientation = None;
+                let mut unshored = None;
+                for tok in arg.split(':').map(str::trim).filter(|s| !s.is_empty()) {
+                    if tok.contains("PARA") {
+                        orientation = Some(crate::core::composite::DeckOrientation::Parallel);
+                    } else if tok.contains("PERP") {
+                        orientation = Some(crate::core::composite::DeckOrientation::Perpendicular);
+                    } else if tok == "SHORED" {
+                        unshored = Some(false);
+                    } else if tok == "UNSHORED" {
+                        unshored = Some(true);
+                    } else if let Ok(v) = tok.parse::<usize>() {
+                        studs = Some(v.clamp(12, 160));
+                    }
+                }
+                directives.push(GeminiDirective::RunComposite {
+                    studs,
+                    orientation,
+                    unshored,
+                });
+            } else if upper == "TOGGLE_COMPOSITE_3D" {
+                directives.push(GeminiDirective::ToggleComposite3d);
+            } else if upper == "EXPORT_COMPOSITE_ANNEX" {
+                directives.push(GeminiDirective::ExportCompositeAnnex);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -2156,6 +2199,42 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Printer,
     },
     SlashCommandSpec {
+        cmd: "/composite",
+        category: "Analysis",
+        description: "Open Composite Steel-Concrete Deck & AISC DG11 Vibration 3D Studio",
+        icon: AppIcon::Grid,
+    },
+    SlashCommandSpec {
+        cmd: "/studs",
+        category: "Analysis",
+        description: "Configure headed shear stud count & rib pattern (/studs 48 perpendicular)",
+        icon: AppIcon::Wrench,
+    },
+    SlashCommandSpec {
+        cmd: "/floor-vib",
+        category: "Analysis",
+        description: "Inspect AISC Design Guide 11 walking vibration & L/360 deflection audit",
+        icon: AppIcon::ChartLine,
+    },
+    SlashCommandSpec {
+        cmd: "/composite-3d",
+        category: "Analysis",
+        description: "Toggle 3D Pure WebGPU composite slab strips & headed shear stud pins",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/composite-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::analysis::composite_deck IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/composite-svg",
+        category: "Export",
+        description: "Export A3 Sheet S-111 Pure-Vector Composite Deck & DG11 Vibration Annex .svg",
+        icon: AppIcon::Printer,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -2308,6 +2387,11 @@ pub struct SpatialHudActions {
     pub toggle_prestress_3d: bool,
     pub export_prestress_ifcx: bool,
     pub export_prestress_svg: bool,
+    // Update v0.8.4.6 (6/10 -> v0.8.5): Composite Deck, Studs & AISC DG11 Studio
+    pub run_composite_studio: bool,
+    pub toggle_composite_3d: bool,
+    pub export_composite_ifcx: bool,
+    pub export_composite_svg: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -2739,5 +2823,9 @@ impl SpatialHudActions {
         self.toggle_prestress_3d |= other.toggle_prestress_3d;
         self.export_prestress_ifcx |= other.export_prestress_ifcx;
         self.export_prestress_svg |= other.export_prestress_svg;
+        self.run_composite_studio |= other.run_composite_studio;
+        self.toggle_composite_3d |= other.toggle_composite_3d;
+        self.export_composite_ifcx |= other.export_composite_ifcx;
+        self.export_composite_svg |= other.export_composite_svg;
     }
 }

@@ -4266,4 +4266,264 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.4.6` (`6/10` -> `v0.8.5`): Width-first Dynamic Island drawer for Composite Deck, Shear Studs & AISC DG11 Vibration Studio.
+    pub(super) fn render_composite_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::composite::DeckOrientation;
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Grid,
+                13.0,
+                theme.accent_blue,
+                "Composite Deck, Shear Studs & DG11 Vibration Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "Deck & Shear Studs"),
+                (1usize, "DG11 Vibration & Deflection"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.composite_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.composite_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Composite Deck Studio drawer",
+            )
+            .clicked()
+            {
+                self.composite_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for (or, lbl) in [
+                    (DeckOrientation::Perpendicular, "Perp Ribs"),
+                    (DeckOrientation::Parallel, "Parallel Ribs"),
+                ] {
+                    let active = universal_canvas.composite_studio_config.deck_orientation == or;
+                    if Self::glass_pill_button(ui, theme, None, lbl, active, theme.accent_blue, "Metal deck rib orientation").clicked() {
+                        universal_canvas.composite_studio_config.deck_orientation = or;
+                        actions.run_composite_studio = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    if universal_canvas.composite_studio_config.unshored { "Unshored" } else { "Shored" },
+                    universal_canvas.composite_studio_config.unshored,
+                    theme.accent_orange,
+                    "Toggle unshored vs shored wet concrete construction check",
+                )
+                .clicked()
+                {
+                    universal_canvas.composite_studio_config.unshored =
+                        !universal_canvas.composite_studio_config.unshored;
+                    actions.run_composite_studio = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Layers),
+                    if universal_canvas.composite_overlay_visible { "Deck 3D: ON" } else { "Deck 3D" },
+                    universal_canvas.composite_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU composite floor strips & shear stud pins",
+                )
+                .clicked()
+                {
+                    actions.toggle_composite_3d = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Document), ".ifcx", false, theme.accent_blue, "Export eigengraph::analysis::composite_deck IFCX").clicked() {
+                    actions.export_composite_ifcx = true;
+                }
+                if Self::glass_pill_button(ui, theme, Some(AppIcon::Printer), "Sheet S-111 .svg", false, theme.accent_green, "Export A3 Sheet S-111 Composite Deck Annex SVG").clicked() {
+                    actions.export_composite_svg = true;
+                }
+            });
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                let mut studs = universal_canvas.composite_studio_config.studs_provided as f64;
+                ui.label(RichText::new("Studs/Bay").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut studs, 12.0..=120.0).max_decimals(0)).changed() {
+                    universal_canvas.composite_studio_config.studs_provided = studs.round() as usize;
+                    actions.run_composite_studio = true;
+                }
+                let mut slab_h = universal_canvas.composite_studio_config.total_slab_h_mm;
+                ui.label(RichText::new("Slab h (mm)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut slab_h, 110.0..=240.0).max_decimals(0)).changed() {
+                    universal_canvas.composite_studio_config.total_slab_h_mm = slab_h;
+                    actions.run_composite_studio = true;
+                }
+                let mut beta = universal_canvas.composite_studio_config.floor_damping_beta * 100.0;
+                ui.label(RichText::new("Damping (%)").size(9.0).color(theme.text_secondary));
+                if ui.add(egui::Slider::new(&mut beta, 1.5..=6.0).max_decimals(1)).changed() {
+                    universal_canvas.composite_studio_config.floor_damping_beta = beta * 0.01;
+                    actions.run_composite_studio = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.composite_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(9, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    let Some(ref studio) = universal_canvas.last_composite_report else {
+                        ui.label(RichText::new("Evaluating Composite Deck Studio...").size(9.5).color(theme.text_muted));
+                        return;
+                    };
+                    let r = &studio.report;
+                    let v = &studio.vibration;
+                    if tab == 0 {
+                        if is_left {
+                            ui.label(RichText::new("Composite Cross-Section & PNA Location").size(9.8).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} | Action={:.0}% | Qn={:.1} kN | {}",
+                                    r.steel_beam_name,
+                                    r.degree_of_composite_action_pct,
+                                    r.stud_single_shear_capacity_qn_kn,
+                                    r.pna_location.label(),
+                                ))
+                                .size(8.6)
+                                .monospace()
+                                .color(if r.is_composite_action_adequate { theme.accent_blue } else { theme.accent_red }),
+                            );
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(inner_w, 70.0), egui::Sense::hover());
+                            let p = ui.painter_at(rect);
+                            p.rect_filled(rect, 5.0, Color32::from_rgba_unmultiplied(15, 23, 42, 42));
+                            p.rect_filled(
+                                Rect::from_min_size(egui::pos2(rect.left() + 18.0, rect.top() + 10.0), Vec2::new((rect.width() - 36.0).max(40.0), 18.0)),
+                                2.0,
+                                Color32::from_rgb(148, 163, 184),
+                            );
+                            p.rect_filled(
+                                Rect::from_min_size(egui::pos2(rect.center().x - 16.0, rect.top() + 28.0), Vec2::new(32.0, 32.0)),
+                                2.0,
+                                theme.accent_blue,
+                            );
+                        } else {
+                            ui.label(RichText::new("Flexure, Wet Concrete & Stud Quantity").size(9.8).strong().color(theme.text_primary));
+                            ui.label(
+                                RichText::new(format!(
+                                    "Mu={:.0}/{:.0} kNm (DCR={:.2}) | Const DCR={:.2}",
+                                    r.applied_factored_moment_mu_knm,
+                                    r.design_flexural_strength_phi_mn_knm,
+                                    r.flexure_dcr,
+                                    r.construction_stage_dcr,
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(if r.is_overall_compliant { theme.accent_green } else { theme.accent_red }),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} Studs/Bay ({} Total Studs) • Rg={:.2} Rp={:.2}",
+                                    r.total_studs_provided,
+                                    studio.total_studs_building,
+                                    r.rg_factor,
+                                    r.rp_factor,
+                                ))
+                                .size(8.6)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                        }
+                    } else if is_left {
+                        ui.label(RichText::new("AISC Design Guide 11 Walking Floor Vibration").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "fn = {:.2} Hz | Peak Accel = {:.3}% g (Limit {:.2}% g)",
+                                v.fundamental_freq_fn_hz,
+                                v.peak_accel_pct_g,
+                                v.tolerance_limit_pct_g,
+                            ))
+                            .size(8.8)
+                            .monospace()
+                            .color(if v.is_vibration_ok { theme.accent_green } else { theme.accent_red }),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Floor Damping beta={:.1}% • Status: {}",
+                                v.damping_ratio * 100.0,
+                                if v.is_vibration_ok { "DG11 COMFORT COMPLIANT" } else { "STIFFEN BAY / ADD DAMPING" }
+                            ))
+                            .size(8.5)
+                            .monospace()
+                            .color(theme.text_secondary),
+                        );
+                    } else {
+                        ui.label(RichText::new("Serviceability Deflections & Composite Ieff").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "LL Deflection: {:.2} / {:.2} mm (L/360) [{}]",
+                                r.live_load_deflection_delta_ll_mm,
+                                r.live_load_deflection_limit_mm,
+                                if r.is_deflection_ll_ok { "PASS" } else { "FAIL" },
+                            ))
+                            .size(8.6)
+                            .monospace()
+                            .color(if r.is_deflection_ll_ok { theme.accent_green } else { theme.accent_red }),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Creep Total: {:.2} / {:.2} mm (L/240) | Ieff={:.0} cm4",
+                                r.total_creep_deflection_delta_total_mm,
+                                r.total_deflection_limit_mm,
+                                r.lower_bound_effective_inertia_ieff_cm4,
+                            ))
+                            .size(8.5)
+                            .monospace()
+                            .color(if r.is_deflection_total_ok { theme.accent_green } else { theme.accent_red }),
+                        );
+                    }
+                });
+            });
+        });
+    }
 }

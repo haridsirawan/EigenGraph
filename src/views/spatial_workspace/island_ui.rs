@@ -2909,6 +2909,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.composite_drawer_open {
+                        self.render_composite_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -5512,6 +5524,20 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_prestress_drawer(0);
                                                         actions.run_prestress_studio = true;
+                                                    }
+                                                    if Self::glass_pill_button(
+                                                        ui,
+                                                        theme,
+                                                        Some(AppIcon::Grid),
+                                                        "Composite",
+                                                        self.composite_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Open Composite Deck, Shear Studs & AISC DG11 Vibration Studio (+ Sheet S-111)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_composite_drawer(0);
+                                                        actions.run_composite_studio = true;
                                                     }
                                                 },
                                             );

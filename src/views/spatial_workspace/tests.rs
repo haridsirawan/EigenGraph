@@ -5541,3 +5541,117 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn phase84_6_composite_studio_drawer_responsive_and_commands_and_directives() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = crate::views::build::BuildView::default();
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_st = spatial.execute_spatial_input(
+            "/studs 56 parallel",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_st.run_composite_studio);
+        assert_eq!(canvas.composite_studio_config.studs_provided, 56);
+        assert_eq!(
+            canvas.composite_studio_config.deck_orientation,
+            crate::core::composite::DeckOrientation::Parallel
+        );
+        assert!(spatial.composite_drawer_open);
+
+        assert!(spatial
+            .execute_spatial_input(
+                "/composite-3d",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .toggle_composite_3d);
+        assert!(spatial
+            .execute_spatial_input(
+                "/composite-ifcx",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_composite_ifcx);
+        assert!(spatial
+            .execute_spatial_input(
+                "/composite-svg",
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            )
+            .export_composite_svg);
+
+        let (clean, dirs) = parse_gemini_action_directives(
+            "Deck check [[RUN_COMPOSITE:48:PERPENDICULAR:UNSHORED]] [[TOGGLE_COMPOSITE_3D]] [[EXPORT_COMPOSITE_ANNEX]]",
+        );
+        assert_eq!(clean, "Deck check");
+        assert_eq!(
+            dirs,
+            vec![
+                GeminiDirective::RunComposite {
+                    studs: Some(48),
+                    orientation: Some(crate::core::composite::DeckOrientation::Perpendicular),
+                    unshored: Some(true),
+                },
+                GeminiDirective::ToggleComposite3d,
+                GeminiDirective::ExportCompositeAnnex,
+            ]
+        );
+
+        let _ = canvas.run_composite_studio(&build.bim_bus.project);
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx = egui::Context::default();
+        for tab_idx in [0_usize, 1] {
+            spatial.open_composite_drawer(tab_idx);
+            for win_w in [1600.0_f32, 1280.0, 768.0, 390.0] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 860.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Phase 84.6 Composite Dynamic Island (tab={tab_idx}) overflowed viewport {win_w}: {r:?}"
+                );
+            }
+        }
+    }

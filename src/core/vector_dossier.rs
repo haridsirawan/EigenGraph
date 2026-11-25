@@ -3764,6 +3764,290 @@ pub fn build_prestress_tendon_annex_svg(
     }
 }
 
+/// Pure-Vector Composite Steel-Concrete Deck, Shear Studs & AISC DG11 Floor Vibration Annex SVG (`S-111`).
+pub fn build_composite_deck_annex_svg(
+    project_name: &str,
+    studio: &crate::core::composite_studio::CompositeStudioReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(24_000);
+    let seal_token = "__EIGENGRAPH_COMPOSITE_S111_SHA256__";
+    let r = &studio.report;
+    let vib = &studio.vibration;
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH COMPOSITE DECK, SHEAR STUDS &amp; AISC DG11 VIBRATION ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • AISC 360-16 Ch. I / AISC DG11 / SNI 1729 • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: Composite Section Cross-Section & PNA Location (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. COMPOSITE DECK CROSS-SECTION, SHEAR STUDS &amp; PLASTIC NEUTRAL AXIS",
+        &format!(
+            "{} • beff={:.0} mm • {} Studs (Qn={:.1} kN, {:.0}% Composite)",
+            escape_xml(&r.steel_beam_name),
+            r.effective_slab_width_beff_mm,
+            r.total_studs_provided,
+            r.stud_single_shear_capacity_qn_kn,
+            r.degree_of_composite_action_pct,
+        ),
+    );
+    let sx0 = p1x + 120.0;
+    let sy0 = p1y + 92.0;
+    let sw = 520.0;
+    let slab_h = 84.0;
+    let beam_w = 180.0;
+    let beam_h = 180.0;
+    let beam_x = sx0 + (sw - beam_w) * 0.5;
+    let pna_y = sy0 + (r.pna_depth_from_slab_top_mm / (studio.config.total_slab_h_mm + r.steel_depth_d_mm).max(300.0)).clamp(0.05, 0.90) * (slab_h + beam_h);
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{sx0:.1}" y="{sy0:.1}" width="{sw:.1}" height="{slab_h:.1}" fill="#e2e8f0" stroke="#0f172a" stroke-width="2.0"/>
+<rect x="{beam_x:.1}" y="{:.1}" width="{beam_w:.1}" height="18" fill="#0284c7" stroke="#0f172a" stroke-width="1.5"/>
+<rect x="{:.1}" y="{:.1}" width="18" height="{:.1}" fill="#38bdf8" stroke="#0f172a" stroke-width="1.5"/>
+<rect x="{beam_x:.1}" y="{:.1}" width="{beam_w:.1}" height="18" fill="#0284c7" stroke="#0f172a" stroke-width="1.5"/>
+<rect x="{:.1}" y="{:.1}" width="14" height="46" fill="#f59e0b" stroke="#0f172a" stroke-width="1.4"/>
+<line x1="{:.1}" y1="{pna_y:.1}" x2="{:.1}" y2="{pna_y:.1}" stroke="#dc2626" stroke-width="2.2" stroke-dasharray="6,3"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-family="monospace" fill="#b91c1c">PNA ({}) @ {:.1} mm from slab top</text>"##,
+        sy0 + slab_h,
+        beam_x + beam_w * 0.5 - 9.0,
+        sy0 + slab_h + 18.0,
+        beam_h - 36.0,
+        sy0 + slab_h + beam_h - 18.0,
+        beam_x + beam_w * 0.5 - 7.0,
+        sy0 + slab_h - 46.0,
+        sx0 - 16.0,
+        sx0 + sw + 16.0,
+        sx0,
+        sy0 + slab_h + beam_h + 34.0,
+        escape_xml(r.pna_location.label()),
+        r.pna_depth_from_slab_top_mm,
+    );
+    let sec_cards = [
+        ("Deck Factors Rg / Rp & Stud Qn", format!("Rg={:.2} | Rp={:.2} | Qn={:.1} kN/stud | Total={:.0} kN", r.rg_factor, r.rp_factor, r.stud_single_shear_capacity_qn_kn, r.total_shear_transfer_v_kn)),
+        ("Lower-Bound Ieff & LL Deflection", format!("Ieff={:.0} cm4 | delta_LL={:.2} mm (Lim L/360 = {:.2} mm)", r.lower_bound_effective_inertia_ieff_cm4, r.live_load_deflection_delta_ll_mm, r.live_load_deflection_limit_mm)),
+    ];
+    for (idx, (lbl, val)) in sec_cards.iter().enumerate() {
+        let ry = p1y + 404.0 + (idx as f64) * 50.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="40" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.3" font-weight="bold" fill="#334155">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-weight="bold" font-family="monospace" text-anchor="end" fill="#0f172a">{val}</text>"##,
+            p1x + 16.0,
+            p1w - 32.0,
+            p1x + 26.0,
+            ry + 24.0,
+            p1x + p1w - 26.0,
+            ry + 24.0,
+        );
+    }
+
+    // Panel 2: AISC Design Guide 11 Floor Walking Vibration Curve & Seal (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. AISC DESIGN GUIDE 11 WALKING VIBRATION &amp; GOVERNANCE SEAL",
+        &format!(
+            "fn={:.2} Hz • Peak Accel={:.2}% g vs Limit {:.2}% g (beta={:.1}%) • {}",
+            vib.fundamental_freq_fn_hz,
+            vib.peak_accel_pct_g,
+            vib.tolerance_limit_pct_g,
+            vib.damping_ratio * 100.0,
+            if vib.is_vibration_ok { "COMFORT OK" } else { "STIFFEN BAY" }
+        ),
+    );
+    let gx0 = p2x + 76.0;
+    let gy0 = p2y + 56.0;
+    let gw = p2w - 116.0;
+    let gh = 220.0;
+    let lim_y = gy0 + gh - (0.50 / 1.20) * gh;
+    let pt_x = gx0 + ((vib.fundamental_freq_fn_hz.clamp(2.0, 14.0) - 2.0) / 12.0) * gw;
+    let pt_y = gy0 + gh - (vib.peak_accel_pct_g / 1.20).clamp(0.0, 1.0) * gh;
+    let pt_col = if vib.is_vibration_ok { "#059669" } else { "#dc2626" };
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{gx0:.1}" y="{gy0:.1}" width="{gw:.1}" height="{gh:.1}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>
+<line x1="{gx0:.1}" y1="{lim_y:.1}" x2="{:.1}" y2="{lim_y:.1}" stroke="#d97706" stroke-width="2.0" stroke-dasharray="6,3"/>
+<circle cx="{pt_x:.1}" cy="{pt_y:.1}" r="7.0" fill="{pt_col}" stroke="#ffffff" stroke-width="1.6"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#334155">Operating Floor Mode: fn={:.2} Hz, ap={:.3}% g (AISC DG11 Limit = 0.50% g)</text>"##,
+        gx0 + gw,
+        gx0 + 4.0,
+        gy0 + gh + 22.0,
+        vib.fundamental_freq_fn_hz,
+        vib.peak_accel_pct_g,
+    );
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="156" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#1e3a8a">ARCHITECTURAL &amp; GOVERNANCE SEAL</text>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#0369a1">Total Building Headed Studs: {} ({} stud/rib • {} Floor Bays)</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p2x + 16.0,
+        p2y + 344.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 368.0,
+        p2x + 26.0,
+        p2y + 394.0,
+        escape_xml(&truncate_clean(&studio.summary_verdict, 86)),
+        p2x + 26.0,
+        p2y + 422.0,
+        studio.total_studs_building,
+        studio.config.studs_per_rib,
+        studio.bays_3d.len(),
+        p2x + 26.0,
+        p2y + 450.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live Composite Deck & Studs Studio".to_string()),
+        ),
+        p2x + 26.0,
+        p2y + 478.0,
+    );
+
+    // Panel 3: AISC 360-16 Ch. I Limit States Verification Matrix (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. AISC 360-16 CHAPTER I / SNI 1729 COMPOSITE LIMIT STATES",
+        &format!(
+            "Degree={:.0}% ({}) • Overall={}",
+            r.degree_of_composite_action_pct,
+            if r.is_full_composite { "FULL COMPOSITE" } else { "PARTIAL COMPOSITE" },
+            if r.is_overall_compliant && vib.is_vibration_ok { "PASS" } else { "REVIEW" }
+        ),
+    );
+    let comp_rows = [
+        ("Composite Positive Moment (Mu / phi*Mn)", format!("{:.1} / {:.1} kNm", r.applied_factored_moment_mu_knm, r.design_flexural_strength_phi_mn_knm), r.flexure_dcr, r.flexure_dcr <= 1.0),
+        ("Unshored Wet Concrete Stage (Mu_c / phi*Mn_bare)", format!("{:.1} / {:.1} kNm", r.wet_concrete_moment_mu_const_knm, r.bare_steel_phi_mn_knm), r.construction_stage_dcr, r.is_construction_stage_safe),
+        ("Minimum 25% Partial Composite Action", format!("{:.1}% >= 25.0%", r.degree_of_composite_action_pct), 25.0 / r.degree_of_composite_action_pct.max(1.0), r.is_composite_action_adequate),
+        ("Live Load Deflection Serviceability (L/360)", format!("{:.2} / {:.2} mm", r.live_load_deflection_delta_ll_mm, r.live_load_deflection_limit_mm), r.live_load_deflection_delta_ll_mm / r.live_load_deflection_limit_mm.max(0.1), r.is_deflection_ll_ok),
+        ("Total Long-Term Creep Deflection (L/240)", format!("{:.2} / {:.2} mm", r.total_creep_deflection_delta_total_mm, r.total_deflection_limit_mm), r.total_creep_deflection_delta_total_mm / r.total_deflection_limit_mm.max(0.1), r.is_deflection_total_ok),
+        ("AISC DG11 Walking Floor Vibration (<= 0.50%g)", format!("{:.2}%g @ fn={:.2} Hz", vib.peak_accel_pct_g, vib.fundamental_freq_fn_hz), vib.peak_accel_pct_g / 0.50, vib.is_vibration_ok),
+    ];
+    for (idx, (nm, det, dcr, ok)) in comp_rows.iter().enumerate() {
+        let ry = p3y + 54.0 + (idx as f64) * 70.0;
+        let col = if *ok { "#059669" } else { "#dc2626" };
+        let st = if *ok { "PASS" } else { "FAIL" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="58" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.5" font-weight="bold" fill="#0f172a">{nm}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#475569">{det} (D/C = {dcr:.2})</text>
+<rect x="{:.1}" y="{:.1}" width="64" height="22" rx="4" fill="{col}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p3x + 14.0,
+            p3w - 28.0,
+            p3x + 22.0,
+            ry + 21.0,
+            p3x + 22.0,
+            ry + 43.0,
+            p3x + p3w - 92.0,
+            ry + 18.0,
+            p3x + p3w - 60.0,
+            ry + 32.5,
+        );
+    }
+
+    // Panel 4: 3D Composite Floor Bays & Headed Stud Schedule (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. 3D COMPOSITE FLOOR BAYS &amp; HEADED SHEAR STUD SCHEDULE",
+        &format!(
+            "{} Bays • {} Studs Total • {} Studs/Rib",
+            studio.bays_3d.len(),
+            studio.total_studs_building,
+            studio.config.studs_per_rib
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="9" font-weight="bold" font-family="monospace" fill="#0369a1">BAY        START -> END (ENU m)              BEFF(m)   SLAB(m)   ACTION%   STATUS</text>"##,
+        p4x + 18.0,
+        p4y + 48.0,
+    );
+    for (idx, b) in studio.bays_3d.iter().take(6).enumerate() {
+        let ry = p4y + 58.0 + (idx as f64) * 68.0;
+        let hex = if b.is_compliant { "#059669" } else { "#dc2626" };
+        let st = if b.is_compliant { "PASS" } else { "CHECK" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="56" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#0f172a">{:<9} ({:>4.1},{:>4.1},{:>4.1})->({:>4.1},{:>4.1},{:>4.1})   {:.2}      {:.2}      {:>5.1}%</text>
+<rect x="{:.1}" y="{:.1}" width="64" height="22" rx="4" fill="{hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 20.0,
+            ry + 32.0,
+            escape_xml(&truncate_clean(&b.bay_id, 9)),
+            b.p0_enu_m[0],
+            b.p0_enu_m[1],
+            b.p0_enu_m[2],
+            b.p1_enu_m[0],
+            b.p1_enu_m[1],
+            b.p1_enu_m[2],
+            b.eff_width_m,
+            b.slab_thick_m,
+            b.degree_pct,
+            p4x + p4w - 92.0,
+            ry + 17.0,
+            p4x + p4w - 60.0,
+            ry + 31.5,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_COMPOSITE_S111");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = studio.bays_3d.len() + studio.studs_3d.len();
+    let summary = format!(
+        "Exported Composite Deck, Studs & DG11 Vibration Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4153,5 +4437,24 @@ mod tests {
         assert!(!s110.svg_content.contains("<image"));
         assert!(!s110.svg_content.contains("ARI"));
         assert_eq!(s110.sha256_seal.len(), 64);
+
+        let comp_rep = crate::core::composite_studio::evaluate_composite_studio(
+            &field_proj,
+            None,
+            &crate::core::composite_studio::CompositeStudioConfig::default(),
+        );
+        let s111 = build_composite_deck_annex_svg(
+            &field_proj.project_name,
+            &comp_rep,
+            "S-111",
+            Some("comp846seal"),
+        );
+        assert!(s111.svg_content.starts_with("<svg"));
+        assert!(s111.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s111.svg_content.contains("SHEET S-111"));
+        assert!(s111.svg_content.contains("<circle"));
+        assert!(!s111.svg_content.contains("<image"));
+        assert!(!s111.svg_content.contains("ARI"));
+        assert_eq!(s111.sha256_seal.len(), 64);
     }
 }

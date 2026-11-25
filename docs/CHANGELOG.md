@@ -7,7 +7,15 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.5 (5/10)]
+## [Unreleased — Next: v0.8.5 (6/10)]
+
+### Update 6/10 (`v0.8.4.6`) — Composite Steel-Concrete Deck, Shear Stud Layout & AISC DG11 Floor Vibration 3D Studio (`AISC 360-16 Ch. I` / `DG11`) + Sheet `S-111`
+- **BIM-Coupled Composite Deck & DG11 Vibration Engine (`src/core/composite_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_composite_studio`](src/core/composite_studio.rs) coupling `BimProject` floor bays into [`CompositeBeamEngine::evaluate_composite_beam`](src/core/composite.rs), evaluating headed shear stud capacities (`Qn`, `Rg`, `Rp`), PNA tracking, unshored wet concrete safety, AISC Design Guide 11 walking excitation floor vibration (`f_n`, `%g` acceleration), 3D ENU composite slab strips & stud pin arrays, `.eigen.json` persistence (`UnifiedWorkspaceArchive::composite_studio_config`), and non-destructive `eigengraph::analysis::composite_deck` IFCX overlays (`IfcxStage::compose_with_composite_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Deck Strips & Shear Studs + Sheet `S-111` (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/core/vector_dossier.rs`)**:
+  - Added [`build_rtc_composite_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`CompositeGpuInput`, `material_kind = 19.0`, WGSL `kind >= 18.5` corrugated deck & rim glow shader, 0% raster), dedicated `composite_deck` GPU slot inside `WebGpuEarthResources`, pure-vector CPU fallback (`paint_cpu_composite_fallback`), and archival A3 landscape Sheet `S-111` Pure-Vector Annex SVG (`build_composite_deck_annex_svg`, 0 `<image>` tags).
+- **Width-First Dynamic Island `Composite Studio`, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the 2-tab width-first Dynamic Island drawer (`Deck & Shear Studs` + `DG11 Vibration & Deflection`), `Composite` toolbar pill, `/composite`, `/studs`, `/floor-vib`, `/composite-3d`, `/composite-ifcx`, `/composite-svg` slash commands, and `[[RUN_COMPOSITE:...]]` / `[[TOGGLE_COMPOSITE_3D]]` / `[[EXPORT_COMPOSITE_ANNEX]]` Gemini directives.
 
 ### Update 5/10 (`v0.8.4.5`) — Post-Tensioned & Prestressed Tendon Drape, Prestress Losses & Camber 3D Studio (`ACI 318-19 Ch. 24` / `SNI 2847` / `PCI 8th Ed.`) + Sheet `S-110`
 - **BIM-Coupled Prestressed & PT Tendon Studio (`src/core/prestress_studio.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

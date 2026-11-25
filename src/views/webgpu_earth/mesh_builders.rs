@@ -3519,3 +3519,71 @@ pub fn build_rtc_prestress_mesh(input: &PrestressGpuInput<'_>) -> GpuMeshPayload
     }
 }
 
+/// GPU input payload for Update `v0.8.4.6` Composite Deck Strips & Headed Shear Studs (`material_kind = 19.0`).
+pub struct CompositeGpuInput<'a> {
+    pub report: &'a crate::core::composite_studio::CompositeStudioReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU composite concrete-metal deck strips and headed shear stud pins
+/// (`material_kind = 19.0`, 0% raster).
+pub fn build_rtc_composite_mesh(input: &CompositeGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+
+    let rep = input.report;
+    let mut verts = Vec::with_capacity(rep.bays_3d.len() * 32 + rep.studs_3d.len() * 16);
+    let mut idxs = Vec::with_capacity(rep.bays_3d.len() * 48 + rep.studs_3d.len() * 24);
+
+    for bay in &rep.bays_3d {
+        let dx = bay.p1_enu_m[0] - bay.p0_enu_m[0];
+        let dy = bay.p1_enu_m[1] - bay.p0_enu_m[1];
+        let len = dx.hypot(dy).max(0.5);
+        let nx = -dy / len;
+        let ny = dx / len;
+        let hw = bay.eff_width_m * 0.45;
+        let z0 = bay.p0_enu_m[2] as f32;
+        let z1 = z0 + bay.slab_thick_m as f32;
+        let col = if bay.is_compliant {
+            [0.14_f32, 0.84, 0.72, 0.36]
+        } else {
+            [1.0_f32, 0.38, 0.24, 0.44]
+        };
+        let fp = [
+            rot_xy(bay.p0_enu_m[0] - nx * hw, bay.p0_enu_m[1] - ny * hw),
+            rot_xy(bay.p1_enu_m[0] - nx * hw, bay.p1_enu_m[1] - ny * hw),
+            rot_xy(bay.p1_enu_m[0] + nx * hw, bay.p1_enu_m[1] + ny * hw),
+            rot_xy(bay.p0_enu_m[0] + nx * hw, bay.p0_enu_m[1] + ny * hw),
+        ];
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z1, col, 19.0);
+    }
+
+    for st in &rep.studs_3d {
+        let cxy = rot_xy(st.pos_enu_m[0], st.pos_enu_m[1]);
+        let col = if st.is_double_rib {
+            [1.0_f32, 0.78, 0.16, 0.96]
+        } else {
+            [0.24_f32, 0.92, 1.0, 0.94]
+        };
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [cxy[0] as f32, cxy[1] as f32, st.pos_enu_m[2] as f32],
+            (st.height_m as f32 * 0.8).clamp(0.08, 0.16),
+            col,
+            0.55,
+            19.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

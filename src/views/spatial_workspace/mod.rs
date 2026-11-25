@@ -155,6 +155,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.4.5 (5/10 -> v0.8.5): Post-Tensioned Tendon Drape & Losses Drawer
     pub prestress_drawer_open: bool,
     pub prestress_drawer_tab: usize,
+    // Update v0.8.4.6 (6/10 -> v0.8.5): Composite Deck & DG11 Vibration Drawer
+    pub composite_drawer_open: bool,
+    pub composite_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -271,6 +274,8 @@ impl Default for SpatialWorkspaceState {
             connection_drawer_tab: 0,
             prestress_drawer_open: false,
             prestress_drawer_tab: 0,
+            composite_drawer_open: false,
+            composite_drawer_tab: 0,
         }
     }
 }
@@ -306,6 +311,7 @@ impl SpatialWorkspaceState {
             || self.shear_wall_drawer_open
             || self.connection_drawer_open
             || self.prestress_drawer_open
+            || self.composite_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -335,6 +341,7 @@ impl SpatialWorkspaceState {
         self.shear_wall_drawer_open = false;
         self.connection_drawer_open = false;
         self.prestress_drawer_open = false;
+        self.composite_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -439,6 +446,11 @@ impl SpatialWorkspaceState {
         } else {
             self.prestress_drawer_open = !self.prestress_drawer_open;
         }
+        if drawer != "composite" {
+            self.composite_drawer_open = false;
+        } else {
+            self.composite_drawer_open = !self.composite_drawer_open;
+        }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
@@ -527,6 +539,14 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.prestress_drawer_tab = tab.min(1);
         self.prestress_drawer_open = true;
+    }
+
+    /// Idempotently opens the Update `v0.8.4.6` Composite Deck, Shear Studs & AISC DG11 Studio drawer
+    /// (`0` = Deck & Shear Studs, `1` = DG11 Vibration & Deflection).
+    pub fn open_composite_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.composite_drawer_tab = tab.min(1);
+        self.composite_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.
