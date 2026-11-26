@@ -170,6 +170,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.5.6 (6/10 -> v0.8.6): Site Zoning & 3D Buildable Envelope Drawer
     pub zoning_drawer_open: bool,
     pub zoning_drawer_tab: usize,
+    // Update v0.8.5.7 (7/10 -> v0.8.6): Spatial Program & 3D Stack/Pack Drawer
+    pub program_drawer_open: bool,
+    pub program_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -296,6 +299,8 @@ impl Default for SpatialWorkspaceState {
             construction_lca_drawer_tab: 0,
             zoning_drawer_open: false,
             zoning_drawer_tab: 0,
+            program_drawer_open: false,
+            program_drawer_tab: 0,
         }
     }
 }
@@ -336,6 +341,7 @@ impl SpatialWorkspaceState {
             || self.foundation_drawer_open
             || self.construction_lca_drawer_open
             || self.zoning_drawer_open
+            || self.program_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -370,6 +376,7 @@ impl SpatialWorkspaceState {
         self.foundation_drawer_open = false;
         self.construction_lca_drawer_open = false;
         self.zoning_drawer_open = false;
+        self.program_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -499,6 +506,11 @@ impl SpatialWorkspaceState {
         } else {
             self.zoning_drawer_open = !self.zoning_drawer_open;
         }
+        if drawer != "program" {
+            self.program_drawer_open = false;
+        } else {
+            self.program_drawer_open = !self.program_drawer_open;
+        }
     }
 
     /// Idempotently opens the Ground-Motion Replay / Fragility drawer inside the Dynamic Island,
@@ -627,6 +639,14 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.zoning_drawer_tab = tab.min(1);
         self.zoning_drawer_open = true;
+    }
+
+    /// Idempotently opens the Update `v0.8.5.7` Spatial Program, Adjacency & 3D Stack/Pack drawer
+    /// (`0` = Program Table & Stack, `1` = Adjacency & Floor-Plate).
+    pub fn open_program_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.program_drawer_tab = tab.min(1);
+        self.program_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

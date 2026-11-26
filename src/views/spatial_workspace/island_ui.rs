@@ -141,6 +141,7 @@ impl SpatialWorkspaceState {
         vault_connected: bool,
         vault_name: &str,
         zoning_overlay_visible: bool,
+        program_overlay_visible: bool,
         actions: &mut SpatialHudActions,
     ) {
         if vault_connected {
@@ -198,6 +199,22 @@ impl SpatialWorkspaceState {
             self.toggle_exclusive_drawer("zoning");
             if !was_open {
                 actions.run_zoning_agent = true;
+            }
+        }
+        if Self::glass_icon_button(
+            ui,
+            theme,
+            AppIcon::BoxPackage,
+            self.program_drawer_open || program_overlay_visible,
+            theme.accent_green,
+            "Spatial Program, Adjacency & 3D Stack/Pack Studio",
+        )
+        .clicked()
+        {
+            let was_open = self.program_drawer_open;
+            self.toggle_exclusive_drawer("program");
+            if !was_open {
+                actions.run_spatial_program = true;
             }
         }
     }
@@ -1828,7 +1845,8 @@ impl SpatialWorkspaceState {
                 || self.shm_drawer_open
                 || self.evacuation_drawer_open
                 || self.collab_drawer_open
-                || self.zoning_drawer_open,
+                || self.zoning_drawer_open
+                || self.program_drawer_open,
         );
 
         let compact_w = if is_mobile {
@@ -2968,6 +2986,18 @@ impl SpatialWorkspaceState {
 
                     if self.zoning_drawer_open {
                         self.render_zoning_envelope_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
+                    if self.program_drawer_open {
+                        self.render_spatial_program_drawer(
                             ui,
                             theme,
                             universal_canvas,
@@ -4444,6 +4474,22 @@ impl SpatialWorkspaceState {
                                                             actions.run_zoning_agent = true;
                                                         }
                                                     }
+                                                    if Self::glass_icon_button(
+                                                        ui,
+                                                        theme,
+                                                        AppIcon::BoxPackage,
+                                                        self.program_drawer_open || universal_canvas.program_overlay_visible,
+                                                        theme.accent_green,
+                                                        "Spatial Program, Adjacency & 3D Stack/Pack Studio",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        let was_open = self.program_drawer_open;
+                                                        self.toggle_exclusive_drawer("program");
+                                                        if !was_open {
+                                                            actions.run_spatial_program = true;
+                                                        }
+                                                    }
                                                     ui.separator();
                                                     if Self::glass_icon_button(
                                                         ui,
@@ -5470,6 +5516,19 @@ impl SpatialWorkspaceState {
                                                     if Self::glass_icon_button(
                                                         ui,
                                                         theme,
+                                                        AppIcon::BoxPackage,
+                                                        self.program_drawer_open,
+                                                        theme.accent_green,
+                                                        "Open Spatial Program, Adjacency & 3D Stack/Pack Studio",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_program_drawer(0);
+                                                        actions.run_spatial_program = true;
+                                                    }
+                                                    if Self::glass_icon_button(
+                                                        ui,
+                                                        theme,
                                                         AppIcon::Book,
                                                         false,
                                                         theme.accent_green,
@@ -5504,6 +5563,7 @@ impl SpatialWorkspaceState {
                                         vault_status.connected,
                                         &vault_status.vault_name,
                                         universal_canvas.zoning_overlay_visible,
+                                        universal_canvas.program_overlay_visible,
                                         &mut actions,
                                     );
                                     self.render_dynamic_island_row1_right(
@@ -5522,6 +5582,7 @@ impl SpatialWorkspaceState {
                                         vault_status.connected,
                                         &vault_status.vault_name,
                                         universal_canvas.zoning_overlay_visible,
+                                        universal_canvas.program_overlay_visible,
                                         &mut actions,
                                     );
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

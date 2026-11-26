@@ -7,7 +7,15 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.6 (6/10)]
+## [Unreleased — Next: v0.8.6 (7/10)]
+
+### Update 7/10 (`v0.8.5.7` -> `v0.8.6`) — Spatial Programming, Adjacency Matrix & 3D Stack/Pack Engine (`eigengraph::design::spatial_program`)
+- **Spatial Programming, Stacking & Deterministic 2D Floor-Plate Packing (`src/core/program_agent.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_spatial_program`](src/core/program_agent.rs) with 5 building typology presets (`MixedUseTower`, `OfficeHeadquarters`, `ResidentialApartment`, `HealthcareHospital`, `UniversityCampus`), editable unit counts and unit areas (`ProgramSpaceEntry`), vertical story stacking into active `SiteZoningReport` podium/tower plates, deterministic binary slicing-tree 2D floor-plate packing (`PackedRoomBlock3D`), 5-rule AEC adjacency scoring (`AdjacencyPairScore`), `.eigen.json` persistence (`UnifiedWorkspaceArchive::program_config`), and non-destructive `eigengraph::design::spatial_program` IFCX overlays (`IfcxStage::compose_with_spatial_program_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Stacked & Packed Space Blocks + CPU Fallback (`src/views/webgpu_earth/`, `src/views/universal_canvas/`)**:
+  - Added [`build_rtc_spatial_program_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`SpatialProgramGpuInput`, `material_kind = 24.0`, WGSL `kind >= 23.5` analytical block shading & Fresnel rim shader, 0% raster), dedicated `spatial_program` GPU slot inside `WebGpuEarthResources`, and pure-vector CPU fallback (`paint_cpu_spatial_program_fallback`).
+- **Program Studio Drawer, Icon-Only Triggers, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the 2-tab width-first **Spatial Program, Adjacency & 3D Stack/Pack Studio** drawer (`Program Table & Stack` with live 2-way schedule editing & story filter + `Adjacency & Floor-Plate` with pure-vector 2D room-packing plan), icon-only `AppIcon::BoxPackage` triggers inside the minimalist Dynamic Island, `/program`, `/stack`, `/pack`, `/adjacency`, `/program-3d`, `/program-ifcx` slash commands, and `[[RUN_SPATIAL_PROGRAM:...]]` / `[[TOGGLE_PROGRAM_3D]]` / `[[EXPORT_PROGRAM_IFCX]]` Gemini directives.
 
 ### Update 6/10 (`v0.8.5.6` -> `v0.8.6`) — Site Zoning & 3D Buildable Envelope Engine (`KDB/KLB/GSB` + Sun Path) & Minimalist Icon-Only Dynamic Island
 - **Site Zoning & 3D Buildable Envelope Core Engine (`src/core/zoning_agent.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

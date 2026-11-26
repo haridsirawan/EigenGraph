@@ -50,6 +50,7 @@ pub mod reliability_studio;
 pub mod foundation_studio;
 pub mod construction_lca_studio;
 pub mod zoning_agent;
+pub mod program_agent;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -344,6 +345,11 @@ pub use zoning_agent::{
     evaluate_site_zoning, SiteZoningConfig, SiteZoningReport, SunPositionPoint3D,
     ZoningComplianceItem, ZoningDistrictPreset, ZoningIfcxOverlay, ZoningTierPrism3D,
     NS_EG_ZONING_ENVELOPE,
+};
+pub use program_agent::{
+    evaluate_spatial_program, AdjacencyPairScore, BuildingTypologyPreset, DepartmentKind,
+    PackedRoomBlock3D, ProgramSpaceEntry, SpatialProgramConfig, SpatialProgramIfcxOverlay,
+    SpatialProgramReport, StoryStackSummary, NS_EG_SPATIAL_PROGRAM,
 };
 
 

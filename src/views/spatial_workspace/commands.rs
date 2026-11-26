@@ -825,6 +825,32 @@ impl SpatialWorkspaceState {
                     self.open_zoning_drawer(0);
                     out.export_zoning_ifcx = true;
                 }
+                PlannedProposalAction::RunSpatialProgram {
+                    typology,
+                    circulation_pct,
+                    core_pct,
+                } => {
+                    if let Some(t) = typology {
+                        universal_canvas.program_config.apply_typology(*t);
+                    }
+                    if let Some(c) = circulation_pct {
+                        universal_canvas.program_config.circulation_factor_pct = c.clamp(5.0, 40.0);
+                    }
+                    if let Some(cr) = core_pct {
+                        universal_canvas.program_config.core_ratio_pct = cr.clamp(6.0, 30.0);
+                    }
+                    universal_canvas.program_overlay_visible = true;
+                    self.open_program_drawer(0);
+                    out.run_spatial_program = true;
+                }
+                PlannedProposalAction::ToggleProgram3d => {
+                    self.open_program_drawer(0);
+                    out.toggle_program_3d = true;
+                }
+                PlannedProposalAction::ExportProgramIfcx => {
+                    self.open_program_drawer(0);
+                    out.export_program_ifcx = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -1252,6 +1278,19 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportZoningIfcx => {
                                 PlannedProposalAction::ExportZoningIfcx
                             }
+                            GeminiDirective::RunSpatialProgram {
+                                typology,
+                                circulation_pct,
+                                core_pct,
+                            } => PlannedProposalAction::RunSpatialProgram {
+                                typology: *typology,
+                                circulation_pct: *circulation_pct,
+                                core_pct: *core_pct,
+                            },
+                            GeminiDirective::ToggleProgram3d => PlannedProposalAction::ToggleProgram3d,
+                            GeminiDirective::ExportProgramIfcx => {
+                                PlannedProposalAction::ExportProgramIfcx
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1461,6 +1500,15 @@ impl SpatialWorkspaceState {
                             ),
                             GeminiDirective::ToggleZoning3d => "ToggleZoning3d".to_string(),
                             GeminiDirective::ExportZoningIfcx => "ExportZoningIfcx".to_string(),
+                            GeminiDirective::RunSpatialProgram {
+                                typology,
+                                circulation_pct,
+                                core_pct,
+                            } => format!(
+                                "RunSpatialProgram({typology:?}/Circ:{circulation_pct:?}/Core:{core_pct:?})"
+                            ),
+                            GeminiDirective::ToggleProgram3d => "ToggleProgram3d".to_string(),
+                            GeminiDirective::ExportProgramIfcx => "ExportProgramIfcx".to_string(),
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -3556,6 +3604,39 @@ impl SpatialWorkspaceState {
                 }
                 "/zoning-ifcx" => {
                     actions.export_zoning_ifcx = true;
+                }
+                "/program" | "/stack" | "/pack" | "/adjacency" => {
+                    let lo = arg.to_ascii_lowercase();
+                    if lo.contains("mix") {
+                        universal_canvas.program_config.apply_typology(
+                            crate::core::program_agent::BuildingTypologyPreset::MixedUseTower,
+                        );
+                    } else if lo.contains("off") {
+                        universal_canvas.program_config.apply_typology(
+                            crate::core::program_agent::BuildingTypologyPreset::OfficeHeadquarters,
+                        );
+                    } else if lo.contains("res") || lo.contains("apt") {
+                        universal_canvas.program_config.apply_typology(
+                            crate::core::program_agent::BuildingTypologyPreset::ResidentialApartment,
+                        );
+                    } else if lo.contains("hosp") || lo.contains("clin") {
+                        universal_canvas.program_config.apply_typology(
+                            crate::core::program_agent::BuildingTypologyPreset::HealthcareHospital,
+                        );
+                    } else if lo.contains("camp") || lo.contains("univ") {
+                        universal_canvas.program_config.apply_typology(
+                            crate::core::program_agent::BuildingTypologyPreset::UniversityCampus,
+                        );
+                    }
+                    self.open_program_drawer(if cmd == "/adjacency" { 1 } else { 0 });
+                    actions.run_spatial_program = true;
+                }
+                "/program-3d" => {
+                    self.open_program_drawer(0);
+                    actions.toggle_program_3d = true;
+                }
+                "/program-ifcx" => {
+                    actions.export_program_ifcx = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

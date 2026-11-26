@@ -4297,6 +4297,55 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if hud_actions.run_spatial_program {
+            let rep = self
+                .universal_canvas
+                .run_spatial_program(&self.build_view.bim_bus.project);
+            self.spatial_workspace
+                .push_trace(rep.summary_verdict, rep.fits_zoning_envelope);
+        }
+        if hud_actions.toggle_program_3d {
+            self.universal_canvas.program_overlay_visible =
+                !self.universal_canvas.program_overlay_visible;
+            if self.universal_canvas.program_overlay_visible {
+                let rep = self
+                    .universal_canvas
+                    .run_spatial_program(&self.build_view.bim_bus.project);
+                self.spatial_workspace.push_trace(
+                    format!("3D Spatial Program ON — {}", rep.summary_verdict),
+                    rep.fits_zoning_envelope,
+                );
+            } else {
+                self.spatial_workspace
+                    .push_trace("3D Spatial Program OFF", true);
+            }
+        }
+        if hud_actions.export_program_ifcx {
+            let rep = self
+                .universal_canvas
+                .run_spatial_program(&self.build_view.bim_bus.project);
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_spatial_program_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_spatial_program.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported Spatial Program IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {

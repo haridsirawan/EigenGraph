@@ -4326,4 +4326,81 @@ impl UniversalCanvasState {
             }
         }
     }
+
+    /// Update `v0.8.5.7` (`7/10` -> `v0.8.6`): Pure-vector CPU fallback rendering stacked & packed 3D space blocks.
+    pub(super) fn paint_cpu_spatial_program_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.program_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_program_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |p: [f64; 3]| -> Option<Pos2> {
+            let ex = p[0] * cr - p[1] * sr;
+            let ny = p[0] * sr + p[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, p[2])
+                .and_then(|(sp, _, vis)| if vis { Some(sp) } else { None })
+        };
+
+        for blk in &report.packed_blocks_3d {
+            let is_focused = report
+                .config
+                .selected_story_filter
+                .is_none_or(|f| f == blk.story_index);
+            let alpha = if is_focused { 180_u8 } else { 45_u8 };
+            let c = blk.color_rgba;
+            let stroke_col = Color32::from_rgba_unmultiplied(
+                (c[0].clamp(0.0, 1.0) * 255.0) as u8,
+                (c[1].clamp(0.0, 1.0) * 255.0) as u8,
+                (c[2].clamp(0.0, 1.0) * 255.0) as u8,
+                alpha,
+            );
+            let fill_col = Color32::from_rgba_unmultiplied(
+                stroke_col.r(),
+                stroke_col.g(),
+                stroke_col.b(),
+                alpha / 3,
+            );
+            let top: Vec<Pos2> = [
+                [blk.min_enu_m[0], blk.min_enu_m[1], blk.max_enu_m[2]],
+                [blk.max_enu_m[0], blk.min_enu_m[1], blk.max_enu_m[2]],
+                [blk.max_enu_m[0], blk.max_enu_m[1], blk.max_enu_m[2]],
+                [blk.min_enu_m[0], blk.max_enu_m[1], blk.max_enu_m[2]],
+            ]
+            .into_iter()
+            .filter_map(proj_enu)
+            .collect();
+            if top.len() == 4 {
+                clip.add(egui::Shape::convex_polygon(
+                    top,
+                    fill_col,
+                    Stroke::new(if is_focused { 1.6 } else { 0.8 }, stroke_col),
+                ));
+            }
+        }
+    }
 }

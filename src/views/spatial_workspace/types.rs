@@ -540,6 +540,14 @@ pub enum PlannedProposalAction {
     },
     ToggleZoning3d,
     ExportZoningIfcx,
+    // Update v0.8.5.7 (7/10 -> v0.8.6): Spatial Programming, Adjacency & 3D Stack/Pack
+    RunSpatialProgram {
+        typology: Option<crate::core::program_agent::BuildingTypologyPreset>,
+        circulation_pct: Option<f64>,
+        core_pct: Option<f64>,
+    },
+    ToggleProgram3d,
+    ExportProgramIfcx,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -722,6 +730,14 @@ pub enum GeminiDirective {
     },
     ToggleZoning3d,
     ExportZoningIfcx,
+    // Update v0.8.5.7 (7/10 -> v0.8.6): Spatial Programming, Adjacency & 3D Stack/Pack
+    RunSpatialProgram {
+        typology: Option<crate::core::program_agent::BuildingTypologyPreset>,
+        circulation_pct: Option<f64>,
+        core_pct: Option<f64>,
+    },
+    ToggleProgram3d,
+    ExportProgramIfcx,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1356,6 +1372,41 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleZoning3d);
             } else if upper == "EXPORT_ZONING_IFCX" {
                 directives.push(GeminiDirective::ExportZoningIfcx);
+            } else if upper == "RUN_SPATIAL_PROGRAM" || upper.starts_with("RUN_SPATIAL_PROGRAM:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let mut typology = None;
+                let mut circulation_pct = None;
+                let mut core_pct = None;
+                for tok in arg.split(':').map(str::trim).filter(|s| !s.is_empty()) {
+                    if tok.contains("MIX") {
+                        typology = Some(crate::core::program_agent::BuildingTypologyPreset::MixedUseTower);
+                    } else if tok.contains("OFF") {
+                        typology = Some(crate::core::program_agent::BuildingTypologyPreset::OfficeHeadquarters);
+                    } else if tok.contains("RES") || tok.contains("APT") {
+                        typology = Some(crate::core::program_agent::BuildingTypologyPreset::ResidentialApartment);
+                    } else if tok.contains("HOSP") || tok.contains("CLIN") {
+                        typology = Some(crate::core::program_agent::BuildingTypologyPreset::HealthcareHospital);
+                    } else if tok.contains("CAMP") || tok.contains("UNIV") {
+                        typology = Some(crate::core::program_agent::BuildingTypologyPreset::UniversityCampus);
+                    } else if let Some(val) = tok.strip_prefix("CIRC") {
+                        if let Ok(v) = val.parse::<f64>() {
+                            circulation_pct = Some(v.clamp(5.0, 40.0));
+                        }
+                    } else if let Some(val) = tok.strip_prefix("CORE") {
+                        if let Ok(v) = val.parse::<f64>() {
+                            core_pct = Some(v.clamp(6.0, 30.0));
+                        }
+                    }
+                }
+                directives.push(GeminiDirective::RunSpatialProgram {
+                    typology,
+                    circulation_pct,
+                    core_pct,
+                });
+            } else if upper == "TOGGLE_PROGRAM_3D" {
+                directives.push(GeminiDirective::ToggleProgram3d);
+            } else if upper == "EXPORT_PROGRAM_IFCX" {
+                directives.push(GeminiDirective::ExportProgramIfcx);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -2640,6 +2691,42 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Document,
     },
     SlashCommandSpec {
+        cmd: "/program",
+        category: "Design",
+        description: "Open Spatial Program, Adjacency & 3D Stack/Pack Studio (/program mixed|office|apt|hosp|campus)",
+        icon: AppIcon::BoxPackage,
+    },
+    SlashCommandSpec {
+        cmd: "/stack",
+        category: "Design",
+        description: "Stack building spaces vertically into zoning podium/tower plates",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/pack",
+        category: "Design",
+        description: "Run deterministic 2D floor-plate packing & inspect room blocks",
+        icon: AppIcon::Grid,
+    },
+    SlashCommandSpec {
+        cmd: "/adjacency",
+        category: "Design",
+        description: "Inspect AEC department adjacency scores & 2D packed floor-plate plan",
+        icon: AppIcon::NodesGraph,
+    },
+    SlashCommandSpec {
+        cmd: "/program-3d",
+        category: "Design",
+        description: "Toggle 3D Pure WebGPU stacked & packed department blocks",
+        icon: AppIcon::Cube3D,
+    },
+    SlashCommandSpec {
+        cmd: "/program-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::design::spatial_program IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -2818,6 +2905,10 @@ pub struct SpatialHudActions {
     pub run_zoning_agent: bool,
     pub toggle_zoning_3d: bool,
     pub export_zoning_ifcx: bool,
+    // Update v0.8.5.7 (7/10 -> v0.8.6): Spatial Programming, Adjacency & 3D Stack/Pack
+    pub run_spatial_program: bool,
+    pub toggle_program_3d: bool,
+    pub export_program_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3269,5 +3360,8 @@ impl SpatialHudActions {
         self.run_zoning_agent |= other.run_zoning_agent;
         self.toggle_zoning_3d |= other.toggle_zoning_3d;
         self.export_zoning_ifcx |= other.export_zoning_ifcx;
+        self.run_spatial_program |= other.run_spatial_program;
+        self.toggle_program_3d |= other.toggle_program_3d;
+        self.export_program_ifcx |= other.export_program_ifcx;
     }
 }

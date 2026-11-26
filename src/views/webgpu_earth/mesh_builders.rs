@@ -3974,3 +3974,78 @@ pub fn build_rtc_zoning_envelope_mesh(input: &ZoningEnvelopeGpuInput<'_>) -> Gpu
     }
 }
 
+/// GPU input payload for Update `v0.8.5.7` Spatial Program Stacked & Packed 3D Space Blocks (`material_kind = 24.0`).
+pub struct SpatialProgramGpuInput<'a> {
+    pub report: &'a crate::core::program_agent::SpatialProgramReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU department-colored stacked & packed space blocks (`material_kind = 24.0`, 0% raster).
+pub fn build_rtc_spatial_program_mesh(input: &SpatialProgramGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+
+    let rep = input.report;
+    let mut verts = Vec::with_capacity(rep.packed_blocks_3d.len() * 48);
+    let mut idxs = Vec::with_capacity(rep.packed_blocks_3d.len() * 72);
+
+    for blk in &rep.packed_blocks_3d {
+        let is_focused = rep
+            .config
+            .selected_story_filter
+            .is_none_or(|f| f == blk.story_index);
+        let mut col = blk.color_rgba;
+        if !is_focused {
+            col[3] = 0.14;
+        }
+        let fp = [
+            rot_xy(blk.min_enu_m[0], blk.min_enu_m[1]),
+            rot_xy(blk.max_enu_m[0], blk.min_enu_m[1]),
+            rot_xy(blk.max_enu_m[0], blk.max_enu_m[1]),
+            rot_xy(blk.min_enu_m[0], blk.max_enu_m[1]),
+        ];
+        let z0 = blk.min_enu_m[2] as f32;
+        let z1 = blk.max_enu_m[2] as f32;
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z1, col, 24.0);
+
+        if is_focused {
+            let rim_col = [
+                (col[0] + 0.18).min(1.0),
+                (col[1] + 0.18).min(1.0),
+                (col[2] + 0.18).min(1.0),
+                0.88,
+            ];
+            let top_pts = [
+                [fp[0][0], fp[0][1], blk.max_enu_m[2]],
+                [fp[1][0], fp[1][1], blk.max_enu_m[2]],
+                [fp[2][0], fp[2][1], blk.max_enu_m[2]],
+                [fp[3][0], fp[3][1], blk.max_enu_m[2]],
+            ];
+            for i in 0..4 {
+                let next = (i + 1) % 4;
+                push_animated_flow_strut_enu(
+                    &mut verts,
+                    &mut idxs,
+                    top_pts[i],
+                    top_pts[next],
+                    0.09,
+                    0.09,
+                    rim_col,
+                    0.55,
+                    24.0,
+                );
+            }
+        }
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

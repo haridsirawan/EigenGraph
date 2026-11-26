@@ -296,6 +296,8 @@ pub struct UnifiedWorkspaceArchive {
     pub construction_lca_config: crate::core::construction_lca_studio::ConstructionLcaConfig,
     #[serde(default)]
     pub zoning_config: crate::core::zoning_agent::SiteZoningConfig,
+    #[serde(default)]
+    pub program_config: crate::core::program_agent::SpatialProgramConfig,
     pub sha256_seal: String,
 }
 

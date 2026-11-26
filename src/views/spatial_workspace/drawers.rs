@@ -5750,4 +5750,393 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.5.7` (`7/10` -> `v0.8.6`): Width-first Dynamic Island drawer for Spatial Programming, Adjacency & 3D Stack/Pack Studio.
+    pub(super) fn render_spatial_program_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::program_agent::{
+            BuildingTypologyPreset, DepartmentKind, ProgramSpaceEntry,
+        };
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::BoxPackage,
+                13.0,
+                theme.accent_green,
+                "Spatial Program, Adjacency & 3D Stack/Pack Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "Program Table & Stack"),
+                (1usize, "Adjacency & Floor-Plate"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.program_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.program_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Spatial Program & Stack/Pack Studio drawer",
+            )
+            .clicked()
+            {
+                self.program_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for typ in BuildingTypologyPreset::ALL {
+                    let active = universal_canvas.program_config.typology == typ;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        typ.short_label(),
+                        active,
+                        theme.accent_green,
+                        typ.label(),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.program_config.apply_typology(typ);
+                        actions.run_spatial_program = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Bolt),
+                    "Stack & Pack",
+                    true,
+                    theme.accent_green,
+                    "Run vertical stacking, 2D floor-plate packing & adjacency check",
+                )
+                .clicked()
+                {
+                    actions.run_spatial_program = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    if universal_canvas.program_overlay_visible {
+                        "3D Program: ON"
+                    } else {
+                        "3D Program: OFF"
+                    },
+                    universal_canvas.program_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU stacked & packed department blocks",
+                )
+                .clicked()
+                {
+                    actions.toggle_program_3d = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "IFCX",
+                    false,
+                    theme.accent_orange,
+                    "Export non-destructive eigengraph::design::spatial_program IFCX (.ifcx)",
+                )
+                .clicked()
+                {
+                    actions.export_program_ifcx = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let Some(rep) = universal_canvas.last_program_report.clone() else {
+            ui.label(
+                RichText::new("Click 'Stack & Pack' or toggle '3D Program' to generate stacked floor plates & 2D room packing.")
+                    .size(9.4)
+                    .color(theme.text_muted),
+            );
+            return;
+        };
+
+        let tab = self.program_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    if is_left && tab == 0 {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Space Program Schedule (2-Way)").size(9.8).strong().color(theme.text_primary));
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Plus),
+                                "Add Space",
+                                false,
+                                theme.accent_green,
+                                "Append a new programmable space entry",
+                            )
+                            .clicked()
+                            {
+                                let next_id = universal_canvas
+                                    .program_config
+                                    .spaces
+                                    .iter()
+                                    .map(|s| s.id)
+                                    .max()
+                                    .unwrap_or(0)
+                                    + 1;
+                                universal_canvas.program_config.spaces.push(ProgramSpaceEntry {
+                                    id: next_id,
+                                    name: format!("Custom Zone {next_id}"),
+                                    department: DepartmentKind::Office,
+                                    unit_count: 4,
+                                    area_per_unit_m2: 90.0,
+                                    preferred_floor_band: 1,
+                                    adjacency_group: 2,
+                                });
+                                actions.run_spatial_program = true;
+                            }
+                        });
+                        let cfg = &mut universal_canvas.program_config;
+                        let mut changed = false;
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Circ%:").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.circulation_factor_pct).range(5.0..=40.0).speed(0.5).suffix("%")).changed();
+                            ui.label(RichText::new("Core%:").size(8.8).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.core_ratio_pct).range(6.0..=30.0).speed(0.5).suffix("%")).changed();
+                        });
+                        let mut remove_idx = None;
+                        ScrollArea::vertical()
+                            .id_salt("spatial_program_table_scroll")
+                            .max_width(inner_w)
+                            .max_height(132.0)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                for (idx, sp) in cfg.spaces.iter_mut().enumerate() {
+                                    ui.horizontal_wrapped(|ui| {
+                                        let c = sp.department.color_rgba();
+                                        let dept_col = Color32::from_rgb(
+                                            (c[0] * 255.0) as u8,
+                                            (c[1] * 255.0) as u8,
+                                            (c[2] * 255.0) as u8,
+                                        );
+                                        if Self::glass_pill_button(
+                                            ui,
+                                            theme,
+                                            None,
+                                            sp.department.short_label(),
+                                            true,
+                                            dept_col,
+                                            "Click to cycle department",
+                                        )
+                                        .clicked()
+                                        {
+                                            sp.department = sp.department.next();
+                                            changed = true;
+                                        }
+                                        ui.label(RichText::new(&sp.name).size(8.8).color(theme.text_primary));
+                                        changed |= ui.add(egui::DragValue::new(&mut sp.unit_count).range(1..=200).speed(1.0).suffix("u")).changed();
+                                        changed |= ui.add(egui::DragValue::new(&mut sp.area_per_unit_m2).range(6.0..=2000.0).speed(2.0).suffix("m2")).changed();
+                                        ui.label(RichText::new(format!("={:.0}", sp.total_area_m2())).size(8.4).monospace().color(theme.text_muted));
+                                        if cfg.spaces.len() > 1 && ui.small_button("x").clicked() {
+                                            remove_idx = Some(idx);
+                                        }
+                                    });
+                                }
+                            });
+                        if let Some(idx) = remove_idx {
+                            cfg.spaces.remove(idx);
+                            changed = true;
+                        }
+                        if changed {
+                            actions.run_spatial_program = true;
+                        }
+                    } else if !is_left && tab == 0 {
+                        ui.label(RichText::new("Stacking Metrics & Story Filter").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "NFA {:.0} m2 • GFA {:.0} / {:.0} m2 ({:.0}% KLB) • Eff {:.1}% • {} Units",
+                                rep.total_nfa_m2,
+                                rep.total_gfa_m2,
+                                rep.zoning_max_gfa_m2,
+                                rep.gfa_utilization_pct,
+                                rep.overall_efficiency_pct,
+                                rep.total_units,
+                            ))
+                            .size(8.6)
+                            .monospace()
+                            .color(if rep.fits_zoning_envelope { theme.accent_green } else { theme.accent_red }),
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                None,
+                                "All Stories",
+                                universal_canvas.program_config.selected_story_filter.is_none(),
+                                theme.accent_blue,
+                                "Show all stacked stories at full opacity",
+                            )
+                            .clicked()
+                            {
+                                universal_canvas.program_config.selected_story_filter = None;
+                            }
+                            for st in rep.story_summaries.iter().take(12) {
+                                let act = universal_canvas.program_config.selected_story_filter
+                                    == Some(st.story_index);
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    None,
+                                    format!("L{} {}", st.story_index + 1, st.primary_department),
+                                    act,
+                                    theme.accent_green,
+                                    &format!(
+                                        "Floor L{}: Net {:.0} m2 / Gross {:.0} m2 ({:.0}% eff)",
+                                        st.story_index + 1,
+                                        st.net_program_area_m2,
+                                        st.gross_plate_area_m2,
+                                        st.efficiency_pct
+                                    ),
+                                )
+                                .clicked()
+                                {
+                                    universal_canvas.program_config.selected_story_filter =
+                                        Some(st.story_index);
+                                }
+                            }
+                        });
+                    } else if is_left && tab == 1 {
+                        let focus_story = universal_canvas
+                            .program_config
+                            .selected_story_filter
+                            .unwrap_or(0)
+                            .min(rep.stacked_stories.saturating_sub(1));
+                        ui.label(
+                            RichText::new(format!("2D Packed Floor Plate — Story L{}", focus_story + 1))
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        let plan_w = inner_w.min(360.0);
+                        let plan_h = 122.0_f32;
+                        let (resp, painter) =
+                            ui.allocate_painter(Vec2::new(plan_w, plan_h), egui::Sense::hover());
+                        let r = resp.rect;
+                        painter.rect_filled(r, CornerRadius::same(6), theme.bg_card.gamma_multiply(0.55));
+                        let blocks: Vec<_> = rep
+                            .packed_blocks_3d
+                            .iter()
+                            .filter(|b| b.story_index == focus_story)
+                            .collect();
+                        if !blocks.is_empty() {
+                            let min_x = blocks.iter().map(|b| b.min_enu_m[0]).fold(f64::INFINITY, f64::min);
+                            let max_x = blocks.iter().map(|b| b.max_enu_m[0]).fold(f64::NEG_INFINITY, f64::max);
+                            let min_y = blocks.iter().map(|b| b.min_enu_m[1]).fold(f64::INFINITY, f64::min);
+                            let max_y = blocks.iter().map(|b| b.max_enu_m[1]).fold(f64::NEG_INFINITY, f64::max);
+                            let span_x = (max_x - min_x).max(1.0);
+                            let span_y = (max_y - min_y).max(1.0);
+                            let pad = 8.0_f32;
+                            let avail_w = (r.width() - 2.0 * pad).max(20.0);
+                            let avail_h = (r.height() - 2.0 * pad).max(20.0);
+                            let sc = (avail_w as f64 / span_x).min(avail_h as f64 / span_y);
+                            let ox = r.center().x - ((span_x * sc) as f32) * 0.5;
+                            let oy = r.center().y + ((span_y * sc) as f32) * 0.5;
+                            for b in blocks {
+                                let x0 = ox + ((b.min_enu_m[0] - min_x) * sc) as f32;
+                                let x1 = ox + ((b.max_enu_m[0] - min_x) * sc) as f32;
+                                let y0 = oy - ((b.max_enu_m[1] - min_y) * sc) as f32;
+                                let y1 = oy - ((b.min_enu_m[1] - min_y) * sc) as f32;
+                                let br = egui::Rect::from_min_max(
+                                    egui::Pos2::new(x0, y0),
+                                    egui::Pos2::new(x1, y1),
+                                );
+                                let c = b.color_rgba;
+                                let col = Color32::from_rgb(
+                                    (c[0] * 255.0) as u8,
+                                    (c[1] * 255.0) as u8,
+                                    (c[2] * 255.0) as u8,
+                                );
+                                painter.rect_filled(br, CornerRadius::same(2), col.gamma_multiply(0.32));
+                                painter.rect_stroke(br, CornerRadius::same(2), Stroke::new(1.0, col), egui::StrokeKind::Middle);
+                                if br.width() > 36.0 && br.height() > 14.0 {
+                                    painter.text(
+                                        br.center(),
+                                        Align2::CENTER_CENTER,
+                                        b.department.short_label(),
+                                        egui::FontId::proportional(8.5),
+                                        theme.text_primary,
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new(format!("Adjacency Matrix Score: {:.0}%", rep.adjacency_score_pct))
+                                .size(9.8)
+                                .strong()
+                                .color(if rep.adjacency_score_pct >= 80.0 {
+                                    theme.accent_green
+                                } else {
+                                    theme.accent_orange
+                                }),
+                        );
+                        for ap in &rep.adjacency_pairs {
+                            let col = if ap.satisfied { theme.accent_green } else { theme.accent_orange };
+                            let tag = if ap.satisfied { "PASS" } else { "WARN" };
+                            ui.label(
+                                RichText::new(format!(
+                                    "[{tag}] {} <-> {} (dL={}) — {}",
+                                    ap.from_dept, ap.to_dept, ap.story_delta, ap.rationale
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(col),
+                            );
+                        }
+                    }
+                });
+            });
+        });
+    }
 }
