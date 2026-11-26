@@ -6139,4 +6139,375 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.5.8` (`8/10` -> `v0.8.6`): Multi-Option Massing Explorer & 1-Click Mass-to-Engineered-BIM Studio Drawer.
+    pub(super) fn render_massing_study_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::massing_agent::{MassingArchetype, MassingStructuralSystem};
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Building,
+                13.0,
+                theme.accent_blue,
+                "Multi-Option Massing Explorer & 1-Click Mass-to-BIM",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "Options & Mass-to-BIM"),
+                (1usize, "Grid, Framing & Trade-Off"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.massing_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.massing_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Multi-Option Massing Explorer drawer",
+            )
+            .clicked()
+            {
+                self.massing_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for arch in MassingArchetype::ALL {
+                    let active = universal_canvas.massing_config.selected_archetype == arch;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        arch.short_label(),
+                        active,
+                        theme.accent_blue,
+                        arch.label(),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.massing_config.selected_archetype = arch;
+                        universal_canvas.massing_overlay_visible = true;
+                        actions.run_massing_study = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Recycle),
+                    "Evaluate",
+                    false,
+                    theme.accent_blue,
+                    "Re-evaluate all 4 massing archetypes against zoning, program & Earth hazards",
+                )
+                .clicked()
+                {
+                    actions.run_massing_study = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    if universal_canvas.massing_overlay_visible {
+                        "3D Mass: ON"
+                    } else {
+                        "3D Mass: OFF"
+                    },
+                    universal_canvas.massing_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU Multi-Option Massing Explorer overlay",
+                )
+                .clicked()
+                {
+                    actions.toggle_massing_3d = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "IFCX",
+                    false,
+                    theme.accent_orange,
+                    "Export non-destructive eigengraph::design::massing_study IFCX (.ifcx)",
+                )
+                .clicked()
+                {
+                    actions.export_massing_ifcx = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let Some(rep) = universal_canvas.last_massing_report.clone() else {
+            ui.label(
+                RichText::new("Click 'Evaluate' or pick a massing option above to compare GFA, EigenGate ARI, DCR%, Cost & CO2.")
+                    .size(9.4)
+                    .color(theme.text_muted),
+            );
+            return;
+        };
+
+        let tab = self.massing_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    if is_left && tab == 0 {
+                        ui.label(
+                            RichText::new("4-Option Architectural Massing Cards")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ui.add_space(2.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
+                            for (idx, opt) in rep.options.iter().enumerate() {
+                                let selected = idx == rep.selected_index;
+                                let is_rec = idx == rep.recommended_index;
+                                let c = opt.archetype.accent_rgba();
+                                let accent = Color32::from_rgb(
+                                    (c[0] * 255.0) as u8,
+                                    (c[1] * 255.0) as u8,
+                                    (c[2] * 255.0) as u8,
+                                );
+                                let badge = if is_rec { " [REC]" } else { "" };
+                                let btn_lbl = format!(
+                                    "{}{badge} • {}F • {:.0}m² • ARI {:.2}",
+                                    opt.archetype.short_label(),
+                                    opt.stories,
+                                    opt.gfa_m2,
+                                    opt.estimated_eigengate_ari,
+                                );
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    None,
+                                    btn_lbl,
+                                    selected,
+                                    accent,
+                                    &opt.rationale,
+                                )
+                                .clicked()
+                                {
+                                    universal_canvas.massing_config.selected_archetype = opt.archetype;
+                                    universal_canvas.massing_overlay_visible = true;
+                                    actions.run_massing_study = true;
+                                }
+                            }
+                        });
+                        ui.add_space(4.0);
+                        if let Some(active) = rep.active_option() {
+                            ui.label(
+                                RichText::new(&active.rationale)
+                                    .size(8.6)
+                                    .color(theme.text_secondary),
+                            );
+                            ui.add_space(4.0);
+                        }
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::CheckCircle),
+                            "1-Click Convert Selected Mass -> Engineered BIM + EigenGate",
+                            true,
+                            theme.accent_green,
+                            "Synthesize full parametric levels, grids, columns, beams, shear-wall core, compound walls with windows/doors, slabs & footings",
+                        )
+                        .clicked()
+                        {
+                            actions.adopt_massing_to_bim = Some(rep.selected_index);
+                        }
+                    } else if !is_left && tab == 0 {
+                        ui.label(
+                            RichText::new("Multi-Option Engineering & Cost/Carbon Matrix")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ScrollArea::vertical()
+                            .id_salt("massing_matrix_scroll")
+                            .max_width(inner_w)
+                            .max_height(155.0)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                for (idx, opt) in rep.options.iter().enumerate() {
+                                    let is_sel = idx == rep.selected_index;
+                                    let col = if is_sel {
+                                        theme.accent_blue
+                                    } else if opt.zoning_compliant {
+                                        theme.text_primary
+                                    } else {
+                                        theme.accent_red
+                                    };
+                                    let pass_tag = if opt.zoning_compliant { "OK" } else { "LIM" };
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{} [{}] {}F ({:.1}m) | GFA {:.0} | KLB {:.2} | ARI {:.2} | DCR {:.0}% | ${:.1}M / Rp{:.1}B | {:.0}tCO2 | {:.0}pts",
+                                            if is_sel { ">" } else { " " },
+                                            pass_tag,
+                                            opt.archetype.short_label(),
+                                            opt.stories,
+                                            opt.total_height_m,
+                                            opt.gfa_m2,
+                                            opt.klb_far,
+                                            opt.estimated_eigengate_ari,
+                                            opt.estimated_max_dcr_pct,
+                                            opt.estimated_cost_usd / 1_000_000.0,
+                                            opt.estimated_cost_idr_billion,
+                                            opt.embodied_carbon_tco2e,
+                                            opt.composite_score,
+                                        ))
+                                        .size(8.3)
+                                        .monospace()
+                                        .color(col),
+                                    );
+                                }
+                            });
+                        ui.label(
+                            RichText::new(&rep.summary_verdict)
+                                .size(8.4)
+                                .monospace()
+                                .color(theme.accent_green),
+                        );
+                    } else if is_left && tab == 1 {
+                        ui.label(
+                            RichText::new("Structural Framing & Facade Grid Parameters")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        let cfg = &mut universal_canvas.massing_config;
+                        let mut changed = false;
+                        ui.horizontal_wrapped(|ui| {
+                            for sys in MassingStructuralSystem::ALL {
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    None,
+                                    sys.short_label(),
+                                    cfg.structural_system == sys,
+                                    theme.accent_blue,
+                                    sys.label(),
+                                )
+                                .clicked()
+                                {
+                                    cfg.structural_system = sys;
+                                    changed = true;
+                                }
+                            }
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("BayX:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.bay_x_m).range(4.8..=10.8).speed(0.2).suffix("m")).changed();
+                            ui.label(RichText::new("BayY:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.bay_y_m).range(4.8..=10.8).speed(0.2).suffix("m")).changed();
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Core:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.core_wall_thick_mm).range(200.0..=500.0).speed(10.0).suffix("mm")).changed();
+                            ui.label(RichText::new("WWR:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.facade_wwr_pct).range(15.0..=75.0).speed(1.0).suffix("%")).changed();
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            changed |= ui.checkbox(&mut cfg.include_basement_footings, "Pad Footings").changed();
+                            changed |= ui.checkbox(&mut cfg.show_structural_grid_preview, "3D Grid Preview").changed();
+                        });
+                        if changed {
+                            actions.run_massing_study = true;
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new("Trade-Off Vector Chart (Composite Score & ARI)")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        let plot_h = 112.0_f32;
+                        let (plot_rect, _) = ui.allocate_exact_size(
+                            Vec2::new(inner_w, plot_h),
+                            egui::Sense::hover(),
+                        );
+                        let painter = ui.painter_at(plot_rect);
+                        painter.rect_filled(plot_rect, CornerRadius::same(6), theme.card_bg_subtle);
+                        let row_h = (plot_h - 14.0) / 4.0;
+                        for (idx, opt) in rep.options.iter().enumerate() {
+                            let y = plot_rect.top() + 8.0 + (idx as f32) * row_h;
+                            let bar_left = plot_rect.left() + 84.0;
+                            let bar_max_w = (plot_rect.width() - 130.0).max(20.0);
+                            let frac = (opt.composite_score / 100.0).clamp(0.05, 1.0) as f32;
+                            let c = opt.archetype.accent_rgba();
+                            let col = Color32::from_rgb(
+                                (c[0] * 255.0) as u8,
+                                (c[1] * 255.0) as u8,
+                                (c[2] * 255.0) as u8,
+                            );
+                            painter.text(
+                                egui::Pos2::new(plot_rect.left() + 6.0, y + 6.0),
+                                Align2::LEFT_CENTER,
+                                opt.archetype.short_label(),
+                                egui::FontId::proportional(8.4),
+                                if idx == rep.selected_index {
+                                    theme.text_primary
+                                } else {
+                                    theme.text_secondary
+                                },
+                            );
+                            let bar_r = egui::Rect::from_min_size(
+                                egui::Pos2::new(bar_left, y + 2.0),
+                                Vec2::new(bar_max_w * frac, 10.0),
+                            );
+                            painter.rect_filled(bar_r, CornerRadius::same(3), col);
+                            painter.text(
+                                egui::Pos2::new(bar_r.right() + 6.0, y + 7.0),
+                                Align2::LEFT_CENTER,
+                                format!("{:.0}", opt.composite_score),
+                                egui::FontId::monospace(8.2),
+                                col,
+                            );
+                        }
+                    }
+                });
+            });
+        });
+    }
 }

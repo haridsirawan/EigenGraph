@@ -298,6 +298,8 @@ pub struct UnifiedWorkspaceArchive {
     pub zoning_config: crate::core::zoning_agent::SiteZoningConfig,
     #[serde(default)]
     pub program_config: crate::core::program_agent::SpatialProgramConfig,
+    #[serde(default)]
+    pub massing_config: crate::core::massing_agent::MassingStudyConfig,
     pub sha256_seal: String,
 }
 

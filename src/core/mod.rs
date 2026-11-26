@@ -51,6 +51,7 @@ pub mod foundation_studio;
 pub mod construction_lca_studio;
 pub mod zoning_agent;
 pub mod program_agent;
+pub mod massing_agent;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -350,6 +351,11 @@ pub use program_agent::{
     evaluate_spatial_program, AdjacencyPairScore, BuildingTypologyPreset, DepartmentKind,
     PackedRoomBlock3D, ProgramSpaceEntry, SpatialProgramConfig, SpatialProgramIfcxOverlay,
     SpatialProgramReport, StoryStackSummary, NS_EG_SPATIAL_PROGRAM,
+};
+pub use massing_agent::{
+    convert_massing_option_to_bim, evaluate_massing_options, MassToBimSummary, MassingArchetype,
+    MassingIfcxOverlay, MassingOptionMetrics, MassingStructuralSystem, MassingStudyConfig,
+    MassingStudyReport, MassingVolumeBlock3D, NS_EG_MASSING_STUDY,
 };
 
 

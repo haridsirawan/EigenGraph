@@ -78,6 +78,7 @@ pub mod ns {
     pub const EG_CONSTRUCTION_4D5D6D: &str = "eigengraph::analysis::construction_4d5d6d";
     pub const EG_ZONING_ENVELOPE: &str = "eigengraph::design::zoning_envelope";
     pub const EG_SPATIAL_PROGRAM: &str = "eigengraph::design::spatial_program";
+    pub const EG_MASSING_STUDY: &str = "eigengraph::design::massing_study";
     pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
@@ -1982,6 +1983,44 @@ impl IfcxStage {
         });
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_spatial_program", base_doc.header.id))
+    }
+
+    /// Composes a base `.ifcx` document with a non-destructive Multi-Option Massing Explorer overlay.
+    pub fn compose_with_massing_study_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::massing_agent::MassingIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_massing_study", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcBuilding", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Multi-Option Architectural Massing Explorer Overlay",
+                "selectedArchetype": overlay.selected_archetype,
+                "structuralSystem": overlay.structural_system,
+                "selectedGfaM2": overlay.selected_gfa_m2,
+                "selectedStories": overlay.selected_stories,
+                "selectedHeightM": overlay.selected_height_m,
+                "selectedEigengateAri": overlay.selected_eigengate_ari,
+                "selectedMaxDcrPct": overlay.selected_max_dcr_pct,
+                "recommendedArchetype": overlay.recommended_archetype,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_MASSING_STUDY.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/design/massing_study".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_massing_study", base_doc.header.id))
     }
 
     /// Composes a base `.ifcx` document with the `v0.8.5` Master Engineering Dossier Index (`S-000`).

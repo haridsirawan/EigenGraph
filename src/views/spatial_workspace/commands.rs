@@ -851,6 +851,38 @@ impl SpatialWorkspaceState {
                     self.open_program_drawer(0);
                     out.export_program_ifcx = true;
                 }
+                PlannedProposalAction::RunMassingStudy { archetype, bay_m } => {
+                    if let Some(a) = archetype {
+                        universal_canvas.massing_config.selected_archetype = *a;
+                    }
+                    if let Some(b) = bay_m {
+                        let clamped = b.clamp(4.8, 10.8);
+                        universal_canvas.massing_config.bay_x_m = clamped;
+                        universal_canvas.massing_config.bay_y_m = clamped;
+                    }
+                    universal_canvas.massing_overlay_visible = true;
+                    self.open_massing_drawer(0);
+                    out.run_massing_study = true;
+                }
+                PlannedProposalAction::AdoptMassingToBim { archetype } => {
+                    if let Some(a) = archetype {
+                        universal_canvas.massing_config.selected_archetype = *a;
+                    }
+                    let idx = crate::core::massing_agent::MassingArchetype::ALL
+                        .iter()
+                        .position(|&x| x == universal_canvas.massing_config.selected_archetype)
+                        .unwrap_or(0);
+                    self.open_massing_drawer(0);
+                    out.adopt_massing_to_bim = Some(idx);
+                }
+                PlannedProposalAction::ToggleMassing3d => {
+                    self.open_massing_drawer(0);
+                    out.toggle_massing_3d = true;
+                }
+                PlannedProposalAction::ExportMassingIfcx => {
+                    self.open_massing_drawer(0);
+                    out.export_massing_ifcx = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -1291,6 +1323,21 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportProgramIfcx => {
                                 PlannedProposalAction::ExportProgramIfcx
                             }
+                            GeminiDirective::RunMassingStudy { archetype, bay_m } => {
+                                PlannedProposalAction::RunMassingStudy {
+                                    archetype: *archetype,
+                                    bay_m: *bay_m,
+                                }
+                            }
+                            GeminiDirective::AdoptMassingToBim { archetype } => {
+                                PlannedProposalAction::AdoptMassingToBim {
+                                    archetype: *archetype,
+                                }
+                            }
+                            GeminiDirective::ToggleMassing3d => PlannedProposalAction::ToggleMassing3d,
+                            GeminiDirective::ExportMassingIfcx => {
+                                PlannedProposalAction::ExportMassingIfcx
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1509,6 +1556,14 @@ impl SpatialWorkspaceState {
                             ),
                             GeminiDirective::ToggleProgram3d => "ToggleProgram3d".to_string(),
                             GeminiDirective::ExportProgramIfcx => "ExportProgramIfcx".to_string(),
+                            GeminiDirective::RunMassingStudy { archetype, bay_m } => {
+                                format!("RunMassingStudy({archetype:?}/Bay:{bay_m:?})")
+                            }
+                            GeminiDirective::AdoptMassingToBim { archetype } => {
+                                format!("AdoptMassingToBim({archetype:?})")
+                            }
+                            GeminiDirective::ToggleMassing3d => "ToggleMassing3d".to_string(),
+                            GeminiDirective::ExportMassingIfcx => "ExportMassingIfcx".to_string(),
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -3637,6 +3692,40 @@ impl SpatialWorkspaceState {
                 }
                 "/program-ifcx" => {
                     actions.export_program_ifcx = true;
+                }
+                "/massing" => {
+                    let lo = rest.to_ascii_lowercase();
+                    if lo.contains("court") {
+                        universal_canvas.massing_config.selected_archetype =
+                            crate::core::massing_agent::MassingArchetype::CourtyardBlock;
+                    } else if lo.contains("bar") || lo.contains("slab") {
+                        universal_canvas.massing_config.selected_archetype =
+                            crate::core::massing_agent::MassingArchetype::LinearSlabBar;
+                    } else if lo.contains("step") || lo.contains("terrace") {
+                        universal_canvas.massing_config.selected_archetype =
+                            crate::core::massing_agent::MassingArchetype::SteppedTerrace;
+                    } else if lo.contains("podium") || lo.contains("tower") {
+                        universal_canvas.massing_config.selected_archetype =
+                            crate::core::massing_agent::MassingArchetype::PodiumTower;
+                    }
+                    universal_canvas.massing_overlay_visible = true;
+                    self.open_massing_drawer(0);
+                    actions.run_massing_study = true;
+                }
+                "/mass-to-bim" => {
+                    let idx = crate::core::massing_agent::MassingArchetype::ALL
+                        .iter()
+                        .position(|&a| a == universal_canvas.massing_config.selected_archetype)
+                        .unwrap_or(0);
+                    self.open_massing_drawer(0);
+                    actions.adopt_massing_to_bim = Some(idx);
+                }
+                "/massing-3d" => {
+                    self.open_massing_drawer(0);
+                    actions.toggle_massing_3d = true;
+                }
+                "/massing-ifcx" => {
+                    actions.export_massing_ifcx = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

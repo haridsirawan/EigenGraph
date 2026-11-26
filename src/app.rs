@@ -4346,6 +4346,84 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if hud_actions.run_massing_study {
+            let rep = self
+                .universal_canvas
+                .run_massing_study(&self.build_view.bim_bus.project);
+            self.spatial_workspace
+                .push_trace(rep.summary_verdict, true);
+        }
+        if let Some(opt_idx) = hud_actions.adopt_massing_to_bim {
+            let rep = self
+                .universal_canvas
+                .run_massing_study(&self.build_view.bim_bus.project);
+            let (new_bim, summary) = crate::core::convert_massing_option_to_bim(&rep, opt_idx);
+            self.build_view.bim_bus.project = new_bim.clone();
+            self.parametric_view.bim_bus.project = new_bim;
+            self.sync_bim_to_fem();
+            self.universal_canvas.massing_overlay_visible = false;
+            let cp_msg = self.universal_canvas.create_signed_ifcx_checkpoint(
+                &self.build_view.bim_bus.project,
+                &self.members,
+                &format!("Mass-to-BIM: {}", summary.archetype_label),
+            );
+            let _ = self
+                .universal_canvas
+                .run_zoning_agent(&self.build_view.bim_bus.project);
+            let _ = self
+                .universal_canvas
+                .run_spatial_program(&self.build_view.bim_bus.project);
+            let _ = self
+                .universal_canvas
+                .run_massing_study(&self.build_view.bim_bus.project);
+            let _ = self
+                .universal_canvas
+                .refresh_permit_compliance(&self.build_view.bim_bus.project, &self.members);
+            self.spatial_workspace
+                .push_trace(format!("{} • {cp_msg}", summary.summary_line), true);
+        }
+        if hud_actions.toggle_massing_3d {
+            self.universal_canvas.massing_overlay_visible =
+                !self.universal_canvas.massing_overlay_visible;
+            if self.universal_canvas.massing_overlay_visible {
+                let rep = self
+                    .universal_canvas
+                    .run_massing_study(&self.build_view.bim_bus.project);
+                self.spatial_workspace.push_trace(
+                    format!("3D Massing Explorer ON — {}", rep.summary_verdict),
+                    true,
+                );
+            } else {
+                self.spatial_workspace
+                    .push_trace("3D Massing Explorer OFF", true);
+            }
+        }
+        if hud_actions.export_massing_ifcx {
+            let rep = self
+                .universal_canvas
+                .run_massing_study(&self.build_view.bim_bus.project);
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_massing_study_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_massing_study.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported Massing Study IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {

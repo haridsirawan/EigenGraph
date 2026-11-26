@@ -229,6 +229,10 @@ pub struct UniversalCanvasState {
     pub program_overlay_visible: bool,
     pub program_config: crate::core::program_agent::SpatialProgramConfig,
     pub last_program_report: Option<crate::core::program_agent::SpatialProgramReport>,
+    // Update v0.8.5.8 (8/10 -> v0.8.6): Multi-Option Massing Explorer & 1-Click Mass-to-Engineered-BIM
+    pub massing_overlay_visible: bool,
+    pub massing_config: crate::core::massing_agent::MassingStudyConfig,
+    pub last_massing_report: Option<crate::core::massing_agent::MassingStudyReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -407,6 +411,9 @@ impl Default for UniversalCanvasState {
             program_overlay_visible: false,
             program_config: crate::core::program_agent::SpatialProgramConfig::default(),
             last_program_report: None,
+            massing_overlay_visible: false,
+            massing_config: crate::core::massing_agent::MassingStudyConfig::default(),
+            last_massing_report: None,
         }
     }
 }
@@ -1190,6 +1197,24 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Multi-Option Massing Explorer coupled to Site Zoning, Spatial Program & Earth Hazards.
+    pub fn run_massing_study(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::massing_agent::MassingStudyReport {
+        let zoning = self.run_zoning_agent(bim_project);
+        let program = self.run_spatial_program(bim_project);
+        let site = self.active_site_coupling();
+        let rep = crate::core::massing_agent::evaluate_massing_options(
+            &zoning,
+            &program,
+            &site,
+            &self.massing_config,
+        );
+        self.last_massing_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1529,6 +1554,7 @@ impl UniversalCanvasState {
             construction_lca_config: self.construction_lca_config.clone(),
             zoning_config: self.zoning_config.clone(),
             program_config: self.program_config.clone(),
+            massing_config: self.massing_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1673,6 +1699,8 @@ impl UniversalCanvasState {
         self.last_zoning_report = None;
         self.program_config = archive.program_config;
         self.last_program_report = None;
+        self.massing_config = archive.massing_config;
+        self.last_massing_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2384,6 +2412,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let massing_study_gpu_input = if self.massing_overlay_visible {
+                self.last_massing_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::MassingStudyGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -2427,6 +2466,7 @@ impl UniversalCanvasState {
                 construction_lca_gpu_input,
                 zoning_envelope_gpu_input,
                 spatial_program_gpu_input,
+                massing_study_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2523,6 +2563,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.program_overlay_visible {
                 self.paint_cpu_spatial_program_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.massing_overlay_visible {
+                self.paint_cpu_massing_study_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

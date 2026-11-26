@@ -142,6 +142,7 @@ impl SpatialWorkspaceState {
         vault_name: &str,
         zoning_overlay_visible: bool,
         program_overlay_visible: bool,
+        massing_overlay_visible: bool,
         actions: &mut SpatialHudActions,
     ) {
         if vault_connected {
@@ -215,6 +216,22 @@ impl SpatialWorkspaceState {
             self.toggle_exclusive_drawer("program");
             if !was_open {
                 actions.run_spatial_program = true;
+            }
+        }
+        if Self::glass_icon_button(
+            ui,
+            theme,
+            AppIcon::Building,
+            self.massing_drawer_open || massing_overlay_visible,
+            theme.accent_blue,
+            "Multi-Option Massing Explorer & 1-Click Mass-to-BIM",
+        )
+        .clicked()
+        {
+            let was_open = self.massing_drawer_open;
+            self.toggle_exclusive_drawer("massing");
+            if !was_open {
+                actions.run_massing_study = true;
             }
         }
     }
@@ -3008,6 +3025,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.massing_drawer_open {
+                        self.render_massing_study_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -4490,6 +4519,22 @@ impl SpatialWorkspaceState {
                                                             actions.run_spatial_program = true;
                                                         }
                                                     }
+                                                    if Self::glass_icon_button(
+                                                        ui,
+                                                        theme,
+                                                        AppIcon::Building,
+                                                        self.massing_drawer_open || universal_canvas.massing_overlay_visible,
+                                                        theme.accent_blue,
+                                                        "Multi-Option Massing Explorer & 1-Click Mass-to-BIM",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        let was_open = self.massing_drawer_open;
+                                                        self.toggle_exclusive_drawer("massing");
+                                                        if !was_open {
+                                                            actions.run_massing_study = true;
+                                                        }
+                                                    }
                                                     ui.separator();
                                                     if Self::glass_icon_button(
                                                         ui,
@@ -5529,6 +5574,19 @@ impl SpatialWorkspaceState {
                                                     if Self::glass_icon_button(
                                                         ui,
                                                         theme,
+                                                        AppIcon::Building,
+                                                        self.massing_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Open Multi-Option Massing Explorer & 1-Click Mass-to-BIM",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_massing_drawer(0);
+                                                        actions.run_massing_study = true;
+                                                    }
+                                                    if Self::glass_icon_button(
+                                                        ui,
+                                                        theme,
                                                         AppIcon::Book,
                                                         false,
                                                         theme.accent_green,
@@ -5564,6 +5622,7 @@ impl SpatialWorkspaceState {
                                         &vault_status.vault_name,
                                         universal_canvas.zoning_overlay_visible,
                                         universal_canvas.program_overlay_visible,
+                                        universal_canvas.massing_overlay_visible,
                                         &mut actions,
                                     );
                                     self.render_dynamic_island_row1_right(
@@ -5583,6 +5642,7 @@ impl SpatialWorkspaceState {
                                         &vault_status.vault_name,
                                         universal_canvas.zoning_overlay_visible,
                                         universal_canvas.program_overlay_visible,
+                                        universal_canvas.massing_overlay_visible,
                                         &mut actions,
                                     );
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

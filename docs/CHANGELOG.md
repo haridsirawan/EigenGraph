@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.6 (7/10)]
+## [Unreleased — Next: v0.8.6 (8/10)]
+
+### Update 8/10 (`v0.8.5.8` -> `v0.8.6`) — Multi-Option Massing Explorer & 1-Click Mass-to-Engineered-BIM (`eigengraph::design::massing_study`)
+- **Multi-Option Architectural Massing & 1-Click Mass-to-BIM Engine (`src/core/massing_agent.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_massing_options`](src/core/massing_agent.rs) coupling active `SiteZoningReport`, `SpatialProgramReport`, and `SiteEnvironmentalCoupling` into four comparative architectural archetypes (`PodiumTower`, `CourtyardBlock`, `LinearSlabBar`, `SteppedTerrace`) across three structural framing systems (`RcMomentCore`, `CompositeSteelCore`, `DiagridHybrid`), computing `GFA`, `KDB/KLB`, daylighting score, physics-coupled `EigenGate` redundancy index (`ARI`), `Max DCR%`, `5D` cost (`USD` & `IDR`), `6D` embodied carbon (`tCO2e`), and composite ranking, plus `.eigen.json` persistence (`UnifiedWorkspaceArchive::massing_config`) and non-destructive `eigengraph::design::massing_study` IFCX overlays (`IfcxStage::compose_with_massing_study_overlay`).
+  - Added [`convert_massing_option_to_bim`](src/core/massing_agent.rs) for 1-click synthesis of a complete parametric `BimProject` (levels, structural grids, columns, steel/RC beams, central shear-wall core with access opening, compound exterior/courtyard walls with WWR-scaled openings, slabs with courtyard cutouts, and pad footings) ready for live 6-DOF FEM + `EigenGate` evaluation.
+- **3D Pure WebGPU (`wgpu` + WGSL) Multi-Option Massing Explorer + CPU Fallback (`src/views/webgpu_earth/`, `src/views/universal_canvas/`)**:
+  - Added [`build_rtc_massing_study_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`MassingStudyGpuInput`, `material_kind = 25.0`, WGSL `kind >= 24.5` tiered massing ribbons, core highlight, optional structural bay columns & roof ARI beacon, 0% raster), dedicated `massing_study` GPU slot inside `WebGpuEarthResources`, and pure-vector CPU fallback (`paint_cpu_massing_study_fallback`).
+- **Massing Studio Drawer, Icon-Only Dynamic Island Triggers, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added the 2-tab width-first **Multi-Option Massing Explorer & 1-Click Mass-to-BIM** drawer (`Options & Mass-to-BIM` + `Grid, Framing & Trade-Off` with vector trade-off bar chart), icon-only `AppIcon::Building` triggers inside the minimalist Dynamic Island, `/massing`, `/mass-to-bim`, `/massing-3d`, `/massing-ifcx` slash commands, `[[RUN_MASSING_STUDY:...]]` / `[[ADOPT_MASSING_TO_BIM]]` / `[[TOGGLE_MASSING_3D]]` / `[[EXPORT_MASSING_IFCX]]` Gemini directives, and live BIM adoption + IFCX checkpointing in `app.rs`.
 
 ### Update 7/10 (`v0.8.5.7` -> `v0.8.6`) — Spatial Programming, Adjacency Matrix & 3D Stack/Pack Engine (`eigengraph::design::spatial_program`)
 - **Spatial Programming, Stacking & Deterministic 2D Floor-Plate Packing (`src/core/program_agent.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

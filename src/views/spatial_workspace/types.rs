@@ -548,6 +548,16 @@ pub enum PlannedProposalAction {
     },
     ToggleProgram3d,
     ExportProgramIfcx,
+    // Update v0.8.5.8 (8/10 -> v0.8.6): Multi-Option Massing Explorer & 1-Click Mass-to-BIM
+    RunMassingStudy {
+        archetype: Option<crate::core::massing_agent::MassingArchetype>,
+        bay_m: Option<f64>,
+    },
+    AdoptMassingToBim {
+        archetype: Option<crate::core::massing_agent::MassingArchetype>,
+    },
+    ToggleMassing3d,
+    ExportMassingIfcx,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -738,6 +748,16 @@ pub enum GeminiDirective {
     },
     ToggleProgram3d,
     ExportProgramIfcx,
+    // Update v0.8.5.8 (8/10 -> v0.8.6): Multi-Option Massing Explorer & 1-Click Mass-to-BIM
+    RunMassingStudy {
+        archetype: Option<crate::core::massing_agent::MassingArchetype>,
+        bay_m: Option<f64>,
+    },
+    AdoptMassingToBim {
+        archetype: Option<crate::core::massing_agent::MassingArchetype>,
+    },
+    ToggleMassing3d,
+    ExportMassingIfcx,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1407,6 +1427,29 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleProgram3d);
             } else if upper == "EXPORT_PROGRAM_IFCX" {
                 directives.push(GeminiDirective::ExportProgramIfcx);
+            } else if let Some(rest) = upper.strip_prefix("RUN_MASSING_STUDY") {
+                let tok = rest.trim_start_matches(':').trim();
+                let archetype = if tok.contains("COURT") {
+                    Some(crate::core::massing_agent::MassingArchetype::CourtyardBlock)
+                } else if tok.contains("BAR") || tok.contains("SLAB") {
+                    Some(crate::core::massing_agent::MassingArchetype::LinearSlabBar)
+                } else if tok.contains("STEP") || tok.contains("TERR") {
+                    Some(crate::core::massing_agent::MassingArchetype::SteppedTerrace)
+                } else if tok.contains("POD") || tok.contains("TOW") {
+                    Some(crate::core::massing_agent::MassingArchetype::PodiumTower)
+                } else {
+                    None
+                };
+                directives.push(GeminiDirective::RunMassingStudy {
+                    archetype,
+                    bay_m: None,
+                });
+            } else if upper == "ADOPT_MASSING_TO_BIM" {
+                directives.push(GeminiDirective::AdoptMassingToBim { archetype: None });
+            } else if upper == "TOGGLE_MASSING_3D" {
+                directives.push(GeminiDirective::ToggleMassing3d);
+            } else if upper == "EXPORT_MASSING_IFCX" {
+                directives.push(GeminiDirective::ExportMassingIfcx);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -2727,6 +2770,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Document,
     },
     SlashCommandSpec {
+        cmd: "/massing",
+        category: "Design",
+        description: "Compare 4 architectural massing options (Podium-Tower, Courtyard, Bar, Stepped)",
+        icon: AppIcon::Building,
+    },
+    SlashCommandSpec {
+        cmd: "/mass-to-bim",
+        category: "Design",
+        description: "Convert the selected 3D massing option into a full Engineered BIM + live EigenGate",
+        icon: AppIcon::CheckCircle,
+    },
+    SlashCommandSpec {
+        cmd: "/massing-3d",
+        category: "Design",
+        description: "Toggle 3D Pure WebGPU Multi-Option Massing Explorer overlay",
+        icon: AppIcon::Cube3D,
+    },
+    SlashCommandSpec {
+        cmd: "/massing-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::design::massing_study IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -2909,6 +2976,11 @@ pub struct SpatialHudActions {
     pub run_spatial_program: bool,
     pub toggle_program_3d: bool,
     pub export_program_ifcx: bool,
+    // Update v0.8.5.8 (8/10 -> v0.8.6): Multi-Option Massing Explorer & 1-Click Mass-to-BIM
+    pub run_massing_study: bool,
+    pub adopt_massing_to_bim: Option<usize>,
+    pub toggle_massing_3d: bool,
+    pub export_massing_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3363,5 +3435,11 @@ impl SpatialHudActions {
         self.run_spatial_program |= other.run_spatial_program;
         self.toggle_program_3d |= other.toggle_program_3d;
         self.export_program_ifcx |= other.export_program_ifcx;
+        self.run_massing_study |= other.run_massing_study;
+        if other.adopt_massing_to_bim.is_some() {
+            self.adopt_massing_to_bim = other.adopt_massing_to_bim;
+        }
+        self.toggle_massing_3d |= other.toggle_massing_3d;
+        self.export_massing_ifcx |= other.export_massing_ifcx;
     }
 }

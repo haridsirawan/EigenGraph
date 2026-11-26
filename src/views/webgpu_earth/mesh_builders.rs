@@ -4049,3 +4049,137 @@ pub fn build_rtc_spatial_program_mesh(input: &SpatialProgramGpuInput<'_>) -> Gpu
     }
 }
 
+/// GPU input payload for Update `v0.8.5.8` Multi-Option Massing Explorer (`material_kind = 25.0`).
+pub struct MassingStudyGpuInput<'a> {
+    pub report: &'a crate::core::massing_agent::MassingStudyReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU architectural massing tiers, story floor-plate ribbons, shear-wall core,
+/// optional structural grid preview struts, and roof EigenGate ARI beacon (`material_kind = 25.0`, 0% raster).
+pub fn build_rtc_massing_study_mesh(input: &MassingStudyGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let Some(opt) = input.report.active_option() else {
+        return GpuMeshPayload::default();
+    };
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+
+    let mut verts = Vec::with_capacity(opt.blocks_3d.len() * 64 + opt.stories * 32);
+    let mut idxs = Vec::with_capacity(opt.blocks_3d.len() * 96 + opt.stories * 48);
+    let story_h = input.report.story_height_m.clamp(2.8, 6.0);
+
+    for blk in &opt.blocks_3d {
+        let fp = [
+            rot_xy(blk.min_enu_m[0], blk.min_enu_m[1]),
+            rot_xy(blk.max_enu_m[0], blk.min_enu_m[1]),
+            rot_xy(blk.max_enu_m[0], blk.max_enu_m[1]),
+            rot_xy(blk.min_enu_m[0], blk.max_enu_m[1]),
+        ];
+        let z0 = blk.min_enu_m[2] as f32;
+        let z1 = blk.max_enu_m[2] as f32;
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z1, blk.color_rgba, 25.0);
+
+        let rim_col = if blk.is_core {
+            [0.92, 0.96, 1.0, 0.90]
+        } else {
+            [
+                (blk.color_rgba[0] + 0.22).min(1.0),
+                (blk.color_rgba[1] + 0.22).min(1.0),
+                (blk.color_rgba[2] + 0.22).min(1.0),
+                0.86,
+            ]
+        };
+
+        // Render clean horizontal floor-plate outline ribbons at every story slice inside the block
+        let end_s = if blk.is_core { opt.stories } else { blk.end_story };
+        let start_s = if blk.is_core { 1 } else { blk.start_story + 1 };
+        for s in start_s..=end_s {
+            let sz = (s as f64) * story_h;
+            if sz > blk.max_enu_m[2] + 0.05 {
+                break;
+            }
+            let pts = [
+                [fp[0][0], fp[0][1], sz],
+                [fp[1][0], fp[1][1], sz],
+                [fp[2][0], fp[2][1], sz],
+                [fp[3][0], fp[3][1], sz],
+            ];
+            for i in 0..4 {
+                let next = (i + 1) % 4;
+                push_animated_flow_strut_enu(
+                    &mut verts,
+                    &mut idxs,
+                    pts[i],
+                    pts[next],
+                    if s == end_s { 0.14 } else { 0.07 },
+                    if s == end_s { 0.14 } else { 0.07 },
+                    rim_col,
+                    0.45 + (s as f32) * 0.05,
+                    25.0,
+                );
+            }
+        }
+    }
+
+    // Optional structural grid preview columns along base bay grid
+    if input.report.config.show_structural_grid_preview {
+        let bay_x = input.report.config.bay_x_m.clamp(4.8, 10.8);
+        let bay_y = input.report.config.bay_y_m.clamp(4.8, 10.8);
+        let mut min_x = f64::INFINITY;
+        let mut max_x = f64::NEG_INFINITY;
+        let mut min_y = f64::INFINITY;
+        let mut max_y = f64::NEG_INFINITY;
+        for b in opt.blocks_3d.iter().filter(|b| !b.is_core && b.start_story == 0) {
+            min_x = min_x.min(b.min_enu_m[0]);
+            max_x = max_x.max(b.max_enu_m[0]);
+            min_y = min_y.min(b.min_enu_m[1]);
+            max_y = max_y.max(b.max_enu_m[1]);
+        }
+        if min_x.is_finite() {
+            let nx = (((max_x - min_x) / bay_x).round() as usize).clamp(1, 12);
+            let ny = (((max_y - min_y) / bay_y).round() as usize).clamp(1, 12);
+            let col_col = [0.95, 0.97, 1.0, 0.65];
+            let podium_top = (opt.podium_stories.max(1) as f64) * story_h;
+            for ix in 0..=nx {
+                let xm = min_x + (ix as f64) * ((max_x - min_x) / (nx as f64));
+                for iy in 0..=ny {
+                    let ym = min_y + (iy as f64) * ((max_y - min_y) / (ny as f64));
+                    let p_rot = rot_xy(xm, ym);
+                    push_animated_flow_strut_enu(
+                        &mut verts,
+                        &mut idxs,
+                        [p_rot[0], p_rot[1], 0.0],
+                        [p_rot[0], p_rot[1], podium_top],
+                        0.12,
+                        0.12,
+                        col_col,
+                        0.3,
+                        25.0,
+                    );
+                }
+            }
+        }
+    }
+
+    // Roof crown EigenGate ARI Beacon
+    let ari_col = if opt.estimated_eigengate_ari >= 0.78 {
+        [0.13, 0.84, 0.56, 0.95]
+    } else if opt.estimated_eigengate_ari >= 0.65 {
+        [0.98, 0.72, 0.16, 0.95]
+    } else {
+        [0.94, 0.30, 0.30, 0.95]
+    };
+    let crown_z = opt.total_height_m + 3.2;
+    push_octahedron_beacon_enu(&mut verts, &mut idxs, [0.0, 0.0, crown_z], 1.15, ari_col, 25.0);
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
