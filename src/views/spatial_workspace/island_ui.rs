@@ -60,6 +60,28 @@ impl SpatialWorkspaceState {
         }
     }
 
+    /// Renders a minimalist icon-only frosted glass pill button with hover tooltip (no text label).
+    pub(super) fn glass_icon_button(
+        ui: &mut Ui,
+        theme: &MacTheme,
+        icon: AppIcon,
+        active: bool,
+        accent: Color32,
+        tooltip: &str,
+    ) -> egui::Response {
+        let (fg, bg, stroke) = theme.glass_chip_style(active, accent);
+        icons::icon_only_button(
+            ui,
+            icon,
+            fg,
+            bg,
+            stroke,
+            CornerRadius::same(8),
+            Vec2::splat(24.0),
+            tooltip,
+        )
+    }
+
     /// Renders a width-clamped frosted Liquid Glass sub-pill container whose inner widgets
     /// wrap strictly within `max_w` so mobile viewports never overflow horizontally.
     pub(super) fn glass_subpill_group(
@@ -118,58 +140,42 @@ impl SpatialWorkspaceState {
         theme: &MacTheme,
         vault_connected: bool,
         vault_name: &str,
-        is_mobile: bool,
+        zoning_overlay_visible: bool,
         actions: &mut SpatialHudActions,
     ) {
         if vault_connected {
-            let lbl = if is_mobile {
-                "Vault".to_string()
-            } else {
-                format!("Vault: {vault_name}")
-            };
-            if Self::glass_pill_button(
+            if Self::glass_icon_button(
                 ui,
                 theme,
-                Some(AppIcon::Folder),
-                lbl,
+                AppIcon::Folder,
                 self.vault_drawer_open,
                 theme.accent_green,
-                "Browse Vault folders, notes, & folder switch",
+                &format!("Vault: {vault_name} — Browse folders, notes & projects"),
             )
             .clicked()
             {
                 self.toggle_exclusive_drawer("vault");
             }
-        } else {
-            let lbl = if is_mobile {
-                "+ Vault"
-            } else {
-                "+ Add Folder (Vault)"
-            };
-            if Self::glass_pill_button(
-                ui,
-                theme,
-                Some(AppIcon::Folder),
-                lbl,
-                true,
-                theme.accent_blue,
-                "Select local folder to mount as Engineering Vault",
-            )
-            .clicked()
-            {
-                actions.add_vault_folder = true;
-            }
-        }
-        let ctx_lbl = if is_mobile { "Context" } else { "Add Context" };
-        if Self::glass_pill_button(
+        } else if Self::glass_icon_button(
             ui,
             theme,
-            Some(if self.context_picker_open {
+            AppIcon::Folder,
+            true,
+            theme.accent_blue,
+            "Select local folder to mount as Engineering Vault",
+        )
+        .clicked()
+        {
+            actions.add_vault_folder = true;
+        }
+        if Self::glass_icon_button(
+            ui,
+            theme,
+            if self.context_picker_open {
                 AppIcon::Close
             } else {
                 AppIcon::Plus
-            }),
-            ctx_lbl,
+            },
             self.context_picker_open,
             theme.accent_blue,
             "Attach element, Earth site, BIM, FEM, Vault file, or disk file (@)",
@@ -177,6 +183,22 @@ impl SpatialWorkspaceState {
         .clicked()
         {
             self.toggle_exclusive_drawer("context");
+        }
+        if Self::glass_icon_button(
+            ui,
+            theme,
+            AppIcon::Compass,
+            self.zoning_drawer_open || zoning_overlay_visible,
+            theme.accent_blue,
+            "Site Zoning & 3D Buildable Envelope (KDB / KLB / GSB / Sun Path)",
+        )
+        .clicked()
+        {
+            let was_open = self.zoning_drawer_open;
+            self.toggle_exclusive_drawer("zoning");
+            if !was_open {
+                actions.run_zoning_agent = true;
+            }
         }
     }
 
@@ -192,11 +214,10 @@ impl SpatialWorkspaceState {
         for slot in order {
             match slot {
                 0 => {
-                    if Self::glass_pill_button(
+                    if Self::glass_icon_button(
                         ui,
                         theme,
-                        Some(AppIcon::Bot),
-                        self.agent_model.short_label(),
+                        AppIcon::Bot,
                         false,
                         theme.accent_blue,
                         &format!("AI Model: {} (click to cycle)", self.agent_model.label()),
@@ -207,14 +228,13 @@ impl SpatialWorkspaceState {
                     }
                 }
                 1 => {
-                    if Self::glass_pill_button(
+                    if Self::glass_icon_button(
                         ui,
                         theme,
-                        Some(AppIcon::SlidersPanel),
-                        self.agent_mode.label(),
+                        AppIcon::SlidersPanel,
                         true,
                         theme.accent_blue,
-                        self.agent_mode.description(),
+                        &format!("{}: {}", self.agent_mode.label(), self.agent_mode.description()),
                     )
                     .clicked()
                     {
@@ -222,16 +242,12 @@ impl SpatialWorkspaceState {
                     }
                 }
                 2 => {
-                    let (hist_fg, hist_bg, hist_st) =
-                        theme.glass_chip_style(self.history_popover_open, theme.accent_blue);
-                    if icons::icon_only_button(
+                    if Self::glass_icon_button(
                         ui,
+                        theme,
                         AppIcon::Clock,
-                        hist_fg,
-                        hist_bg,
-                        hist_st,
-                        CornerRadius::same(8),
-                        Vec2::splat(22.0),
+                        self.history_popover_open,
+                        theme.accent_blue,
                         "Conversation History",
                     )
                     .clicked()
@@ -242,14 +258,13 @@ impl SpatialWorkspaceState {
                 3 => {
                     if is_mobile
                         && !should_expand
-                        && Self::glass_pill_button(
+                        && Self::glass_icon_button(
                             ui,
                             theme,
-                            Some(AppIcon::Layers),
-                            "Deck",
+                            AppIcon::Layers,
                             true,
                             theme.accent_blue,
-                            "Expand Dynamic Island controls for touch devices",
+                            "Expand Studio Deck",
                         )
                         .clicked()
                     {
@@ -1812,13 +1827,14 @@ impl SpatialWorkspaceState {
                 || self.ground_motion_drawer_open
                 || self.shm_drawer_open
                 || self.evacuation_drawer_open
-                || self.collab_drawer_open,
+                || self.collab_drawer_open
+                || self.zoning_drawer_open,
         );
 
         let compact_w = if is_mobile {
-            (vp.x - 16.0).clamp(220.0, 420.0)
+            (vp.x - 16.0).clamp(220.0, 380.0)
         } else {
-            (vp.x * 0.48).clamp(500.0, 680.0)
+            (vp.x * 0.36).clamp(320.0, 440.0)
         };
         let expanded_w = if is_mobile {
             (vp.x - 14.0).clamp(220.0, 440.0)
@@ -1847,7 +1863,7 @@ impl SpatialWorkspaceState {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
 
                 ui.vertical(|ui| {
-                    // A. Subtle execution trace badge above the resting Dynamic Island
+                    // A. Minimalist icon-only status trace above the resting Dynamic Island
                     if !should_expand && !self.recent_trace_chips.is_empty() && !slash_mode {
                         ui.horizontal_wrapped(|ui| {
                             for chip in self
@@ -1861,28 +1877,21 @@ impl SpatialWorkspaceState {
                                 } else {
                                     frame_theme.accent_orange
                                 };
-                                frame_theme
-                                    .glass_capsule_frame(12, Margin::symmetric(10, 3))
-                                    .stroke(Stroke::new(1.0, col.gamma_multiply(0.55)))
-                                    .show(ui, |ui| {
-                                        icons::icon_label(
-                                            ui,
-                                            if chip.ok {
-                                                AppIcon::CheckCircle
-                                            } else {
-                                                AppIcon::AlertTriangle
-                                            },
-                                            11.0,
-                                            col,
-                                            &chip.label,
-                                            10.0,
-                                            frame_theme.text_secondary,
-                                            false,
-                                        );
-                                    });
+                                let _ = Self::glass_icon_button(
+                                    ui,
+                                    &frame_theme,
+                                    if chip.ok {
+                                        AppIcon::CheckCircle
+                                    } else {
+                                        AppIcon::AlertTriangle
+                                    },
+                                    true,
+                                    col,
+                                    &chip.label,
+                                );
                             }
                         });
-                        ui.add_space(5.0);
+                        ui.add_space(4.0);
                     }
 
                     // B. ONE UNIFIED GROWING LIQUID GLASS DYNAMIC ISLAND (morphs seamlessly upward & wider when needed)
@@ -2957,6 +2966,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.zoning_drawer_open {
+                        self.render_zoning_envelope_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -3362,19 +3383,13 @@ impl SpatialWorkspaceState {
                                 if draw_tabs {
                                     for tab in DynamicIslandStudioTab::ALL {
                                         let is_act = effective_tab == tab;
-                                        let lbl = if is_mobile {
-                                            tab.short_label()
-                                        } else {
-                                            tab.label()
-                                        };
-                                        if Self::glass_pill_button(
+                                        if Self::glass_icon_button(
                                             ui,
                                             theme,
-                                            Some(tab.icon()),
-                                            lbl,
+                                            tab.icon(),
                                             is_act,
                                             theme.accent_blue,
-                                            "",
+                                            tab.label(),
                                         )
                                         .clicked()
                                         {
@@ -3389,11 +3404,13 @@ impl SpatialWorkspaceState {
                                 }
                                 if draw_util {
                                         if world_total > 0 {
-                                            icons::pill_badge(
+                                            let _ = Self::glass_icon_button(
                                                 ui,
-                                                AppIcon::Layers,
-                                                format!("World: {world_total}"),
+                                                theme,
+                                                AppIcon::Globe,
+                                                false,
                                                 theme.accent_blue,
+                                                &format!("World Portfolio: {world_total} structures"),
                                             );
                                             let rep = &universal_canvas.neighborhood_report;
                                             if rep.neighbors_evaluated > 0 {
@@ -3418,51 +3435,54 @@ impl SpatialWorkspaceState {
                                                 } else {
                                                     theme.accent_green
                                                 };
-                                                icons::pill_badge(
+                                                let _ = Self::glass_icon_button(
                                                     ui,
+                                                    theme,
                                                     AppIcon::AlertTriangle,
-                                                    format!(
-                                                        "Nb:{} Gap {gap_tag} {exp_tag}{}",
+                                                    rep.pounding_risk_count > 0 || rep.tight_buffer_count > 0,
+                                                    nb_col,
+                                                    &format!(
+                                                        "Neighbors: {} • Min Gap {gap_tag} • {exp_tag}{}",
                                                         rep.neighbors_evaluated,
                                                         if rep.pounding_risk_count > 0 {
-                                                            " POUND"
+                                                            " • POUNDING RISK"
                                                         } else {
                                                             ""
                                                         }
                                                     ),
-                                                    nb_col,
                                                 );
                                             }
                                         }
                                         if !build_view.bim_bus.project.is_empty() || !members.is_empty()
                                         {
-                                            icons::pill_badge(
+                                            let _ = Self::glass_icon_button(
                                                 ui,
-                                                AppIcon::Bolt,
-                                                format!(
+                                                theme,
+                                                AppIcon::Pulse,
+                                                crit_cnt > 0,
+                                                health_col,
+                                                &format!(
                                                     "{}C {}B • DCR {:.0}% • EigenGate {:.2}{}",
                                                     build_view.bim_bus.project.columns.len(),
                                                     build_view.bim_bus.project.runs.len(),
                                                     max_dcr,
                                                     min_eigengate,
                                                     if crit_cnt > 0 {
-                                                        format!(" • Crit {crit_cnt}")
+                                                        format!(" • {crit_cnt} Critical")
                                                     } else {
                                                         String::new()
                                                     }
                                                 ),
-                                                health_col,
                                             );
                                         }
                                         if let Some(target) = worst_target {
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                Some(AppIcon::Target),
-                                                "Worst",
+                                                AppIcon::Target,
                                                 false,
                                                 theme.accent_orange,
-                                                "Select critical / highest-DCR structural element on Earth 3D",
+                                                "Focus critical / highest-DCR structural element on Earth 3D",
                                             )
                                             .clicked()
                                             {
@@ -3479,14 +3499,13 @@ impl SpatialWorkspaceState {
                                             }
                                         }
                                         if (crit_cnt > 0 || max_dcr > 95.0)
-                                            && Self::glass_pill_button(
+                                            && Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                Some(AppIcon::Wrench),
-                                                "Auto-Repair",
+                                                AppIcon::Wrench,
                                                 true,
                                                 theme.accent_orange,
-                                                "Upgrade low-redundancy / overstressed elements cleanly",
+                                                "Auto-Repair low-redundancy / overstressed elements cleanly",
                                             )
                                             .clicked()
                                         {
@@ -3495,11 +3514,10 @@ impl SpatialWorkspaceState {
 
                                         ui.separator();
 
-                                        if Self::glass_pill_button(
+                                        if Self::glass_icon_button(
                                             ui,
                                             theme,
-                                            Some(AppIcon::Undo),
-                                            "Undo",
+                                            AppIcon::Undo,
                                             false,
                                             theme.accent_blue,
                                             "Undo last BIM or 2D canvas action (Cmd/Ctrl+Z)",
@@ -3509,11 +3527,10 @@ impl SpatialWorkspaceState {
                                         {
                                             actions.undo = true;
                                         }
-                                        if Self::glass_pill_button(
+                                        if Self::glass_icon_button(
                                             ui,
                                             theme,
-                                            Some(AppIcon::Redo),
-                                            "Redo",
+                                            AppIcon::Redo,
                                             false,
                                             theme.accent_blue,
                                             "Redo undone BIM or 2D canvas action (Cmd/Ctrl+Y)",
@@ -3523,11 +3540,10 @@ impl SpatialWorkspaceState {
                                         {
                                             actions.redo = true;
                                         }
-                                        if Self::glass_pill_button(
+                                        if Self::glass_icon_button(
                                             ui,
                                             theme,
-                                            Some(AppIcon::ZoomFit),
-                                            "Fit",
+                                            AppIcon::ZoomFit,
                                             false,
                                             theme.accent_blue,
                                             "Fit Earth 3D viewport to model",
@@ -3543,24 +3559,26 @@ impl SpatialWorkspaceState {
                                         } else {
                                             theme.accent_blue
                                         };
-                                        if Self::glass_pill_button(
+                                        if Self::glass_icon_button(
                                             ui,
                                             theme,
-                                            Some(AppIcon::Lock),
-                                            if has_key { "Key OK" } else { "API Key" },
+                                            AppIcon::Lock,
                                             self.api_key_popover_open || has_key || needs_key,
                                             key_accent,
-                                            "Configure Gemini API Key",
+                                            if has_key {
+                                                "Gemini API Key configured"
+                                            } else {
+                                                "Configure Gemini API Key"
+                                            },
                                         )
                                         .clicked()
                                         {
                                             self.toggle_exclusive_drawer("api_key");
                                         }
-                                        if Self::glass_pill_button(
+                                        if Self::glass_icon_button(
                                             ui,
                                             theme,
-                                            Some(AppIcon::SettingsGear),
-                                            "Settings",
+                                            AppIcon::SettingsGear,
                                             false,
                                             theme.accent_blue,
                                             "Open Workspace Settings",
@@ -3569,14 +3587,17 @@ impl SpatialWorkspaceState {
                                         {
                                             actions.open_settings = true;
                                         }
-                                        if Self::glass_pill_button(
+                                        if Self::glass_icon_button(
                                             ui,
                                             theme,
-                                            Some(AppIcon::MapPin),
-                                            if self.mobile_deck_pinned { "Pinned" } else { "Pin" },
+                                            AppIcon::MapPin,
                                             self.mobile_deck_pinned,
                                             theme.accent_green,
-                                            "Pin Studio Deck open while authoring on Earth 3D (Alt+1..4 tabs)",
+                                            if self.mobile_deck_pinned {
+                                                "Studio Deck Pinned (click to unpin)"
+                                            } else {
+                                                "Pin Studio Deck open while authoring on Earth 3D (Alt+1..4 tabs)"
+                                            },
                                         )
                                         .clicked()
                                         {
@@ -3623,40 +3644,33 @@ impl SpatialWorkspaceState {
                                         ui,
                                         theme,
                                         9,
-                                        Margin::symmetric(7, 3),
+                                        Margin::symmetric(6, 3),
                                         deck_w,
                                         |ui| {
-                                            ui.label(
-                                                RichText::new("Cam:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
-                                            );
-                                            for (preset, lbl, act, tip) in [
+                                            for (preset, icon, act, tip) in [
                                                 (
                                                     "iso",
-                                                    "Iso",
+                                                    AppIcon::Cube3D,
                                                     tilt >= 5.0 && tilt <= 55.0,
-                                                    "Earth 3D Isometric Camera (42° tilt)",
+                                                    "Iso Camera — Earth 3D Isometric (42° tilt)",
                                                 ),
                                                 (
                                                     "top",
-                                                    "Top",
+                                                    AppIcon::Grid,
                                                     tilt < 5.0,
-                                                    "Earth 3D Nadir Top-Down Plan View (0° tilt)",
+                                                    "Top View — Earth 3D Nadir Plan (0° tilt)",
                                                 ),
                                                 (
                                                     "front",
-                                                    "Elev",
+                                                    AppIcon::Building,
                                                     tilt > 55.0,
-                                                    "Earth 3D Low-Horizon Elevation Camera (64° tilt)",
+                                                    "Elevation Camera — Earth 3D Low-Horizon (64° tilt)",
                                                 ),
                                             ] {
-                                                if Self::glass_pill_button(
+                                                if Self::glass_icon_button(
                                                     ui,
                                                     theme,
-                                                    None,
-                                                    lbl,
+                                                    icon,
                                                     act,
                                                     theme.accent_blue,
                                                     tip,
@@ -3672,31 +3686,24 @@ impl SpatialWorkspaceState {
                                                 }
                                             }
                                             ui.separator();
-                                            ui.label(
-                                                RichText::new("Lens:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
-                                            );
-                                            for (lens, lbl) in [
-                                                (SpatialLens::Clean, "Clean"),
-                                                (SpatialLens::DcrHeatmap, "DCR%"),
-                                                (SpatialLens::EigenGateRedundancy, "EigenGate"),
-                                                (SpatialLens::BendingMoment, "Moment"),
-                                                (SpatialLens::DeformedShape, "Deform"),
-                                                (SpatialLens::ModalVibration, "Modal"),
-                                                (SpatialLens::TimeHistoryReplay, "EQ Replay"),
-                                                (SpatialLens::ShmDigitalTwin, "SHM Twin"),
-                                                (SpatialLens::Erection4D, "4D"),
+                                            for (lens, icon, tip) in [
+                                                (SpatialLens::Clean, AppIcon::Globe, "Lens: Clean Architectural"),
+                                                (SpatialLens::DcrHeatmap, AppIcon::ChartBar, "Lens: LRFD DCR% Utilization Heatmap"),
+                                                (SpatialLens::EigenGateRedundancy, AppIcon::Shield, "Lens: EigenGate Redundancy Index"),
+                                                (SpatialLens::BendingMoment, AppIcon::ChartLine, "Lens: Bending Moment BMD"),
+                                                (SpatialLens::DeformedShape, AppIcon::NodesGraph, "Lens: 6-DOF Deformed Shape"),
+                                                (SpatialLens::ModalVibration, AppIcon::Pulse, "Lens: Modal Vibration Eigenmodes"),
+                                                (SpatialLens::TimeHistoryReplay, AppIcon::Play, "Lens: Earthquake Time-History Replay"),
+                                                (SpatialLens::ShmDigitalTwin, AppIcon::Cpu, "Lens: SHM Digital Twin"),
+                                                (SpatialLens::Erection4D, AppIcon::Clock, "Lens: 4D Construction Erection"),
                                             ] {
-                                                if Self::glass_pill_button(
+                                                if Self::glass_icon_button(
                                                     ui,
                                                     theme,
-                                                    None,
-                                                    lbl,
+                                                    icon,
                                                     self.active_lens == lens,
                                                     theme.accent_blue,
-                                                    "",
+                                                    tip,
                                                 )
                                                 .clicked()
                                                 {
@@ -3728,37 +3735,32 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 theme,
                                                 9,
-                                                Margin::symmetric(7, 3),
+                                                Margin::symmetric(6, 3),
                                                 col_w,
                                                 |ui| {
-                                                    ui.label(
-                                                        RichText::new("CRC & Cascade:")
-                                                            .size(9.3)
-                                                            .strong()
-                                                            .color(theme.text_muted),
-                                                    );
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Bolt),
-                                                        "CRC + Cascade",
+                                                        AppIcon::Bolt,
                                                         universal_canvas.last_crc_cascade_report.is_some(),
                                                         theme.accent_orange,
-                                                        "Run Two-Stage EigenGate + StructGNN-CRC Conformal Screening & 3D Progressive Collapse Cascade",
+                                                        "Run Two-Stage EigenGate + StructGNN-CRC Screening & Progressive Collapse Cascade",
                                                     )
                                                     .clicked()
                                                     {
                                                         actions.run_crc_cascade_screening =
                                                             Some(universal_canvas.cascade_daf);
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        None,
-                                                        format!("DAF {:.2}x", universal_canvas.cascade_daf),
+                                                        AppIcon::SlidersPanel,
                                                         false,
                                                         theme.accent_blue,
-                                                        "Cycle UFC 4-023-03 Dynamic Amplification Factor: 1.20x / 1.50x / 2.00x",
+                                                        &format!(
+                                                            "Cascade DAF {:.2}x (click to cycle 1.20x / 1.50x / 2.00x)",
+                                                            universal_canvas.cascade_daf
+                                                        ),
                                                     )
                                                     .clicked()
                                                     {
@@ -3777,25 +3779,23 @@ impl SpatialWorkspaceState {
                                                         let max_steps = crc_rep.total_steps.clamp(1, 4);
                                                         for s in 1..=max_steps {
                                                             let act = universal_canvas.active_cascade_step == s;
-                                                            if Self::glass_pill_button(
+                                                            if Self::glass_icon_button(
                                                                 ui,
                                                                 theme,
-                                                                None,
-                                                                format!("S{s}"),
+                                                                AppIcon::SkipNext,
                                                                 act,
                                                                 theme.accent_red,
-                                                                "Inspect domino collapse chronology at step",
+                                                                &format!("Inspect collapse step S{s}"),
                                                             )
                                                             .clicked()
                                                             {
                                                                 universal_canvas.active_cascade_step = s;
                                                             }
                                                         }
-                                                        if Self::glass_pill_button(
+                                                        if Self::glass_icon_button(
                                                             ui,
                                                             theme,
-                                                            Some(AppIcon::Cube3D),
-                                                            "CRC .ifcx",
+                                                            AppIcon::SaveDisk,
                                                             false,
                                                             theme.accent_green,
                                                             "Export eigengraph::analysis::crc_cascade .ifcx overlay",
@@ -3812,26 +3812,23 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 theme,
                                                 9,
-                                                Margin::symmetric(7, 3),
+                                                Margin::symmetric(6, 3),
                                                 col_w,
                                                 |ui| {
                                                     use crate::core::ground_motion_replay::GroundMotionReplayConfig;
-                                                    ui.label(
-                                                        RichText::new("Ground Motion & Async CRC:")
-                                                            .size(9.3)
-                                                            .strong()
-                                                            .color(theme.text_muted),
-                                                    );
                                                     let worker_busy = universal_canvas.replay_async_manager.is_running();
                                                     let has_rep = universal_canvas.last_ground_motion_replay_report.is_some();
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Bolt),
-                                                        if worker_busy { "Running..." } else { "Async EQ" },
+                                                        if worker_busy { AppIcon::Pulse } else { AppIcon::Play },
                                                         has_rep || worker_busy,
                                                         theme.accent_orange,
-                                                        "Run non-blocking background StructGNN-CRC & live 60 FPS Earthquake Replay",
+                                                        if worker_busy {
+                                                            "Async Earthquake Replay Running..."
+                                                        } else {
+                                                            "Run Async StructGNN-CRC & 60 FPS Earthquake Replay"
+                                                        },
                                                     )
                                                     .clicked()
                                                     {
@@ -3842,20 +3839,16 @@ impl SpatialWorkspaceState {
                                                         );
                                                         actions.run_async_ground_motion_replay = true;
                                                     }
-                                                    let rec_lbl = format!(
-                                                        "Rec: {}",
-                                                        GroundMotionReplayConfig::record_short_label(
-                                                            universal_canvas.ground_motion_replay_config.record
-                                                        )
+                                                    let rec_lbl = GroundMotionReplayConfig::record_short_label(
+                                                        universal_canvas.ground_motion_replay_config.record,
                                                     );
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        None,
-                                                        rec_lbl,
+                                                        AppIcon::Pulse,
                                                         false,
                                                         theme.accent_blue,
-                                                        "Cycle earthquake record (Northridge / Kobe / El Centro / Chi-Chi / Sumatra)",
+                                                        &format!("Earthquake Record: {rec_lbl} (click to cycle)"),
                                                     )
                                                     .clicked()
                                                     {
@@ -3870,17 +3863,16 @@ impl SpatialWorkspaceState {
                                                         );
                                                         actions.run_async_ground_motion_replay = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        None,
-                                                        format!(
-                                                            "SF {:.2}x",
-                                                            universal_canvas.ground_motion_replay_config.scale_factor
-                                                        ),
+                                                        AppIcon::SlidersPanel,
                                                         false,
                                                         theme.text_secondary,
-                                                        "Cycle MCE ground motion scale factor (0.75x..2.00x)",
+                                                        &format!(
+                                                            "MCE Scale Factor: {:.2}x (click to cycle)",
+                                                            universal_canvas.ground_motion_replay_config.scale_factor
+                                                        ),
                                                     )
                                                     .clicked()
                                                     {
@@ -3888,11 +3880,10 @@ impl SpatialWorkspaceState {
                                                         actions.run_async_ground_motion_replay = true;
                                                     }
                                                     let hinges_on = universal_canvas.ground_motion_replay_config.show_plastic_hinges;
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Target),
-                                                        "Hinges",
+                                                        AppIcon::Target,
                                                         hinges_on,
                                                         theme.accent_red,
                                                         "Toggle 3D ASCE 41-17 plastic hinge beacons",
@@ -3901,11 +3892,10 @@ impl SpatialWorkspaceState {
                                                     {
                                                         universal_canvas.ground_motion_replay_config.show_plastic_hinges = !hinges_on;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::ChartLine),
-                                                        "Replay UI",
+                                                        AppIcon::ChartLine,
                                                         self.ground_motion_drawer_open,
                                                         theme.accent_blue,
                                                         "Open Live Earthquake Replay & Async StructGNN-CRC drawer",
@@ -3914,24 +3904,22 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.toggle_exclusive_drawer("ground_motion");
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Cube3D),
-                                                        "Replay .ifcx",
+                                                        AppIcon::SaveDisk,
                                                         false,
                                                         theme.accent_green,
-                                                        "Export non-destructive eigengraph::analysis::time_history_replay .ifcx overlay",
+                                                        "Export eigengraph::analysis::time_history_replay .ifcx overlay",
                                                     )
                                                     .clicked()
                                                     {
                                                         actions.export_ground_motion_replay_ifcx = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Bolt),
-                                                        "GPU MC",
+                                                        AppIcon::Cpu,
                                                         self.ground_motion_drawer_open && self.ground_motion_drawer_tab == 2,
                                                         theme.accent_orange,
                                                         "Open WebGPU @compute Multi-Hazard Particles & FEMA P-58 Monte Carlo drawer",
@@ -3948,11 +3936,10 @@ impl SpatialWorkspaceState {
                                                             );
                                                         }
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Shield),
-                                                        "SHM UI",
+                                                        AppIcon::Shield,
                                                         self.shm_drawer_open,
                                                         theme.accent_green,
                                                         "Open Live SHM Digital Twin & Automated ATC-20 Placard drawer",
@@ -3975,45 +3962,33 @@ impl SpatialWorkspaceState {
                                     });
                                 }
                                 DynamicIslandStudioTab::BimAndStory => {
-                                    let (_, _, story_lbl, lvl_cnt) =
+                                    let (_, _, story_lbl, _) =
                                         self.active_base_and_top_levels(&build_view.bim_bus.project);
+                                    let lvl_cnt = build_view.bim_bus.project.levels.len().max(1);
                                     Self::glass_subpill_group(
                                         ui,
                                         theme,
                                         9,
-                                        Margin::symmetric(7, 3),
+                                        Margin::symmetric(6, 3),
                                         deck_w,
                                         |ui| {
-                                            ui.label(
-                                                RichText::new("Floor:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
-                                            );
-                                            let story_btn_lbl = if is_mobile {
-                                                format!("Story L{}", self.active_story_idx + 1)
-                                            } else {
-                                                format!("Story: {story_lbl}")
-                                            };
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                None,
-                                                story_btn_lbl,
+                                                AppIcon::Layers,
                                                 false,
                                                 theme.accent_blue,
-                                                "Cycle active placement floor level",
+                                                &format!("Active Story: {story_lbl} (click to cycle)"),
                                             )
                                             .clicked()
                                             {
                                                 self.active_story_idx =
                                                     (self.active_story_idx + 1) % lvl_cnt.max(1);
                                             }
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                None,
-                                                "+ Story",
+                                                AppIcon::Plus,
                                                 false,
                                                 theme.accent_green,
                                                 "Add upper floor story (+3.5m) on Earth 3D",
@@ -4024,11 +3999,10 @@ impl SpatialWorkspaceState {
                                                 actions.sync_fem_and_earth = true;
                                                 actions.fit_camera = true;
                                             }
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                None,
-                                                "+ Slab",
+                                                AppIcon::Slab,
                                                 false,
                                                 theme.accent_green,
                                                 "Add structural concrete floor slab on Earth 3D",
@@ -4038,11 +4012,10 @@ impl SpatialWorkspaceState {
                                             {
                                                 actions.sync_fem_and_earth = true;
                                             }
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                None,
-                                                "Clone ↑",
+                                                AppIcon::BoxPackage,
                                                 false,
                                                 theme.accent_blue,
                                                 "Clone active floor columns, beams, walls & slabs one story upward (+3.5m)",
@@ -4053,11 +4026,10 @@ impl SpatialWorkspaceState {
                                                 actions.sync_fem_and_earth = true;
                                                 actions.fit_camera = true;
                                             }
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                None,
-                                                "+ Footings",
+                                                AppIcon::Hammer,
                                                 false,
                                                 theme.accent_orange,
                                                 "Auto-generate subsurface pile caps under ground-story columns",
@@ -4073,14 +4045,13 @@ impl SpatialWorkspaceState {
                                             let iso_on = universal_canvas
                                                 .earth_bim_author
                                                 .isolate_active_story;
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                None,
-                                                if iso_on { "Isolate ON" } else { "Isolate" },
+                                                AppIcon::Target,
                                                 iso_on,
                                                 theme.accent_orange,
-                                                "Isolate active Story elements for unobstructed interior BIM authoring",
+                                                "Isolate active Story elements for interior BIM authoring",
                                             )
                                             .clicked()
                                             {
@@ -4090,11 +4061,10 @@ impl SpatialWorkspaceState {
                                             }
                                             let sec_on =
                                                 universal_canvas.earth_bim_author.section_cut_active;
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                None,
-                                                if sec_on { "Sec Cut ON" } else { "Sec Cut" },
+                                                AppIcon::SectionCut,
                                                 sec_on,
                                                 theme.accent_orange,
                                                 "Slice 3D building horizontally at target elevation on Earth 3D (/section)",
@@ -4115,38 +4085,27 @@ impl SpatialWorkspaceState {
                                                     )
                                                     .range(0.5..=120.0)
                                                     .speed(0.25)
-                                                    .prefix("Z:")
                                                     .suffix("m"),
                                                 );
                                             }
                                             ui.separator();
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                None,
-                                                if universal_canvas.ortho_mode {
-                                                    "Ortho ON"
-                                                } else {
-                                                    "Ortho"
-                                                },
+                                                AppIcon::RulerSquare,
                                                 universal_canvas.ortho_mode,
                                                 theme.accent_blue,
-                                                "Toggle orthogonal 90° snap when drawing Beams/Walls/Lines on Earth 3D",
+                                                "Toggle orthogonal 90° snap when drawing Beams/Walls/Lines",
                                             )
                                             .clicked()
                                             {
                                                 universal_canvas.ortho_mode =
                                                     !universal_canvas.ortho_mode;
                                             }
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                None,
-                                                if build_view.show_grid {
-                                                    "Grid ON"
-                                                } else {
-                                                    "Grid OFF"
-                                                },
+                                                AppIcon::Grid,
                                                 build_view.show_grid,
                                                 theme.accent_blue,
                                                 "Show/hide engineering grid on Earth 3D surface",
@@ -4166,51 +4125,45 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 theme,
                                                 9,
-                                                Margin::symmetric(7, 3),
+                                                Margin::symmetric(6, 3),
                                                 col_w,
                                                 |ui| {
-                                                    ui.label(
-                                                        RichText::new("Retrofit:")
-                                                            .size(9.3)
-                                                            .strong()
-                                                            .color(theme.text_muted),
-                                                    );
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        None,
-                                                        format!("Mode: {}", universal_canvas.retrofit_strategy.short_label()),
+                                                        AppIcon::SlidersPanel,
                                                         false,
                                                         theme.accent_blue,
-                                                        "Cycle automated retrofit strategy: Auto / BRB / Jacket / Shear Wall",
+                                                        &format!(
+                                                            "Retrofit Mode: {} (click to cycle Auto / BRB / Jacket / Shear Wall)",
+                                                            universal_canvas.retrofit_strategy.short_label()
+                                                        ),
                                                     )
                                                     .clicked()
                                                     {
                                                         universal_canvas.retrofit_strategy =
                                                             universal_canvas.retrofit_strategy.cycle_next();
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Shield),
-                                                        "Auto-Retrofit",
+                                                        AppIcon::Shield,
                                                         universal_canvas.last_retrofit_report.is_some(),
                                                         theme.accent_green,
-                                                        "Synthesize code-verified structural retrofit & non-destructive .ifcx strengthening layer",
+                                                        "Auto-Retrofit — Synthesize code-verified structural strengthening layer",
                                                     )
                                                     .clicked()
                                                     {
                                                         actions.run_structural_retrofit =
                                                             Some(universal_canvas.retrofit_strategy);
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Bolt),
-                                                        "+ BRB",
+                                                        AppIcon::Bolt,
                                                         false,
                                                         theme.accent_orange,
-                                                        "Inject 3D Buckling-Restrained Braces (BRB) across low-EigenGate structural bays",
+                                                        "+ BRB — Inject 3D Buckling-Restrained Braces across low-EigenGate bays",
                                                     )
                                                     .clicked()
                                                     {
@@ -4220,14 +4173,13 @@ impl SpatialWorkspaceState {
                                                             crate::core::retrofit::RetrofitStrategy::BrbBracingOnly,
                                                         );
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Wrench),
-                                                        "+ Jacket",
+                                                        AppIcon::Wrench,
                                                         false,
                                                         theme.accent_blue,
-                                                        "Apply RC column/beam jacketing & foundation footing enlargement",
+                                                        "+ Jacket — Apply RC column/beam jacketing & footing enlargement",
                                                     )
                                                     .clicked()
                                                     {
@@ -4239,31 +4191,29 @@ impl SpatialWorkspaceState {
                                                     }
                                                     if universal_canvas.last_retrofit_report.is_some() {
                                                         ui.separator();
-                                                        if Self::glass_pill_button(
+                                                        if Self::glass_icon_button(
                                                             ui,
                                                             theme,
-                                                            None,
-                                                            if universal_canvas.viewing_pre_retrofit_baseline {
-                                                                "View: Before"
-                                                            } else {
-                                                                "View: After"
-                                                            },
+                                                            AppIcon::Recycle,
                                                             !universal_canvas.viewing_pre_retrofit_baseline,
                                                             theme.accent_blue,
-                                                            "Compare intact pre-retrofit baseline vs. strengthened 3D structure",
+                                                            if universal_canvas.viewing_pre_retrofit_baseline {
+                                                                "Viewing Before-Retrofit baseline (click for After)"
+                                                            } else {
+                                                                "Viewing After-Retrofit strengthened model (click for Before)"
+                                                            },
                                                         )
                                                         .clicked()
                                                         {
                                                             actions.toggle_retrofit_before_after = true;
                                                         }
-                                                        if Self::glass_pill_button(
+                                                        if Self::glass_icon_button(
                                                             ui,
                                                             theme,
-                                                            Some(AppIcon::Cube3D),
-                                                            "Delta .ifcx",
+                                                            AppIcon::SaveDisk,
                                                             false,
                                                             theme.accent_green,
-                                                            "Export non-destructive eigengraph::bim::retrofit_delta .ifcx strengthening layer",
+                                                            "Export non-destructive eigengraph::bim::retrofit_delta .ifcx layer",
                                                         )
                                                         .clicked()
                                                         {
@@ -4277,25 +4227,18 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 theme,
                                                 9,
-                                                Margin::symmetric(7, 3),
+                                                Margin::symmetric(6, 3),
                                                 col_w,
                                                 |ui| {
-                                                    ui.label(
-                                                        RichText::new("District Portfolio:")
-                                                            .size(9.3)
-                                                            .strong()
-                                                            .color(theme.text_muted),
-                                                    );
                                                     let pf_on = universal_canvas.portfolio_retrofit_config.overlay_visible
                                                         || self.portfolio_drawer_open;
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::ChartLine),
-                                                        "Portfolio Pareto",
+                                                        AppIcon::ChartLine,
                                                         pf_on,
                                                         theme.accent_green,
-                                                        "Run multi-building district EigenGate Pareto optimizer & open frontier drawer",
+                                                        "District Portfolio EigenGate Pareto Optimizer",
                                                     )
                                                     .clicked()
                                                     {
@@ -4303,20 +4246,19 @@ impl SpatialWorkspaceState {
                                                         self.toggle_exclusive_drawer("portfolio");
                                                         actions.run_portfolio_retrofit = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Target),
-                                                        format!(
-                                                            "Obj: {}",
+                                                        AppIcon::Target,
+                                                        false,
+                                                        theme.accent_blue,
+                                                        &format!(
+                                                            "Portfolio Objective: {} (click to cycle)",
                                                             universal_canvas
                                                                 .portfolio_retrofit_config
                                                                 .objective
                                                                 .short_label()
                                                         ),
-                                                        false,
-                                                        theme.accent_blue,
-                                                        "Cycle portfolio Pareto selection objective (EigenGate/$ / Balanced / Low-CO2 / Max EigenGate)",
                                                     )
                                                     .clicked()
                                                     {
@@ -4327,20 +4269,19 @@ impl SpatialWorkspaceState {
                                                                 .cycle_next();
                                                         actions.run_portfolio_retrofit = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Coins),
-                                                        format!(
-                                                            "Cap: ${:.0}k",
+                                                        AppIcon::Coins,
+                                                        false,
+                                                        theme.accent_orange,
+                                                        &format!(
+                                                            "District Budget Cap: ${:.0}k (click to cycle $100k–$1000k)",
                                                             universal_canvas
                                                                 .portfolio_retrofit_config
                                                                 .budget_cap_usd
                                                                 / 1000.0
                                                         ),
-                                                        false,
-                                                        theme.accent_orange,
-                                                        "Cycle district budget cap ($100k / $250k / $500k / $1000k)",
                                                     )
                                                     .clicked()
                                                     {
@@ -4361,11 +4302,10 @@ impl SpatialWorkspaceState {
                                                             .budget_cap_usd = next;
                                                         actions.run_portfolio_retrofit = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Cube3D),
-                                                        "Portfolio .ifcx",
+                                                        AppIcon::SaveDisk,
                                                         false,
                                                         theme.accent_green,
                                                         "Export non-destructive eigengraph::portfolio::retrofit_plan .ifcx overlay",
@@ -4386,21 +4326,19 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 theme,
                                                 9,
-                                                Margin::symmetric(7, 3),
+                                                Margin::symmetric(6, 3),
                                                 col_w,
                                                 |ui| {
-                                                    let map_lbl = format!(
-                                                        "Theme: {}",
-                                                        universal_canvas.world_map.visual_layer_label()
-                                                    );
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        None,
-                                                        map_lbl,
+                                                        AppIcon::Palette,
                                                         false,
                                                         theme.accent_blue,
-                                                        "Cycle Pure-Rust Vector Earth theme: Coastal Blueprint / City Daylight / Night Cyber-Twin / Topographic",
+                                                        &format!(
+                                                            "Vector Earth Theme: {} (click to cycle)",
+                                                            universal_canvas.world_map.visual_layer_label()
+                                                        ),
                                                     )
                                                     .clicked()
                                                     {
@@ -4413,23 +4351,17 @@ impl SpatialWorkspaceState {
                                                             true,
                                                         );
                                                     }
-                                                    let topo_lbl = if universal_canvas.show_terrain_contours {
-                                                        if universal_canvas.site_tin_from_ifc {
-                                                            "Topo IFC"
-                                                        } else {
-                                                            "Topo ON"
-                                                        }
-                                                    } else {
-                                                        "Topo"
-                                                    };
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        None,
-                                                        topo_lbl,
+                                                        AppIcon::Mountain,
                                                         universal_canvas.show_terrain_contours,
                                                         theme.accent_green,
-                                                        "Toggle pure-vector 3D TIN terrain contours (IFC IfcSite / survey / procedural) & SNI 8460:2017 steep slope (>30°) overlay",
+                                                        if universal_canvas.show_terrain_contours && universal_canvas.site_tin_from_ifc {
+                                                            "Terrain Contours ON (IFC IfcSite TIN)"
+                                                        } else {
+                                                            "Toggle pure-vector 3D TIN terrain contours & SNI 8460 slope overlay"
+                                                        },
                                                     )
                                                     .clicked()
                                                     {
@@ -4443,18 +4375,17 @@ impl SpatialWorkspaceState {
                                                         .earth_world
                                                         .camera
                                                         .lighting_preset_label();
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(if sun_preset == "Night" {
+                                                        if sun_preset == "Night" {
                                                             AppIcon::Moon
                                                         } else {
                                                             AppIcon::Sun
-                                                        }),
-                                                        format!("Sun: {sun_preset}"),
+                                                        },
                                                         sun_preset != "Day",
                                                         theme.accent_orange,
-                                                        "Cycle Pure WebGPU Earth Vector solar lighting: Day (13:30) / Golden Dusk (17:24) / Night (22:00)",
+                                                        &format!("Solar Lighting: {sun_preset} (click to cycle Day / Dusk / Night)"),
                                                     )
                                                     .clicked()
                                                     {
@@ -4480,36 +4411,47 @@ impl SpatialWorkspaceState {
                                                         );
                                                     }
                                                     let gpu_on = universal_canvas.webgpu_earth.is_active();
-                                                    let gpu_lbl = if gpu_on {
-                                                        "WebGPU"
-                                                    } else if universal_canvas.webgpu_earth.is_available() {
-                                                        "CPU Vec"
-                                                    } else {
-                                                        "Vec 3D"
-                                                    };
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        None,
-                                                        gpu_lbl,
+                                                        AppIcon::Cpu,
                                                         gpu_on,
                                                         theme.accent_blue,
-                                                        "Toggle 100% Pure WebGPU (WGSL) 3D Vector Earth pass vs. CPU vector fallback",
+                                                        if gpu_on {
+                                                            "Pure WebGPU (WGSL) 3D Earth Active (click for CPU fallback)"
+                                                        } else {
+                                                            "Toggle 100% Pure WebGPU (WGSL) 3D Vector Earth pass"
+                                                        },
                                                     )
                                                     .clicked()
                                                     {
                                                         universal_canvas.webgpu_earth.enabled =
                                                             !universal_canvas.webgpu_earth.enabled;
                                                     }
-                                                    ui.separator();
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::MapPin),
-                                                        "Anchor Here",
+                                                        AppIcon::Compass,
+                                                        self.zoning_drawer_open || universal_canvas.zoning_overlay_visible,
+                                                        theme.accent_green,
+                                                        "Site Zoning & 3D Buildable Envelope (KDB / KLB / GSB / Sun Path)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        let was_open = self.zoning_drawer_open;
+                                                        self.toggle_exclusive_drawer("zoning");
+                                                        if !was_open {
+                                                            actions.run_zoning_agent = true;
+                                                        }
+                                                    }
+                                                    ui.separator();
+                                                    if Self::glass_icon_button(
+                                                        ui,
+                                                        theme,
+                                                        AppIcon::MapPin,
                                                         false,
                                                         theme.accent_blue,
-                                                        "Relocate BIM/IFC origin (0,0) to current Earth 3D center GPS coordinates",
+                                                        "Anchor BIM/IFC origin (0,0) to current Earth 3D center GPS coordinates",
                                                     )
                                                     .clicked()
                                                     {
@@ -4519,14 +4461,13 @@ impl SpatialWorkspaceState {
                                                     if let Some(rel) =
                                                         universal_canvas.active_world_project_rel_path.clone()
                                                     {
-                                                        if Self::glass_pill_button(
+                                                        if Self::glass_icon_button(
                                                             ui,
                                                             theme,
-                                                            None,
-                                                            "Move Pin",
+                                                            AppIcon::CursorPan,
                                                             false,
                                                             theme.accent_orange,
-                                                            "Reposition active building on Earth 3D with automatic road/parcel vector OSNAP",
+                                                            "Move Pin — Reposition active building on Earth 3D with road/parcel OSNAP",
                                                         )
                                                         .clicked()
                                                         {
@@ -4540,11 +4481,10 @@ impl SpatialWorkspaceState {
                                                                     .map(|b| b.heading_deg)
                                                                     .unwrap_or(0.0);
                                                         }
-                                                        if Self::glass_pill_button(
+                                                        if Self::glass_icon_button(
                                                             ui,
                                                             theme,
-                                                            None,
-                                                            "-15°",
+                                                            AppIcon::Undo,
                                                             false,
                                                             theme.accent_blue,
                                                             "Rotate active Earth building -15° counter-clockwise (Shift+R)",
@@ -4554,11 +4494,10 @@ impl SpatialWorkspaceState {
                                                             actions.rotate_active_world_heading_deg =
                                                                 Some(-15.0);
                                                         }
-                                                        if Self::glass_pill_button(
+                                                        if Self::glass_icon_button(
                                                             ui,
                                                             theme,
-                                                            None,
-                                                            "+15°",
+                                                            AppIcon::Redo,
                                                             false,
                                                             theme.accent_blue,
                                                             "Rotate active Earth building +15° clockwise (R)",
@@ -4573,14 +4512,13 @@ impl SpatialWorkspaceState {
                                                     {
                                                         ui.separator();
                                                         if world_crit > 0
-                                                            && Self::glass_pill_button(
+                                                            && Self::glass_icon_button(
                                                                 ui,
                                                                 theme,
-                                                                None,
-                                                                format!("{world_crit} Crit • Fly"),
+                                                                AppIcon::AlertTriangle,
                                                                 false,
                                                                 theme.accent_red,
-                                                                "Fly Earth 3D camera to the next high-DCR/low-EigenGate structure across the Vault",
+                                                                &format!("Fly to next critical structure ({world_crit} critical)"),
                                                             )
                                                             .clicked()
                                                         {
@@ -4589,14 +4527,13 @@ impl SpatialWorkspaceState {
                                                             );
                                                         }
                                                         if world_unloc > 0 {
-                                                            if Self::glass_pill_button(
+                                                            if Self::glass_icon_button(
                                                                 ui,
                                                                 theme,
-                                                                None,
-                                                                format!("{world_unloc} Unlocated • Place"),
+                                                                AppIcon::Target,
                                                                 false,
                                                                 theme.accent_orange,
-                                                                "Pick next unlocated Staging model and click anywhere on Earth 3D to pin its real address",
+                                                                &format!("Place next unlocated Staging model ({world_unloc} unlocated)"),
                                                             )
                                                             .clicked()
                                                             {
@@ -4634,14 +4571,13 @@ impl SpatialWorkspaceState {
                                                                     );
                                                                 }
                                                             }
-                                                            if Self::glass_pill_button(
+                                                            if Self::glass_icon_button(
                                                                 ui,
                                                                 theme,
-                                                                None,
-                                                                "Next Unloc",
+                                                                AppIcon::SkipNext,
                                                                 false,
                                                                 theme.accent_blue,
-                                                                "Fly camera to the next unlocated Staging parcel on Earth 3D",
+                                                                "Fly camera to next unlocated Staging parcel",
                                                             )
                                                             .clicked()
                                                             {
@@ -4659,25 +4595,19 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 theme,
                                                 9,
-                                                Margin::symmetric(7, 3),
+                                                Margin::symmetric(6, 3),
                                                 col_w,
                                                 |ui| {
-                                                    ui.label(
-                                                        RichText::new("IFCX City:")
-                                                            .size(9.3)
-                                                            .strong()
-                                                            .color(theme.text_muted),
-                                                    );
                                                     let road_on = universal_canvas.earth_bim_author.active_tool
                                                         == crate::views::universal_canvas::EarthBimTool::Road;
-                                                    if Self::glass_pill_button(
+                                                    let road_cnt = universal_canvas.city_scene.roads.iter().filter(|r| !r.is_bridge).count();
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::MapPin),
-                                                        format!("Road ({})", universal_canvas.city_scene.roads.iter().filter(|r| !r.is_bridge).count()),
+                                                        AppIcon::LineSeg,
                                                         road_on,
                                                         theme.accent_blue,
-                                                        "Draw IFCX IfcRoad multi-lane corridor on Earth 3D (2 clicks)",
+                                                        &format!("Draw IFCX IfcRoad corridor ({road_cnt} placed, 2 clicks)"),
                                                     )
                                                     .clicked()
                                                     {
@@ -4692,14 +4622,14 @@ impl SpatialWorkspaceState {
                                                     }
                                                     let bridge_on = universal_canvas.earth_bim_author.active_tool
                                                         == crate::views::universal_canvas::EarthBimTool::Bridge;
-                                                    if Self::glass_pill_button(
+                                                    let bridge_cnt = universal_canvas.city_scene.roads.iter().filter(|r| r.is_bridge).count();
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::BridgeSpan),
-                                                        format!("Bridge ({})", universal_canvas.city_scene.roads.iter().filter(|r| r.is_bridge).count()),
+                                                        AppIcon::BridgeSpan,
                                                         bridge_on,
                                                         theme.accent_blue,
-                                                        "Draw elevated IFCX IfcBridge deck & piers on Earth 3D (2 clicks)",
+                                                        &format!("Draw elevated IFCX IfcBridge ({bridge_cnt} placed, 2 clicks)"),
                                                     )
                                                     .clicked()
                                                     {
@@ -4714,17 +4644,16 @@ impl SpatialWorkspaceState {
                                                     }
                                                     let zone_on = universal_canvas.earth_bim_author.active_tool
                                                         == crate::views::universal_canvas::EarthBimTool::Zone;
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Building),
-                                                        format!(
-                                                            "Zone: {}",
-                                                            universal_canvas.city_scene.active_zone_kind.short_label()
-                                                        ),
+                                                        AppIcon::Building,
                                                         zone_on,
                                                         theme.accent_green,
-                                                        "Click on Earth 3D to stamp IFCX IfcSpatialZone parcel with context massing & trees",
+                                                        &format!(
+                                                            "Stamp IFCX IfcSpatialZone ({}) on Earth 3D",
+                                                            universal_canvas.city_scene.active_zone_kind.short_label()
+                                                        ),
                                                     )
                                                     .clicked()
                                                     {
@@ -4738,11 +4667,10 @@ impl SpatialWorkspaceState {
                                                             universal_canvas.is_frozen = false;
                                                         }
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Layers),
-                                                        "Grade Pad",
+                                                        AppIcon::Layers,
                                                         !universal_canvas.city_scene.graded_pads.is_empty(),
                                                         theme.accent_orange,
                                                         "Auto-grade flat foundation pad onto IfcSite TIN & compute Cut/Fill m3",
@@ -4776,14 +4704,17 @@ impl SpatialWorkspaceState {
                                                         );
                                                     }
                                                     let snap_on = universal_canvas.city_scene.road_snap_enabled;
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        None,
-                                                        if snap_on { "Road Snap" } else { "Snap Off" },
+                                                        AppIcon::MagnetSnap,
                                                         snap_on,
                                                         theme.accent_blue,
-                                                        "Snap BIM columns/walls/footings to road setbacks & parcel alignments",
+                                                        if snap_on {
+                                                            "Road/Parcel Setback Snap ON"
+                                                        } else {
+                                                            "Road/Parcel Setback Snap OFF"
+                                                        },
                                                     )
                                                     .clicked()
                                                     {
@@ -4798,21 +4729,14 @@ impl SpatialWorkspaceState {
                                         ui,
                                         theme,
                                         9,
-                                        Margin::symmetric(7, 3),
+                                        Margin::symmetric(6, 3),
                                         deck_w,
                                         |ui| {
-                                            ui.label(
-                                                RichText::new("Multi-Hazard:")
-                                                    .size(9.3)
-                                                    .strong()
-                                                    .color(theme.text_muted),
-                                            );
                                             let seis_on = universal_canvas.district_hazard.seismic_wave_active;
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                Some(AppIcon::Pulse),
-                                                "Seismic",
+                                                AppIcon::Pulse,
                                                 seis_on,
                                                 theme.accent_orange,
                                                 "Toggle SNI 1726 / ASCE 7 traveling seismic wavefield",
@@ -4824,18 +4748,13 @@ impl SpatialWorkspaceState {
                                             }
                                             let pound_on = universal_canvas.district_hazard.pounding_overlay_active;
                                             let p_cnt = universal_canvas.district_hazard_report.pounding_risk_count;
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                Some(AppIcon::AlertTriangle),
-                                                if p_cnt > 0 {
-                                                    format!("Pounding ({p_cnt})")
-                                                } else {
-                                                    "Pounding".to_string()
-                                                },
+                                                AppIcon::AlertTriangle,
                                                 pound_on,
                                                 theme.accent_red,
-                                                "Highlight phase-amplified seismic pounding corridors",
+                                                &format!("Toggle seismic pounding corridors ({p_cnt} risks)"),
                                             )
                                             .clicked()
                                             {
@@ -4845,18 +4764,13 @@ impl SpatialWorkspaceState {
                                             }
                                             let wind_on = universal_canvas.district_hazard.venturi_wind_active;
                                             let v_fac = universal_canvas.district_hazard_report.venturi_speedup_factor;
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                Some(AppIcon::Wind),
-                                                if wind_on && v_fac > 1.01 {
-                                                    format!("Venturi x{v_fac:.2}")
-                                                } else {
-                                                    "Venturi".to_string()
-                                                },
+                                                AppIcon::Wind,
                                                 wind_on,
                                                 theme.accent_blue,
-                                                "Toggle urban Venturi wind channeling streamlines",
+                                                &format!("Toggle urban Venturi wind streamlines (x{v_fac:.2})"),
                                             )
                                             .clicked()
                                             {
@@ -4864,21 +4778,16 @@ impl SpatialWorkspaceState {
                                                 actions.run_district_hazard_audit = true;
                                             }
                                             let flood_on = universal_canvas.district_hazard.flood_plane_active;
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                Some(AppIcon::Waves),
-                                                if flood_on {
-                                                    format!(
-                                                        "Flood {:+.1}m",
-                                                        universal_canvas.district_hazard.flood_water_level_m
-                                                    )
-                                                } else {
-                                                    "Flood 3D".to_string()
-                                                },
+                                                AppIcon::Waves,
                                                 flood_on,
                                                 theme.accent_blue,
-                                                "Toggle 3D flood plane against IfcSite TIN contours",
+                                                &format!(
+                                                    "Toggle 3D flood plane ({:+.1}m) against IfcSite TIN",
+                                                    universal_canvas.district_hazard.flood_water_level_m
+                                                ),
                                             )
                                             .clicked()
                                             {
@@ -4890,11 +4799,10 @@ impl SpatialWorkspaceState {
                                                 actions.run_district_hazard_audit = true;
                                             }
                                             if flood_on {
-                                                if Self::glass_pill_button(
+                                                if Self::glass_icon_button(
                                                     ui,
                                                     theme,
-                                                    None,
-                                                    "-0.5m",
+                                                    AppIcon::Minus,
                                                     false,
                                                     theme.text_secondary,
                                                     "Lower 3D flood elevation by 0.5m",
@@ -4906,11 +4814,10 @@ impl SpatialWorkspaceState {
                                                             .clamp(-5.0, 25.0);
                                                     actions.run_district_hazard_audit = true;
                                                 }
-                                                if Self::glass_pill_button(
+                                                if Self::glass_icon_button(
                                                     ui,
                                                     theme,
-                                                    None,
-                                                    "+0.5m",
+                                                    AppIcon::Plus,
                                                     false,
                                                     theme.text_secondary,
                                                     "Raise 3D flood elevation by 0.5m",
@@ -4925,21 +4832,16 @@ impl SpatialWorkspaceState {
                                             }
                                             ui.separator();
                                             let gp_on = universal_canvas.monte_carlo_config.gpu_particles_enabled;
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                Some(AppIcon::Bolt),
-                                                if gp_on {
-                                                    format!(
-                                                        "GPU {}P",
-                                                        universal_canvas.monte_carlo_config.normalized_particle_count()
-                                                    )
-                                                } else {
-                                                    "GPU Particles".to_string()
-                                                },
+                                                AppIcon::Bolt,
                                                 gp_on,
                                                 theme.accent_blue,
-                                                "Toggle 60 FPS Pure WebGPU @compute seismic wave & Venturi wind obstacle particles",
+                                                &format!(
+                                                    "Toggle WebGPU @compute multi-hazard particles ({}P)",
+                                                    universal_canvas.monte_carlo_config.normalized_particle_count()
+                                                ),
                                             )
                                             .clicked()
                                             {
@@ -4951,14 +4853,13 @@ impl SpatialWorkspaceState {
                                                     universal_canvas.district_hazard.venturi_wind_active = true;
                                                 }
                                             }
-                                            if Self::glass_pill_button(
+                                            if Self::glass_icon_button(
                                                 ui,
                                                 theme,
-                                                Some(AppIcon::Sparkles),
-                                                "AI Scan -> IFCX",
+                                                AppIcon::Sparkles,
                                                 false,
                                                 theme.accent_green,
-                                                "Stream AI real-building massing .ifcx onto Earth with automatic frame inference & instant 6-DOF EigenGate triage",
+                                                "Stream AI real-building massing .ifcx -> automatic BIM frame inference",
                                             )
                                             .clicked()
                                             {
@@ -4973,25 +4874,18 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 theme,
                                                 9,
-                                                Margin::symmetric(7, 3),
+                                                Margin::symmetric(6, 3),
                                                 col_w,
                                                 |ui| {
-                                                    ui.label(
-                                                        RichText::new("SSI & Soil:")
-                                                            .size(9.3)
-                                                            .strong()
-                                                            .color(theme.text_muted),
-                                                    );
                                                     let ssi_on =
                                                         universal_canvas.subsurface_ssi.ssi_coupling_enabled;
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Layers),
-                                                        "Winkler SSI",
+                                                        AppIcon::Layers,
                                                         ssi_on,
                                                         theme.accent_blue,
-                                                        "Toggle coupled 6-DOF Winkler foundation springs & modal period lengthening",
+                                                        "Toggle coupled 6-DOF Winkler SSI foundation springs",
                                                     )
                                                     .clicked()
                                                     {
@@ -5000,23 +4894,22 @@ impl SpatialWorkspaceState {
                                                             .ssi_coupling_enabled = !ssi_on;
                                                         actions.run_subsurface_ssi_sync = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Database),
-                                                        format!(
-                                                            "Soil: {}",
-                                                            universal_canvas
-                                                                .subsurface_ssi
-                                                                .borehole_preset
-                                                                .short_label()
-                                                        ),
+                                                        AppIcon::Database,
                                                         ssi_on
                                                             || universal_canvas
                                                                 .subsurface_ssi
                                                                 .xray_subsurface_visible,
                                                         theme.accent_orange,
-                                                        "Cycle borehole soil stratigraphy archetype (Soft Clay / Liquefiable / Stiff Alluvium / Dense Rock)",
+                                                        &format!(
+                                                            "Cycle borehole soil stratigraphy ({})",
+                                                            universal_canvas
+                                                                .subsurface_ssi
+                                                                .borehole_preset
+                                                                .short_label()
+                                                        ),
                                                     )
                                                     .clicked()
                                                     {
@@ -5033,14 +4926,13 @@ impl SpatialWorkspaceState {
                                                     let liq_on = universal_canvas
                                                         .subsurface_ssi
                                                         .liquefaction_trigger_active;
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Waves),
-                                                        "Liquefy",
+                                                        AppIcon::Waves,
                                                         liq_on,
                                                         theme.accent_red,
-                                                        "Toggle Seed-Idriss seismic liquefaction trigger & p-y spring degradation",
+                                                        "Toggle Seed-Idriss seismic liquefaction trigger & p-y degradation",
                                                     )
                                                     .clicked()
                                                     {
@@ -5052,14 +4944,13 @@ impl SpatialWorkspaceState {
                                                     let xray_on = universal_canvas
                                                         .subsurface_ssi
                                                         .xray_subsurface_visible;
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::SectionCut),
-                                                        "X-Ray Ground",
+                                                        AppIcon::SectionCut,
                                                         xray_on,
                                                         theme.accent_blue,
-                                                        "Toggle 3D Pure WebGPU subsurface stratigraphy, borehole casing & groundwater table cutaway",
+                                                        "Toggle 3D Pure WebGPU subsurface stratigraphy & groundwater X-Ray",
                                                     )
                                                     .clicked()
                                                     {
@@ -5068,14 +4959,13 @@ impl SpatialWorkspaceState {
                                                             .xray_subsurface_visible = !xray_on;
                                                         actions.run_subsurface_ssi_sync = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Cube3D),
-                                                        "SSI .ifcx",
+                                                        AppIcon::SaveDisk,
                                                         false,
                                                         theme.accent_green,
-                                                        "Export non-destructive eigengraph::geotech::stratigraphy & ssi_springs .ifcx overlay",
+                                                        "Export non-destructive eigengraph::geotech::ssi_springs .ifcx overlay",
                                                     )
                                                     .clicked()
                                                     {
@@ -5088,20 +4978,13 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 theme,
                                                 9,
-                                                Margin::symmetric(7, 3),
+                                                Margin::symmetric(6, 3),
                                                 col_w,
                                                 |ui| {
-                                                    ui.label(
-                                                        RichText::new("Evacuation & Lifelines:")
-                                                            .size(9.3)
-                                                            .strong()
-                                                            .color(theme.text_muted),
-                                                    );
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Shield),
-                                                        "Evac Route",
+                                                        AppIcon::Shield,
                                                         self.evacuation_drawer_open,
                                                         theme.accent_green,
                                                         "Compute A* post-disaster safe evacuation & emergency responder routes",
@@ -5111,20 +4994,19 @@ impl SpatialWorkspaceState {
                                                         self.open_evacuation_drawer();
                                                         actions.run_evacuation_routing = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Target),
-                                                        format!(
-                                                            "Mode: {}",
+                                                        AppIcon::Target,
+                                                        universal_canvas.evacuation_config.overlay_visible,
+                                                        theme.accent_blue,
+                                                        &format!(
+                                                            "Evacuation Routing Mode: {} (click to cycle)",
                                                             universal_canvas
                                                                 .evacuation_config
                                                                 .mode
                                                                 .short_label()
                                                         ),
-                                                        universal_canvas.evacuation_config.overlay_visible,
-                                                        theme.accent_blue,
-                                                        "Cycle lifeline routing display (Pedestrian / Responder / Both)",
                                                     )
                                                     .clicked()
                                                     {
@@ -5137,14 +5019,13 @@ impl SpatialWorkspaceState {
                                                     }
                                                     let evac_3d =
                                                         universal_canvas.evacuation_config.overlay_visible;
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Globe),
-                                                        "Evac 3D",
+                                                        AppIcon::Globe,
                                                         evac_3d,
                                                         theme.accent_green,
-                                                        "Toggle 3D Pure WebGPU evacuation corridors, debris cordons & assembly beacons",
+                                                        "Toggle 3D Pure WebGPU evacuation corridors & assembly beacons",
                                                     )
                                                     .clicked()
                                                     {
@@ -5161,14 +5042,13 @@ impl SpatialWorkspaceState {
                                                             actions.run_evacuation_routing = true;
                                                         }
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Cube3D),
-                                                        "Evac .ifcx",
+                                                        AppIcon::SaveDisk,
                                                         false,
                                                         theme.accent_green,
-                                                        "Export non-destructive eigengraph::analysis::evacuation_lifelines .ifcx overlay",
+                                                        "Export non-destructive eigengraph::analysis::evacuation_lifelines .ifcx",
                                                     )
                                                     .clicked()
                                                     {
@@ -5178,11 +5058,10 @@ impl SpatialWorkspaceState {
                                                         .collab_state
                                                         .config
                                                         .risk_heatmap_visible;
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Flame),
-                                                        "3D Risk Map",
+                                                        AppIcon::Flame,
                                                         rm_on || (self.collab_drawer_open && self.collab_drawer_tab == 1),
                                                         theme.accent_red,
                                                         "Toggle 3D Pure WebGPU District Risk Field Heatmap & Hotspots",
@@ -5208,15 +5087,9 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 theme,
                                                 9,
-                                                Margin::symmetric(7, 3),
+                                                Margin::symmetric(6, 3),
                                                 col_w,
                                                 |ui| {
-                                                    ui.label(
-                                                        RichText::new("2D & Earth:")
-                                                            .size(9.3)
-                                                            .strong()
-                                                            .color(theme.text_muted),
-                                                    );
                                                     for ext_tool in [
                                                         UniversalCanvasTool::Freehand,
                                                         UniversalCanvasTool::Circle,
@@ -5233,11 +5106,10 @@ impl SpatialWorkspaceState {
                                                         let is_act = build_view.ground_author_tool
                                                             == Ground3DAuthorTool::Orbit
                                                             && universal_canvas.active_tool == ext_tool;
-                                                        if Self::glass_pill_button(
+                                                        if Self::glass_icon_button(
                                                             ui,
                                                             theme,
-                                                            Some(ext_tool.app_icon()),
-                                                            ext_tool.short_label(),
+                                                            ext_tool.app_icon(),
                                                             is_act,
                                                             theme.accent_orange,
                                                             ext_tool.tooltip(),
@@ -5262,11 +5134,10 @@ impl SpatialWorkspaceState {
                                                         }
                                                     }
                                                     if !universal_canvas.entities.is_empty()
-                                                        && Self::glass_pill_button(
+                                                        && Self::glass_icon_button(
                                                             ui,
                                                             theme,
-                                                            None,
-                                                            "Promote -> BIM",
+                                                            AppIcon::ArrowRight,
                                                             false,
                                                             theme.accent_green,
                                                             "Promote selected vector Lines/Rects on Earth 3D into 3D BIM Walls, Beams & Slabs",
@@ -5288,17 +5159,10 @@ impl SpatialWorkspaceState {
                                                         }
                                                     }
                                                     ui.separator();
-                                                    ui.label(
-                                                        RichText::new("Export:")
-                                                            .size(9.3)
-                                                            .strong()
-                                                            .color(theme.text_muted),
-                                                    );
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::SaveDisk),
-                                                        "Export",
+                                                        AppIcon::SaveDisk,
                                                         false,
                                                         theme.accent_blue,
                                                         "Export .eigen.json workspace",
@@ -5307,11 +5171,10 @@ impl SpatialWorkspaceState {
                                                     {
                                                         actions.export_archive = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Cube3D),
-                                                        "IFCX",
+                                                        AppIcon::Cube3D,
                                                         false,
                                                         theme.accent_blue,
                                                         "Export georeferenced IFCX (IFC 5 JSON ECS) site layer",
@@ -5320,11 +5183,10 @@ impl SpatialWorkspaceState {
                                                     {
                                                         actions.export_ifcx = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Globe),
-                                                        "Earth .ifcx",
+                                                        AppIcon::Globe,
                                                         false,
                                                         theme.accent_green,
                                                         "Export composed Living Earth Globe + Site IFCX graph",
@@ -5333,11 +5195,10 @@ impl SpatialWorkspaceState {
                                                     {
                                                         actions.export_earth_ifcx = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Document),
-                                                        "Audit .md",
+                                                        AppIcon::Document,
                                                         false,
                                                         theme.accent_green,
                                                         "Save Engineering Audit Markdown note to Vault",
@@ -5353,20 +5214,13 @@ impl SpatialWorkspaceState {
                                                 ui,
                                                 theme,
                                                 9,
-                                                Margin::symmetric(7, 3),
+                                                Margin::symmetric(6, 3),
                                                 col_w,
                                                 |ui| {
-                                                    ui.label(
-                                                        RichText::new("IFCX Diff & Dossier:")
-                                                            .size(9.3)
-                                                            .strong()
-                                                            .color(theme.text_muted),
-                                                    );
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Camera),
-                                                        "Snapshot Base",
+                                                        AppIcon::Camera,
                                                         false,
                                                         theme.accent_blue,
                                                         "Capture baseline .ifcx snapshot for layer visual diffing",
@@ -5377,11 +5231,10 @@ impl SpatialWorkspaceState {
                                                     }
                                                     let diff_active = universal_canvas.ifcx_diff_overlay_active
                                                         || self.ifcx_diff_drawer_open;
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Layers),
-                                                        "Visual Diff",
+                                                        AppIcon::Layers,
                                                         diff_active,
                                                         theme.accent_orange,
                                                         "Open Multi-Layer IFCX visual diff inspector & 3D delta highlighting",
@@ -5393,11 +5246,10 @@ impl SpatialWorkspaceState {
                                                         self.toggle_exclusive_drawer("ifcx_diff");
                                                         actions.run_ifcx_visual_diff = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Cube3D),
-                                                        "Diff .ifcx",
+                                                        AppIcon::Cube3D,
                                                         false,
                                                         theme.accent_green,
                                                         "Export non-destructive eigengraph::ifcx::diff_manifest .ifcx layer",
@@ -5406,11 +5258,10 @@ impl SpatialWorkspaceState {
                                                     {
                                                         actions.export_ifcx_diff_manifest = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Printer),
-                                                        "Vector Dossier .svg",
+                                                        AppIcon::Printer,
                                                         false,
                                                         theme.accent_green,
                                                         "Export publication-grade 100% Pure-Vector SVG engineering dossier",
@@ -5419,11 +5270,10 @@ impl SpatialWorkspaceState {
                                                     {
                                                         actions.export_vector_dossier_svg = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Shield),
-                                                        "Gov / Merge",
+                                                        AppIcon::Shield,
                                                         self.collab_drawer_open && self.collab_drawer_tab == 0,
                                                         theme.accent_blue,
                                                         "Open SHA-256 Checkpoints, Sign-Off & 3-Way IFCX Merge drawer",
@@ -5432,11 +5282,10 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_collab_drawer(0);
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::ChartLine),
-                                                        "Trade / Permit",
+                                                        AppIcon::ChartLine,
                                                         self.collab_drawer_open && self.collab_drawer_tab == 2,
                                                         theme.accent_green,
                                                         "Open 6-Scenario Trade-Study Matrix & 10-Clause Permit Compliance Annex",
@@ -5448,11 +5297,10 @@ impl SpatialWorkspaceState {
                                                             Some(universal_canvas.trade_study_config.objective);
                                                         actions.run_permit_compliance = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Wrench),
-                                                        "Field QA/QC",
+                                                        AppIcon::Wrench,
                                                         self.field_qaqc_drawer_open,
                                                         theme.accent_blue,
                                                         "Open Field QA/QC Waypoints, 1D Rebar BBS Cut-List & Sheet S-103",
@@ -5463,11 +5311,10 @@ impl SpatialWorkspaceState {
                                                         actions.run_field_fabrication =
                                                             Some(universal_canvas.field_fab_config.stock_length_m);
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Bolt),
-                                                        "EigenFlow",
+                                                        AppIcon::Bolt,
                                                         self.eigenflow_drawer_open,
                                                         theme.accent_green,
                                                         "Open EigenFlow Non-Linear Studio (Woodbury P1->P2, Pushover ADRS & Sheet S-104)",
@@ -5477,11 +5324,10 @@ impl SpatialWorkspaceState {
                                                         self.open_eigenflow_drawer(0);
                                                         actions.run_eigenflow_studio = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::AlertTriangle),
-                                                        "Blast / Fire",
+                                                        AppIcon::Flame,
                                                         self.extreme_events_drawer_open,
                                                         theme.accent_orange,
                                                         "Open Extreme Events Studio (Blast UFC 3-340-02 & Fire ISO 834 + Sheet S-105)",
@@ -5491,11 +5337,10 @@ impl SpatialWorkspaceState {
                                                         self.open_extreme_events_drawer(0);
                                                         actions.run_extreme_events = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Shield),
-                                                        "Isolation",
+                                                        AppIcon::Lock,
                                                         self.isolation_drawer_open,
                                                         theme.accent_blue,
                                                         "Open Seismic Base Isolation & Damper Studio (ASCE 7-22 Ch. 17-18 / SNI 1726 + Sheet S-106)",
@@ -5505,11 +5350,10 @@ impl SpatialWorkspaceState {
                                                         self.open_isolation_drawer(0);
                                                         actions.run_isolation_studio = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Wind),
-                                                        "Wind / Aero",
+                                                        AppIcon::Wind,
                                                         self.wind_drawer_open,
                                                         theme.accent_blue,
                                                         "Open Wind Aeroelasticity, Facade Pressure & ISO 10137 Comfort Studio (+ Sheet S-107)",
@@ -5519,11 +5363,10 @@ impl SpatialWorkspaceState {
                                                         self.open_wind_drawer(0);
                                                         actions.run_wind_studio = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Layers),
-                                                        "Shear Wall",
+                                                        AppIcon::Wall,
                                                         self.shear_wall_drawer_open,
                                                         theme.accent_blue,
                                                         "Open Special RC Shear Wall, SBE & Diagonal Coupling Beam Studio (+ Sheet S-108)",
@@ -5533,11 +5376,10 @@ impl SpatialWorkspaceState {
                                                         self.open_shear_wall_drawer(0);
                                                         actions.run_shear_wall_studio = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Wrench),
-                                                        "Connections",
+                                                        AppIcon::LinkChain,
                                                         self.connection_drawer_open,
                                                         theme.accent_blue,
                                                         "Open Steel Seismic Connection, Bolts & Panel-Zone Studio (AISC 358/360 + Sheet S-109)",
@@ -5547,11 +5389,10 @@ impl SpatialWorkspaceState {
                                                         self.open_connection_drawer(0);
                                                         actions.run_connection_studio = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::ChartLine),
-                                                        "PT / Tendon",
+                                                        AppIcon::ArcCurve,
                                                         self.prestress_drawer_open,
                                                         theme.accent_blue,
                                                         "Open Post-Tensioned Tendon Drape, Losses & Camber Studio (+ Sheet S-110)",
@@ -5561,11 +5402,10 @@ impl SpatialWorkspaceState {
                                                         self.open_prestress_drawer(0);
                                                         actions.run_prestress_studio = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Grid),
-                                                        "Composite",
+                                                        AppIcon::Grid,
                                                         self.composite_drawer_open,
                                                         theme.accent_blue,
                                                         "Open Composite Deck, Shear Studs & AISC DG11 Vibration Studio (+ Sheet S-111)",
@@ -5575,11 +5415,10 @@ impl SpatialWorkspaceState {
                                                         self.open_composite_drawer(0);
                                                         actions.run_composite_studio = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Target),
-                                                        "Reliability",
+                                                        AppIcon::Target,
                                                         self.reliability_drawer_open,
                                                         theme.accent_orange,
                                                         "Open Structural Reliability FORM/SORM & FEMA P-58 Fragility Studio (+ Sheet S-112)",
@@ -5589,11 +5428,10 @@ impl SpatialWorkspaceState {
                                                         self.open_reliability_drawer(0);
                                                         actions.run_reliability_studio = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Hammer),
-                                                        "Foundation",
+                                                        AppIcon::Hammer,
                                                         self.foundation_drawer_open,
                                                         theme.accent_green,
                                                         "Open Deep Foundation Pile Group, Winkler Springs & Punching Shear Studio (+ Sheet S-113)",
@@ -5603,11 +5441,10 @@ impl SpatialWorkspaceState {
                                                         self.open_foundation_drawer(0);
                                                         actions.run_foundation_studio = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Clock),
-                                                        "4D/5D/6D",
+                                                        AppIcon::Clock,
                                                         self.construction_lca_drawer_open,
                                                         theme.accent_blue,
                                                         "Open 4D CPM Sequence, 5D Cost S-Curve & 6D Carbon LCA Studio (+ Sheet S-114)",
@@ -5617,11 +5454,23 @@ impl SpatialWorkspaceState {
                                                         self.open_construction_lca_drawer(0);
                                                         actions.run_construction_lca_studio = true;
                                                     }
-                                                    if Self::glass_pill_button(
+                                                    if Self::glass_icon_button(
                                                         ui,
                                                         theme,
-                                                        Some(AppIcon::Book),
-                                                        "Dossier S-000",
+                                                        AppIcon::Compass,
+                                                        self.zoning_drawer_open,
+                                                        theme.accent_green,
+                                                        "Open Site Zoning & 3D Buildable Envelope Studio (KDB / KLB / GSB / Sun Path)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_zoning_drawer(0);
+                                                        actions.run_zoning_agent = true;
+                                                    }
+                                                    if Self::glass_icon_button(
+                                                        ui,
+                                                        theme,
+                                                        AppIcon::Book,
                                                         false,
                                                         theme.accent_green,
                                                         "Export Sheet S-000 Master Engineering Dossier Drawing Index (S-100..S-114)",
@@ -5644,8 +5493,8 @@ impl SpatialWorkspaceState {
                     ui.add_space(4.0);
                     }
 
-                            // Resting 3-Row Liquid Glass Dynamic Island Base Dock
-                            // Row 1: Balanced Left (Vault + Context) / Right (Model + Mode + History + Collapse)
+                            // Resting Liquid Glass Dynamic Island Base Dock (Icon-Only Chrome)
+                            // Row 1: Balanced Left (Vault + Context + Zoning) / Right (Model + Mode + History + Collapse)
                             if is_mobile {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.set_max_width(cap_w);
@@ -5654,7 +5503,7 @@ impl SpatialWorkspaceState {
                                         theme,
                                         vault_status.connected,
                                         &vault_status.vault_name,
-                                        true,
+                                        universal_canvas.zoning_overlay_visible,
                                         &mut actions,
                                     );
                                     self.render_dynamic_island_row1_right(
@@ -5672,7 +5521,7 @@ impl SpatialWorkspaceState {
                                         theme,
                                         vault_status.connected,
                                         &vault_status.vault_name,
-                                        false,
+                                        universal_canvas.zoning_overlay_visible,
                                         &mut actions,
                                     );
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -5687,14 +5536,14 @@ impl SpatialWorkspaceState {
                                 });
                             }
 
-                            ui.add_space(5.0);
+                            ui.add_space(4.0);
 
-                            // Row 2: Grouped Glass Quick-Draw Strip with subtle category dividers
+                            // Row 2: Minimalist Icon-Only Quick-Draw Strip with category dividers
                             Self::glass_subpill_group(
                                 ui,
                                 theme,
                                 11,
-                                Margin::symmetric(7, 3),
+                                Margin::symmetric(6, 3),
                                 cap_w,
                                 |ui| {
                                     for tool in SpatialManualTool::ALL {
@@ -5708,11 +5557,10 @@ impl SpatialWorkspaceState {
                                         } else {
                                             theme.accent_orange
                                         };
-                                        if Self::glass_pill_button(
+                                        if Self::glass_icon_button(
                                             ui,
                                             theme,
-                                            Some(tool.icon()),
-                                            tool.short_label(),
+                                            tool.icon(),
                                             active,
                                             accent,
                                             tool.tooltip(),
@@ -5816,28 +5664,23 @@ impl SpatialWorkspaceState {
                                     let row_w = (cap_w - 22.0).max(160.0);
                                     ui.set_width(row_w);
                                     ui.horizontal(|ui| {
+                                        let _ = icons::draw_icon(ui, AppIcon::Sparkles, 13.0, theme.accent_blue);
                                         if let Some(mention) =
                                             self.active_context_mention(&build_view.bim_bus.project)
                                         {
-                                            if !is_mobile {
-                                                if icons::icon_button(
-                                                    ui,
-                                                    AppIcon::Target,
-                                                    mention,
-                                                    9.5,
-                                                    theme.accent_blue,
-                                                    theme.accent_blue.gamma_multiply(0.14),
-                                                    Stroke::NONE,
-                                                    CornerRadius::same(8),
-                                                    Vec2::new(0.0, 20.0),
-                                                )
-                                                .on_hover_text("Attach selected canvas item as @Context")
-                                                .clicked()
-                                                {
-                                                    self.attach_context(
-                                                        AiContextAttachment::SelectedElement,
-                                                    );
-                                                }
+                                            if Self::glass_icon_button(
+                                                ui,
+                                                theme,
+                                                AppIcon::Target,
+                                                false,
+                                                theme.accent_blue,
+                                                &format!("Attach {mention} as @Context"),
+                                            )
+                                            .clicked()
+                                            {
+                                                self.attach_context(
+                                                    AiContextAttachment::SelectedElement,
+                                                );
                                             }
                                         }
 
@@ -5851,16 +5694,13 @@ impl SpatialWorkspaceState {
                                                 )
                                             });
 
-                                        let trailing_reserve = 66.0;
+                                        let trailing_reserve = 58.0;
                                         let input_w =
                                             (ui.available_width() - trailing_reserve).max(60.0);
                                         let edit_resp = ui.add(
                                             egui::TextEdit::singleline(&mut self.command_input)
                                                 .desired_width(input_w)
-                                                .frame(Frame::NONE)
-                                                .hint_text(
-                                                    "Ask EigenAI, @ context, or / commands...",
-                                                ),
+                                                .frame(Frame::NONE),
                                         );
                                         self.composer_had_focus = edit_resp.has_focus();
                                         if std::mem::take(&mut self.request_focus_command) {
@@ -5878,21 +5718,15 @@ impl SpatialWorkspaceState {
                                         let enter_singleline = edit_resp.lost_focus()
                                             && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
-                                        if ui
-                                            .add_sized(
-                                                Vec2::new(24.0, 23.0),
-                                                egui::Button::new(
-                                                    RichText::new("/")
-                                                        .size(11.5)
-                                                        .strong()
-                                                        .color(theme.text_secondary),
-                                                )
-                                                .fill(theme.bg_sidebar)
-                                                .stroke(Stroke::new(0.8, theme.border_subtle))
-                                                .corner_radius(CornerRadius::same(7)),
-                                            )
-                                            .on_hover_text("Browse slash commands (/earth, /3d, /vault...)")
-                                            .clicked()
+                                        if Self::glass_icon_button(
+                                            ui,
+                                            theme,
+                                            AppIcon::Search,
+                                            slash_mode,
+                                            theme.accent_blue,
+                                            "Slash commands (/zoning, /earth, /3d, /vault...)",
+                                        )
+                                        .clicked()
                                         {
                                             if self.command_input.trim_start().starts_with('/') {
                                                 self.command_input.clear();

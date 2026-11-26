@@ -76,6 +76,7 @@ pub mod ns {
     pub const EG_RELIABILITY_FORM: &str = "eigengraph::analysis::reliability_form";
     pub const EG_DEEP_FOUNDATION: &str = "eigengraph::analysis::deep_foundation";
     pub const EG_CONSTRUCTION_4D5D6D: &str = "eigengraph::analysis::construction_4d5d6d";
+    pub const EG_ZONING_ENVELOPE: &str = "eigengraph::design::zoning_envelope";
     pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
@@ -1906,6 +1907,43 @@ impl IfcxStage {
         });
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_construction_4d5d6d", base_doc.header.id))
+    }
+
+    /// Composes a base `.ifcx` document with a non-destructive Site Zoning & 3D Buildable Envelope overlay.
+    pub fn compose_with_zoning_envelope_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::zoning_agent::ZoningIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_zoning_envelope", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcSpatialZone", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Site Zoning & 3D Buildable Envelope (KDB/KLB/GSB & Sun Path)",
+                "preset": overlay.preset,
+                "lotAreaM2": overlay.lot_area_m2,
+                "kdbBcrPct": overlay.kdb_bcr_pct,
+                "klbFar": overlay.klb_far,
+                "maxHeightM": overlay.max_height_m,
+                "maxGfaKlbM2": overlay.max_gfa_klb_m2,
+                "overallCompliant": overlay.overall_compliant,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_ZONING_ENVELOPE.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/design/zoning_envelope".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_zoning_envelope", base_doc.header.id))
     }
 
     /// Composes a base `.ifcx` document with the `v0.8.5` Master Engineering Dossier Index (`S-000`).

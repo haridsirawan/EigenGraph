@@ -5468,4 +5468,286 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.5.6` (`6/10` -> `v0.8.6`): Width-first Dynamic Island drawer for Site Zoning & 3D Buildable Envelope (`KDB/KLB/GSB` + Sun Path).
+    pub(super) fn render_zoning_envelope_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::zoning_agent::ZoningDistrictPreset;
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Compass,
+                13.0,
+                theme.accent_blue,
+                "Site Zoning & 3D Buildable Envelope (KDB / KLB / GSB / Sun Path)",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "Zoning & Envelope"),
+                (1usize, "Solar Path & Compliance"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.zoning_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.zoning_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Site Zoning & Buildable Envelope drawer",
+            )
+            .clicked()
+            {
+                self.zoning_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for preset in ZoningDistrictPreset::ALL {
+                    let active = universal_canvas.zoning_config.preset == preset;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        preset.short_label(),
+                        active,
+                        theme.accent_green,
+                        preset.label(),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.zoning_config.apply_preset(preset);
+                        actions.run_zoning_agent = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Bolt),
+                    "Evaluate",
+                    true,
+                    theme.accent_green,
+                    "Evaluate KDB/KLB/GSB limits, buildable envelope & Sun Path",
+                )
+                .clicked()
+                {
+                    actions.run_zoning_agent = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    if universal_canvas.zoning_overlay_visible {
+                        "3D Envelope: ON"
+                    } else {
+                        "3D Envelope: OFF"
+                    },
+                    universal_canvas.zoning_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU buildable envelope prisms, setback cage & Sun Path",
+                )
+                .clicked()
+                {
+                    actions.toggle_zoning_3d = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "IFCX",
+                    false,
+                    theme.accent_orange,
+                    "Export non-destructive eigengraph::design::zoning_envelope IFCX (.ifcx)",
+                )
+                .clicked()
+                {
+                    actions.export_zoning_ifcx = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let Some(ref rep) = universal_canvas.last_zoning_report.clone() else {
+            ui.label(
+                RichText::new("Click 'Evaluate' or toggle '3D Envelope' to generate KDB/KLB/GSB limits and Sun Path.")
+                    .size(9.4)
+                    .color(theme.text_muted),
+            );
+            return;
+        };
+
+        let tab = self.zoning_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    if is_left {
+                        let cfg = &mut universal_canvas.zoning_config;
+                        let mut changed = false;
+                        if tab == 0 {
+                            ui.label(RichText::new("Lot Geometry, KDB/KLB & Setbacks").size(9.8).strong().color(theme.text_primary));
+                            ui.horizontal_wrapped(|ui| {
+                                ui.set_max_width(inner_w);
+                                ui.label(RichText::new("Lot W:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.lot_width_m).range(10.0..=400.0).speed(1.0).suffix("m")).changed();
+                                ui.label(RichText::new("D:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.lot_depth_m).range(10.0..=400.0).speed(1.0).suffix("m")).changed();
+                                ui.label(RichText::new("KDB:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.kdb_bcr_pct).range(10.0..=90.0).speed(1.0).suffix("%")).changed();
+                                ui.label(RichText::new("KLB:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.klb_far).range(0.4..=24.0).speed(0.1)).changed();
+                                ui.label(RichText::new("KDH:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.kdh_green_pct).range(5.0..=70.0).speed(1.0).suffix("%")).changed();
+                            });
+                            ui.horizontal_wrapped(|ui| {
+                                ui.set_max_width(inner_w);
+                                ui.label(RichText::new("GSB F/S/R:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.setback_front_m).range(0.0..=30.0).speed(0.5).suffix("m")).changed();
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.setback_side_m).range(0.0..=25.0).speed(0.5).suffix("m")).changed();
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.setback_rear_m).range(0.0..=25.0).speed(0.5).suffix("m")).changed();
+                                ui.label(RichText::new("Max H:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.max_height_m).range(4.0..=350.0).speed(1.0).suffix("m")).changed();
+                                ui.label(RichText::new("Podium:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.podium_stories).range(0..=12).speed(1.0).suffix("st")).changed();
+                                ui.label(RichText::new("Stepback:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.tower_stepback_m).range(0.0..=16.0).speed(0.5).suffix("m")).changed();
+                            });
+                        } else {
+                            ui.label(RichText::new("Analytical Solar Path & Daylight Parameters").size(9.8).strong().color(theme.text_primary));
+                            ui.horizontal_wrapped(|ui| {
+                                ui.set_max_width(inner_w);
+                                ui.spacing_mut().slider_width = (inner_w * 0.36).clamp(56.0, 100.0);
+                                ui.label(RichText::new("Month:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::DragValue::new(&mut cfg.solar_month).range(1..=12).speed(1.0)).changed();
+                                ui.label(RichText::new("Hour:").size(8.8).color(theme.text_muted));
+                                changed |= ui.add(egui::Slider::new(&mut cfg.solar_hour_local, 6.0..=18.0).suffix("h")).changed();
+                                changed |= ui.checkbox(&mut cfg.show_sun_path, "Show 3D Sun Path").changed();
+                            });
+                            ui.label(
+                                RichText::new(format!(
+                                    "Site: {} ({:.3}°, {:.3}°) • Alt {:.1}° • Az {:.1}° • Shadow {:.2}x",
+                                    rep.site_label,
+                                    rep.lat_deg,
+                                    rep.lon_deg,
+                                    rep.active_sun_altitude_deg,
+                                    rep.active_sun_azimuth_deg,
+                                    rep.shadow_length_factor,
+                                ))
+                                .size(8.6)
+                                .monospace()
+                                .color(theme.accent_orange),
+                            );
+                        }
+                        if changed {
+                            actions.run_zoning_agent = true;
+                        }
+                        ui.label(
+                            RichText::new(format!(
+                                "Lot {:.0} m2 • Pad {:.1}x{:.1}m ({:.0} m2) • Max Footprint {:.0} m2",
+                                rep.lot_area_m2,
+                                rep.buildable_pad_width_m,
+                                rep.buildable_pad_depth_m,
+                                rep.buildable_pad_area_m2,
+                                rep.effective_footprint_limit_m2,
+                            ))
+                            .size(8.6)
+                            .monospace()
+                            .color(theme.accent_blue),
+                        );
+                    } else if tab == 0 {
+                        ui.label(RichText::new("Buildable GFA Capacity & BIM Envelope Audit").size(9.8).strong().color(theme.text_primary));
+                        ui.label(
+                            RichText::new(format!(
+                                "Max GFA (KLB {:.1}): {:.0} m2 | Existing BIM: {:.0} m2 | Remaining: {:.0} m2",
+                                rep.config.klb_far,
+                                rep.max_gfa_klb_m2,
+                                rep.existing_bim_gfa_m2,
+                                rep.remaining_gfa_capacity_m2,
+                            ))
+                            .size(8.6)
+                            .monospace()
+                            .color(theme.accent_green),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "KDB {:.1}%/{:.0}% • Height {:.1}/{:.0}m • Stories {}/{} • Open Space {:.0} m2",
+                                rep.actual_kdb_pct,
+                                rep.config.kdb_bcr_pct,
+                                rep.existing_bim_height_m,
+                                rep.config.max_height_m,
+                                rep.existing_bim_stories,
+                                rep.max_allowable_stories,
+                                rep.required_green_kdh_m2,
+                            ))
+                            .size(8.5)
+                            .monospace()
+                            .color(if rep.overall_compliant { theme.text_secondary } else { theme.accent_red }),
+                        );
+                    } else {
+                        ui.label(RichText::new("5-Clause Zoning & Solar Exposure Audit").size(9.8).strong().color(theme.text_primary));
+                        for item in &rep.compliance_checks {
+                            let col = if item.compliant { theme.accent_green } else { theme.accent_red };
+                            let tag = if item.compliant { "PASS" } else { "FAIL" };
+                            ui.label(
+                                RichText::new(format!(
+                                    "[{tag}] {}: {:.1}/{:.1}{} — {}",
+                                    item.code, item.actual_val, item.limit_val, item.unit, item.detail
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(col),
+                            );
+                        }
+                        ui.label(
+                            RichText::new(format!(
+                                "Daylight Exposure Score: {:.0}%",
+                                rep.solar_exposure_score_pct
+                            ))
+                            .size(8.6)
+                            .monospace()
+                            .color(theme.accent_blue),
+                        );
+                    }
+                });
+            });
+        });
+    }
 }

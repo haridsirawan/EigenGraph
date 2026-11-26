@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.6 (5/10)]
+## [Unreleased — Next: v0.8.6 (6/10)]
+
+### Update 6/10 (`v0.8.5.6` -> `v0.8.6`) — Site Zoning & 3D Buildable Envelope Engine (`KDB/KLB/GSB` + Sun Path) & Minimalist Icon-Only Dynamic Island
+- **Site Zoning & 3D Buildable Envelope Core Engine (`src/core/zoning_agent.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`evaluate_site_zoning`](src/core/zoning_agent.rs) with 5 urban district presets (`CommercialCbd`, `MixedUseUrban`, `ResidentialHighDensity`, `MidRiseInstitutional`, `LowRiseSuburban`), deterministic `KDB/BCR`, `KLB/FAR`, `KDH/Green`, `GSB` front/side/rear setback, and height cap calculations coupled against active `BimProject` footprint/stories and `SiteEnvironmentalCoupling` latitude.
+  - Synthesizes 3D ENU lot boundary, podium, and stepped-back tower buildable envelope prisms (`ZoningTierPrism3D`), hourly analytical diurnal Sun Path trajectories (`SunPositionPoint3D`), 5-clause regulatory compliance audits (`ZoningComplianceItem`), `.eigen.json` persistence (`UnifiedWorkspaceArchive::zoning_config`), and non-destructive `eigengraph::design::zoning_envelope` IFCX overlays (`IfcxStage::compose_with_zoning_envelope_overlay`).
+- **3D Pure WebGPU (`wgpu` + WGSL) Buildable Envelope & Sun Path + CPU Fallback (`src/views/webgpu_earth/`, `src/views/universal_canvas/`)**:
+  - Added [`build_rtc_zoning_envelope_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`ZoningEnvelopeGpuInput`, `material_kind = 23.0`, WGSL `kind >= 22.5` analytical envelope grid & Fresnel rim shader, 0% raster), dedicated `zoning_envelope` GPU slot inside `WebGpuEarthResources`, and pure-vector CPU fallback (`paint_cpu_zoning_envelope_fallback`).
+- **Minimalist Icon-Only Dynamic Island, Zoning Drawer, Commands & Directives (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Redesigned the resting Dynamic Island and 4-tab Hover Studio Deck (`View & Lens`, `BIM & Story`, `GIS & Site`, `CAD & Export`) into a compact, minimalist **100% icon-only** Liquid Glass capsule (zero static button words or composer placeholder sentences; full descriptions preserved in hover tooltips), tightened resting capsule width (`320–440 px` desktop), and added the 2-tab width-first **Site Zoning & 3D Buildable Envelope** drawer (`Zoning & Envelope` + `Solar Path & Compliance`), `/zoning`, `/envelope`, `/far`, `/kdb`, `/klb`, `/sunpath`, `/zoning-3d`, `/zoning-ifcx` slash commands, and `[[RUN_SITE_ZONING:...]]` / `[[TOGGLE_ZONING_3D]]` / `[[EXPORT_ZONING_IFCX]]` Gemini directives.
 
 ### Update 5/10 (`v0.8.5.5` -> `v0.8.6`) — Horizontal EigenGate & EigenFlow Banner Logos & README Engine Documentation
 - Added horizontal `1024×571` rounded banner logos [`assets/eigengate-logo.png`](assets/eigengate-logo.png) and [`assets/eigenflow-logo.png`](assets/eigenflow-logo.png) matching `assets/logo.png`, with shared wordmark typography height and seamless white cards.

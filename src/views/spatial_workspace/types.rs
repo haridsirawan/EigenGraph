@@ -531,6 +531,15 @@ pub enum PlannedProposalAction {
     ExportConstructionAnnex,
     // Update 10/10 (v0.8.5): Master Engineering Dossier Index (S-000 / S-100..S-114)
     ExportMasterDossierIndex,
+    // Update v0.8.5.6 (6/10 -> v0.8.6): Site Zoning & 3D Buildable Envelope + Sun Path
+    RunSiteZoning {
+        preset: Option<crate::core::zoning_agent::ZoningDistrictPreset>,
+        kdb_pct: Option<f64>,
+        klb_far: Option<f64>,
+        max_height_m: Option<f64>,
+    },
+    ToggleZoning3d,
+    ExportZoningIfcx,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -704,6 +713,15 @@ pub enum GeminiDirective {
     ExportConstructionAnnex,
     // Update 10/10 (v0.8.5): Master Engineering Dossier Index (S-000 / S-100..S-114)
     ExportMasterDossierIndex,
+    // Update v0.8.5.6 (6/10 -> v0.8.6): Site Zoning & 3D Buildable Envelope + Sun Path
+    RunSiteZoning {
+        preset: Option<crate::core::zoning_agent::ZoningDistrictPreset>,
+        kdb_pct: Option<f64>,
+        klb_far: Option<f64>,
+        max_height_m: Option<f64>,
+    },
+    ToggleZoning3d,
+    ExportZoningIfcx,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1292,6 +1310,52 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ExportConstructionAnnex);
             } else if upper == "EXPORT_MASTER_DOSSIER_INDEX" {
                 directives.push(GeminiDirective::ExportMasterDossierIndex);
+            } else if upper == "RUN_SITE_ZONING" || upper.starts_with("RUN_SITE_ZONING:") {
+                let arg = upper.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                let mut preset = None;
+                let mut kdb_pct = None;
+                let mut klb_far = None;
+                let mut max_height_m = None;
+                for tok in arg.split(':').map(str::trim).filter(|s| !s.is_empty()) {
+                    if tok.contains("CBD") || tok.contains("COMM") {
+                        preset = Some(crate::core::zoning_agent::ZoningDistrictPreset::CommercialCbd);
+                    } else if tok.contains("MIX") {
+                        preset = Some(crate::core::zoning_agent::ZoningDistrictPreset::MixedUseUrban);
+                    } else if tok.contains("RES") {
+                        preset = Some(
+                            crate::core::zoning_agent::ZoningDistrictPreset::ResidentialHighDensity,
+                        );
+                    } else if tok.contains("INST") {
+                        preset = Some(
+                            crate::core::zoning_agent::ZoningDistrictPreset::MidRiseInstitutional,
+                        );
+                    } else if tok.contains("SUB") || tok.contains("LOW") {
+                        preset =
+                            Some(crate::core::zoning_agent::ZoningDistrictPreset::LowRiseSuburban);
+                    } else if let Some(val) = tok.strip_prefix("KDB").or_else(|| tok.strip_prefix("BCR")) {
+                        if let Ok(v) = val.parse::<f64>() {
+                            kdb_pct = Some(v.clamp(10.0, 90.0));
+                        }
+                    } else if let Some(val) = tok.strip_prefix("KLB").or_else(|| tok.strip_prefix("FAR")) {
+                        if let Ok(v) = val.parse::<f64>() {
+                            klb_far = Some(v.clamp(0.4, 24.0));
+                        }
+                    } else if let Some(val) = tok.strip_prefix("H").or_else(|| tok.strip_prefix("MAXH")) {
+                        if let Ok(v) = val.trim_end_matches('M').parse::<f64>() {
+                            max_height_m = Some(v.clamp(4.0, 350.0));
+                        }
+                    }
+                }
+                directives.push(GeminiDirective::RunSiteZoning {
+                    preset,
+                    kdb_pct,
+                    klb_far,
+                    max_height_m,
+                });
+            } else if upper == "TOGGLE_ZONING_3D" {
+                directives.push(GeminiDirective::ToggleZoning3d);
+            } else if upper == "EXPORT_ZONING_IFCX" {
+                directives.push(GeminiDirective::ExportZoningIfcx);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -2540,6 +2604,42 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Book,
     },
     SlashCommandSpec {
+        cmd: "/zoning",
+        category: "Design",
+        description: "Open Site Zoning & 3D Buildable Envelope Studio (/zoning cbd|mixed|res|inst|sub)",
+        icon: AppIcon::Compass,
+    },
+    SlashCommandSpec {
+        cmd: "/envelope",
+        category: "Design",
+        description: "Toggle 3D Pure WebGPU Buildable Envelope & Sun Path overlay (/zoning-3d)",
+        icon: AppIcon::Cube3D,
+    },
+    SlashCommandSpec {
+        cmd: "/far",
+        category: "Design",
+        description: "Evaluate KLB / FAR, KDB / BCR & GSB setback envelope (/far 4.5)",
+        icon: AppIcon::SlidersPanel,
+    },
+    SlashCommandSpec {
+        cmd: "/sunpath",
+        category: "Design",
+        description: "Open Solar Path, Altitude & Daylight Exposure tab inside Site Zoning Studio",
+        icon: AppIcon::Sun,
+    },
+    SlashCommandSpec {
+        cmd: "/zoning-3d",
+        category: "Design",
+        description: "Toggle 3D Pure WebGPU Buildable Envelope prisms, setback cage & Sun Path",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/zoning-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::design::zoning_envelope IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -2714,6 +2814,10 @@ pub struct SpatialHudActions {
     pub export_construction_svg: bool,
     // Update 10/10 (v0.8.5): Master Engineering Dossier Index (S-000)
     pub export_master_dossier_svg: bool,
+    // Update v0.8.5.6 (6/10 -> v0.8.6): Site Zoning & 3D Buildable Envelope + Sun Path
+    pub run_zoning_agent: bool,
+    pub toggle_zoning_3d: bool,
+    pub export_zoning_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3162,5 +3266,8 @@ impl SpatialHudActions {
         self.export_construction_ifcx |= other.export_construction_ifcx;
         self.export_construction_svg |= other.export_construction_svg;
         self.export_master_dossier_svg |= other.export_master_dossier_svg;
+        self.run_zoning_agent |= other.run_zoning_agent;
+        self.toggle_zoning_3d |= other.toggle_zoning_3d;
+        self.export_zoning_ifcx |= other.export_zoning_ifcx;
     }
 }

@@ -795,6 +795,36 @@ impl SpatialWorkspaceState {
                 PlannedProposalAction::ExportMasterDossierIndex => {
                     out.export_master_dossier_svg = true;
                 }
+                PlannedProposalAction::RunSiteZoning {
+                    preset,
+                    kdb_pct,
+                    klb_far,
+                    max_height_m,
+                } => {
+                    if let Some(p) = preset {
+                        universal_canvas.zoning_config.apply_preset(*p);
+                    }
+                    if let Some(kdb) = kdb_pct {
+                        universal_canvas.zoning_config.kdb_bcr_pct = kdb.clamp(10.0, 90.0);
+                    }
+                    if let Some(klb) = klb_far {
+                        universal_canvas.zoning_config.klb_far = klb.clamp(0.4, 24.0);
+                    }
+                    if let Some(mh) = max_height_m {
+                        universal_canvas.zoning_config.max_height_m = mh.clamp(4.0, 350.0);
+                    }
+                    universal_canvas.zoning_overlay_visible = true;
+                    self.open_zoning_drawer(0);
+                    out.run_zoning_agent = true;
+                }
+                PlannedProposalAction::ToggleZoning3d => {
+                    self.open_zoning_drawer(0);
+                    out.toggle_zoning_3d = true;
+                }
+                PlannedProposalAction::ExportZoningIfcx => {
+                    self.open_zoning_drawer(0);
+                    out.export_zoning_ifcx = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -1207,6 +1237,21 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportMasterDossierIndex => {
                                 PlannedProposalAction::ExportMasterDossierIndex
                             }
+                            GeminiDirective::RunSiteZoning {
+                                preset,
+                                kdb_pct,
+                                klb_far,
+                                max_height_m,
+                            } => PlannedProposalAction::RunSiteZoning {
+                                preset: *preset,
+                                kdb_pct: *kdb_pct,
+                                klb_far: *klb_far,
+                                max_height_m: *max_height_m,
+                            },
+                            GeminiDirective::ToggleZoning3d => PlannedProposalAction::ToggleZoning3d,
+                            GeminiDirective::ExportZoningIfcx => {
+                                PlannedProposalAction::ExportZoningIfcx
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1406,6 +1451,16 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportMasterDossierIndex => {
                                 "ExportMasterDossierIndex(S-000)".to_string()
                             }
+                            GeminiDirective::RunSiteZoning {
+                                preset,
+                                kdb_pct,
+                                klb_far,
+                                max_height_m,
+                            } => format!(
+                                "RunSiteZoning({preset:?}/KDB:{kdb_pct:?}/KLB:{klb_far:?}/H:{max_height_m:?})"
+                            ),
+                            GeminiDirective::ToggleZoning3d => "ToggleZoning3d".to_string(),
+                            GeminiDirective::ExportZoningIfcx => "ExportZoningIfcx".to_string(),
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -3451,6 +3506,56 @@ impl SpatialWorkspaceState {
                 }
                 "/master-dossier" | "/dossier-index" => {
                     actions.export_master_dossier_svg = true;
+                }
+                "/zoning" | "/far" | "/kdb" | "/klb" | "/sunpath" => {
+                    let lo = arg.to_ascii_lowercase();
+                    if lo.contains("cbd") || lo.contains("comm") {
+                        universal_canvas
+                            .zoning_config
+                            .apply_preset(crate::core::zoning_agent::ZoningDistrictPreset::CommercialCbd);
+                    } else if lo.contains("mix") {
+                        universal_canvas
+                            .zoning_config
+                            .apply_preset(crate::core::zoning_agent::ZoningDistrictPreset::MixedUseUrban);
+                    } else if lo.contains("res") {
+                        universal_canvas
+                            .zoning_config
+                            .apply_preset(crate::core::zoning_agent::ZoningDistrictPreset::ResidentialHighDensity);
+                    } else if lo.contains("inst") {
+                        universal_canvas
+                            .zoning_config
+                            .apply_preset(crate::core::zoning_agent::ZoningDistrictPreset::MidRiseInstitutional);
+                    } else if lo.contains("sub") || lo.contains("low") {
+                        universal_canvas
+                            .zoning_config
+                            .apply_preset(crate::core::zoning_agent::ZoningDistrictPreset::LowRiseSuburban);
+                    }
+                    if cmd == "/far" || cmd == "/klb" {
+                        if let Some(val) = lo
+                            .split_whitespace()
+                            .filter_map(|t| t.parse::<f64>().ok())
+                            .next()
+                        {
+                            universal_canvas.zoning_config.klb_far = val.clamp(0.4, 24.0);
+                        }
+                    } else if cmd == "/kdb" {
+                        if let Some(val) = lo
+                            .split_whitespace()
+                            .filter_map(|t| t.parse::<f64>().ok())
+                            .next()
+                        {
+                            universal_canvas.zoning_config.kdb_bcr_pct = val.clamp(10.0, 90.0);
+                        }
+                    }
+                    self.open_zoning_drawer(if cmd == "/sunpath" { 1 } else { 0 });
+                    actions.run_zoning_agent = true;
+                }
+                "/envelope" | "/zoning-3d" => {
+                    self.open_zoning_drawer(0);
+                    actions.toggle_zoning_3d = true;
+                }
+                "/zoning-ifcx" => {
+                    actions.export_zoning_ifcx = true;
                 }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {

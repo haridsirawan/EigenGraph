@@ -49,6 +49,7 @@ pub mod composite_studio;
 pub mod reliability_studio;
 pub mod foundation_studio;
 pub mod construction_lca_studio;
+pub mod zoning_agent;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -338,6 +339,11 @@ pub use construction_lca_studio::{
     ConstructionLcaIfcxOverlay, ConstructionLcaStudioReport, LcaStageDto, SCurvePointDto,
     SteelSmeltingRoute, StorySequenceZone3D, TowerCrane3D, WbsActivityDto,
     NS_EG_CONSTRUCTION_4D5D6D,
+};
+pub use zoning_agent::{
+    evaluate_site_zoning, SiteZoningConfig, SiteZoningReport, SunPositionPoint3D,
+    ZoningComplianceItem, ZoningDistrictPreset, ZoningIfcxOverlay, ZoningTierPrism3D,
+    NS_EG_ZONING_ENVELOPE,
 };
 
 

@@ -492,6 +492,12 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 22.5) {
+        // Update v0.8.5.6: Pure Analytical WGSL Site Zoning Buildable Envelope & Sun Path (0% raster)
+        let grid_z = 0.82 + 0.18 * sin(f_in.world_pos.z * 2.4 - u_time * 2.6);
+        let ndotv = max(abs(dot(n, v)), 0.14);
+        let rim = pow(1.0 - ndotv, 1.45) * 0.52;
+        col = f_in.color.rgb * (0.76 + 0.24 * grid_z + rim);
     } else if (kind >= 21.5) {
         // Update v0.8.4.9: Pure Analytical WGSL 4D/5D/6D Construction Sequence & Crane (0% raster)
         let scan = 0.78 + 0.22 * sin(f_in.world_pos.z * 3.0 - u_time * 3.6);
@@ -780,6 +786,7 @@ pub struct WebGpuEarthResources {
     reliability_form: GpuMeshSlot,
     deep_foundation: GpuMeshSlot,
     construction_lca: GpuMeshSlot,
+    zoning_envelope: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
 }
 
@@ -1003,6 +1010,7 @@ impl WebGpuEarthResources {
             reliability_form: GpuMeshSlot::default(),
             deep_foundation: GpuMeshSlot::default(),
             construction_lca: GpuMeshSlot::default(),
+            zoning_envelope: GpuMeshSlot::default(),
             hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
@@ -1135,6 +1143,7 @@ impl WebGpuEarthResources {
             || self.reliability_form.index_count > 0
             || self.deep_foundation.index_count > 0
             || self.construction_lca.index_count > 0
+            || self.zoning_envelope.index_count > 0
             || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1185,6 +1194,7 @@ impl WebGpuEarthResources {
             self.reliability_form.draw(&mut pass);
             self.deep_foundation.draw(&mut pass);
             self.construction_lca.draw(&mut pass);
+            self.zoning_envelope.draw(&mut pass);
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
             self.hazard_compute.draw(&mut pass);
@@ -1221,6 +1231,7 @@ struct WebGpuEarthPaintCallback {
     pending_reliability: Option<(u64, GpuMeshPayload)>,
     pending_foundation: Option<(u64, GpuMeshPayload)>,
     pending_construction_lca: Option<(u64, GpuMeshPayload)>,
+    pending_zoning_envelope: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
 }
 
@@ -1368,6 +1379,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
                     .upload(device, queue, "construction_lca_mesh", lca_in.0, &lca_in.1);
             }
         }
+        if let Some(ref zon_in) = self.pending_zoning_envelope {
+            if res.zoning_envelope.revision_uploaded != zon_in.0 {
+                res.zoning_envelope
+                    .upload(device, queue, "zoning_envelope_mesh", zon_in.0, &zon_in.1);
+            }
+        }
         if let Some(ref h_cmp) = self.pending_hazard_compute {
             res.hazard_compute.dispatch(queue, egui_encoder, h_cmp);
         } else {
@@ -1466,6 +1483,7 @@ pub struct WebGpuEarthState {
     cached_reliability_hash: u64,
     cached_foundation_hash: u64,
     cached_construction_lca_hash: u64,
+    cached_zoning_envelope_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1489,6 +1507,7 @@ pub struct WebGpuEarthState {
     pub last_reliability_tris: usize,
     pub last_foundation_tris: usize,
     pub last_construction_lca_tris: usize,
+    pub last_zoning_envelope_tris: usize,
     pub last_compute_particles: u32,
     #[cfg(not(target_arch = "wasm32"))]
     wgpu_device: Option<wgpu::Device>,
@@ -1771,6 +1790,7 @@ impl WebGpuEarthState {
         reliability_input: Option<ReliabilityGpuInput<'_>>,
         foundation_input: Option<FoundationGpuInput<'_>>,
         construction_lca_input: Option<ConstructionLcaGpuInput<'_>>,
+        zoning_envelope_input: Option<ZoningEnvelopeGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
@@ -2452,6 +2472,43 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_zoning_envelope = if render_site_pass {
+            if let Some(ref zon_in) = zoning_envelope_input {
+                let c = &zon_in.report.config;
+                let rev: u64 = ((c.preset as u64) << 2)
+                    ^ c.lot_width_m.to_bits()
+                    ^ c.lot_depth_m.to_bits().rotate_left(7)
+                    ^ c.kdb_bcr_pct.to_bits().rotate_left(13)
+                    ^ c.klb_far.to_bits().rotate_left(19)
+                    ^ c.max_height_m.to_bits().rotate_left(25)
+                    ^ c.setback_front_m.to_bits().rotate_left(31)
+                    ^ c.setback_side_m.to_bits().rotate_left(37)
+                    ^ c.solar_hour_local.to_bits().rotate_left(43)
+                    ^ ((c.podium_stories as u64) << 10)
+                    ^ ((c.solar_month as u64) << 16)
+                    ^ u64::from(c.show_sun_path).wrapping_mul(0x517C_C1B7_2722_0A95)
+                    ^ u64::from(zon_in.report.overall_compliant).wrapping_mul(0x94D0_49BB_1331_11EB)
+                    ^ ((zon_in.heading_deg.round() as u64) << 48)
+                    ^ u64::from(zon_in.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                if rev != self.cached_zoning_envelope_hash {
+                    let mesh = build_rtc_zoning_envelope_mesh(zon_in);
+                    self.last_zoning_envelope_tris = mesh.indices.len() / 3;
+                    self.cached_zoning_envelope_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_zoning_envelope_hash != 0 {
+                self.cached_zoning_envelope_hash = 0;
+                self.last_zoning_envelope_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let pending_hazard_compute = if render_site_pass {
             if let Some(hc) = hazard_compute_input {
                 if hc.enabled {
@@ -2500,6 +2557,7 @@ impl WebGpuEarthState {
                 pending_reliability,
                 pending_foundation,
                 pending_construction_lca,
+                pending_zoning_envelope,
                 pending_hazard_compute,
             },
         ));
@@ -2533,6 +2591,7 @@ impl WebGpuEarthState {
         let reliability_animated = reliability_input.as_ref().is_some_and(|r| r.visible);
         let foundation_animated = foundation_input.as_ref().is_some_and(|f| f.visible);
         let construction_lca_animated = construction_lca_input.as_ref().is_some_and(|l| l.visible);
+        let zoning_animated = zoning_envelope_input.as_ref().is_some_and(|z| z.visible);
         let frame_ms = if hazard_animated
             || compute_animated
             || subsurface_animated
@@ -2552,6 +2611,7 @@ impl WebGpuEarthState {
             || reliability_animated
             || foundation_animated
             || construction_lca_animated
+            || zoning_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

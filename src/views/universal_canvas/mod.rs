@@ -221,6 +221,10 @@ pub struct UniversalCanvasState {
     pub construction_lca_config: crate::core::construction_lca_studio::ConstructionLcaConfig,
     pub last_construction_lca_report:
         Option<crate::core::construction_lca_studio::ConstructionLcaStudioReport>,
+    // Update v0.8.5.6 (6/10 -> v0.8.6): Site Zoning & 3D Buildable Envelope + Sun Path
+    pub zoning_overlay_visible: bool,
+    pub zoning_config: crate::core::zoning_agent::SiteZoningConfig,
+    pub last_zoning_report: Option<crate::core::zoning_agent::SiteZoningReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -393,6 +397,9 @@ impl Default for UniversalCanvasState {
             construction_lca_overlay_visible: false,
             construction_lca_config: crate::core::construction_lca_studio::ConstructionLcaConfig::default(),
             last_construction_lca_report: None,
+            zoning_overlay_visible: false,
+            zoning_config: crate::core::zoning_agent::SiteZoningConfig::default(),
+            last_zoning_report: None,
         }
     }
 }
@@ -1145,6 +1152,21 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Site Zoning (`KDB/KLB/KDH/GSB`), 3D Buildable Envelope & Sun Path coupled to BIM & site.
+    pub fn run_zoning_agent(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::zoning_agent::SiteZoningReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::zoning_agent::evaluate_site_zoning(
+            bim_project,
+            Some(&site),
+            &self.zoning_config,
+        );
+        self.last_zoning_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1482,6 +1504,7 @@ impl UniversalCanvasState {
             reliability_studio_config: self.reliability_studio_config.clone(),
             foundation_studio_config: self.foundation_studio_config.clone(),
             construction_lca_config: self.construction_lca_config.clone(),
+            zoning_config: self.zoning_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1622,6 +1645,8 @@ impl UniversalCanvasState {
         self.last_foundation_report = None;
         self.construction_lca_config = archive.construction_lca_config;
         self.last_construction_lca_report = None;
+        self.zoning_config = archive.zoning_config;
+        self.last_zoning_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2311,6 +2336,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let zoning_envelope_gpu_input = if self.zoning_overlay_visible {
+                self.last_zoning_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::ZoningEnvelopeGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -2352,6 +2388,7 @@ impl UniversalCanvasState {
                 reliability_gpu_input,
                 foundation_gpu_input,
                 construction_lca_gpu_input,
+                zoning_envelope_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2442,6 +2479,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.construction_lca_overlay_visible {
                 self.paint_cpu_construction_lca_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.zoning_overlay_visible {
+                self.paint_cpu_zoning_envelope_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

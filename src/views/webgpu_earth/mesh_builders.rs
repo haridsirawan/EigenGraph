@@ -3834,3 +3834,143 @@ pub fn build_rtc_construction_lca_mesh(input: &ConstructionLcaGpuInput<'_>) -> G
     }
 }
 
+/// GPU input payload for Update `v0.8.5.6` Site Zoning & 3D Buildable Envelope + Sun Path (`material_kind = 23.0`).
+pub struct ZoningEnvelopeGpuInput<'a> {
+    pub report: &'a crate::core::zoning_agent::SiteZoningReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU Site Zoning Buildable Envelope prisms, wireframe setback cages,
+/// and analytical diurnal Sun Path arc + active solar beacon (`material_kind = 23.0`, 0% raster).
+pub fn build_rtc_zoning_envelope_mesh(input: &ZoningEnvelopeGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+    let rot_3 = |p: [f64; 3]| -> [f64; 3] {
+        let xy = rot_xy(p[0], p[1]);
+        [xy[0], xy[1], p[2]]
+    };
+
+    let rep = input.report;
+    let mut verts = Vec::with_capacity(rep.envelope_prisms_3d.len() * 64 + 128);
+    let mut idxs = Vec::with_capacity(rep.envelope_prisms_3d.len() * 96 + 192);
+
+    for p in &rep.envelope_prisms_3d {
+        let (fill_col, edge_col) = match p.tier_kind {
+            0 => (
+                [0.24_f32, 0.42, 0.56, 0.34],
+                [0.36_f32, 0.78, 0.96, 0.88],
+            ),
+            1 => (
+                [0.14_f32, 0.72, 0.88, 0.24],
+                [0.26_f32, 0.88, 1.00, 0.92],
+            ),
+            2 => (
+                [0.16_f32, 0.84, 0.64, 0.20],
+                [0.22_f32, 0.95, 0.72, 0.94],
+            ),
+            _ => (
+                [0.94_f32, 0.24, 0.24, 0.26],
+                [1.00_f32, 0.36, 0.32, 0.96],
+            ),
+        };
+        let fp = [
+            rot_xy(p.min_enu_m[0], p.min_enu_m[1]),
+            rot_xy(p.max_enu_m[0], p.min_enu_m[1]),
+            rot_xy(p.max_enu_m[0], p.max_enu_m[1]),
+            rot_xy(p.min_enu_m[0], p.max_enu_m[1]),
+        ];
+        let z0 = p.min_enu_m[2] as f32;
+        let z1 = p.max_enu_m[2] as f32;
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z1, fill_col, 23.0);
+
+        let corners_bot = [
+            [fp[0][0], fp[0][1], p.min_enu_m[2]],
+            [fp[1][0], fp[1][1], p.min_enu_m[2]],
+            [fp[2][0], fp[2][1], p.min_enu_m[2]],
+            [fp[3][0], fp[3][1], p.min_enu_m[2]],
+        ];
+        let corners_top = [
+            [fp[0][0], fp[0][1], p.max_enu_m[2]],
+            [fp[1][0], fp[1][1], p.max_enu_m[2]],
+            [fp[2][0], fp[2][1], p.max_enu_m[2]],
+            [fp[3][0], fp[3][1], p.max_enu_m[2]],
+        ];
+        let edge_r = if p.tier_kind == 0 { 0.16 } else { 0.22 };
+        for i in 0..4 {
+            let next = (i + 1) % 4;
+            push_animated_flow_strut_enu(
+                &mut verts,
+                &mut idxs,
+                corners_top[i],
+                corners_top[next],
+                edge_r,
+                edge_r,
+                edge_col,
+                0.75,
+                23.0,
+            );
+            if p.tier_kind > 0 {
+                push_animated_flow_strut_enu(
+                    &mut verts,
+                    &mut idxs,
+                    corners_bot[i],
+                    corners_top[i],
+                    edge_r,
+                    edge_r,
+                    edge_col,
+                    0.65,
+                    23.0,
+                );
+            }
+        }
+    }
+
+    if rep.config.show_sun_path && rep.sun_path_arc_3d.len() >= 2 {
+        let arc_col = [1.0_f32, 0.80, 0.24, 0.90];
+        for win in rep.sun_path_arc_3d.windows(2) {
+            push_animated_flow_strut_enu(
+                &mut verts,
+                &mut idxs,
+                rot_3(win[0].enu_pos_m),
+                rot_3(win[1].enu_pos_m),
+                0.35,
+                0.35,
+                arc_col,
+                0.85,
+                23.0,
+            );
+        }
+        let sun_p = rot_3(rep.active_sun_pos_3d);
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [sun_p[0] as f32, sun_p[1] as f32, sun_p[2] as f32],
+            2.1,
+            [1.0_f32, 0.88, 0.28, 0.98],
+            0.95,
+            23.0,
+        );
+        push_animated_flow_strut_enu(
+            &mut verts,
+            &mut idxs,
+            sun_p,
+            [0.0, 0.0, 0.5],
+            0.18,
+            0.18,
+            [1.0_f32, 0.84, 0.36, 0.42],
+            0.60,
+            23.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

@@ -4228,4 +4228,102 @@ impl UniversalCanvasState {
             }
         }
     }
+
+    /// Update `v0.8.5.6` (`6/10` -> `v0.8.6`): Pure-vector CPU fallback rendering 3D Zoning Buildable Envelope & Sun Path.
+    pub(super) fn paint_cpu_zoning_envelope_fallback(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.zoning_overlay_visible || self.world_map.zoom_level < 12.0 {
+            return;
+        }
+        let Some(ref report) = self.last_zoning_report else {
+            return;
+        };
+        let clip = painter.with_clip_rect(rect);
+        let origin = if self.ground_origin_anchored {
+            self.ground_origin_lat_lon
+        } else {
+            self.world_map.center_lat_lon
+        };
+        let heading_deg = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj_enu = |p: [f64; 3]| -> Option<Pos2> {
+            let ex = p[0] * cr - p[1] * sr;
+            let ny = p[0] * sr + p[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                origin,
+                [ex * 1000.0, ny * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, p[2])
+                .and_then(|(sp, _, vis)| if vis { Some(sp) } else { None })
+        };
+
+        for p in &report.envelope_prisms_3d {
+            let col = match p.tier_kind {
+                0 => Color32::from_rgb(91, 180, 216),
+                1 => Color32::from_rgb(56, 189, 248),
+                2 => Color32::from_rgb(16, 185, 129),
+                _ => Color32::from_rgb(239, 68, 68),
+            };
+            let bot: Vec<Pos2> = [
+                [p.min_enu_m[0], p.min_enu_m[1], p.min_enu_m[2]],
+                [p.max_enu_m[0], p.min_enu_m[1], p.min_enu_m[2]],
+                [p.max_enu_m[0], p.max_enu_m[1], p.min_enu_m[2]],
+                [p.min_enu_m[0], p.max_enu_m[1], p.min_enu_m[2]],
+            ]
+            .into_iter()
+            .filter_map(proj_enu)
+            .collect();
+            let top: Vec<Pos2> = [
+                [p.min_enu_m[0], p.min_enu_m[1], p.max_enu_m[2]],
+                [p.max_enu_m[0], p.min_enu_m[1], p.max_enu_m[2]],
+                [p.max_enu_m[0], p.max_enu_m[1], p.max_enu_m[2]],
+                [p.min_enu_m[0], p.max_enu_m[1], p.max_enu_m[2]],
+            ]
+            .into_iter()
+            .filter_map(proj_enu)
+            .collect();
+            if bot.len() == 4 {
+                clip.add(egui::Shape::closed_line(bot.clone(), Stroke::new(1.5, col)));
+            }
+            if top.len() == 4 {
+                clip.add(egui::Shape::closed_line(top.clone(), Stroke::new(2.0, col)));
+            }
+            if bot.len() == 4 && top.len() == 4 && p.tier_kind > 0 {
+                for i in 0..4 {
+                    clip.line_segment([bot[i], top[i]], Stroke::new(1.4, col));
+                }
+            }
+        }
+
+        if report.config.show_sun_path {
+            let sun_pts: Vec<Pos2> = report
+                .sun_path_arc_3d
+                .iter()
+                .filter_map(|sp| proj_enu(sp.enu_pos_m))
+                .collect();
+            for win in sun_pts.windows(2) {
+                clip.line_segment([win[0], win[1]], Stroke::new(2.0, Color32::from_rgb(250, 204, 21)));
+            }
+            if let Some(sun_sp) = proj_enu(report.active_sun_pos_3d) {
+                clip.circle_filled(sun_sp, 6.0, Color32::from_rgb(250, 204, 21));
+                if let Some(org_sp) = proj_enu([0.0, 0.0, 0.5]) {
+                    clip.line_segment(
+                        [sun_sp, org_sp],
+                        Stroke::new(1.4, Color32::from_rgba_unmultiplied(250, 204, 21, 130)),
+                    );
+                }
+            }
+        }
+    }
 }
