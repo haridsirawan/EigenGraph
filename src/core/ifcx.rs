@@ -79,6 +79,7 @@ pub mod ns {
     pub const EG_ZONING_ENVELOPE: &str = "eigengraph::design::zoning_envelope";
     pub const EG_SPATIAL_PROGRAM: &str = "eigengraph::design::spatial_program";
     pub const EG_MASSING_STUDY: &str = "eigengraph::design::massing_study";
+    pub const EG_DESIGN_PIPELINE: &str = "eigengraph::design::concept_pipeline";
     pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
@@ -2021,6 +2022,44 @@ impl IfcxStage {
         });
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_massing_study", base_doc.header.id))
+    }
+
+    /// Composes a base `.ifcx` document with a non-destructive 6-Stage AI Building Design Pipeline overlay.
+    pub fn compose_with_design_pipeline_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::design_agent::DesignPipelineIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_design_pipeline", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcBuilding", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Chained AI Building Design Pipeline Overlay",
+                "selectedArchetype": overlay.selected_archetype,
+                "structuralSystem": overlay.structural_system,
+                "gfaM2": overlay.gfa_m2,
+                "stories": overlay.stories,
+                "klbFar": overlay.klb_far,
+                "liveEigengateAri": overlay.live_eigengate_ari,
+                "stagesPassed": overlay.stages_passed,
+                "totalStages": overlay.total_stages,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_DESIGN_PIPELINE.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/design/concept_pipeline".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_design_pipeline", base_doc.header.id))
     }
 
     /// Composes a base `.ifcx` document with the `v0.8.5` Master Engineering Dossier Index (`S-000`).

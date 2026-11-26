@@ -233,6 +233,8 @@ pub struct UniversalCanvasState {
     pub massing_overlay_visible: bool,
     pub massing_config: crate::core::massing_agent::MassingStudyConfig,
     pub last_massing_report: Option<crate::core::massing_agent::MassingStudyReport>,
+    // Update v0.8.5.9 (9/10 -> v0.8.6): Chained 6-Stage AI Building Design Pipeline
+    pub last_design_pipeline_report: Option<crate::core::design_agent::DesignPipelineReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -414,6 +416,7 @@ impl Default for UniversalCanvasState {
             massing_overlay_visible: false,
             massing_config: crate::core::massing_agent::MassingStudyConfig::default(),
             last_massing_report: None,
+            last_design_pipeline_report: None,
         }
     }
 }
@@ -1215,6 +1218,34 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Executes the chained 6-stage AI Building Design Pipeline from a natural-language brief/RFP.
+    pub fn run_design_pipeline(
+        &mut self,
+        prompt: &str,
+        base_bim: &BimProject,
+    ) -> (
+        crate::core::design_agent::DesignPipelineReport,
+        Option<BimProject>,
+    ) {
+        let site = self.active_site_coupling();
+        let (rep, gen_bim) = crate::core::design_agent::execute_chained_design_pipeline(
+            prompt,
+            base_bim,
+            &site,
+            &self.zoning_config,
+            &self.program_config,
+            &self.massing_config,
+        );
+        self.zoning_config = rep.zoning_config.clone();
+        self.program_config = rep.program_config.clone();
+        self.massing_config = rep.massing_config.clone();
+        self.last_zoning_report = Some(rep.zoning_report.clone());
+        self.last_program_report = Some(rep.program_report.clone());
+        self.last_massing_report = Some(rep.massing_report.clone());
+        self.last_design_pipeline_report = Some(rep.clone());
+        (rep, gen_bim)
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1701,6 +1732,7 @@ impl UniversalCanvasState {
         self.last_program_report = None;
         self.massing_config = archive.massing_config;
         self.last_massing_report = None;
+        self.last_design_pipeline_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {

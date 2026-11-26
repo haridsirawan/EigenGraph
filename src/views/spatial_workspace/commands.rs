@@ -883,6 +883,17 @@ impl SpatialWorkspaceState {
                     self.open_massing_drawer(0);
                     out.export_massing_ifcx = true;
                 }
+                PlannedProposalAction::RunDesignPipeline { prompt } => {
+                    self.design_agent_brief_draft = prompt.clone();
+                    self.open_design_agent_drawer();
+                    out.run_design_pipeline = Some(prompt.clone());
+                }
+                PlannedProposalAction::ExportFeasibilityS115 => {
+                    out.export_feasibility_s115 = true;
+                }
+                PlannedProposalAction::ExportDesignIfcx => {
+                    out.export_design_ifcx = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -1338,6 +1349,17 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportMassingIfcx => {
                                 PlannedProposalAction::ExportMassingIfcx
                             }
+                            GeminiDirective::RunDesignPipeline { prompt } => {
+                                PlannedProposalAction::RunDesignPipeline {
+                                    prompt: prompt.clone(),
+                                }
+                            }
+                            GeminiDirective::ExportFeasibilityS115 => {
+                                PlannedProposalAction::ExportFeasibilityS115
+                            }
+                            GeminiDirective::ExportDesignIfcx => {
+                                PlannedProposalAction::ExportDesignIfcx
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1564,6 +1586,13 @@ impl SpatialWorkspaceState {
                             }
                             GeminiDirective::ToggleMassing3d => "ToggleMassing3d".to_string(),
                             GeminiDirective::ExportMassingIfcx => "ExportMassingIfcx".to_string(),
+                            GeminiDirective::RunDesignPipeline { prompt } => {
+                                format!("RunDesignPipeline({prompt})")
+                            }
+                            GeminiDirective::ExportFeasibilityS115 => {
+                                "ExportFeasibilityAnnex(S-115)".to_string()
+                            }
+                            GeminiDirective::ExportDesignIfcx => "ExportDesignIfcx".to_string(),
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -3727,6 +3756,25 @@ impl SpatialWorkspaceState {
                 "/massing-ifcx" => {
                     actions.export_massing_ifcx = true;
                 }
+                "/design" | "/rfp" | "/brief" | "/feasibility" => {
+                    let brief = rest.trim();
+                    self.open_design_agent_drawer();
+                    if !brief.is_empty() {
+                        self.design_agent_brief_draft = brief.to_string();
+                        actions.run_design_pipeline = Some(brief.to_string());
+                    } else {
+                        self.push_trace(
+                            "AI Design Agent ready — enter RFP brief or click Run 6-Stage Pipeline",
+                            true,
+                        );
+                    }
+                }
+                "/sheet-s115" => {
+                    actions.export_feasibility_s115 = true;
+                }
+                "/design-ifcx" => {
+                    actions.export_design_ifcx = true;
+                }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {
                         actions.sync_fem_and_earth = true;
@@ -4040,6 +4088,37 @@ impl SpatialWorkspaceState {
             }
         }
 
+        // 3b. Chained 6-Stage Concept-to-Engineered-BIM Brief Interception
+        if crate::core::looks_like_building_design_brief(trimmed) {
+            let brief_str = trimmed.to_string();
+            if self.agent_mode == AgentExecutionMode::Planning {
+                self.queue_planning_proposal(
+                    "Chained 6-Stage AI Building Design Pipeline",
+                    "Planning Mode detected architectural/structural building brief. Click Apply Changes to execute Zoning -> Spatial Program -> Massing Explorer -> 1-Click Mass-to-BIM -> Live EigenGate Audit.",
+                    format!("Brief: {brief_str}"),
+                    vec![PlannedProposalAction::RunDesignPipeline {
+                        prompt: brief_str.clone(),
+                    }],
+                );
+                ai_assistant.chat_history.push(crate::models::ChatMessage {
+                    is_user: true,
+                    message: trimmed.to_string(),
+                    time: crate::core::web_bridge::unix_timestamp_label(),
+                });
+                ai_assistant.chat_history.push(crate::models::ChatMessage {
+                    is_user: false,
+                    message: "[Planning Mode]: Prepared 6-stage Concept-to-BIM design proposal below. Click Apply Changes to execute or Reject to cancel.".to_string(),
+                    time: crate::core::web_bridge::unix_timestamp_label(),
+                });
+                self.sessions_dirty = true;
+                return actions;
+            }
+            self.design_agent_brief_draft = brief_str.clone();
+            self.open_design_agent_drawer();
+            actions.run_design_pipeline = Some(brief_str);
+            return actions;
+        }
+
         // Collect Antigravity attached context chips + optional selected element context
         let (mut chip_labels, mut step_traces, ctx_markdown) =
             self.build_enriched_context_payload(&build_view.bim_bus.project, members, universal_canvas);
@@ -4105,7 +4184,7 @@ impl SpatialWorkspaceState {
                  Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s. \
                  Active BIM elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}. \
                  To propose workspace actions, you may append bracket directives: \
-                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[ADD_STORY]], [[ADD_SLAB]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[EIGENGATE_AUDIT]], [[BATCH_PIN_CITY:keyword,city]], [[PIN_ACTIVE:lat,lon,heading]], [[AUDIT_NEIGHBORHOOD]], [[TOGGLE_TOPO]], [[TOGGLE_VECTOR]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
+                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[ADD_STORY]], [[ADD_SLAB]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[EIGENGATE_AUDIT]], [[RUN_DESIGN_PIPELINE:brief]], [[EXPORT_FEASIBILITY_S115]], [[EXPORT_DESIGN_IFCX]], [[BATCH_PIN_CITY:keyword,city]], [[PIN_ACTIVE:lat,lon,heading]], [[AUDIT_NEIGHBORHOOD]], [[TOGGLE_TOPO]], [[TOGGLE_VECTOR]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
                 site.elevation_m,
                 site.seismic_pga_ss_g,
                 site.design_wind_ms,

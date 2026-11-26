@@ -4944,6 +4944,423 @@ pub fn build_construction_lca_annex_svg(
     }
 }
 
+/// Pure-Vector Archival A3 Sheet `S-115` — Zoning Envelope, Spatial Program & Feasibility Brief SVG (`0` raster tags).
+pub fn build_feasibility_brief_annex_svg(
+    project_name: &str,
+    zoning: &crate::core::zoning_agent::SiteZoningReport,
+    program: &crate::core::program_agent::SpatialProgramReport,
+    massing: &crate::core::massing_agent::MassingStudyReport,
+    pipeline: Option<&crate::core::design_agent::DesignPipelineReport>,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(32_000);
+    let seal_token = "__EIGENGRAPH_FEASIBILITY_S115_SHA256__";
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH ZONING, SPATIAL PROGRAM &amp; CONCEPT FEASIBILITY BRIEF (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • CONCEPT-TO-BIM FEASIBILITY • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: Site Zoning Envelope, Setbacks & Solar Compliance (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. SITE ZONING ENVELOPE, SETBACKS &amp; SOLAR COMPLIANCE (KDB / KLB / GSB)",
+        &format!(
+            "{} • Lot {:.1}x{:.1}m ({:.0} m2) • Sun Alt {:.1} deg / Az {:.1} deg",
+            escape_xml(&truncate_clean(zoning.config.preset.label(), 28)),
+            zoning.config.lot_width_m,
+            zoning.config.lot_depth_m,
+            zoning.lot_area_m2,
+            zoning.active_sun_altitude_deg,
+            zoning.active_sun_azimuth_deg,
+        ),
+    );
+    // Pure-vector parcel & buildable pad schematic
+    let (plan_x, plan_y, plan_w, plan_h) = (p1x + 22.0, p1y + 44.0, 290.0, 178.0);
+    let lot_w = zoning.config.lot_width_m.max(10.0);
+    let lot_d = zoning.config.lot_depth_m.max(10.0);
+    let scale = ((plan_w - 28.0) / lot_w).min((plan_h - 24.0) / lot_d);
+    let lw_px = lot_w * scale;
+    let ld_px = lot_d * scale;
+    let lx0 = plan_x + (plan_w - lw_px) * 0.5;
+    let ly0 = plan_y + (plan_h - ld_px) * 0.5;
+    let pw_px = zoning.buildable_pad_width_m * scale;
+    let pd_px = zoning.buildable_pad_depth_m * scale;
+    let px0 = lx0 + zoning.config.setback_side_m * scale;
+    let py0 = ly0 + zoning.config.setback_rear_m * scale;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{plan_x:.1}" y="{plan_y:.1}" width="{plan_w:.1}" height="{plan_h:.1}" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>
+<rect x="{lx0:.1}" y="{ly0:.1}" width="{lw_px:.1}" height="{ld_px:.1}" fill="#ecfeff" stroke="#0284c7" stroke-width="1.8" stroke-dasharray="6,3"/>
+<rect x="{px0:.1}" y="{py0:.1}" width="{pw_px:.1}" height="{pd_px:.1}" fill="rgba(16,185,129,0.18)" stroke="#059669" stroke-width="2.0"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" text-anchor="middle" fill="#065f46">Buildable Pad {:.1}x{:.1}m</text>"##,
+        px0 + pw_px * 0.5,
+        py0 + pd_px * 0.5 + 3.0,
+        zoning.buildable_pad_width_m,
+        zoning.buildable_pad_depth_m,
+    );
+    // Solar & envelope KPI summary card right of parcel plan
+    let kpi_x = plan_x + plan_w + 14.0;
+    let kpi_w = p1w - plan_w - 50.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{kpi_x:.1}" y="{plan_y:.1}" width="{kpi_w:.1}" height="{plan_h:.1}" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.6" font-weight="bold" fill="#0f172a">ZONING &amp; SOLAR ENVELOPE PARAMETERS</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#334155">Max KDB (BCR)  : {:.1}% ({:.0} m2) | Actual {:.1}%</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#334155">Max KLB (FAR)  : {:.2} ({:.0} m2 GFA) | Actual {:.2}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#334155">Min KDH Green  : {:.1}% ({:.0} m2) | Actual {:.1}%</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#334155">Height Cap     : {:.1} m (Max {} Floors @ {:.2}m)</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#0369a1">Solar Exposure : {:.1}% • Shadow Factor {:.2}x</text>"##,
+        kpi_x + 12.0,
+        plan_y + 22.0,
+        kpi_x + 12.0,
+        plan_y + 48.0,
+        zoning.config.kdb_bcr_pct,
+        zoning.max_footprint_kdb_m2,
+        zoning.actual_kdb_pct,
+        kpi_x + 12.0,
+        plan_y + 72.0,
+        zoning.config.klb_far,
+        zoning.max_gfa_klb_m2,
+        zoning.actual_klb_far,
+        kpi_x + 12.0,
+        plan_y + 96.0,
+        zoning.config.kdh_green_pct,
+        zoning.required_green_kdh_m2,
+        zoning.actual_kdh_pct,
+        kpi_x + 12.0,
+        plan_y + 120.0,
+        zoning.config.max_height_m,
+        zoning.max_allowable_stories,
+        zoning.config.typical_story_height_m,
+        kpi_x + 12.0,
+        plan_y + 144.0,
+        zoning.solar_exposure_score_pct,
+        zoning.shadow_length_factor,
+    );
+    // 5-Clause Regulatory Compliance Table
+    for (idx, item) in zoning.compliance_checks.iter().take(5).enumerate() {
+        let ry = p1y + 236.0 + (idx as f64) * 53.0;
+        let col = if item.compliant { "#059669" } else { "#dc2626" };
+        let st = if item.compliant { "PASS" } else { "FAIL" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="44" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-weight="bold" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">Actual {:.1} {} vs Limit {:.1} {} — {}</text>
+<rect x="{:.1}" y="{:.1}" width="62" height="22" rx="4" fill="{col}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p1x + 22.0,
+            p1w - 44.0,
+            p1x + 32.0,
+            ry + 18.0,
+            escape_xml(&truncate_clean(&item.code, 42)),
+            p1x + 32.0,
+            ry + 35.0,
+            item.actual_val,
+            escape_xml(&item.unit),
+            item.limit_val,
+            escape_xml(&item.unit),
+            escape_xml(&truncate_clean(&item.detail, 46)),
+            p1x + p1w - 94.0,
+            ry + 11.0,
+            p1x + p1w - 63.0,
+            ry + 25.0,
+        );
+    }
+
+    // Panel 2: Spatial Program Schedule, Stacking & Adjacency Audit (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. SPATIAL PROGRAM SCHEDULE, STACKING &amp; ADJACENCY AUDIT",
+        &format!(
+            "{} • NFA {:.0} m2 | GFA {:.0} m2 | Eff {:.1}% | Adj {:.0}%",
+            escape_xml(&truncate_clean(program.config.typology.label(), 28)),
+            program.total_nfa_m2,
+            program.total_gfa_m2,
+            program.overall_efficiency_pct,
+            program.adjacency_score_pct,
+        ),
+    );
+    let max_sp_area = program
+        .config
+        .spaces
+        .iter()
+        .map(|s| s.total_area_m2())
+        .fold(1.0_f64, f64::max);
+    for (idx, sp) in program.config.spaces.iter().take(6).enumerate() {
+        let ry = p2y + 44.0 + (idx as f64) * 38.0;
+        let area = sp.total_area_m2();
+        let bar_w = ((area / max_sp_area) * 260.0).max(16.0);
+        let hex = rgba_to_svg_hex(sp.department.color_rgba());
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="31" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" fill="#0f172a">{} ({}u x {:.0}m2)</text>
+<rect x="{:.1}" y="{:.1}" width="{bar_w:.1}" height="14" rx="3" fill="{hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" text-anchor="end" fill="#334155">{:.0} m2 ({})</text>"##,
+            p2x + 18.0,
+            p2w - 36.0,
+            p2x + 26.0,
+            ry + 19.0,
+            escape_xml(&truncate_clean(&sp.name, 26)),
+            sp.unit_count,
+            sp.area_per_unit_m2,
+            p2x + 320.0,
+            ry + 8.5,
+            p2x + p2w - 28.0,
+            ry + 19.0,
+            area,
+            escape_xml(sp.department.short_label()),
+        );
+    }
+    for (idx, ap) in program.adjacency_pairs.iter().take(5).enumerate() {
+        let ry = p2y + 286.0 + (idx as f64) * 44.0;
+        let col = if ap.satisfied { "#059669" } else { "#d97706" };
+        let st = if ap.satisfied { "PASS" } else { "WARN" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="37" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-weight="bold" fill="#0f172a">{} &lt;-&gt; {} (dL={})</text>
+<text x="{:.1}" y="{:.1}" font-size="8.0" font-family="monospace" fill="#475569">{}</text>
+<rect x="{:.1}" y="{:.1}" width="58" height="20" rx="4" fill="{col}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-weight="bold" text-anchor="middle" fill="#ffffff">{st}</text>"##,
+            p2x + 18.0,
+            p2w - 36.0,
+            p2x + 26.0,
+            ry + 15.0,
+            escape_xml(&ap.from_dept),
+            escape_xml(&ap.to_dept),
+            ap.story_delta,
+            p2x + 26.0,
+            ry + 30.0,
+            escape_xml(&truncate_clean(&ap.rationale, 66)),
+            p2x + p2w - 86.0,
+            ry + 8.5,
+            p2x + p2w - 57.0,
+            ry + 22.0,
+        );
+    }
+
+    // Panel 3: Multi-Option Massing Comparison & Cost/Carbon Trade-Off (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. MULTI-OPTION MASSING EXPLORER &amp; COST / CARBON TRADE-OFF",
+        &format!(
+            "{} • Bay {:.1}x{:.1}m • Core {:.0}mm",
+            escape_xml(massing.config.structural_system.short_label()),
+            massing.config.bay_x_m,
+            massing.config.bay_y_m,
+            massing.config.core_wall_thick_mm,
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="8.4" font-weight="bold" font-family="monospace" fill="#475569">OPTION         STORIES  GFA(m2)  KLB   REDUND.  DCR%   COST($M / RpB)    CO2(t)   SCORE</text>"##,
+        p3x + 24.0,
+        p3y + 52.0,
+    );
+    for (idx, opt) in massing.options.iter().enumerate() {
+        let ry = p3y + 64.0 + (idx as f64) * 64.0;
+        let is_sel = idx == massing.selected_index;
+        let is_rec = idx == massing.recommended_index;
+        let border = if is_sel { "#0284c7" } else { "#cbd5e1" };
+        let bg = if is_sel { "#eff6ff" } else { "#ffffff" };
+        let hex = rgba_to_svg_hex(opt.archetype.accent_rgba());
+        let bar_w = ((opt.composite_score / 100.0) * (p3w - 210.0)).max(24.0);
+        let tag = if is_rec { "REC" } else if opt.zoning_compliant { "OK" } else { "LIM" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="54" rx="4" fill="{bg}" stroke="{border}" stroke-width="1.3"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" font-family="monospace" fill="#0f172a">{:<13} {:>3}F/{:<4.0}m {:>6.0}  {:.2}   {:.2}    {:>3.0}%  ${:>4.1}M / Rp{:>5.1}B {:>6.0}t  [{tag}]</text>
+<rect x="{:.1}" y="{:.1}" width="{bar_w:.1}" height="10" rx="3" fill="{hex}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-weight="bold" font-family="monospace" text-anchor="end" fill="#0369a1">{:.0} / 100</text>"##,
+            p3x + 16.0,
+            p3w - 32.0,
+            p3x + 24.0,
+            ry + 21.0,
+            escape_xml(opt.archetype.short_label()),
+            opt.stories,
+            opt.total_height_m,
+            opt.gfa_m2,
+            opt.klb_far,
+            opt.estimated_eigengate_ari,
+            opt.estimated_max_dcr_pct,
+            opt.estimated_cost_usd / 1_000_000.0,
+            opt.estimated_cost_idr_billion,
+            opt.embodied_carbon_tco2e,
+            p3x + 24.0,
+            ry + 33.0,
+            p3x + p3w - 28.0,
+            ry + 42.0,
+            opt.composite_score,
+        );
+    }
+    if let Some(active_opt) = massing.active_option() {
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="68" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-weight="bold" fill="#0f172a">ACTIVE MASSING ENGINEERING RATIONALE</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#334155">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#0369a1">{}</text>"##,
+            p3x + 16.0,
+            p3y + 332.0,
+            p3w - 32.0,
+            p3x + 26.0,
+            p3y + 354.0,
+            p3x + 26.0,
+            p3y + 374.0,
+            escape_xml(&truncate_clean(&active_opt.rationale, 84)),
+            p3x + 26.0,
+            p3y + 391.0,
+            escape_xml(&truncate_clean(&massing.summary_verdict, 84)),
+        );
+    }
+
+    // Panel 4: Chained 6-Stage AI Design Pipeline Audit & Governance Seal (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. CHAINED AI DESIGN PIPELINE &amp; EIGENGATE GOVERNANCE SEAL",
+        &escape_xml(
+            &pipeline
+                .map(|p| {
+                    format!(
+                        "{}/{} Stages • FEM {}N/{}E • Crit {}",
+                        p.steps.iter().filter(|s| s.status_ok).count(),
+                        p.steps.len(),
+                        p.live_fem_nodes,
+                        p.live_fem_elements,
+                        p.live_critical_members,
+                    )
+                })
+                .unwrap_or_else(|| "Manual Zoning + Program + Massing Snapshot".to_string()),
+        ),
+    );
+    let fallback_steps = [
+        ("Stage 1: Brief & Constraints", true, "Workspace site & parametric brief synced".to_string()),
+        ("Stage 2: Site Zoning Envelope", zoning.overall_compliant, truncate_clean(&zoning.summary_verdict, 64)),
+        ("Stage 3: Spatial Stack & Pack", program.fits_zoning_envelope, truncate_clean(&program.summary_verdict, 64)),
+        ("Stage 4: Multi-Option Massing", true, truncate_clean(&massing.summary_verdict, 64)),
+        ("Stage 5: Mass-to-Engineered-BIM", false, "Ready for 1-click Mass-to-BIM synthesis".to_string()),
+        ("Stage 6: EigenGate 6-DOF Audit", true, "Waiting for live BIM conversion audit".to_string()),
+    ];
+    for idx in 0..6 {
+        let ry = p4y + 44.0 + (idx as f64) * 52.0;
+        let (title, ok, summary) = if let Some(p) = pipeline.and_then(|rep| rep.steps.get(idx)) {
+            (
+                format!("Stage {}: {}", p.stage_index, p.stage_name),
+                p.status_ok,
+                p.metric_summary.clone(),
+            )
+        } else {
+            let (t, ok, s) = &fallback_steps[idx];
+            ((*t).to_string(), *ok, s.clone())
+        };
+        let col = if ok { "#059669" } else { "#d97706" };
+        let tag = if ok { "PASS" } else { "INFO" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="44" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-weight="bold" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">{}</text>
+<rect x="{:.1}" y="{:.1}" width="60" height="22" rx="4" fill="{col}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-weight="bold" text-anchor="middle" fill="#ffffff">{tag}</text>"##,
+            p4x + 16.0,
+            p4w - 32.0,
+            p4x + 24.0,
+            ry + 17.0,
+            escape_xml(&title),
+            p4x + 24.0,
+            ry + 35.0,
+            escape_xml(&truncate_clean(&summary, 68)),
+            p4x + p4w - 92.0,
+            ry + 11.0,
+            p4x + p4w - 62.0,
+            ry + 25.0,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="122" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#1e3a8a">CONCEPT-TO-BIM IFCX &amp; SHA-256 GOVERNANCE SEAL</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p4x + 16.0,
+        p4y + 366.0,
+        p4w - 32.0,
+        p4x + 26.0,
+        p4y + 390.0,
+        p4x + 26.0,
+        p4y + 414.0,
+        escape_xml(&truncate_clean(
+            pipeline
+                .map(|p| p.summary_verdict.as_str())
+                .unwrap_or(&massing.summary_verdict),
+            84,
+        )),
+        p4x + 26.0,
+        p4y + 438.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX NAMESPACE: eigengraph::design::concept_pipeline".to_string()),
+        ),
+        p4x + 26.0,
+        p4y + 464.0,
+    );
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_FEASIBILITY_S115");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = zoning.compliance_checks.len()
+        + program.config.spaces.len()
+        + massing.options.len()
+        + pipeline.map_or(0, |p| p.steps.len());
+    let summary = format!(
+        "Exported Concept-to-BIM Feasibility Brief Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 /// Canonical row entry in Sheet `S-000` Master Engineering Dossier Drawing Index (`S-100`–`S-114`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MasterDossierSheetEntry {
@@ -5812,5 +6229,29 @@ mod tests {
         assert!(!s000.svg_content.contains("<image"));
         assert!(!s000.svg_content.contains("ARI"));
         assert_eq!(s000.sha256_seal.len(), 64);
+
+        let site_demo = SiteEnvironmentalCoupling::default();
+        let (pipeline_rep, _) = crate::core::design_agent::execute_chained_design_pipeline(
+            "Design 8-story mixed-use tower on 48x36m lot bay 7.2m",
+            &field_proj,
+            &site_demo,
+            &crate::core::zoning_agent::SiteZoningConfig::default(),
+            &crate::core::program_agent::SpatialProgramConfig::default(),
+            &crate::core::massing_agent::MassingStudyConfig::default(),
+        );
+        let s115 = build_feasibility_brief_annex_svg(
+            &field_proj.project_name,
+            &pipeline_rep.zoning_report,
+            &pipeline_rep.program_report,
+            &pipeline_rep.massing_report,
+            Some(&pipeline_rep),
+            "S-115",
+            Some("brief910seal"),
+        );
+        assert!(s115.svg_content.starts_with("<svg"));
+        assert!(s115.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s115.svg_content.contains("SHEET S-115"));
+        assert!(!s115.svg_content.contains("<image"));
+        assert_eq!(s115.sha256_seal.len(), 64);
     }
 }

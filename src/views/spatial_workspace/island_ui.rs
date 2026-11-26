@@ -3037,6 +3037,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.design_agent_drawer_open {
+                        self.render_design_agent_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,
@@ -4535,6 +4547,18 @@ impl SpatialWorkspaceState {
                                                             actions.run_massing_study = true;
                                                         }
                                                     }
+                                                    if Self::glass_icon_button(
+                                                        ui,
+                                                        theme,
+                                                        AppIcon::Sparkles,
+                                                        self.design_agent_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Chained 6-Stage AI Building Design Agent (Concept -> Engineered BIM)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.toggle_exclusive_drawer("design_agent");
+                                                    }
                                                     ui.separator();
                                                     if Self::glass_icon_button(
                                                         ui,
@@ -5583,6 +5607,30 @@ impl SpatialWorkspaceState {
                                                     {
                                                         self.open_massing_drawer(0);
                                                         actions.run_massing_study = true;
+                                                    }
+                                                    if Self::glass_icon_button(
+                                                        ui,
+                                                        theme,
+                                                        AppIcon::Sparkles,
+                                                        self.design_agent_drawer_open,
+                                                        theme.accent_blue,
+                                                        "Open Chained 6-Stage AI Building Design Agent (+ Sheet S-115)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_design_agent_drawer();
+                                                    }
+                                                    if Self::glass_icon_button(
+                                                        ui,
+                                                        theme,
+                                                        AppIcon::Document,
+                                                        false,
+                                                        theme.accent_green,
+                                                        "Export Archival A3 Sheet S-115 Zoning, Spatial Program & Feasibility Brief (.svg)",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        actions.export_feasibility_s115 = true;
                                                     }
                                                     if Self::glass_icon_button(
                                                         ui,

@@ -176,6 +176,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.5.8 (8/10 -> v0.8.6): Multi-Option Massing Explorer & 1-Click Mass-to-BIM Drawer
     pub massing_drawer_open: bool,
     pub massing_drawer_tab: usize,
+    // Update v0.8.5.9 (9/10 -> v0.8.6): Chained AI Building Design Agent Drawer
+    pub design_agent_drawer_open: bool,
+    pub design_agent_brief_draft: String,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -306,6 +309,8 @@ impl Default for SpatialWorkspaceState {
             program_drawer_tab: 0,
             massing_drawer_open: false,
             massing_drawer_tab: 0,
+            design_agent_drawer_open: false,
+            design_agent_brief_draft: "Design a 10-story mixed-use tower on 54x42m urban lot, KDB 60%, KLB 5.0, 7.2m bay".to_string(),
         }
     }
 }
@@ -348,6 +353,7 @@ impl SpatialWorkspaceState {
             || self.zoning_drawer_open
             || self.program_drawer_open
             || self.massing_drawer_open
+            || self.design_agent_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -384,6 +390,7 @@ impl SpatialWorkspaceState {
         self.zoning_drawer_open = false;
         self.program_drawer_open = false;
         self.massing_drawer_open = false;
+        self.design_agent_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -522,6 +529,11 @@ impl SpatialWorkspaceState {
             self.massing_drawer_open = false;
         } else {
             self.massing_drawer_open = !self.massing_drawer_open;
+        }
+        if drawer != "design_agent" {
+            self.design_agent_drawer_open = false;
+        } else {
+            self.design_agent_drawer_open = !self.design_agent_drawer_open;
         }
     }
 
@@ -667,6 +679,12 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.massing_drawer_tab = tab.min(1);
         self.massing_drawer_open = true;
+    }
+
+    /// Idempotently opens the Update `v0.8.5.9` Chained 6-Stage AI Building Design Agent drawer.
+    pub fn open_design_agent_drawer(&mut self) {
+        self.toggle_exclusive_drawer("__none");
+        self.design_agent_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

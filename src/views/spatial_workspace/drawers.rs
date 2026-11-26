@@ -6269,6 +6269,19 @@ impl SpatialWorkspaceState {
                 {
                     actions.export_massing_ifcx = true;
                 }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "Sheet S-115",
+                    false,
+                    theme.accent_green,
+                    "Export Archival A3 Sheet S-115 Zoning, Spatial Program & Feasibility Brief (.svg)",
+                )
+                .clicked()
+                {
+                    actions.export_feasibility_s115 = true;
+                }
             });
         });
 
@@ -6503,6 +6516,242 @@ impl SpatialWorkspaceState {
                                 format!("{:.0}", opt.composite_score),
                                 egui::FontId::monospace(8.2),
                                 col,
+                            );
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    /// Update `v0.8.5.9` (`9/10` -> `v0.8.6`): Chained 6-Stage AI Building Design Agent & Feasibility Brief Drawer.
+    pub(super) fn render_design_agent_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Sparkles,
+                13.0,
+                theme.accent_blue,
+                "AI Building Design Agent (6-Stage Concept-to-BIM)",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Bolt),
+                "Run 6-Stage Pipeline",
+                true,
+                theme.accent_green,
+                "Execute Brief -> Zoning -> Program -> Massing -> Mass-to-BIM -> Live EigenGate Audit",
+            )
+            .clicked()
+            {
+                actions.run_design_pipeline = Some(self.design_agent_brief_draft.clone());
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Document),
+                "Sheet S-115",
+                false,
+                theme.accent_blue,
+                "Export Archival A3 Sheet S-115 Zoning, Spatial Program & Feasibility Brief (.svg)",
+            )
+            .clicked()
+            {
+                actions.export_feasibility_s115 = true;
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Document),
+                "IFCX",
+                false,
+                theme.accent_orange,
+                "Export non-destructive eigengraph::design::concept_pipeline IFCX (.ifcx)",
+            )
+            .clicked()
+            {
+                actions.export_design_ifcx = true;
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close AI Building Design Agent drawer",
+            )
+            .clicked()
+            {
+                self.design_agent_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    if is_left {
+                        ui.label(
+                            RichText::new("Architectural Brief / RFP Input & Quick Presets")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ui.add_space(2.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
+                            for (lbl, brief_txt) in [
+                                (
+                                    "CBD Mixed 14F",
+                                    "Design 14-story CBD mixed-use podium tower on 60x45m lot, KDB 65%, KLB 7.5, bay 7.8m composite steel",
+                                ),
+                                (
+                                    "Office HQ 10F",
+                                    "Design 10-story corporate office courtyard on 54x42m lot, KDB 60%, KLB 5.0, bay 7.2m",
+                                ),
+                                (
+                                    "Hospital 8F",
+                                    "Design 8-story clinical hospital linear slab on 64x48m lot, KDB 50%, bay 8.4m",
+                                ),
+                                (
+                                    "Campus 6F",
+                                    "Design 6-story university campus stepped terrace on 56x40m lot, KDB 45%, bay 7.2m",
+                                ),
+                            ] {
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    None,
+                                    lbl,
+                                    false,
+                                    theme.accent_blue,
+                                    brief_txt,
+                                )
+                                .clicked()
+                                {
+                                    self.design_agent_brief_draft = brief_txt.to_string();
+                                    actions.run_design_pipeline = Some(self.design_agent_brief_draft.clone());
+                                }
+                            }
+                        });
+                        ui.add_space(4.0);
+                        let resp = ui.add(
+                            egui::TextEdit::multiline(&mut self.design_agent_brief_draft)
+                                .desired_rows(3)
+                                .desired_width(inner_w),
+                        );
+                        if resp.has_focus()
+                            && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter))
+                        {
+                            actions.run_design_pipeline = Some(self.design_agent_brief_draft.clone());
+                        }
+                        ui.add_space(4.0);
+                        ui.horizontal_wrapped(|ui| {
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Compass),
+                                "Zoning Studio",
+                                false,
+                                theme.accent_green,
+                                "Inspect Stage 2 Site Zoning & Sun Path",
+                            )
+                            .clicked()
+                            {
+                                self.open_zoning_drawer(0);
+                            }
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::BoxPackage),
+                                "Program Studio",
+                                false,
+                                theme.accent_green,
+                                "Inspect Stage 3 Spatial Program & 2D Floor-Plate Packing",
+                            )
+                            .clicked()
+                            {
+                                self.open_program_drawer(0);
+                            }
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Building),
+                                "Massing Explorer",
+                                false,
+                                theme.accent_blue,
+                                "Inspect Stage 4 Multi-Option Massing Trade-Off",
+                            )
+                            .clicked()
+                            {
+                                self.open_massing_drawer(0);
+                            }
+                        });
+                    } else {
+                        ui.label(
+                            RichText::new("6-Stage Pipeline Execution Trace & Live Audit")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        if let Some(ref rep) = universal_canvas.last_design_pipeline_report {
+                            for st in &rep.steps {
+                                let col = if st.status_ok {
+                                    theme.accent_green
+                                } else {
+                                    theme.accent_orange
+                                };
+                                let tag = if st.status_ok { "PASS" } else { "WARN" };
+                                ui.label(
+                                    RichText::new(format!(
+                                        "[{tag}] {}. {} — {}",
+                                        st.stage_index, st.stage_name, st.metric_summary
+                                    ))
+                                    .size(8.4)
+                                    .monospace()
+                                    .color(col),
+                                );
+                            }
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(&rep.summary_verdict)
+                                    .size(8.5)
+                                    .monospace()
+                                    .color(if rep.overall_ok {
+                                        theme.accent_green
+                                    } else {
+                                        theme.accent_orange
+                                    }),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new("Click 'Run 6-Stage Pipeline' or pick a quick RFP preset to chain Zoning -> Program -> Massing -> Mass-to-BIM -> Live EigenGate Audit.")
+                                    .size(8.8)
+                                    .color(theme.text_muted),
                             );
                         }
                     }

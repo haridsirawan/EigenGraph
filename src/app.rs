@@ -4424,6 +4424,106 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if let Some(brief_prompt) = hud_actions.run_design_pipeline {
+            let (rep, gen_bim) = self
+                .universal_canvas
+                .run_design_pipeline(&brief_prompt, &self.build_view.bim_bus.project);
+            let mut extra_msg = String::new();
+            if let Some(new_bim) = gen_bim {
+                self.build_view.bim_bus.project = new_bim.clone();
+                self.parametric_view.bim_bus.project = new_bim;
+                self.sync_bim_to_fem();
+                self.universal_canvas.massing_overlay_visible = false;
+                let cp_msg = self.universal_canvas.create_signed_ifcx_checkpoint(
+                    &self.build_view.bim_bus.project,
+                    &self.members,
+                    "AI Design Agent Concept-to-BIM",
+                );
+                let _ = self
+                    .universal_canvas
+                    .refresh_permit_compliance(&self.build_view.bim_bus.project, &self.members);
+                extra_msg = format!(" • {cp_msg}");
+            }
+            self.ai_assistant_view.chat_history.push(crate::models::ChatMessage {
+                is_user: false,
+                message: format!("[AI Building Design Agent]: {}{extra_msg}", rep.summary_verdict),
+                time: crate::core::web_bridge::unix_timestamp_label(),
+            });
+            self.spatial_workspace
+                .push_trace(format!("{}{extra_msg}", rep.summary_verdict), rep.overall_ok);
+        }
+        if hud_actions.export_feasibility_s115 {
+            let zoning = self
+                .universal_canvas
+                .run_zoning_agent(&self.build_view.bim_bus.project);
+            let program = self
+                .universal_canvas
+                .run_spatial_program(&self.build_view.bim_bus.project);
+            let massing = self
+                .universal_canvas
+                .run_massing_study(&self.build_view.bim_bus.project);
+            let cp_hash = self
+                .universal_canvas
+                .collab_state
+                .active_checkpoint()
+                .map(|c| c.short_sha256());
+            let annex = crate::core::build_feasibility_brief_annex_svg(
+                &self.build_view.bim_bus.project.project_name,
+                &zoning,
+                &program,
+                &massing,
+                self.universal_canvas.last_design_pipeline_report.as_ref(),
+                "S-115",
+                cp_hash.as_deref(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_sheet_S115_feasibility_brief.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &annex.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(annex.sha256_seal);
+                    self.spatial_workspace.push_trace(annex.summary, true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.export_design_ifcx {
+            let rep = if let Some(ref existing) = self.universal_canvas.last_design_pipeline_report
+            {
+                existing.clone()
+            } else {
+                let brief = self.spatial_workspace.design_agent_brief_draft.clone();
+                let (rep, _) = self
+                    .universal_canvas
+                    .run_design_pipeline(&brief, &self.build_view.bim_bus.project);
+                rep
+            };
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_design_pipeline_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_design_pipeline.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported Concept-to-BIM Pipeline IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {

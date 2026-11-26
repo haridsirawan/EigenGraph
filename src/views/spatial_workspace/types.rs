@@ -558,6 +558,12 @@ pub enum PlannedProposalAction {
     },
     ToggleMassing3d,
     ExportMassingIfcx,
+    // Update v0.8.5.9 (9/10 -> v0.8.6): Chained 6-Stage AI Building Design Agent + Sheet S-115
+    RunDesignPipeline {
+        prompt: String,
+    },
+    ExportFeasibilityS115,
+    ExportDesignIfcx,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -758,6 +764,12 @@ pub enum GeminiDirective {
     },
     ToggleMassing3d,
     ExportMassingIfcx,
+    // Update v0.8.5.9 (9/10 -> v0.8.6): Chained 6-Stage AI Building Design Agent + Sheet S-115
+    RunDesignPipeline {
+        prompt: String,
+    },
+    ExportFeasibilityS115,
+    ExportDesignIfcx,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1450,6 +1462,18 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleMassing3d);
             } else if upper == "EXPORT_MASSING_IFCX" {
                 directives.push(GeminiDirective::ExportMassingIfcx);
+            } else if let Some(rest) = upper.strip_prefix("RUN_DESIGN_PIPELINE:") {
+                let raw_tail = tag[20..].trim();
+                let brief = if raw_tail.is_empty() {
+                    rest.trim().to_string()
+                } else {
+                    raw_tail.to_string()
+                };
+                directives.push(GeminiDirective::RunDesignPipeline { prompt: brief });
+            } else if upper == "EXPORT_FEASIBILITY_S115" {
+                directives.push(GeminiDirective::ExportFeasibilityS115);
+            } else if upper == "EXPORT_DESIGN_IFCX" {
+                directives.push(GeminiDirective::ExportDesignIfcx);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -2794,6 +2818,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Document,
     },
     SlashCommandSpec {
+        cmd: "/design",
+        category: "Design",
+        description: "Run chained 6-stage AI Building Design Agent (/design <RFP or building brief>)",
+        icon: AppIcon::Sparkles,
+    },
+    SlashCommandSpec {
+        cmd: "/rfp",
+        category: "Design",
+        description: "Execute concept-to-engineered-BIM workflow from architectural RFP parameters",
+        icon: AppIcon::Sparkles,
+    },
+    SlashCommandSpec {
+        cmd: "/sheet-s115",
+        category: "Export",
+        description: "Export A3 Pure-Vector Sheet S-115 Zoning, Spatial Program & Feasibility Brief (.svg)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/design-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::design::concept_pipeline IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -2981,6 +3029,10 @@ pub struct SpatialHudActions {
     pub adopt_massing_to_bim: Option<usize>,
     pub toggle_massing_3d: bool,
     pub export_massing_ifcx: bool,
+    // Update v0.8.5.9 (9/10 -> v0.8.6): Chained 6-Stage AI Building Design Agent + Sheet S-115
+    pub run_design_pipeline: Option<String>,
+    pub export_feasibility_s115: bool,
+    pub export_design_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3441,5 +3493,10 @@ impl SpatialHudActions {
         }
         self.toggle_massing_3d |= other.toggle_massing_3d;
         self.export_massing_ifcx |= other.export_massing_ifcx;
+        if other.run_design_pipeline.is_some() {
+            self.run_design_pipeline = other.run_design_pipeline.clone();
+        }
+        self.export_feasibility_s115 |= other.export_feasibility_s115;
+        self.export_design_ifcx |= other.export_design_ifcx;
     }
 }

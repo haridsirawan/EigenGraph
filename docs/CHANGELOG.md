@@ -7,7 +7,15 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.6 (8/10)]
+## [Unreleased — Next: v0.8.6 (9/10)]
+
+### Update 9/10 (`v0.8.5.9` -> `v0.8.6`) — Chained 6-Stage AI Building Design Agent (`Concept -> Engineered BIM`) & Archival Sheet `S-115`
+- **Chained AI Building Design Pipeline (`src/core/design_agent.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:
+  - Added [`parse_design_brief_prompt`](src/core/design_agent.rs), [`looks_like_building_design_brief`](src/core/design_agent.rs), and [`execute_chained_design_pipeline`](src/core/design_agent.rs) chaining 6 autonomous engineering stages from a natural-language brief or RFP (`Brief Extraction` -> `Site Zoning & Solar` -> `Spatial Program Stack & Pack` -> `Multi-Option Massing Explorer` -> `1-Click Mass-to-Engineered-BIM` -> `EigenGate 6-DOF Redundancy Audit`) plus non-destructive `eigengraph::design::concept_pipeline` IFCX composition (`IfcxStage::compose_with_design_pipeline_overlay`).
+- **Archival A3 Pure-Vector Sheet `S-115` (`src/core/vector_dossier.rs`)**:
+  - Added [`build_feasibility_brief_annex_svg`](src/core/vector_dossier.rs) (`1600 x 1131` A3 landscape pure-vector SVG, `0` `<image>` tags, SHA-256 governance seal) uniting site setback plan & solar compliance, department stack/adjacency bars, 4-option massing cost/carbon comparison, and the 6-stage pipeline & `EigenGate` audit ledger.
+- **Design Agent Drawer, Icon-Only Island Triggers, NLP Interception & App Wiring (`src/views/universal_canvas/mod.rs`, `src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added `render_design_agent_drawer` with quick RFP presets, multiline brief editor, and live 6-stage trace; icon-only `AppIcon::Sparkles` & `AppIcon::Document` triggers inside the minimalist Hover Studio Deck; `/design`, `/rfp`, `/sheet-s115`, `/design-ifcx` commands; natural-language brief interception in both `Planning` and `Fast` modes; and `[[RUN_DESIGN_PIPELINE:...]]` / `[[EXPORT_FEASIBILITY_S115]]` / `[[EXPORT_DESIGN_IFCX]]` Gemini directives.
 
 ### Update 8/10 (`v0.8.5.8` -> `v0.8.6`) — Multi-Option Massing Explorer & 1-Click Mass-to-Engineered-BIM (`eigengraph::design::massing_study`)
 - **Multi-Option Architectural Massing & 1-Click Mass-to-BIM Engine (`src/core/massing_agent.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

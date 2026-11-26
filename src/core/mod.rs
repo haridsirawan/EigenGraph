@@ -52,6 +52,7 @@ pub mod construction_lca_studio;
 pub mod zoning_agent;
 pub mod program_agent;
 pub mod massing_agent;
+pub mod design_agent;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -235,12 +236,12 @@ pub use vector_dossier::{
     build_composite_deck_annex_svg, build_construction_lca_annex_svg,
     build_deep_foundation_annex_svg, build_eigenflow_nonlinear_annex_svg,
     build_extreme_events_annex_svg, build_fabrication_bbs_shop_svg,
-    build_master_dossier_index_svg, build_permit_compliance_annex_svg,
-    build_prestress_tendon_annex_svg, build_pure_vector_engineering_dossier_svg,
-    build_reliability_form_annex_svg, build_seismic_isolation_annex_svg,
-    build_shear_wall_annex_svg, build_steel_connection_annex_svg, build_wind_aero_annex_svg,
-    evaluate_master_dossier_entries, MasterDossierSheetEntry, VectorDossierExport,
-    VectorDossierInput,
+    build_feasibility_brief_annex_svg, build_master_dossier_index_svg,
+    build_permit_compliance_annex_svg, build_prestress_tendon_annex_svg,
+    build_pure_vector_engineering_dossier_svg, build_reliability_form_annex_svg,
+    build_seismic_isolation_annex_svg, build_shear_wall_annex_svg, build_steel_connection_annex_svg,
+    build_wind_aero_annex_svg, evaluate_master_dossier_entries, MasterDossierSheetEntry,
+    VectorDossierExport, VectorDossierInput,
 };
 pub use portfolio_retrofit::{
     optimize_district_portfolio_retrofit, DistrictPortfolioRetrofitReport,
@@ -356,6 +357,11 @@ pub use massing_agent::{
     convert_massing_option_to_bim, evaluate_massing_options, MassToBimSummary, MassingArchetype,
     MassingIfcxOverlay, MassingOptionMetrics, MassingStructuralSystem, MassingStudyConfig,
     MassingStudyReport, MassingVolumeBlock3D, NS_EG_MASSING_STUDY,
+};
+pub use design_agent::{
+    execute_chained_design_pipeline, looks_like_building_design_brief, parse_design_brief_prompt,
+    DesignPipelineIfcxOverlay, DesignPipelineReport, DesignPipelineStepTrace, ParsedDesignBrief,
+    NS_EG_DESIGN_PIPELINE,
 };
 
 
