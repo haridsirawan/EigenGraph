@@ -564,6 +564,15 @@ pub enum PlannedProposalAction {
     },
     ExportFeasibilityS115,
     ExportDesignIfcx,
+    // Update v0.8.6.1 (1/10 -> v0.8.7): 3D Solar Irradiation, Cast Shadow & SNI 6389 OTTV
+    RunSolarEnvelope {
+        glazing: Option<crate::core::solar_envelope::GlazingPerformancePreset>,
+        shading: Option<crate::core::solar_envelope::SolarShadingStrategy>,
+        wwr_pct: Option<f64>,
+        hour_local: Option<f64>,
+    },
+    ToggleSolar3d,
+    ExportSolarIfcx,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -770,6 +779,15 @@ pub enum GeminiDirective {
     },
     ExportFeasibilityS115,
     ExportDesignIfcx,
+    // Update v0.8.6.1 (1/10 -> v0.8.7): 3D Solar Irradiation, Cast Shadow & SNI 6389 OTTV
+    RunSolarEnvelope {
+        glazing: Option<crate::core::solar_envelope::GlazingPerformancePreset>,
+        shading: Option<crate::core::solar_envelope::SolarShadingStrategy>,
+        wwr_pct: Option<f64>,
+        hour_local: Option<f64>,
+    },
+    ToggleSolar3d,
+    ExportSolarIfcx,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1474,6 +1492,49 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ExportFeasibilityS115);
             } else if upper == "EXPORT_DESIGN_IFCX" {
                 directives.push(GeminiDirective::ExportDesignIfcx);
+            } else if let Some(rest) = upper.strip_prefix("RUN_SOLAR_OTTV") {
+                let tail = rest.trim_start_matches(':').trim();
+                let mut glazing = None;
+                let mut shading = None;
+                let mut wwr_pct = None;
+                let mut hour_local = None;
+                for tok in tail.split(|c| c == ',' || c == ';').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                    if tok.contains("CLEAR") {
+                        glazing = Some(crate::core::solar_envelope::GlazingPerformancePreset::ClearSingle);
+                    } else if tok.contains("TINT") {
+                        glazing = Some(crate::core::solar_envelope::GlazingPerformancePreset::TintedDouble);
+                    } else if tok.contains("LOWE") || tok.contains("LOW-E") || tok.contains("LOW_E") {
+                        glazing = Some(crate::core::solar_envelope::GlazingPerformancePreset::LowESpectrallySelective);
+                    } else if tok.contains("TRIPLE") {
+                        glazing = Some(crate::core::solar_envelope::GlazingPerformancePreset::TripleHighPerf);
+                    } else if tok.contains("OVERHANG") {
+                        shading = Some(crate::core::solar_envelope::SolarShadingStrategy::HorizontalOverhang);
+                    } else if tok.contains("FIN") {
+                        shading = Some(crate::core::solar_envelope::SolarShadingStrategy::VerticalFins);
+                    } else if tok.contains("LOUV") || tok.contains("EGG") {
+                        shading = Some(crate::core::solar_envelope::SolarShadingStrategy::EggCrateLouvers);
+                    } else if tok.contains("UNSHADED") || tok == "NONE" {
+                        shading = Some(crate::core::solar_envelope::SolarShadingStrategy::None);
+                    } else if let Some(val) = tok.strip_prefix("WWR") {
+                        if let Ok(v) = val.parse::<f64>() {
+                            wwr_pct = Some(v.clamp(10.0, 90.0));
+                        }
+                    } else if let Some(val) = tok.strip_prefix("HR").or_else(|| tok.strip_prefix("H")) {
+                        if let Ok(v) = val.parse::<f64>() {
+                            hour_local = Some(v.clamp(6.0, 18.0));
+                        }
+                    }
+                }
+                directives.push(GeminiDirective::RunSolarEnvelope {
+                    glazing,
+                    shading,
+                    wwr_pct,
+                    hour_local,
+                });
+            } else if upper == "TOGGLE_SOLAR_3D" {
+                directives.push(GeminiDirective::ToggleSolar3d);
+            } else if upper == "EXPORT_SOLAR_IFCX" {
+                directives.push(GeminiDirective::ExportSolarIfcx);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -2842,6 +2903,36 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Document,
     },
     SlashCommandSpec {
+        cmd: "/solar",
+        category: "Design",
+        description: "Run 3D Solar Irradiation, Cast Shadow & SNI 6389 OTTV Facade Analysis",
+        icon: AppIcon::Sun,
+    },
+    SlashCommandSpec {
+        cmd: "/ottv",
+        category: "Design",
+        description: "Evaluate SNI 6389 / ASHRAE 90.1 facade OTTV & RTTV thermal compliance",
+        icon: AppIcon::Sun,
+    },
+    SlashCommandSpec {
+        cmd: "/shadow",
+        category: "Design",
+        description: "Inspect 3D cast ground shadow polygon and sun altitude/azimuth",
+        icon: AppIcon::Sun,
+    },
+    SlashCommandSpec {
+        cmd: "/solar-3d",
+        category: "Design",
+        description: "Toggle 3D Pure WebGPU solar irradiance & cast shadow overlay",
+        icon: AppIcon::Cube3D,
+    },
+    SlashCommandSpec {
+        cmd: "/solar-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::design::solar_ottv IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -3033,6 +3124,10 @@ pub struct SpatialHudActions {
     pub run_design_pipeline: Option<String>,
     pub export_feasibility_s115: bool,
     pub export_design_ifcx: bool,
+    // Update v0.8.6.1 (1/10 -> v0.8.7): 3D Solar Irradiation, Cast Shadow & SNI 6389 OTTV
+    pub run_solar_envelope: bool,
+    pub toggle_solar_3d: bool,
+    pub export_solar_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3498,5 +3593,8 @@ impl SpatialHudActions {
         }
         self.export_feasibility_s115 |= other.export_feasibility_s115;
         self.export_design_ifcx |= other.export_design_ifcx;
+        self.run_solar_envelope |= other.run_solar_envelope;
+        self.toggle_solar_3d |= other.toggle_solar_3d;
+        self.export_solar_ifcx |= other.export_solar_ifcx;
     }
 }

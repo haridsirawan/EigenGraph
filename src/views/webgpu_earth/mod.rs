@@ -492,6 +492,13 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 25.5) {
+        // Update v0.8.6.1 (1/10 -> v0.8.7): Pure Analytical WGSL 3D Solar Irradiation, Shadow & OTTV Heatmap (0% raster)
+        let heat = clamp(height_m, 0.0, 1.0);
+        let solar_pulse = 0.82 + 0.18 * sin(phase * 1.7 - u_time * (1.8 + heat * 2.2));
+        let ndotv = max(abs(dot(n, v)), 0.16);
+        let rim = pow(1.0 - ndotv, 1.55) * (0.28 + 0.30 * heat);
+        col = f_in.color.rgb * (0.76 + 0.24 * solar_pulse + rim);
     } else if (kind >= 24.5) {
         // Update v0.8.5.8 (8/10 -> v0.8.6): Pure Analytical WGSL Multi-Option Architectural Massing Explorer (0% raster)
         let tier_wave = 0.84 + 0.16 * sin(f_in.world_pos.z * 2.1 - u_time * 1.6);
@@ -801,6 +808,7 @@ pub struct WebGpuEarthResources {
     zoning_envelope: GpuMeshSlot,
     spatial_program: GpuMeshSlot,
     massing_study: GpuMeshSlot,
+    solar_envelope: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
 }
 
@@ -1027,6 +1035,7 @@ impl WebGpuEarthResources {
             zoning_envelope: GpuMeshSlot::default(),
             spatial_program: GpuMeshSlot::default(),
             massing_study: GpuMeshSlot::default(),
+            solar_envelope: GpuMeshSlot::default(),
             hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
@@ -1162,6 +1171,7 @@ impl WebGpuEarthResources {
             || self.zoning_envelope.index_count > 0
             || self.spatial_program.index_count > 0
             || self.massing_study.index_count > 0
+            || self.solar_envelope.index_count > 0
             || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1215,6 +1225,7 @@ impl WebGpuEarthResources {
             self.zoning_envelope.draw(&mut pass);
             self.spatial_program.draw(&mut pass);
             self.massing_study.draw(&mut pass);
+            self.solar_envelope.draw(&mut pass);
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
             self.hazard_compute.draw(&mut pass);
@@ -1254,6 +1265,7 @@ struct WebGpuEarthPaintCallback {
     pending_zoning_envelope: Option<(u64, GpuMeshPayload)>,
     pending_spatial_program: Option<(u64, GpuMeshPayload)>,
     pending_massing_study: Option<(u64, GpuMeshPayload)>,
+    pending_solar_envelope: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
 }
 
@@ -1419,6 +1431,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
                     .upload(device, queue, "massing_study_mesh", ms_in.0, &ms_in.1);
             }
         }
+        if let Some(ref sol_in) = self.pending_solar_envelope {
+            if res.solar_envelope.revision_uploaded != sol_in.0 {
+                res.solar_envelope
+                    .upload(device, queue, "solar_envelope_mesh", sol_in.0, &sol_in.1);
+            }
+        }
         if let Some(ref h_cmp) = self.pending_hazard_compute {
             res.hazard_compute.dispatch(queue, egui_encoder, h_cmp);
         } else {
@@ -1520,6 +1538,7 @@ pub struct WebGpuEarthState {
     cached_zoning_envelope_hash: u64,
     cached_spatial_program_hash: u64,
     cached_massing_study_hash: u64,
+    cached_solar_envelope_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1546,6 +1565,7 @@ pub struct WebGpuEarthState {
     pub last_zoning_envelope_tris: usize,
     pub last_spatial_program_tris: usize,
     pub last_massing_study_tris: usize,
+    pub last_solar_envelope_tris: usize,
     pub last_compute_particles: u32,
     #[cfg(not(target_arch = "wasm32"))]
     wgpu_device: Option<wgpu::Device>,
@@ -1831,6 +1851,7 @@ impl WebGpuEarthState {
         zoning_envelope_input: Option<ZoningEnvelopeGpuInput<'_>>,
         spatial_program_input: Option<SpatialProgramGpuInput<'_>>,
         massing_study_input: Option<MassingStudyGpuInput<'_>>,
+        solar_envelope_input: Option<SolarEnvelopeGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
@@ -2618,6 +2639,41 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_solar_envelope = if render_site_pass {
+            if let Some(ref solar) = solar_envelope_input.as_ref().filter(|s| s.visible) {
+                let c = &solar.report.config;
+                let rev: u64 = ((c.glazing_preset as u64 + 1) << 2)
+                    ^ ((c.shading_strategy as u64 + 1) << 7)
+                    ^ c.wwr_pct.to_bits().rotate_left(11)
+                    ^ c.shgc.to_bits().rotate_left(17)
+                    ^ c.u_wall_w_m2k.to_bits().rotate_left(23)
+                    ^ c.shading_depth_m.to_bits().rotate_left(29)
+                    ^ ((c.inspection_month as u64) << 33)
+                    ^ c.inspection_hour_local.to_bits().rotate_left(39)
+                    ^ u64::from(c.show_shadow_polygon).rotate_left(43)
+                    ^ solar.report.overall_ottv_w_m2.to_bits().rotate_left(47)
+                    ^ solar.report.sun_altitude_deg.to_bits().rotate_left(53)
+                    ^ ((solar.heading_deg.round() as u64) << 57)
+                    ^ u64::from(solar.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                if rev != self.cached_solar_envelope_hash {
+                    let mesh = build_rtc_solar_envelope_mesh(solar);
+                    self.last_solar_envelope_tris = mesh.indices.len() / 3;
+                    self.cached_solar_envelope_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_solar_envelope_hash != 0 {
+                self.cached_solar_envelope_hash = 0;
+                self.last_solar_envelope_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let pending_hazard_compute = if render_site_pass {
             if let Some(hc) = hazard_compute_input {
                 if hc.enabled {
@@ -2669,6 +2725,7 @@ impl WebGpuEarthState {
                 pending_zoning_envelope,
                 pending_spatial_program,
                 pending_massing_study,
+                pending_solar_envelope,
                 pending_hazard_compute,
             },
         ));
@@ -2705,6 +2762,7 @@ impl WebGpuEarthState {
         let zoning_animated = zoning_envelope_input.as_ref().is_some_and(|z| z.visible);
         let program_animated = spatial_program_input.as_ref().is_some_and(|p| p.visible);
         let massing_animated = massing_study_input.as_ref().is_some_and(|m| m.visible);
+        let solar_animated = solar_envelope_input.as_ref().is_some_and(|s| s.visible);
         let frame_ms = if hazard_animated
             || compute_animated
             || subsurface_animated
@@ -2727,6 +2785,7 @@ impl WebGpuEarthState {
             || zoning_animated
             || program_animated
             || massing_animated
+            || solar_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

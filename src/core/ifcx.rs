@@ -80,6 +80,7 @@ pub mod ns {
     pub const EG_SPATIAL_PROGRAM: &str = "eigengraph::design::spatial_program";
     pub const EG_MASSING_STUDY: &str = "eigengraph::design::massing_study";
     pub const EG_DESIGN_PIPELINE: &str = "eigengraph::design::concept_pipeline";
+    pub const EG_SOLAR_OTTV: &str = "eigengraph::design::solar_ottv";
     pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
@@ -2060,6 +2061,43 @@ impl IfcxStage {
         });
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_design_pipeline", base_doc.header.id))
+    }
+
+    /// Composes a base `.ifcx` document with a non-destructive 3D Solar Irradiation & SNI 6389 OTTV overlay.
+    pub fn compose_with_solar_ottv_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::solar_envelope::SolarOttvIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_solar_ottv", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcBuilding", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "3D Solar Irradiation & SNI 6389 OTTV Envelope",
+                "overallOttvWM2": overlay.overall_ottv_w_m2,
+                "ottvLimitWM2": overlay.ottv_limit_w_m2,
+                "rttvRoofWM2": overlay.rttv_roof_w_m2,
+                "wwrPct": overlay.wwr_pct,
+                "shgc": overlay.shgc,
+                "annualCoolingKwhM2": overlay.annual_cooling_kwh_m2,
+                "sni6389Compliant": overlay.sni_6389_compliant,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_SOLAR_OTTV.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/design/solar_ottv".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_solar_ottv", base_doc.header.id))
     }
 
     /// Composes a base `.ifcx` document with the `v0.8.5` Master Engineering Dossier Index (`S-000`).

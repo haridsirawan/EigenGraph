@@ -6760,4 +6760,308 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.6.1` (`1/10` -> `v0.8.7`): 3D Solar Irradiation, Cast Shadow & SNI 6389 OTTV Facade Studio.
+    pub(super) fn render_solar_envelope_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::solar_envelope::{GlazingPerformancePreset, SolarShadingStrategy};
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Sun,
+                13.0,
+                theme.accent_orange,
+                "Solar Irradiation, Cast Shadow & SNI 6389 OTTV Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [
+                (0usize, "Envelope & Scorecard"),
+                (1usize, "Orientation & Irradiance"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.solar_drawer_tab == idx,
+                    theme.accent_orange,
+                    "",
+                )
+                .clicked()
+                {
+                    self.solar_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close 3D Solar & OTTV Facade Envelope Studio",
+            )
+            .clicked()
+            {
+                self.solar_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for preset in GlazingPerformancePreset::ALL {
+                    let active = universal_canvas.solar_envelope_config.glazing_preset == preset;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        preset.short_label(),
+                        active,
+                        theme.accent_blue,
+                        preset.label(),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.solar_envelope_config.apply_glazing(preset);
+                        universal_canvas.solar_overlay_visible = true;
+                        actions.run_solar_envelope = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Recycle),
+                    "Evaluate",
+                    false,
+                    theme.accent_orange,
+                    "Recompute 3D solar irradiance, cast ground shadows & SNI 6389 OTTV",
+                )
+                .clicked()
+                {
+                    universal_canvas.solar_overlay_visible = true;
+                    actions.run_solar_envelope = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    if universal_canvas.solar_overlay_visible {
+                        "3D Solar: ON"
+                    } else {
+                        "3D Solar: OFF"
+                    },
+                    universal_canvas.solar_overlay_visible,
+                    theme.accent_orange,
+                    "Toggle 3D Pure WebGPU thermal irradiance & cast shadow overlay",
+                )
+                .clicked()
+                {
+                    actions.toggle_solar_3d = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "IFCX",
+                    false,
+                    theme.accent_green,
+                    "Export non-destructive eigengraph::design::solar_ottv IFCX (.ifcx)",
+                )
+                .clicked()
+                {
+                    actions.export_solar_ifcx = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.solar_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    if is_left {
+                        ui.label(
+                            RichText::new(if tab == 0 {
+                                "Fenestration, Shading & Sun Angle"
+                            } else {
+                                "Shading Archetype & Envelope Tuners"
+                            })
+                            .size(9.8)
+                            .strong()
+                            .color(theme.text_primary),
+                        );
+                        ui.add_space(2.0);
+                        let cfg = &mut universal_canvas.solar_envelope_config;
+                        let mut changed = false;
+                        ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
+                            for strat in SolarShadingStrategy::ALL {
+                                let active = cfg.shading_strategy == strat;
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    None,
+                                    strat.short_label(),
+                                    active,
+                                    theme.accent_green,
+                                    strat.label(),
+                                )
+                                .clicked()
+                                {
+                                    cfg.shading_strategy = strat;
+                                    changed = true;
+                                }
+                            }
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("WWR:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.wwr_pct).range(10.0..=85.0).speed(1.0).suffix("%")).changed();
+                            ui.label(RichText::new("SHGC:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.shgc).range(0.18..=0.88).speed(0.01)).changed();
+                            ui.label(RichText::new("Depth:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.shading_depth_m).range(0.0..=2.5).speed(0.05).suffix("m")).changed();
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Month:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.inspection_month).range(1..=12).speed(1.0)).changed();
+                            ui.label(RichText::new("Hour:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.inspection_hour_local).range(6.0..=18.0).speed(0.25).suffix("h")).changed();
+                            changed |= ui.checkbox(&mut cfg.show_shadow_polygon, "Cast Shadow").changed();
+                        });
+                        if changed {
+                            universal_canvas.solar_overlay_visible = true;
+                            actions.run_solar_envelope = true;
+                        }
+                    } else if let Some(ref rep) = universal_canvas.last_solar_envelope_report {
+                        if tab == 0 {
+                            let status_col = if rep.sni_6389_compliant {
+                                theme.accent_green
+                            } else {
+                                theme.accent_red
+                            };
+                            let status_txt = if rep.sni_6389_compliant { "PASS" } else { "EXCEED" };
+                            ui.label(
+                                RichText::new("SNI 6389 / ASHRAE 90.1 Envelope Scorecard")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "OTTV: {:.1} / {:.0} W/m² [{status_txt}]  •  RTTV: {:.1} W/m²",
+                                    rep.overall_ottv_w_m2,
+                                    rep.config.ottv_limit_w_m2,
+                                    rep.rttv_roof_w_m2,
+                                ))
+                                .size(9.2)
+                                .strong()
+                                .monospace()
+                                .color(status_col),
+                            );
+                            let sh_len = rep
+                                .shadow_quads_3d
+                                .first()
+                                .map(|q| q.shadow_length_m)
+                                .unwrap_or(0.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "Sun Alt/Az: {:.1}° / {:.1}°  •  Cast Shadow: {:.1} m\nCooling Intensity: {:.0} kWh/m²/yr  •  Peak Solar Gain: {:.0} kW\nGoverning Orientation: {}",
+                                    rep.sun_altitude_deg,
+                                    rep.sun_azimuth_deg,
+                                    sh_len,
+                                    rep.annual_cooling_kwh_m2,
+                                    rep.peak_solar_load_kw,
+                                    rep.worst_orientation,
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(theme.text_muted),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new("Facade Orientation OTTV (W/m²) & Solar Gain")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            let plot_h = 112.0_f32;
+                            let (plot_rect, _) = ui.allocate_exact_size(
+                                Vec2::new(inner_w, plot_h),
+                                egui::Sense::hover(),
+                            );
+                            let painter = ui.painter_at(plot_rect);
+                            painter.rect_filled(plot_rect, CornerRadius::same(6), theme.bg_card);
+                            let count = rep.orientations.len().max(1);
+                            let row_h = (plot_h - 14.0) / (count as f32);
+                            for (idx, ori) in rep.orientations.iter().enumerate() {
+                                let y = plot_rect.top() + 8.0 + (idx as f32) * row_h;
+                                let bar_left = plot_rect.left() + 62.0;
+                                let bar_max_w = (plot_rect.width() - 122.0).max(20.0);
+                                let frac = (ori.ottv_w_m2 / 55.0).clamp(0.05, 1.0) as f32;
+                                let bar_col = if ori.compliant {
+                                    theme.accent_green
+                                } else {
+                                    theme.accent_red
+                                };
+                                painter.text(
+                                    egui::Pos2::new(plot_rect.left() + 6.0, y + 7.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    &ori.orientation,
+                                    egui::FontId::monospace(8.2),
+                                    theme.text_primary,
+                                );
+                                painter.rect_filled(
+                                    Rect::from_min_size(
+                                        egui::Pos2::new(bar_left, y + 2.0),
+                                        Vec2::new(bar_max_w * frac, (row_h - 5.0).max(6.0)),
+                                    ),
+                                    CornerRadius::same(3),
+                                    bar_col,
+                                );
+                                painter.text(
+                                    egui::Pos2::new(bar_left + bar_max_w + 6.0, y + 7.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    format!("{:.1}W/m²", ori.ottv_w_m2),
+                                    egui::FontId::monospace(8.0),
+                                    bar_col,
+                                );
+                            }
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new("Click 'Evaluate' or pick a glazing/shading option to compute SNI 6389 OTTV, irradiance panels, and 3D cast shadows.")
+                                .size(8.8)
+                                .color(theme.text_muted),
+                        );
+                    }
+                });
+            });
+        });
+    }
 }

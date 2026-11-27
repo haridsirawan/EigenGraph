@@ -4183,3 +4183,103 @@ pub fn build_rtc_massing_study_mesh(input: &MassingStudyGpuInput<'_>) -> GpuMesh
     }
 }
 
+/// GPU input payload for Update `v0.8.6.1` 3D Solar Irradiation, Shadow & OTTV Heatmap (`material_kind = 26.0`).
+pub struct SolarEnvelopeGpuInput<'a> {
+    pub report: &'a crate::core::solar_envelope::SolarEnvelopeReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU thermal irradiance facade/roof heatmap panels, cast ground shadows,
+/// and incoming solar vector beam (`material_kind = 26.0`, 0% raster).
+pub fn build_rtc_solar_envelope_mesh(input: &SolarEnvelopeGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rep = input.report;
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+    let rot_n = |n: [f32; 3]| -> [f32; 3] {
+        let nx = (n[0] as f64) * cr - (n[1] as f64) * sr;
+        let ny = (n[0] as f64) * sr + (n[1] as f64) * cr;
+        [nx as f32, ny as f32, n[2]]
+    };
+
+    let mut verts = Vec::with_capacity(rep.heatmap_panels_3d.len() * 4 + 32);
+    let mut idxs = Vec::with_capacity(rep.heatmap_panels_3d.len() * 6 + 48);
+
+    for p in &rep.heatmap_panels_3d {
+        let base = verts.len() as u32;
+        let norm = rot_n(p.normal_enu);
+        let phase = (p.story_index as f32) * 0.25 + p.intensity_norm;
+        for c in p.corners_enu_m {
+            let rxy = rot_xy(c[0], c[1]);
+            verts.push(GpuEarthVertex {
+                pos: [rxy[0] as f32, rxy[1] as f32, c[2] as f32],
+                normal: norm,
+                color: p.color_rgba,
+                meta: [26.0, p.intensity_norm, 1.0, phase],
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    if rep.config.show_shadow_polygon {
+        let shadow_col = [0.05_f32, 0.08, 0.14, 0.52];
+        for sq in &rep.shadow_quads_3d {
+            let base = verts.len() as u32;
+            for c in sq.corners_enu_m {
+                let rxy = rot_xy(c[0], c[1]);
+                verts.push(GpuEarthVertex {
+                    pos: [rxy[0] as f32, rxy[1] as f32, c[2] as f32],
+                    normal: [0.0, 0.0, 1.0],
+                    color: shadow_col,
+                    meta: [26.0, 0.05, 1.0, 0.0],
+                });
+            }
+            idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+
+    // Incoming solar beam indicator toward building crown
+    if rep.sun_altitude_deg > 2.5 {
+        let beam_start = [
+            rep.sun_dir_enu[0] * 38.0,
+            rep.sun_dir_enu[1] * 38.0,
+            rep.building_height_m * 0.6 + rep.sun_dir_enu[2] * 38.0,
+        ];
+        let b0 = rot_xy(beam_start[0], beam_start[1]);
+        let roof_mid = [
+            0.5 * (rep.min_enu_xy_m[0] + rep.max_enu_xy_m[0]),
+            0.5 * (rep.min_enu_xy_m[1] + rep.max_enu_xy_m[1]),
+        ];
+        let rc = rot_xy(roof_mid[0], roof_mid[1]);
+        push_animated_flow_strut_enu(
+            &mut verts,
+            &mut idxs,
+            [b0[0], b0[1], beam_start[2]],
+            [rc[0], rc[1], rep.building_height_m + 0.5],
+            0.22,
+            0.22,
+            [1.0, 0.85, 0.25, 0.90],
+            0.8,
+            26.0,
+        );
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [b0[0] as f32, b0[1] as f32, beam_start[2] as f32],
+            1.4,
+            [1.0, 0.88, 0.30, 0.95],
+            0.65,
+            26.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

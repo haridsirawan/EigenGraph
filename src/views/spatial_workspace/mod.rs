@@ -179,6 +179,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.5.9 (9/10 -> v0.8.6): Chained AI Building Design Agent Drawer
     pub design_agent_drawer_open: bool,
     pub design_agent_brief_draft: String,
+    // Update v0.8.6.1 (1/10 -> v0.8.7): 3D Solar Irradiation, Cast Shadow & SNI 6389 OTTV Drawer
+    pub solar_drawer_open: bool,
+    pub solar_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -311,6 +314,8 @@ impl Default for SpatialWorkspaceState {
             massing_drawer_tab: 0,
             design_agent_drawer_open: false,
             design_agent_brief_draft: "Design a 10-story mixed-use tower on 54x42m urban lot, KDB 60%, KLB 5.0, 7.2m bay".to_string(),
+            solar_drawer_open: false,
+            solar_drawer_tab: 0,
         }
     }
 }
@@ -354,6 +359,7 @@ impl SpatialWorkspaceState {
             || self.program_drawer_open
             || self.massing_drawer_open
             || self.design_agent_drawer_open
+            || self.solar_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -391,6 +397,7 @@ impl SpatialWorkspaceState {
         self.program_drawer_open = false;
         self.massing_drawer_open = false;
         self.design_agent_drawer_open = false;
+        self.solar_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -534,6 +541,11 @@ impl SpatialWorkspaceState {
             self.design_agent_drawer_open = false;
         } else {
             self.design_agent_drawer_open = !self.design_agent_drawer_open;
+        }
+        if drawer != "solar" {
+            self.solar_drawer_open = false;
+        } else {
+            self.solar_drawer_open = !self.solar_drawer_open;
         }
     }
 
@@ -685,6 +697,15 @@ impl SpatialWorkspaceState {
     pub fn open_design_agent_drawer(&mut self) {
         self.toggle_exclusive_drawer("__none");
         self.design_agent_drawer_open = true;
+    }
+
+    /// Idempotently opens the Update `v0.8.6.1` (`1/10` -> `v0.8.7`) 3D Solar Irradiation,
+    /// Cast Shadow & SNI 6389 OTTV Facade Envelope drawer
+    /// (`0` = Glazing, Shading & Scorecards, `1` = Orientation N/E/S/W/Roof OTTV Chart).
+    pub fn open_solar_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.solar_drawer_tab = tab.min(1);
+        self.solar_drawer_open = true;
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.

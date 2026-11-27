@@ -1865,7 +1865,8 @@ impl SpatialWorkspaceState {
                 || self.zoning_drawer_open
                 || self.program_drawer_open
                 || self.massing_drawer_open
-                || self.design_agent_drawer_open,
+                || self.design_agent_drawer_open
+                || self.solar_drawer_open,
         );
 
         let compact_w = if is_mobile {
@@ -3041,6 +3042,18 @@ impl SpatialWorkspaceState {
 
                     if self.design_agent_drawer_open {
                         self.render_design_agent_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
+                    if self.solar_drawer_open {
+                        self.render_solar_envelope_drawer(
                             ui,
                             theme,
                             universal_canvas,
@@ -5192,6 +5205,20 @@ impl SpatialWorkspaceState {
                                                         self.open_collab_drawer(1);
                                                         actions.refresh_district_risk_field = true;
                                                     }
+                                                    if Self::glass_icon_button(
+                                                        ui,
+                                                        theme,
+                                                        AppIcon::Sun,
+                                                        self.solar_drawer_open
+                                                            || universal_canvas.solar_overlay_visible,
+                                                        theme.accent_orange,
+                                                        "Open 3D Solar Irradiation, Cast Shadow & SNI 6389 OTTV Facade Studio",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_solar_drawer(0);
+                                                        actions.run_solar_envelope = true;
+                                                    }
                                                 },
                                             );
                                         }
@@ -5621,6 +5648,20 @@ impl SpatialWorkspaceState {
                                                     .clicked()
                                                     {
                                                         self.open_design_agent_drawer();
+                                                    }
+                                                    if Self::glass_icon_button(
+                                                        ui,
+                                                        theme,
+                                                        AppIcon::Sun,
+                                                        self.solar_drawer_open
+                                                            || universal_canvas.solar_overlay_visible,
+                                                        theme.accent_orange,
+                                                        "Open 3D Solar Irradiation, Cast Shadow & SNI 6389 OTTV Facade Studio",
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        self.open_solar_drawer(0);
+                                                        actions.run_solar_envelope = true;
                                                     }
                                                     if Self::glass_icon_button(
                                                         ui,

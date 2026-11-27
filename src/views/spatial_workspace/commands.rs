@@ -894,6 +894,36 @@ impl SpatialWorkspaceState {
                 PlannedProposalAction::ExportDesignIfcx => {
                     out.export_design_ifcx = true;
                 }
+                PlannedProposalAction::RunSolarEnvelope {
+                    glazing,
+                    shading,
+                    wwr_pct,
+                    hour_local,
+                } => {
+                    if let Some(g) = glazing {
+                        universal_canvas.solar_envelope_config.apply_glazing(*g);
+                    }
+                    if let Some(s) = shading {
+                        universal_canvas.solar_envelope_config.shading_strategy = *s;
+                    }
+                    if let Some(w) = wwr_pct {
+                        universal_canvas.solar_envelope_config.wwr_pct = *w;
+                    }
+                    if let Some(h) = hour_local {
+                        universal_canvas.solar_envelope_config.inspection_hour_local = *h;
+                    }
+                    universal_canvas.solar_overlay_visible = true;
+                    self.open_solar_drawer(0);
+                    out.run_solar_envelope = true;
+                }
+                PlannedProposalAction::ToggleSolar3d => {
+                    self.open_solar_drawer(0);
+                    out.toggle_solar_3d = true;
+                }
+                PlannedProposalAction::ExportSolarIfcx => {
+                    self.open_solar_drawer(0);
+                    out.export_solar_ifcx = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -1360,6 +1390,21 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportDesignIfcx => {
                                 PlannedProposalAction::ExportDesignIfcx
                             }
+                            GeminiDirective::RunSolarEnvelope {
+                                glazing,
+                                shading,
+                                wwr_pct,
+                                hour_local,
+                            } => PlannedProposalAction::RunSolarEnvelope {
+                                glazing: *glazing,
+                                shading: *shading,
+                                wwr_pct: *wwr_pct,
+                                hour_local: *hour_local,
+                            },
+                            GeminiDirective::ToggleSolar3d => PlannedProposalAction::ToggleSolar3d,
+                            GeminiDirective::ExportSolarIfcx => {
+                                PlannedProposalAction::ExportSolarIfcx
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1593,6 +1638,16 @@ impl SpatialWorkspaceState {
                                 "ExportFeasibilityAnnex(S-115)".to_string()
                             }
                             GeminiDirective::ExportDesignIfcx => "ExportDesignIfcx".to_string(),
+                            GeminiDirective::RunSolarEnvelope {
+                                glazing,
+                                shading,
+                                wwr_pct,
+                                hour_local,
+                            } => format!(
+                                "RunSolarEnvelope({glazing:?}/{shading:?}/WWR:{wwr_pct:?}/H:{hour_local:?})"
+                            ),
+                            GeminiDirective::ToggleSolar3d => "ToggleSolar3d".to_string(),
+                            GeminiDirective::ExportSolarIfcx => "ExportSolarIfcx".to_string(),
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -3775,6 +3830,49 @@ impl SpatialWorkspaceState {
                 "/design-ifcx" => {
                     actions.export_design_ifcx = true;
                 }
+                "/solar" | "/ottv" | "/shadow" => {
+                    let lo = arg.to_ascii_lowercase();
+                    if lo.contains("clear") {
+                        universal_canvas.solar_envelope_config.apply_glazing(
+                            crate::core::solar_envelope::GlazingPerformancePreset::ClearSingle,
+                        );
+                    } else if lo.contains("tint") {
+                        universal_canvas.solar_envelope_config.apply_glazing(
+                            crate::core::solar_envelope::GlazingPerformancePreset::TintedDouble,
+                        );
+                    } else if lo.contains("low") {
+                        universal_canvas.solar_envelope_config.apply_glazing(
+                            crate::core::solar_envelope::GlazingPerformancePreset::LowESpectrallySelective,
+                        );
+                    } else if lo.contains("triple") {
+                        universal_canvas.solar_envelope_config.apply_glazing(
+                            crate::core::solar_envelope::GlazingPerformancePreset::TripleHighPerf,
+                        );
+                    }
+                    if lo.contains("overhang") {
+                        universal_canvas.solar_envelope_config.shading_strategy =
+                            crate::core::solar_envelope::SolarShadingStrategy::HorizontalOverhang;
+                    } else if lo.contains("fin") {
+                        universal_canvas.solar_envelope_config.shading_strategy =
+                            crate::core::solar_envelope::SolarShadingStrategy::VerticalFins;
+                    } else if lo.contains("louver") || lo.contains("egg") {
+                        universal_canvas.solar_envelope_config.shading_strategy =
+                            crate::core::solar_envelope::SolarShadingStrategy::EggCrateLouvers;
+                    } else if lo.contains("none") || lo.contains("unshaded") {
+                        universal_canvas.solar_envelope_config.shading_strategy =
+                            crate::core::solar_envelope::SolarShadingStrategy::None;
+                    }
+                    universal_canvas.solar_overlay_visible = true;
+                    self.open_solar_drawer(if cmd == "/ottv" { 1 } else { 0 });
+                    actions.run_solar_envelope = true;
+                }
+                "/solar-3d" => {
+                    self.open_solar_drawer(0);
+                    actions.toggle_solar_3d = true;
+                }
+                "/solar-ifcx" => {
+                    actions.export_solar_ifcx = true;
+                }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {
                         actions.sync_fem_and_earth = true;
@@ -4184,7 +4282,7 @@ impl SpatialWorkspaceState {
                  Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s. \
                  Active BIM elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}. \
                  To propose workspace actions, you may append bracket directives: \
-                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[ADD_STORY]], [[ADD_SLAB]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[EIGENGATE_AUDIT]], [[RUN_DESIGN_PIPELINE:brief]], [[EXPORT_FEASIBILITY_S115]], [[EXPORT_DESIGN_IFCX]], [[BATCH_PIN_CITY:keyword,city]], [[PIN_ACTIVE:lat,lon,heading]], [[AUDIT_NEIGHBORHOOD]], [[TOGGLE_TOPO]], [[TOGGLE_VECTOR]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
+                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[ADD_STORY]], [[ADD_SLAB]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[EIGENGATE_AUDIT]], [[RUN_DESIGN_PIPELINE:brief]], [[EXPORT_FEASIBILITY_S115]], [[EXPORT_DESIGN_IFCX]], [[RUN_SOLAR_OTTV:LOWE,OVERHANG,WWR40,H14]], [[TOGGLE_SOLAR_3D]], [[EXPORT_SOLAR_IFCX]], [[BATCH_PIN_CITY:keyword,city]], [[PIN_ACTIVE:lat,lon,heading]], [[AUDIT_NEIGHBORHOOD]], [[TOGGLE_TOPO]], [[TOGGLE_VECTOR]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
                 site.elevation_m,
                 site.seismic_pga_ss_g,
                 site.design_wind_ms,

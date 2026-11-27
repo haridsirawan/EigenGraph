@@ -235,6 +235,10 @@ pub struct UniversalCanvasState {
     pub last_massing_report: Option<crate::core::massing_agent::MassingStudyReport>,
     // Update v0.8.5.9 (9/10 -> v0.8.6): Chained 6-Stage AI Building Design Pipeline
     pub last_design_pipeline_report: Option<crate::core::design_agent::DesignPipelineReport>,
+    // Update v0.8.6.1 (1/10 -> v0.8.7): 3D Solar Irradiation, Cast Shadow & SNI 6389 OTTV Engine
+    pub solar_overlay_visible: bool,
+    pub solar_envelope_config: crate::core::solar_envelope::SolarEnvelopeConfig,
+    pub last_solar_envelope_report: Option<crate::core::solar_envelope::SolarEnvelopeReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -417,6 +421,9 @@ impl Default for UniversalCanvasState {
             massing_config: crate::core::massing_agent::MassingStudyConfig::default(),
             last_massing_report: None,
             last_design_pipeline_report: None,
+            solar_overlay_visible: false,
+            solar_envelope_config: crate::core::solar_envelope::SolarEnvelopeConfig::default(),
+            last_solar_envelope_report: None,
         }
     }
 }
@@ -1246,6 +1253,22 @@ impl UniversalCanvasState {
         (rep, gen_bim)
     }
 
+    /// Evaluates 3D Solar Irradiation, Cast Ground Shadows & SNI 6389 / ASHRAE 90.1 OTTV Envelope.
+    pub fn run_solar_envelope(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::solar_envelope::SolarEnvelopeReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::solar_envelope::evaluate_solar_envelope(
+            bim_project,
+            Some(&site),
+            self.last_massing_report.as_ref(),
+            &self.solar_envelope_config,
+        );
+        self.last_solar_envelope_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1586,6 +1609,7 @@ impl UniversalCanvasState {
             zoning_config: self.zoning_config.clone(),
             program_config: self.program_config.clone(),
             massing_config: self.massing_config.clone(),
+            solar_envelope_config: self.solar_envelope_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1733,6 +1757,8 @@ impl UniversalCanvasState {
         self.massing_config = archive.massing_config;
         self.last_massing_report = None;
         self.last_design_pipeline_report = None;
+        self.solar_envelope_config = archive.solar_envelope_config;
+        self.last_solar_envelope_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2455,6 +2481,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let solar_envelope_gpu_input = if self.solar_overlay_visible {
+                self.last_solar_envelope_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::SolarEnvelopeGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -2499,6 +2536,7 @@ impl UniversalCanvasState {
                 zoning_envelope_gpu_input,
                 spatial_program_gpu_input,
                 massing_study_gpu_input,
+                solar_envelope_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2598,6 +2636,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.massing_overlay_visible {
                 self.paint_cpu_massing_study_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.solar_overlay_visible {
+                self.paint_cpu_solar_envelope_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

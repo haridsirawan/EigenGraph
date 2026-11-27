@@ -53,6 +53,7 @@ pub mod zoning_agent;
 pub mod program_agent;
 pub mod massing_agent;
 pub mod design_agent;
+pub mod solar_envelope;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -362,6 +363,11 @@ pub use design_agent::{
     execute_chained_design_pipeline, looks_like_building_design_brief, parse_design_brief_prompt,
     DesignPipelineIfcxOverlay, DesignPipelineReport, DesignPipelineStepTrace, ParsedDesignBrief,
     NS_EG_DESIGN_PIPELINE,
+};
+pub use solar_envelope::{
+    evaluate_solar_envelope, FacadeOrientationMetric, GlazingPerformancePreset, SolarEnvelopeConfig,
+    SolarEnvelopeReport, SolarHeatmapPanel3D, SolarOttvIfcxOverlay, SolarShadingStrategy,
+    SolarShadowQuad3D, NS_EG_SOLAR_OTTV,
 };
 
 

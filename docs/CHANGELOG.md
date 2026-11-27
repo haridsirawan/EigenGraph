@@ -7,6 +7,17 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [Unreleased — Next: v0.8.7 (1/10)]
+
+### Update 1/10 (`v0.8.6.1` -> `v0.8.7`) — 3D Solar Irradiation, Cast Shadow & OTTV Facade Envelope Engine (`SNI 6389 / ASHRAE 90.1`)
+- **3D Solar Irradiation & OTTV/RTTV Envelope Engine (`src/core/solar_envelope.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:
+  - Added [`evaluate_solar_envelope`](src/core/solar_envelope.rs) coupling active BIM geometry (or active 3D massing study) and `SiteEnvironmentalCoupling` latitude into astronomical sun altitude/azimuth vectors, orientation-resolved Solar Factors (`North`, `East`, `South`, `West`, `Roof`), glazing presets (`ClearSingle`, `TintedDouble`, `LowESpectrallySelective`, `TripleHighPerf`), external shading devices (`None`, `HorizontalOverhang`, `VerticalFins`, `EggCrateLouvers`), SNI 6389 / ASHRAE 90.1 OTTV & RTTV compliance (`35 W/m²` limit), annual cooling energy intensity (`kWh/m²/yr`), per-story 3D ENU irradiance heatmap panels, and analytical cast ground shadows.
+  - Registered non-destructive IFCX namespace `eigengraph::design::solar_ottv` via [`IfcxStage::compose_with_solar_ottv_overlay`](src/core/ifcx.rs).
+- **Pure WebGPU Solar Thermal Heatmap & Cast Shadow Pass (`src/views/webgpu_earth/mesh_builders.rs`, `src/views/webgpu_earth/mod.rs`, `src/views/universal_canvas/`)**:
+  - Added `material_kind = 26.0` WGSL emissive thermal irradiance shader branch and dedicated `solar_envelope` GPU slot rendered via [`build_rtc_solar_envelope_mesh`](src/views/webgpu_earth/mesh_builders.rs) with sun vector beam + beacon, alongside pure-vector CPU fallback [`paint_cpu_solar_envelope_fallback`](src/views/universal_canvas/render_layers.rs) and `.eigen.json` persistence (`solar_envelope_config`).
+- **Solar OTTV Dynamic Island Studio, Slash Commands & Icon-Only Deck Triggers (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added 2-tab width-first [`render_solar_envelope_drawer`](src/views/spatial_workspace/drawers.rs) (Glazing/Shading presets, WWR%/SHGC/Depth/Month/Hour tuning, OTTV vs `35 W/m²` scorecard, and pure-vector `N/E/S/W/Roof` OTTV bar chart), icon-only `AppIcon::Sun` triggers in Hover Studio Deck, `/solar`, `/ottv`, `/shadow`, `/solar-3d`, `/solar-ifcx` commands, and Gemini directives (`[[RUN_SOLAR_OTTV:...]]`, `[[TOGGLE_SOLAR_3D]]`, `[[EXPORT_SOLAR_IFCX]]`).
+
 ## [v0.8.6] — 2026-11-26
 
 ### Update 10/10 (`v0.8.6` Milestone Release) — Master Index `S-000` (`S-100`–`S-115`), Full Verification & Production Release
