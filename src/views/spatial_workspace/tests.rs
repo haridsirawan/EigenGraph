@@ -6052,3 +6052,107 @@ use crate::theme::MacTheme;
         assert_eq!(clean, "Full index");
         assert_eq!(dirs, vec![GeminiDirective::ExportMasterDossierIndex]);
     }
+
+    #[test]
+    fn test_v0862_smart_layered_ribbon_dynamic_island() {
+        assert_eq!(RibbonCategoryTab::ALL.len(), 10);
+        let expected_labels = [
+            "Planning",
+            "Drafting",
+            "Modeling",
+            "Scheduling",
+            "Budgeting",
+            "Sustainability",
+            "Facility",
+            "Safety",
+            "Construction",
+            "Industrialization",
+        ];
+        for (tab, exp) in RibbonCategoryTab::ALL.iter().zip(expected_labels.iter()) {
+            assert_eq!(tab.label(), *exp);
+        }
+
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::EngineeringLight);
+        let ctx = egui::Context::default();
+        let mut build = crate::views::build::BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        // Layer 1: Categorized Ribbon across all 10 AEC categories on Desktop, Tablet & Mobile
+        for tab in RibbonCategoryTab::ALL {
+            for win_w in [1000.0_f32, 700.0, 390.0] {
+                let mut spatial = SpatialWorkspaceState::default();
+                let mut canvas = UniversalCanvasState::default();
+                spatial.active_ribbon_tab = tab;
+                spatial.mobile_deck_pinned = true;
+
+                let raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(win_w, 840.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial.hud_rects.len(), 1);
+                let r = spatial.hud_rects[0];
+                assert!(
+                    r.right() <= win_w + 1.0 && r.left() >= -1.0,
+                    "Ribbon tab {} overflowed viewport {win_w}: {r:?}",
+                    tab.label()
+                );
+            }
+        }
+
+        // Layer 2: Exclusive Project Browser overlay replaces Ribbon cleanly and returns via breadcrumb
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        spatial.mobile_deck_pinned = true;
+        spatial.vault_drawer_open = true;
+        assert_eq!(
+            spatial.active_focus_layer_info(false),
+            Some(("Project Browser & Vault", AppIcon::Folder))
+        );
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(1000.0, 840.0),
+            )),
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(raw, |ui| {
+            let _ = spatial.render_hud_overlays(
+                ui.ctx(),
+                &theme,
+                &mut canvas,
+                &mut build,
+                &mut ai,
+                &members,
+                &projects,
+                &mut db_components,
+            );
+        });
+        out.textures_delta.clear();
+        assert_eq!(spatial.hud_rects.len(), 1);
+        assert!(spatial.hud_rects[0].right() <= 1001.0);
+
+        spatial.close_focus_layer_return_to_ribbon();
+        assert_eq!(spatial.active_focus_layer_info(false), None);
+        assert!(spatial.mobile_deck_pinned);
+    }

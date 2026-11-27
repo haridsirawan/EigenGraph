@@ -131,6 +131,82 @@ impl DynamicIslandStudioTab {
     }
 }
 
+/// 10-Category AEC Engineering Lifecycle Ribbon tabs inside the Smart Layered Dynamic Island (Update v0.8.6.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RibbonCategoryTab {
+    Planning,
+    Drafting,
+    #[default]
+    Modeling,
+    Scheduling,
+    Budgeting,
+    Sustainability,
+    Facility,
+    Safety,
+    Construction,
+    Industrialization,
+}
+
+impl RibbonCategoryTab {
+    pub const ALL: [Self; 10] = [
+        Self::Planning,
+        Self::Drafting,
+        Self::Modeling,
+        Self::Scheduling,
+        Self::Budgeting,
+        Self::Sustainability,
+        Self::Facility,
+        Self::Safety,
+        Self::Construction,
+        Self::Industrialization,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Planning => "Planning",
+            Self::Drafting => "Drafting",
+            Self::Modeling => "Modeling",
+            Self::Scheduling => "Scheduling",
+            Self::Budgeting => "Budgeting",
+            Self::Sustainability => "Sustainability",
+            Self::Facility => "Facility",
+            Self::Safety => "Safety",
+            Self::Construction => "Construction",
+            Self::Industrialization => "Industrialization",
+        }
+    }
+
+    pub fn icon(self) -> AppIcon {
+        match self {
+            Self::Planning => AppIcon::Compass,
+            Self::Drafting => AppIcon::RulerSquare,
+            Self::Modeling => AppIcon::Cube3D,
+            Self::Scheduling => AppIcon::Clock,
+            Self::Budgeting => AppIcon::Coins,
+            Self::Sustainability => AppIcon::Leaf,
+            Self::Facility => AppIcon::Building,
+            Self::Safety => AppIcon::Shield,
+            Self::Construction => AppIcon::Recycle,
+            Self::Industrialization => AppIcon::Cpu,
+        }
+    }
+
+    pub fn pillar(self) -> NavigationPillar {
+        match self {
+            Self::Planning => NavigationPillar::ResearchConcept,
+            Self::Drafting => NavigationPillar::ParametricDED,
+            Self::Modeling => NavigationPillar::GeometryAssembly,
+            Self::Scheduling => NavigationPillar::TimeScheduling,
+            Self::Budgeting => NavigationPillar::CostBudgeting,
+            Self::Sustainability => NavigationPillar::SustainabilityEnergy,
+            Self::Facility => NavigationPillar::FacilityManagement,
+            Self::Safety => NavigationPillar::SafetyHealth,
+            Self::Construction => NavigationPillar::LeanConstruction,
+            Self::Industrialization => NavigationPillar::IndustrializedAutomation,
+        }
+    }
+}
+
 /// Domain provenance used to maintain chronological LIFO Undo/Redo across 3D BIM & 2D Canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpatialUndoDomain {

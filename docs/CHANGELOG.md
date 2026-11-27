@@ -7,7 +7,14 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.7 (1/10)]
+## [Unreleased — Next: v0.8.7 (2/10)]
+
+### Update 2/10 (`v0.8.6.2` -> `v0.8.7`) — Smart Layered Ribbon Dynamic Island (`10-Category AEC Lifecycle Ribbon`)
+- **10-Category Horizontal AEC Lifecycle Ribbon (`src/views/spatial_workspace/types.rs`, `src/views/spatial_workspace/ribbon_ui.rs`, `src/views/spatial_workspace/mod.rs`)**:
+  - Added [`RibbonCategoryTab`](src/views/spatial_workspace/types.rs) (`Planning`, `Drafting`, `Modeling`, `Scheduling`, `Budgeting`, `Sustainability`, `Facility`, `Safety`, `Construction`, `Industrialization`) paired with a highlighted `File` Vault trigger pill, Quick-Access bar (`Vault`, `Save`, `Undo`, `Redo`, `3D`, `Project · Level`, utilities), horizontal grouped icon-above-caption tool tiles (`ribbon_tool_tile`), and soft-pill group footers (`ribbon_group`).
+- **Exclusive Smart Layer Switching (`src/views/spatial_workspace/island_ui.rs`, `src/views/spatial_workspace/tests.rs`)**:
+  - Added [`active_focus_layer_info`](src/views/spatial_workspace/mod.rs) and [`close_focus_layer_return_to_ribbon`](src/views/spatial_workspace/mod.rs) with [`render_smart_layer2_header`](src/views/spatial_workspace/ribbon_ui.rs) (`← Ribbon | Active Overlay | ×`) so opening Project Browser (Vault), Studio Drawers, Smart Inspector, Slash Commands, or AI Chat swaps into Layer 2 in-place without stacking Layer 1 Ribbon underneath while preserving a single thin AI Prompt bar at the bottom.
+  - Added [`test_v0862_smart_layered_ribbon_dynamic_island`](src/views/spatial_workspace/tests.rs) verifying all 10 categories at Desktop (`1000px`), Tablet (`700px`), and Mobile (`390px`) plus Layer 2 breadcrumb switching.
 
 ### Update 1/10 (`v0.8.6.1` -> `v0.8.7`) — 3D Solar Irradiation, Cast Shadow & OTTV Facade Envelope Engine (`SNI 6389 / ASHRAE 90.1`)
 - **3D Solar Irradiation & OTTV/RTTV Envelope Engine (`src/core/solar_envelope.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:

@@ -18,6 +18,7 @@ use crate::views::{AiAssistantView, BuildView, UniversalCanvasState};
 mod commands;
 mod drawers;
 mod island_ui;
+mod ribbon_ui;
 mod smart_popup;
 mod types;
 pub use island_ui::SpatialIslandHost;
@@ -182,6 +183,8 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.6.1 (1/10 -> v0.8.7): 3D Solar Irradiation, Cast Shadow & SNI 6389 OTTV Drawer
     pub solar_drawer_open: bool,
     pub solar_drawer_tab: usize,
+    // Update v0.8.6.2 (2/10 -> v0.8.7): Smart Layered 10-Category AEC Ribbon Dynamic Island
+    pub active_ribbon_tab: RibbonCategoryTab,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -316,6 +319,7 @@ impl Default for SpatialWorkspaceState {
             design_agent_brief_draft: "Design a 10-story mixed-use tower on 54x42m urban lot, KDB 60%, KLB 5.0, 7.2m bay".to_string(),
             solar_drawer_open: false,
             solar_drawer_tab: 0,
+            active_ribbon_tab: RibbonCategoryTab::Modeling,
         }
     }
 }
@@ -706,6 +710,88 @@ impl SpatialWorkspaceState {
         self.toggle_exclusive_drawer("__none");
         self.solar_drawer_tab = tab.min(1);
         self.solar_drawer_open = true;
+    }
+
+    /// Returns the active Layer 2 exclusive focus overlay `(title, icon)` when a drawer,
+    /// Project Browser, AI chat, Smart Inspector, or Slash Palette is open inside the Dynamic Island.
+    pub fn active_focus_layer_info(&self, slash_mode: bool) -> Option<(&'static str, crate::icons::AppIcon)> {
+        use crate::icons::AppIcon;
+        if self.selected_target.is_some() {
+            Some(("Smart Inspector", AppIcon::Target))
+        } else if self.vault_drawer_open || self.vault_path_popover_open {
+            Some(("Project Browser & Vault", AppIcon::Folder))
+        } else if slash_mode {
+            Some(("Slash Commands", AppIcon::Search))
+        } else if self.context_picker_open {
+            Some(("Attach @Context", AppIcon::Plus))
+        } else if self.history_popover_open {
+            Some(("Conversation History", AppIcon::Clock))
+        } else if self.api_key_popover_open {
+            Some(("Gemini API Key", AppIcon::Lock))
+        } else if self.command_bar_expanded {
+            Some(("EigenAI Spatial Agent", AppIcon::Bot))
+        } else if self.solar_drawer_open {
+            Some(("Solar & OTTV Studio", AppIcon::Sun))
+        } else if self.design_agent_drawer_open {
+            Some(("AI Design Agent", AppIcon::Sparkles))
+        } else if self.massing_drawer_open {
+            Some(("Massing Explorer", AppIcon::Building))
+        } else if self.program_drawer_open {
+            Some(("Spatial Program", AppIcon::BoxPackage))
+        } else if self.zoning_drawer_open {
+            Some(("Site Zoning & Envelope", AppIcon::Compass))
+        } else if self.construction_lca_drawer_open {
+            Some(("4D/5D/6D Construction & LCA", AppIcon::Clock))
+        } else if self.foundation_drawer_open {
+            Some(("Deep Foundation Studio", AppIcon::Hammer))
+        } else if self.reliability_drawer_open {
+            Some(("Structural Reliability", AppIcon::Target))
+        } else if self.composite_drawer_open {
+            Some(("Composite Deck Studio", AppIcon::Grid))
+        } else if self.prestress_drawer_open {
+            Some(("Post-Tension Studio", AppIcon::ArcCurve))
+        } else if self.connection_drawer_open {
+            Some(("Steel Connection Studio", AppIcon::Wrench))
+        } else if self.shear_wall_drawer_open {
+            Some(("RC Shear Wall Studio", AppIcon::Wall))
+        } else if self.wind_drawer_open {
+            Some(("Wind Aeroelasticity", AppIcon::Wind))
+        } else if self.isolation_drawer_open {
+            Some(("Seismic Isolation", AppIcon::Shield))
+        } else if self.extreme_events_drawer_open {
+            Some(("Extreme Events Studio", AppIcon::Flame))
+        } else if self.eigenflow_drawer_open {
+            Some(("EigenFlow CFD Studio", AppIcon::Waves))
+        } else if self.field_qaqc_drawer_open {
+            Some(("Field QA/QC & BBS", AppIcon::Clipboard))
+        } else if self.collab_drawer_open {
+            Some(("Collab & Risk Governance", AppIcon::Layers))
+        } else if self.evacuation_drawer_open {
+            Some(("Evacuation & Lifelines", AppIcon::Shield))
+        } else if self.shm_drawer_open {
+            Some(("SHM Digital Twin", AppIcon::Pulse))
+        } else if self.ground_motion_drawer_open {
+            Some(("Ground-Motion Replay", AppIcon::Pulse))
+        } else if self.portfolio_drawer_open {
+            Some(("Portfolio Optimizer", AppIcon::ChartLine))
+        } else if self.ifcx_diff_drawer_open {
+            Some(("IFCX Layer Diff", AppIcon::Document))
+        } else {
+            None
+        }
+    }
+
+    /// Closes any active Layer 2 focus overlay and returns cleanly to Layer 1 Categorized Ribbon
+    /// without collapsing an explicitly pinned mobile deck.
+    pub fn close_focus_layer_return_to_ribbon(&mut self) {
+        self.toggle_exclusive_drawer("__none");
+        self.command_bar_expanded = false;
+        self.selected_target = None;
+        self.popup_pinned = false;
+        if self.command_input.trim_start().starts_with('/') {
+            self.command_input.clear();
+            self.last_command_len = 0;
+        }
     }
 
     /// Computes global structural health telemetry + worst critical element target for 1-click triage.
