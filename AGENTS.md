@@ -49,12 +49,15 @@ Keep the 15 engineering workflow modules accessible in navigation (sidebar/drawe
   - Patch versions advance by `+0.0.1` once every **10 completed updates** (starting after `v0.8.4`, so Updates `1/10` through `10/10` accumulate toward `v0.8.5`, then the next 10 toward `v0.8.6`, and so on):
     1. **Intermediate Updates (`1/10` – `9/10`)**:
        - Keep the current patch version in `Cargo.toml` unchanged and log each milestone in `docs/CHANGELOG.md` under `## [Unreleased — Next: vX.Y.Z (k/10)]`.
-       - Skip `cargo check`, `cargo test`, and `wasm32` checks during intermediate updates; defer all test execution and WASM compilation verification to the `10/10` milestone release (unless explicitly requested by the user).
+       - **Hybrid Verification Protocol**:
+         - When an intermediate update modifies Rust source files under `src/`, run fast incremental `cargo check --lib` plus targeted filtered unit tests for only the modified modules (`cargo test --lib <module_filter>` — and `cargo test --lib test_phase46_spatial_hud_responsive_zero_overflow` whenever `src/views/spatial_workspace/island_ui.rs` changes).
+         - When an intermediate update touches only non-Rust assets or documentation (`assets/`, `docs/`, `README.md`, `index.html`, `sw.js`), skip `cargo` checks entirely.
+         - Defer the full native unit test suite (`cargo test --lib` across all crate tests) and all `wasm32-unknown-unknown` checks/release builds to the `10/10` milestone release (unless explicitly requested by the user).
        - Stage and **commit locally only** (`git commit`); **do NOT push to `origin main`** until the 10th update is reached (unless explicitly requested by the user).
        - Keep the local `target/` build cache intact between intermediate updates for fast incremental compilation (do **NOT** run `cargo clean` until the `10/10` release push completes).
     2. **Milestone Release Update (`10/10`)**:
        - Bump the patch version by `+0.0.1` in `Cargo.toml`, `Settings -> About EigenGraph`, `docs/CHANGELOG.md`, and `docs/IFCX Earth.md`.
-       - Run full deferred verification at `10/10` before pushing (`cargo test --lib`, `cargo check --bin eigengraph --target wasm32-unknown-unknown`, and `cargo build --bin eigengraph --target wasm32-unknown-unknown --release` or `trunk build`), resolving any compilation or test failures accumulated across `1/10` – `10/10`.
+       - Run full milestone verification at `10/10` before pushing (`cargo test --lib`, `cargo check --bin eigengraph --target wasm32-unknown-unknown`, and `cargo build --bin eigengraph --target wasm32-unknown-unknown --release` or `trunk build`), resolving any remaining cross-module or `wasm32` issues.
        - **Automatically stage, commit, and push all changes to `origin main`** so `./dist` deploys to Cloudflare Workers (`eigengraph.net` and `www.eigengraph.net`).
        - Immediately after the `10/10` `git push origin main` succeeds, automatically run `cargo clean` and remove stray OS metadata files (`find . -name ".DS_Store" -not -path "./.git/*" -delete`) to keep local storage lean.
 
