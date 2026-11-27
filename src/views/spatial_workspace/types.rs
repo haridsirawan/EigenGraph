@@ -1783,6 +1783,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::SaveDisk,
     },
     SlashCommandSpec {
+        cmd: "/road-curve",
+        category: "Roads",
+        description: "Activate 3-click Cities: Skylines II curved Bézier road tool",
+        icon: AppIcon::ArcCurve,
+    },
+    SlashCommandSpec {
+        cmd: "/road-straight",
+        category: "Roads",
+        description: "Activate 2-click straight terrain-following road tool",
+        icon: AppIcon::LineSeg,
+    },
+    SlashCommandSpec {
+        cmd: "/bridge-curve",
+        category: "Roads",
+        description: "Activate elevated curved IfcBridge & cable-stayed span tool",
+        icon: AppIcon::BridgeSpan,
+    },
+    SlashCommandSpec {
+        cmd: "/road-demo",
+        category: "Roads",
+        description: "Synthesize curved coastal highway + cable-stayed bay auto-bridge demo",
+        icon: AppIcon::Sparkles,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",

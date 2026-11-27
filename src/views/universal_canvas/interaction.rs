@@ -774,22 +774,86 @@ impl UniversalCanvasState {
                         }
                         EarthBimTool::Road | EarthBimTool::Bridge => {
                             let is_bridge = self.earth_bim_author.active_tool == EarthBimTool::Bridge;
-                            if let Some(s) = self.earth_bim_author.pending_start_mm.take() {
-                                let start_m = [s[0] * 0.001, s[1] * 0.001];
-                                let end_m = [pt[0] * 0.001, pt[1] * 0.001];
-                                let kind = self.city_scene.active_road_kind;
-                                if let Some(seg) = self.city_scene.add_road(start_m, end_m, kind, is_bridge) {
+                            let pt_m_raw = [pt[0] * 0.001, pt[1] * 0.001];
+                            let snapped_m = self
+                                .city_scene
+                                .snap_road_endpoint(pt_m_raw, 12.0)
+                                .unwrap_or(pt_m_raw);
+                            let pt_snapped_mm = [snapped_m[0] * 1000.0, snapped_m[1] * 1000.0];
+                            let kind = self.city_scene.active_road_kind;
+                            let elev_off = self.earth_bim_author.road_elevation_offset_m;
+
+                            if self.city_scene.road_draw_mode
+                                == crate::core::gis::RoadDrawMode::CurvedSpline
+                            {
+                                if self.earth_bim_author.pending_start_mm.is_none() {
+                                    self.earth_bim_author.pending_start_mm = Some(pt_snapped_mm);
+                                    self.earth_bim_author.pending_road_control_mm = None;
+                                    self.status_message = Some(
+                                        "Spline Step 1/3 anchored — click 2nd point to bend curve"
+                                            .to_string(),
+                                    );
+                                } else if self.earth_bim_author.pending_road_control_mm.is_none() {
+                                    self.earth_bim_author.pending_road_control_mm =
+                                        Some(pt_snapped_mm);
+                                    self.status_message = Some(
+                                        "Spline Step 2/3 bend set — click 3rd point to finish Road / Auto-Bridge"
+                                            .to_string(),
+                                    );
+                                } else if let (Some(s_mm), Some(c_mm)) = (
+                                    self.earth_bim_author.pending_start_mm.take(),
+                                    self.earth_bim_author.pending_road_control_mm.take(),
+                                ) {
+                                    let start_m = [s_mm[0] * 0.001, s_mm[1] * 0.001];
+                                    let ctrl_m = [c_mm[0] * 0.001, c_mm[1] * 0.001];
+                                    if let Some(seg) = self.city_scene.add_curved_road_with_auto_bridge(
+                                        start_m,
+                                        Some(ctrl_m),
+                                        snapped_m,
+                                        kind,
+                                        is_bridge,
+                                        elev_off,
+                                        self.active_site_tin.as_ref(),
+                                        self.sea_level_m,
+                                    ) {
+                                        self.status_message = Some(format!(
+                                            "Built Curved {} '{}' ({:.1} m, {:.1} m wide) as IFCX {}",
+                                            if seg.is_bridge { "Auto-Bridge" } else { "Road" },
+                                            seg.name,
+                                            seg.length_m(),
+                                            seg.width_m,
+                                            if seg.is_bridge { "IfcBridge" } else { "IfcRoad" }
+                                        ));
+                                    }
+                                }
+                            } else if let Some(s_mm) = self.earth_bim_author.pending_start_mm.take() {
+                                let start_m = [s_mm[0] * 0.001, s_mm[1] * 0.001];
+                                self.earth_bim_author.pending_road_control_mm = None;
+                                if let Some(seg) = self.city_scene.add_curved_road_with_auto_bridge(
+                                    start_m,
+                                    None,
+                                    snapped_m,
+                                    kind,
+                                    is_bridge,
+                                    elev_off,
+                                    self.active_site_tin.as_ref(),
+                                    self.sea_level_m,
+                                ) {
                                     self.status_message = Some(format!(
                                         "Authored {} '{}' ({:.1} m, {:.1} m wide) as IFCX {}",
-                                        if is_bridge { "Bridge" } else { "Road" },
+                                        if seg.is_bridge { "Bridge" } else { "Road" },
                                         seg.name,
                                         seg.length_m(),
                                         seg.width_m,
-                                        if is_bridge { "IfcBridge" } else { "IfcRoad" }
+                                        if seg.is_bridge { "IfcBridge" } else { "IfcRoad" }
                                     ));
                                 }
                             } else {
-                                self.earth_bim_author.pending_start_mm = Some(pt);
+                                self.earth_bim_author.pending_start_mm = Some(pt_snapped_mm);
+                                self.earth_bim_author.pending_road_control_mm = None;
+                                self.status_message = Some(
+                                    "Road Start anchored — click destination point".to_string(),
+                                );
                             }
                         }
                         EarthBimTool::Zone => {

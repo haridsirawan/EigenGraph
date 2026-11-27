@@ -336,6 +336,9 @@ fn synthesize_fallback_district_roads() -> Vec<IfcxRoadSegment> {
                 is_bridge,
                 deck_elev_m: if is_bridge { 5.2 } else { 0.14 },
                 pier_spacing_m: 18.0,
+                control_enu_m: None,
+                auto_bridge_over_water: true,
+                elevation_offset_m: 0.0,
             });
             id += 1;
         }
@@ -364,6 +367,9 @@ fn synthesize_fallback_district_roads() -> Vec<IfcxRoadSegment> {
                 is_bridge: false,
                 deck_elev_m: 0.14,
                 pier_spacing_m: 18.0,
+                control_enu_m: None,
+                auto_bridge_over_water: true,
+                elevation_offset_m: 0.0,
             });
             id += 1;
         }

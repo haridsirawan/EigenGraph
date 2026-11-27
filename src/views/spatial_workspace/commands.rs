@@ -2144,6 +2144,35 @@ impl SpatialWorkspaceState {
                         }
                     }
                 }
+                "/road-curve" => {
+                    universal_canvas.set_road_author_mode(
+                        false,
+                        crate::core::gis::RoadDrawMode::CurvedSpline,
+                    );
+                    self.push_trace("Activated 3-Click Curved Bézier Road Tool", true);
+                }
+                "/road-straight" => {
+                    universal_canvas.set_road_author_mode(
+                        false,
+                        crate::core::gis::RoadDrawMode::Straight,
+                    );
+                    self.push_trace("Activated Straight Terrain Road Tool", true);
+                }
+                "/bridge-curve" => {
+                    universal_canvas.set_road_author_mode(
+                        true,
+                        crate::core::gis::RoadDrawMode::CurvedSpline,
+                    );
+                    self.push_trace("Activated Curved Cable-Stayed IfcBridge Tool", true);
+                }
+                "/road-demo" => {
+                    universal_canvas.synthesize_demo_coastal_highway();
+                    actions.fit_camera = true;
+                    self.push_trace(
+                        "Synthesized Curved Coastal Highway + Auto-Bridge Demo",
+                        true,
+                    );
+                }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");
                     actions.fit_camera = true;

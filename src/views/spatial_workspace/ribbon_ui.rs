@@ -617,6 +617,122 @@ impl SpatialWorkspaceState {
             });
         }
 
+        if matches!(
+            universal_canvas.earth_bim_author.active_tool,
+            crate::views::universal_canvas::EarthBimTool::Road
+                | crate::views::universal_canvas::EarthBimTool::Bridge
+        ) {
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(deck_w);
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let is_bridge = universal_canvas.earth_bim_author.active_tool
+                    == crate::views::universal_canvas::EarthBimTool::Bridge;
+                let step_lbl = if universal_canvas.earth_bim_author.pending_start_mm.is_none() {
+                    "Click 1: Start"
+                } else if universal_canvas.city_scene.road_draw_mode
+                    == crate::core::gis::RoadDrawMode::CurvedSpline
+                    && universal_canvas
+                        .earth_bim_author
+                        .pending_road_control_mm
+                        .is_none()
+                {
+                    "Click 2: Bend"
+                } else {
+                    "Click End"
+                };
+                icons::icon_label(
+                    ui,
+                    if is_bridge {
+                        AppIcon::BridgeSpan
+                    } else {
+                        AppIcon::ArcCurve
+                    },
+                    12.0,
+                    theme.accent_blue,
+                    &format!(
+                        "{} ({}) • {}",
+                        if is_bridge { "Bridge" } else { "Road" },
+                        universal_canvas.city_scene.road_draw_mode.label(),
+                        step_lbl
+                    ),
+                    10.5,
+                    theme.text_primary,
+                    true,
+                );
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    universal_canvas.city_scene.active_road_kind.label(),
+                    false,
+                    theme.accent_blue,
+                    "Cycle roadway class (Arterial / Collector / Local / Boulevard)",
+                )
+                .clicked()
+                {
+                    universal_canvas.city_scene.active_road_kind =
+                        universal_canvas.city_scene.active_road_kind.cycle_next();
+                }
+                ui.label(
+                    egui::RichText::new("Elev:")
+                        .size(10.0)
+                        .color(theme.text_secondary),
+                );
+                ui.add(
+                    egui::DragValue::new(
+                        &mut universal_canvas.earth_bim_author.road_elevation_offset_m,
+                    )
+                    .range(0.0..=24.0)
+                    .speed(0.5)
+                    .suffix(" m"),
+                );
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "Auto-Bridge",
+                    universal_canvas.city_scene.auto_bridge_enabled,
+                    theme.accent_green,
+                    "Automatically span water and bay crossings with cable-stayed IfcBridge decks & piers",
+                )
+                .clicked()
+                {
+                    universal_canvas.city_scene.auto_bridge_enabled =
+                        !universal_canvas.city_scene.auto_bridge_enabled;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Sparkles),
+                    "Demo Hwy",
+                    false,
+                    theme.accent_orange,
+                    "Build a curved coastal arterial boulevard + cable-stayed auto-bridge across the bay",
+                )
+                .clicked()
+                {
+                    universal_canvas.synthesize_demo_coastal_highway();
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Close),
+                    "Done",
+                    false,
+                    theme.text_secondary,
+                    "Exit road/bridge authoring tool",
+                )
+                .clicked()
+                {
+                    universal_canvas.earth_bim_author.active_tool =
+                        crate::views::universal_canvas::EarthBimTool::None;
+                    universal_canvas.earth_bim_author.pending_start_mm = None;
+                    universal_canvas.earth_bim_author.pending_road_control_mm = None;
+                }
+            });
+        }
+
         if self.active_lens != SpatialLens::Clean {
             ui.add_space(3.0);
             self.render_active_lens_colorbar_strip(
@@ -861,6 +977,108 @@ impl SpatialWorkspaceState {
                     .clicked()
                     {
                         universal_canvas.undo_terrain_sculpt();
+                    }
+                });
+                Self::ribbon_group(ui, theme, "Roads", |ui| {
+                    let et = universal_canvas.earth_bim_author.active_tool;
+                    let rm = universal_canvas.city_scene.road_draw_mode;
+                    let curve_active = et == crate::views::universal_canvas::EarthBimTool::Road
+                        && rm == crate::core::gis::RoadDrawMode::CurvedSpline;
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::ArcCurve,
+                        "Curve Rd",
+                        curve_active,
+                        theme.accent_blue,
+                        "Cities: Skylines II 3-Click Curved Bézier Road (auto-bridges water)",
+                    )
+                    .clicked()
+                    {
+                        if curve_active {
+                            universal_canvas.earth_bim_author.active_tool =
+                                crate::views::universal_canvas::EarthBimTool::None;
+                        } else {
+                            universal_canvas.set_road_author_mode(
+                                false,
+                                crate::core::gis::RoadDrawMode::CurvedSpline,
+                            );
+                        }
+                    }
+                    let straight_active = et == crate::views::universal_canvas::EarthBimTool::Road
+                        && rm == crate::core::gis::RoadDrawMode::Straight;
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::LineSeg,
+                        "Straight",
+                        straight_active,
+                        theme.accent_blue,
+                        "Draw 2-Click Straight Terrain-Following Road (auto-bridges water)",
+                    )
+                    .clicked()
+                    {
+                        if straight_active {
+                            universal_canvas.earth_bim_author.active_tool =
+                                crate::views::universal_canvas::EarthBimTool::None;
+                        } else {
+                            universal_canvas.set_road_author_mode(
+                                false,
+                                crate::core::gis::RoadDrawMode::Straight,
+                            );
+                        }
+                    }
+                    let bridge_active = et == crate::views::universal_canvas::EarthBimTool::Bridge;
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::BridgeSpan,
+                        "Bridge",
+                        bridge_active,
+                        theme.accent_green,
+                        "Draw Elevated Cable-Stayed / Pier IfcBridge Spline",
+                    )
+                    .clicked()
+                    {
+                        if bridge_active {
+                            universal_canvas.earth_bim_author.active_tool =
+                                crate::views::universal_canvas::EarthBimTool::None;
+                        } else {
+                            universal_canvas.set_road_author_mode(
+                                true,
+                                crate::core::gis::RoadDrawMode::CurvedSpline,
+                            );
+                        }
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Grid,
+                        "Road Type",
+                        false,
+                        theme.accent_orange,
+                        &format!(
+                            "Cycle Road Class ({})",
+                            universal_canvas.city_scene.active_road_kind.label()
+                        ),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.city_scene.active_road_kind =
+                            universal_canvas.city_scene.active_road_kind.cycle_next();
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Undo,
+                        "Undo Rd",
+                        false,
+                        theme.text_secondary,
+                        "Remove the most recently authored IfcRoad / IfcBridge segment",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.city_scene.roads.pop();
                     }
                 });
                 Self::ribbon_group(ui, theme, "Zoning & Brief", |ui| {

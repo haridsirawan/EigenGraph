@@ -2981,3 +2981,58 @@ use crate::core::ifcx::IfcxDocument;
             "Realistic biome & coastal ocean WGSL pass triggered WebGPU validation error: {val_err:?}"
         );
     }
+
+    #[test]
+    fn test_v0867_curved_road_and_auto_bridge_webgpu_mesh() {
+        let tin = TinSurfaceMesh::generate_from_dem_preset(
+            DemTerrainPreset::ArchipelagoBayAndVolcano,
+            680.0,
+            680.0,
+            46,
+            46,
+            1.0,
+        );
+        let mut city = IfcxCityScene::default();
+        city.add_curved_road_with_auto_bridge(
+            [-190.0, -190.0],
+            Some([10.0, -150.0]),
+            [50.0, 40.0],
+            crate::core::gis::IfcxRoadKind::Arterial,
+            false,
+            0.0,
+            Some(&tin),
+            0.0,
+        )
+        .expect("curved auto-bridge");
+        let mesh = build_rtc_site_scene_mesh_with_landscape(
+            VectorEarthTheme::CityDaylight,
+            (-6.2088, 106.8456),
+            17.0,
+            true,
+            Some(&tin),
+            &WorldSpatialIndex::default(),
+            None,
+            &UrbanVectorLayerCache::default(),
+            Some(&city),
+            true,
+            0.0,
+        );
+        let road_verts: Vec<&GpuEarthVertex> = mesh
+            .vertices
+            .iter()
+            .filter(|v| (v.meta[0] - 3.0).abs() < 0.05)
+            .collect();
+        assert!(
+            road_verts.len() > 600,
+            "Curved coastal auto-bridge must emit extruded deck, piers, pylons, and stay cables, got {} verts",
+            road_verts.len()
+        );
+        assert!(
+            road_verts.iter().any(|v| v.pos[2] > 18.0),
+            "Coastal cable-stayed bridge pylons must rise above +18m relative elevation"
+        );
+        assert!(mesh
+            .vertices
+            .iter()
+            .all(|v| v.pos.iter().all(|f| f.is_finite()) && v.normal.iter().all(|f| f.is_finite())));
+    }

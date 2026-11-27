@@ -485,13 +485,289 @@ pub(super) fn push_inclined_3d_strut_enu(
     }
 }
 
+/// Pushes a mitered sloped quad segment strip between stations `a` and `b` at signed lateral
+/// offset `[off_l, off_r]` and bottom/top elevations `z0..z1` with proper outward normals.
+#[allow(clippy::too_many_arguments)]
+fn push_sloped_ribbon_strip_enu(
+    verts: &mut Vec<GpuEarthVertex>,
+    idxs: &mut Vec<u32>,
+    a: &crate::core::gis::RoadProfileSample,
+    b: &crate::core::gis::RoadProfileSample,
+    off_l: f64,
+    off_r: f64,
+    za_bot: f32,
+    za_top: f32,
+    zb_bot: f32,
+    zb_top: f32,
+    col: [f32; 4],
+    kind: f32,
+) {
+    let pt = |s: &crate::core::gis::RoadProfileSample, off: f64, z: f32| -> [f32; 3] {
+        [
+            (s.east_m + s.normal[0] * off) as f32,
+            (s.north_m + s.normal[1] * off) as f32,
+            z,
+        ]
+    };
+    let al_t = pt(a, off_l, za_top);
+    let ar_t = pt(a, off_r, za_top);
+    let br_t = pt(b, off_r, zb_top);
+    let bl_t = pt(b, off_l, zb_top);
+    let al_b = pt(a, off_l, za_bot);
+    let ar_b = pt(a, off_r, za_bot);
+    let br_b = pt(b, off_r, zb_bot);
+    let bl_b = pt(b, off_l, zb_bot);
+
+    // Top deck face
+    let tb = verts.len() as u32;
+    for pos in [al_t, ar_t, br_t, bl_t] {
+        verts.push(GpuEarthVertex {
+            pos,
+            normal: [0.0, 0.0, 1.0],
+            color: col,
+            meta: [kind, pos[2].max(0.0), 1.0, 0.0],
+        });
+    }
+    idxs.extend_from_slice(&[tb, tb + 1, tb + 2, tb, tb + 2, tb + 3]);
+
+    let side_col = mix_rgb(col, [0.12, 0.14, 0.18, 1.0], 0.28);
+    // Right side skirt
+    let rb = verts.len() as u32;
+    let rn = [-a.normal[0] as f32, -a.normal[1] as f32, 0.0];
+    for pos in [ar_b, br_b, br_t, ar_t] {
+        verts.push(GpuEarthVertex {
+            pos,
+            normal: rn,
+            color: side_col,
+            meta: [kind, pos[2].max(0.0), 0.85, 0.0],
+        });
+    }
+    idxs.extend_from_slice(&[rb, rb + 1, rb + 2, rb, rb + 2, rb + 3]);
+
+    // Left side skirt
+    let lb = verts.len() as u32;
+    let ln = [a.normal[0] as f32, a.normal[1] as f32, 0.0];
+    for pos in [bl_b, al_b, al_t, bl_t] {
+        verts.push(GpuEarthVertex {
+            pos,
+            normal: ln,
+            color: side_col,
+            meta: [kind, pos[2].max(0.0), 0.85, 0.0],
+        });
+    }
+    idxs.extend_from_slice(&[lb, lb + 1, lb + 2, lb, lb + 2, lb + 3]);
+}
+
+/// Extrudes a terrain-coupled straight or curved Bézier `IfcRoad` / `IfcBridge` with piers,
+/// bridge parapets, centerline striping, and signature coastal cable-stayed pylons.
+#[allow(clippy::too_many_arguments)]
+fn push_curved_road_or_bridge_enu(
+    verts: &mut Vec<GpuEarthVertex>,
+    idxs: &mut Vec<u32>,
+    road: &crate::core::gis::IfcxRoadSegment,
+    tin: Option<&TinSurfaceMesh>,
+    sea_level_m: f32,
+    asphalt_col: [f32; 4],
+    curb_col: [f32; 4],
+    stripe_col: [f32; 4],
+) {
+    let profile = road.sample_3d_profile(tin, sea_level_m);
+    if profile.len() < 2 {
+        return;
+    }
+    let hw = road.width_m * 0.5;
+    let sw_hw = hw + if road.is_bridge { 0.85 } else { 1.35 };
+    let has_water_span = profile.iter().any(|s| s.over_water);
+
+    for (seg_idx, win) in profile.windows(2).enumerate() {
+        let a = &win[0];
+        let b = &win[1];
+        if road.is_bridge || a.is_elevated || b.is_elevated {
+            let za_bot = a.deck_z_rel_m - 0.85;
+            let zb_bot = b.deck_z_rel_m - 0.85;
+            // Box girder deck slab
+            push_sloped_ribbon_strip_enu(
+                verts,
+                idxs,
+                a,
+                b,
+                -sw_hw,
+                sw_hw,
+                za_bot,
+                a.deck_z_rel_m,
+                zb_bot,
+                b.deck_z_rel_m,
+                curb_col,
+                3.0,
+            );
+            // Asphalt carriageway between parapets
+            let inner = (hw - 0.35).max(1.2);
+            push_sloped_ribbon_strip_enu(
+                verts,
+                idxs,
+                a,
+                b,
+                -inner,
+                inner,
+                a.deck_z_rel_m,
+                a.deck_z_rel_m + 0.08,
+                b.deck_z_rel_m,
+                b.deck_z_rel_m + 0.08,
+                asphalt_col,
+                3.0,
+            );
+            // Guardrail parapets
+            for side in [-1.0_f64, 1.0] {
+                let p_in = side * (sw_hw - 0.45);
+                let p_out = side * sw_hw;
+                let (ol, or) = if p_in < p_out { (p_in, p_out) } else { (p_out, p_in) };
+                push_sloped_ribbon_strip_enu(
+                    verts,
+                    idxs,
+                    a,
+                    b,
+                    ol,
+                    or,
+                    a.deck_z_rel_m,
+                    a.deck_z_rel_m + 0.65,
+                    b.deck_z_rel_m,
+                    b.deck_z_rel_m + 0.65,
+                    mix_rgb(curb_col, [0.95, 0.96, 0.98, 1.0], 0.35),
+                    3.0,
+                );
+            }
+        } else {
+            // Terrain-hugging road sidewalk apron + asphalt carriageway
+            push_sloped_ribbon_strip_enu(
+                verts,
+                idxs,
+                a,
+                b,
+                -sw_hw,
+                sw_hw,
+                a.deck_z_rel_m - 0.25,
+                a.deck_z_rel_m - 0.04,
+                b.deck_z_rel_m - 0.25,
+                b.deck_z_rel_m - 0.04,
+                curb_col,
+                3.0,
+            );
+            push_sloped_ribbon_strip_enu(
+                verts,
+                idxs,
+                a,
+                b,
+                -hw,
+                hw,
+                a.deck_z_rel_m - 0.10,
+                a.deck_z_rel_m + 0.05,
+                b.deck_z_rel_m - 0.10,
+                b.deck_z_rel_m + 0.05,
+                asphalt_col,
+                3.0,
+            );
+        }
+        // Dashed lane markings along alternating stations
+        if seg_idx % 2 == 0 {
+            push_sloped_ribbon_strip_enu(
+                verts,
+                idxs,
+                a,
+                b,
+                -0.16,
+                0.16,
+                a.deck_z_rel_m + 0.05,
+                a.deck_z_rel_m + 0.11,
+                b.deck_z_rel_m + 0.05,
+                b.deck_z_rel_m + 0.11,
+                stripe_col,
+                3.0,
+            );
+        }
+    }
+
+    // Twin substructure piers beneath elevated spans & water bridges
+    for (idx, s) in profile.iter().enumerate() {
+        let clear_m = s.deck_z_rel_m - s.ground_z_rel_m;
+        let on_pier_step = idx > 0 && idx + 1 < profile.len() && idx % 3 == 0;
+        if on_pier_step && (road.is_bridge || clear_m > 1.6) {
+            let p_bot = (s.ground_z_rel_m - 2.2).min(s.deck_z_rel_m - 1.5);
+            let p_top = s.deck_z_rel_m - 0.80;
+            let pr = 0.72_f64;
+            for side in [-0.34_f64, 0.34] {
+                let cx = s.east_m + s.normal[0] * road.width_m * side;
+                let cy = s.north_m + s.normal[1] * road.width_m * side;
+                let pfp = [
+                    [cx - pr, cy - pr],
+                    [cx + pr, cy - pr],
+                    [cx + pr, cy + pr],
+                    [cx - pr, cy + pr],
+                ];
+                push_box_prism_enu(verts, idxs, &pfp, p_bot, p_top, [0.58, 0.63, 0.68, 1.0], 3.0);
+            }
+        }
+    }
+
+    // Signature cable-stayed pylons & diagonal cables on coastal water bridges >= 65m
+    if road.is_bridge && road.length_m() >= 65.0 && has_water_span && profile.len() >= 9 {
+        let n_st = profile.len();
+        let tower_indices = [n_st / 3, (2 * n_st) / 3];
+        let tower_col = [0.84_f32, 0.88, 0.92, 1.0];
+        let cable_col = [0.92_f32, 0.95, 0.98, 1.0];
+        let pylon_h = 18.0_f32;
+        for ti in tower_indices {
+            let s = &profile[ti];
+            let p_top = s.deck_z_rel_m + pylon_h;
+            let mut heads = Vec::with_capacity(2);
+            for side in [-1.0_f64, 1.0] {
+                let cx = s.east_m + s.normal[0] * (sw_hw + 0.35) * side;
+                let cy = s.north_m + s.normal[1] * (sw_hw + 0.35) * side;
+                heads.push([cx, cy, (p_top - 1.5) as f64]);
+                let pr = 0.85_f64;
+                let pfp = [
+                    [cx - pr, cy - pr],
+                    [cx + pr, cy - pr],
+                    [cx + pr, cy + pr],
+                    [cx - pr, cy + pr],
+                ];
+                push_box_prism_enu(verts, idxs, &pfp, s.deck_z_rel_m - 0.5, p_top, tower_col, 3.0);
+
+                // Anchor 4 pairs of stay cables fore and aft along the bridge deck
+                for dk in [-3_isize, -2, -1, 1, 2, 3] {
+                    let anchor_idx = (ti as isize + dk).clamp(0, (n_st - 1) as isize) as usize;
+                    let anc = &profile[anchor_idx];
+                    let ax = anc.east_m + anc.normal[0] * (sw_hw - 0.25) * side;
+                    let ay = anc.north_m + anc.normal[1] * (sw_hw - 0.25) * side;
+                    let az = (anc.deck_z_rel_m + 0.45) as f64;
+                    let hz = (s.deck_z_rel_m + pylon_h - 1.2 - (dk.unsigned_abs() as f32 * 1.4)) as f64;
+                    push_inclined_3d_strut_enu(
+                        verts,
+                        idxs,
+                        [cx, cy, hz],
+                        [ax, ay, az],
+                        0.16,
+                        0.16,
+                        cable_col,
+                    );
+                }
+            }
+            if heads.len() == 2 {
+                push_inclined_3d_strut_enu(verts, idxs, heads[0], heads[1], 1.1, 1.2, tower_col);
+            }
+        }
+    }
+}
+
 /// Appends authored IFCX City-Builder objects (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`,
 /// context towers, instanced stylized trees, and `IfcGradedPad`) into the RTC site mesh.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn push_city_builder_scene_enu(
     verts: &mut Vec<GpuEarthVertex>,
     idxs: &mut Vec<u32>,
     theme: VectorEarthTheme,
     city: &IfcxCityScene,
+    active_site_tin: Option<&TinSurfaceMesh>,
+    sea_level_m: f32,
     wall_base: [f32; 4],
     roof_base: [f32; 4],
 ) {
@@ -507,93 +783,36 @@ pub(super) fn push_city_builder_scene_enu(
     } else {
         [0.94_f32, 0.94, 0.88, 1.0]
     };
+    let ref_z = active_site_tin
+        .map(|t| t.sample_elevation_and_slope(0.0, 0.0).0)
+        .unwrap_or(0.0);
 
-    // 1. Authored `IfcRoad` & `IfcBridge` spans
+    // 1. Authored Terrain-Coupled Straight / Curved Bézier `IfcRoad` & Auto-Bridge `IfcBridge`
     for road in &city.roads {
-        let fp = road.footprint_enu_m();
-        let dx = road.end_enu_m[0] - road.start_enu_m[0];
-        let dy = road.end_enu_m[1] - road.start_enu_m[1];
-        let len = dx.hypot(dy).max(1.0);
-        let ux = dx / len;
-        let uy = dy / len;
-        let nx = -uy;
-        let ny = ux;
-
-        if road.is_bridge {
-            let deck_top = road.deck_elev_m as f32;
-            let deck_bot = (road.deck_elev_m - 0.85) as f32;
-            push_box_prism_enu(verts, idxs, &fp, deck_bot, deck_top, curb_col, 3.0);
-            // Asphalt roadway surface slightly raised inside bridge parapets
-            let inner_hw = (road.width_m * 0.5 - 0.65).max(1.2);
-            let asp_fp = [
-                [road.start_enu_m[0] - nx * inner_hw, road.start_enu_m[1] - ny * inner_hw],
-                [road.end_enu_m[0] - nx * inner_hw, road.end_enu_m[1] - ny * inner_hw],
-                [road.end_enu_m[0] + nx * inner_hw, road.end_enu_m[1] + ny * inner_hw],
-                [road.start_enu_m[0] + nx * inner_hw, road.start_enu_m[1] + ny * inner_hw],
-            ];
-            push_box_prism_enu(verts, idxs, &asp_fp, deck_top, deck_top + 0.08, asphalt_col, 3.0);
-
-            // Bridge piers every `pier_spacing_m` down to subsurface foundations
-            let span_count = ((len / road.pier_spacing_m.max(8.0)).ceil() as usize).clamp(2, 24);
-            for k in 1..span_count {
-                let frac = k as f64 / span_count as f64;
-                let px = road.start_enu_m[0] + dx * frac;
-                let py = road.start_enu_m[1] + dy * frac;
-                let pr = 0.75_f64;
-                for side in [-0.32, 0.32] {
-                    let cx = px + nx * road.width_m * side;
-                    let cy = py + ny * road.width_m * side;
-                    let pier_fp = [
-                        [cx - pr, cy - pr],
-                        [cx + pr, cy - pr],
-                        [cx + pr, cy + pr],
-                        [cx - pr, cy + pr],
-                    ];
-                    push_box_prism_enu(verts, idxs, &pier_fp, -1.5, deck_bot, [0.58, 0.63, 0.68, 1.0], 3.0);
-                }
-            }
-        } else {
-            // Sidewalk base + asphalt carriageway + center lane markings
-            let sw_hw = road.width_m * 0.5 + 1.2;
-            let sw_fp = [
-                [road.start_enu_m[0] - nx * sw_hw, road.start_enu_m[1] - ny * sw_hw],
-                [road.end_enu_m[0] - nx * sw_hw, road.end_enu_m[1] - ny * sw_hw],
-                [road.end_enu_m[0] + nx * sw_hw, road.end_enu_m[1] + ny * sw_hw],
-                [road.start_enu_m[0] + nx * sw_hw, road.start_enu_m[1] + ny * sw_hw],
-            ];
-            push_box_prism_enu(verts, idxs, &sw_fp, 0.0, 0.12, curb_col, 3.0);
-            push_box_prism_enu(verts, idxs, &fp, 0.04, 0.16, asphalt_col, 3.0);
-
-            // Dashed center lane stripe
-            let dash_step = 6.0_f64;
-            let n_dashes = (len / dash_step).floor() as usize;
-            for d in 0..n_dashes.min(120) {
-                let s0 = d as f64 * dash_step + 1.2;
-                let s1 = (s0 + 2.8).min(len - 0.8);
-                if s1 <= s0 {
-                    continue;
-                }
-                let shw = 0.14;
-                let p0x = road.start_enu_m[0] + ux * s0;
-                let p0y = road.start_enu_m[1] + uy * s0;
-                let p1x = road.start_enu_m[0] + ux * s1;
-                let p1y = road.start_enu_m[1] + uy * s1;
-                let dash_fp = [
-                    [p0x - nx * shw, p0y - ny * shw],
-                    [p1x - nx * shw, p1y - ny * shw],
-                    [p1x + nx * shw, p1y + ny * shw],
-                    [p0x + nx * shw, p0y + ny * shw],
-                ];
-                push_box_prism_enu(verts, idxs, &dash_fp, 0.16, 0.19, stripe_col, 3.0);
-            }
-        }
+        push_curved_road_or_bridge_enu(
+            verts,
+            idxs,
+            road,
+            active_site_tin,
+            sea_level_m,
+            asphalt_col,
+            curb_col,
+            stripe_col,
+        );
     }
 
     // 2. Authored `IfcSpatialZone` parcels, optional context towers & instanced stylized trees
     for zone in &city.zones {
+        let ground_z = active_site_tin
+            .map(|t| {
+                t.sample_elevation_and_slope(zone.center_enu_m[0] as f32, zone.center_enu_m[1] as f32)
+                    .0
+                    - ref_z
+            })
+            .unwrap_or(0.0);
         let fp = zone.footprint_enu_m();
         let zcol = mix_rgb(zone.kind.fill_rgba(), [0.9, 0.94, 0.96, 1.0], 0.12);
-        push_box_prism_enu(verts, idxs, &fp, 0.0, 0.16, zcol, 1.0);
+        push_box_prism_enu(verts, idxs, &fp, ground_z, ground_z + 0.22, zcol, 1.0);
 
         if zone.synthesize_context_towers && zone.kind != IfcxZoneKind::Park {
             let rad = zone.rotation_deg.to_radians();
@@ -615,16 +834,24 @@ pub(super) fn push_city_builder_scene_enu(
             };
             let twall = mix_rgb(wall_base, zone.kind.fill_rgba(), 0.22);
             let troof = mix_rgb(roof_base, zone.kind.fill_rgba(), 0.15);
-            push_extruded_building_prism_enu(verts, idxs, &tfp, 0.16, h_m, twall, troof);
+            push_extruded_building_prism_enu(verts, idxs, &tfp, ground_z + 0.22, h_m, twall, troof);
         }
 
         for [tx, ty, th] in zone.instanced_trees_enu_m() {
-            push_stylized_tree_enu(verts, idxs, tx as f32, ty as f32, 0.16, th as f32, theme);
+            let tz = active_site_tin
+                .map(|t| t.sample_elevation_and_slope(tx as f32, ty as f32).0 - ref_z)
+                .unwrap_or(0.0);
+            push_stylized_tree_enu(verts, idxs, tx as f32, ty as f32, tz + 0.18, th as f32, theme);
         }
     }
 
     // 3. Authored `IfcGradedPad` foundation aprons
     for pad in &city.graded_pads {
+        let pad_z = if active_site_tin.is_some() {
+            (pad.target_elev_m as f32) - ref_z
+        } else {
+            0.0
+        };
         let hw = pad.width_m * 0.5;
         let hd = pad.depth_m * 0.5;
         let pfp = [
@@ -633,7 +860,15 @@ pub(super) fn push_city_builder_scene_enu(
             [pad.center_enu_m[0] + hw, pad.center_enu_m[1] + hd],
             [pad.center_enu_m[0] - hw, pad.center_enu_m[1] + hd],
         ];
-        push_box_prism_enu(verts, idxs, &pfp, -0.06, 0.08, [0.58, 0.56, 0.50, 1.0], 1.0);
+        push_box_prism_enu(
+            verts,
+            idxs,
+            &pfp,
+            pad_z - 0.12,
+            pad_z + 0.08,
+            [0.58, 0.56, 0.50, 1.0],
+            1.0,
+        );
     }
 }
 
@@ -1896,7 +2131,16 @@ pub fn build_rtc_site_scene_mesh_with_landscape(
 
     // 5. Phase 67: Authored IFCX City-Builder Infrastructure (`IfcRoad`, `IfcBridge`, `IfcSpatialZone`, Trees, Graded Pads)
     if let Some(city) = city_scene.filter(|c| !c.is_empty()) {
-        push_city_builder_scene_enu(&mut vertices, &mut indices, theme, city, wall_base, roof_base);
+        push_city_builder_scene_enu(
+            &mut vertices,
+            &mut indices,
+            theme,
+            city,
+            active_site_tin,
+            sea_level_m,
+            wall_base,
+            roof_base,
+        );
     }
 
     GpuMeshPayload { vertices, indices }

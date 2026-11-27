@@ -678,6 +678,199 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Equips Cities: Skylines II road/bridge spline authoring and clears conflicting sculpt brushes.
+    pub fn set_road_author_mode(
+        &mut self,
+        is_bridge: bool,
+        mode: crate::core::gis::RoadDrawMode,
+    ) {
+        self.terrain_sculpt.active_brush = None;
+        self.terrain_sculpt_hover_enu = None;
+        self.globe_mode = true;
+        self.earth_bim_author.active_tool = if is_bridge {
+            EarthBimTool::Bridge
+        } else {
+            EarthBimTool::Road
+        };
+        self.city_scene.road_draw_mode = mode;
+        self.earth_bim_author.pending_start_mm = None;
+        self.earth_bim_author.pending_road_control_mm = None;
+        self.status_message = Some(format!(
+            "Road Tool: {} ({}) • Click Start -> {} -> End",
+            self.city_scene.active_road_kind.label(),
+            mode.label(),
+            if mode == crate::core::gis::RoadDrawMode::CurvedSpline {
+                "Bend"
+            } else {
+                "Next"
+            }
+        ));
+    }
+
+    /// Generates a scenic curved coastal arterial boulevard + cable-stayed bay auto-bridge demo.
+    pub fn synthesize_demo_coastal_highway(&mut self) {
+        self.globe_mode = true;
+        self.show_terrain_contours = true;
+        self.realistic_landscape_enabled = true;
+        if self.active_site_tin.is_none() || !self.site_tin_preset.has_coastal_water() {
+            self.apply_landscape_preset(
+                crate::core::gis::DemTerrainPreset::ArchipelagoBayAndVolcano,
+            );
+        } else {
+            self.ensure_site_tin_generated();
+        }
+        self.show_water_surface = true;
+        let tin_clone = self.active_site_tin.clone();
+        let sea = self.sea_level_m;
+        let mut added = 0usize;
+        if self
+            .city_scene
+            .add_curved_road_with_auto_bridge(
+                [-195.0, -185.0],
+                Some([15.0, -145.0]),
+                [45.0, 25.0],
+                crate::core::gis::IfcxRoadKind::Arterial,
+                false,
+                0.0,
+                tin_clone.as_ref(),
+                sea,
+            )
+            .is_some()
+        {
+            added += 1;
+        }
+        if self
+            .city_scene
+            .add_curved_road_with_auto_bridge(
+                [45.0, 25.0],
+                Some([-25.0, 65.0]),
+                [-130.0, 40.0],
+                crate::core::gis::IfcxRoadKind::Collector,
+                false,
+                0.0,
+                tin_clone.as_ref(),
+                sea,
+            )
+            .is_some()
+        {
+            added += 1;
+        }
+        self.status_message = Some(format!(
+            "Synthesized {added} curved coastal IFCX highways & cable-stayed auto-bridge"
+        ));
+    }
+
+    fn paint_road_spline_preview(
+        &self,
+        painter: &egui::Painter,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !matches!(
+            self.earth_bim_author.active_tool,
+            EarthBimTool::Road | EarthBimTool::Bridge
+        ) {
+            return;
+        }
+        let Some(start_mm) = self.earth_bim_author.pending_start_mm else {
+            return;
+        };
+        let Some(hover_mm) = self.earth_bim_author.hover_snap_mm else {
+            return;
+        };
+        let start_m = [start_mm[0] * 0.001, start_mm[1] * 0.001];
+        let hover_m = [hover_mm[0] * 0.001, hover_mm[1] * 0.001];
+        let snapped_end = self
+            .city_scene
+            .snap_road_endpoint(hover_m, 12.0)
+            .unwrap_or(hover_m);
+
+        let (ctrl_m, end_m) = if self.city_scene.road_draw_mode
+            == crate::core::gis::RoadDrawMode::CurvedSpline
+        {
+            if let Some(c_mm) = self.earth_bim_author.pending_road_control_mm {
+                (Some([c_mm[0] * 0.001, c_mm[1] * 0.001]), snapped_end)
+            } else {
+                // Before Bend is clicked, preview a gentle straight lead segment to cursor
+                (None, snapped_end)
+            }
+        } else {
+            (None, snapped_end)
+        };
+
+        let preview = crate::core::gis::IfcxRoadSegment {
+            id: 0,
+            name: "Preview".to_string(),
+            kind: self.city_scene.active_road_kind,
+            start_enu_m: start_m,
+            end_enu_m: end_m,
+            width_m: self.city_scene.active_road_kind.default_width_m(),
+            lanes: self.city_scene.active_road_kind.default_lanes(),
+            is_bridge: self.earth_bim_author.active_tool == EarthBimTool::Bridge
+                || self.earth_bim_author.road_elevation_offset_m > 2.2,
+            deck_elev_m: 6.5,
+            pier_spacing_m: 18.0,
+            control_enu_m: ctrl_m,
+            auto_bridge_over_water: self.city_scene.auto_bridge_enabled,
+            elevation_offset_m: self.earth_bim_author.road_elevation_offset_m,
+        };
+        let profile = preview.sample_3d_profile(self.active_site_tin.as_ref(), self.sea_level_m);
+        let crosses_water = profile.iter().any(|s| s.over_water);
+        let col = if crosses_water || preview.is_bridge {
+            Color32::from_rgb(56, 206, 248)
+        } else {
+            Color32::from_rgb(248, 186, 64)
+        };
+
+        let mut pts = Vec::with_capacity(profile.len());
+        for s in &profile {
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                self.ground_origin_lat_lon,
+                [s.east_m * 1000.0, s.north_m * 1000.0],
+            );
+            if let Some((sp, _, true)) =
+                xform.project_lat_lon_elev(ll.0, ll.1, s.deck_z_rel_m as f64 + 0.3)
+            {
+                pts.push(sp);
+            }
+        }
+        if pts.len() >= 2 {
+            painter.add(egui::Shape::line(pts.clone(), Stroke::new(3.2, col)));
+            if let Some(&last_sp) = pts.last() {
+                let len = preview.length_m();
+                let badge = if crosses_water && self.city_scene.auto_bridge_enabled {
+                    format!("{len:.0} m • AUTO-BRIDGE")
+                } else {
+                    format!("{len:.0} m • {}", preview.kind.label())
+                };
+                painter.text(
+                    last_sp + egui::vec2(10.0, -12.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    badge,
+                    egui::FontId::proportional(11.0),
+                    Color32::WHITE,
+                );
+            }
+        }
+        for anchor in [Some(start_m), ctrl_m].into_iter().flatten() {
+            let z = self
+                .active_site_tin
+                .as_ref()
+                .map(|t| {
+                    t.sample_elevation_and_slope(anchor[0] as f32, anchor[1] as f32)
+                        .0
+                        - t.sample_elevation_and_slope(0.0, 0.0).0
+                })
+                .unwrap_or(0.0);
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                self.ground_origin_lat_lon,
+                [anchor[0] * 1000.0, anchor[1] * 1000.0],
+            );
+            if let Some((ap, _, true)) = xform.project_lat_lon_elev(ll.0, ll.1, z as f64 + 0.4) {
+                painter.circle_filled(ap, 4.5, col);
+            }
+        }
+    }
+
     /// Evaluates seismic pounding gaps, urban wind exposure & Venturi channeling, and debris zones
     /// between the active BIM structure and all surrounding neighbors inside `world_index`.
     pub fn refresh_neighborhood_coupling(&mut self, bim_project: &BimProject) {
@@ -2939,6 +3132,7 @@ impl UniversalCanvasState {
             }
             if let Some(ref xform) = active_globe_xform {
                 self.paint_terrain_sculpt_brush_ring(&painter, xform);
+                self.paint_road_spline_preview(&painter, xform);
             }
             self.paint_planetary_world_buildings(&painter, rect, theme);
             if self.show_neighborhood_hazards {

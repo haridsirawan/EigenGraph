@@ -24,7 +24,7 @@ pub use district_hazard::{
 
 pub use city_builder::{
     IfcxCityScene, IfcxGradedPad, IfcxRoadKind, IfcxRoadSegment, IfcxSpatialZone, IfcxZoneKind,
-    RoadParcelSnapHit,
+    RoadDrawMode, RoadParcelSnapHit, RoadProfileSample,
 };
 
 pub use world_vectors::{

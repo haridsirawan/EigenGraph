@@ -64,6 +64,40 @@ impl IfcxRoadKind {
     }
 }
 
+fn default_auto_bridge_true() -> bool {
+    true
+}
+
+/// Geometry alignment authoring mode for Cities: Skylines II style road & bridge placement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RoadDrawMode {
+    Straight,
+    #[default]
+    CurvedSpline,
+}
+
+impl RoadDrawMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Straight => "Straight",
+            Self::CurvedSpline => "Curved Spline",
+        }
+    }
+}
+
+/// Terrain-coupled 3D station sample along a straight or curved quadratic Bézier road/bridge span.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RoadProfileSample {
+    pub east_m: f64,
+    pub north_m: f64,
+    pub deck_z_rel_m: f32,
+    pub ground_z_rel_m: f32,
+    pub over_water: bool,
+    pub is_elevated: bool,
+    pub tangent: [f64; 2],
+    pub normal: [f64; 2],
+}
+
 /// Authored pure-vector roadway or bridge span in local ENU site meters (`IfcRoad` / `IfcBridge`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IfcxRoadSegment {
@@ -77,13 +111,131 @@ pub struct IfcxRoadSegment {
     pub is_bridge: bool,
     pub deck_elev_m: f64,
     pub pier_spacing_m: f64,
+    #[serde(default)]
+    pub control_enu_m: Option<[f64; 2]>,
+    #[serde(default = "default_auto_bridge_true")]
+    pub auto_bridge_over_water: bool,
+    #[serde(default)]
+    pub elevation_offset_m: f64,
 }
 
 impl IfcxRoadSegment {
+    /// Evaluates ordered 2D centerline stations along linear or quadratic Bézier alignment.
+    pub fn sample_centerline(&self, steps: usize) -> Vec<[f64; 2]> {
+        let n = steps.max(1);
+        let p0 = self.start_enu_m;
+        let p1 = self.end_enu_m;
+        let mut pts = Vec::with_capacity(n + 1);
+        for i in 0..=n {
+            let t = i as f64 / n as f64;
+            let pt = if let Some(pc) = self.control_enu_m {
+                let omt = 1.0 - t;
+                [
+                    omt * omt * p0[0] + 2.0 * omt * t * pc[0] + t * t * p1[0],
+                    omt * omt * p0[1] + 2.0 * omt * t * pc[1] + t * t * p1[1],
+                ]
+            } else {
+                [p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t]
+            };
+            pts.push(pt);
+        }
+        pts
+    }
+
     pub fn length_m(&self) -> f64 {
-        let dx = self.end_enu_m[0] - self.start_enu_m[0];
-        let dy = self.end_enu_m[1] - self.start_enu_m[1];
-        dx.hypot(dy)
+        if self.control_enu_m.is_some() {
+            let pts = self.sample_centerline(16);
+            pts.windows(2)
+                .map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]))
+                .sum()
+        } else {
+            let dx = self.end_enu_m[0] - self.start_enu_m[0];
+            let dy = self.end_enu_m[1] - self.start_enu_m[1];
+            dx.hypot(dy)
+        }
+    }
+
+    /// Evaluates terrain-coupled 3D road/bridge vertical profile with smooth vertical curve grading.
+    pub fn sample_3d_profile(
+        &self,
+        tin: Option<&TinSurfaceMesh>,
+        sea_level_m: f32,
+    ) -> Vec<RoadProfileSample> {
+        let steps = if self.control_enu_m.is_some() {
+            18
+        } else {
+            ((self.length_m() / 14.0).ceil() as usize).clamp(4, 20)
+        };
+        let pts = self.sample_centerline(steps);
+        let ref_z = tin
+            .map(|t| t.sample_elevation_and_slope(0.0, 0.0).0)
+            .unwrap_or(0.0);
+        let mut samples = Vec::with_capacity(pts.len());
+
+        for (i, &p) in pts.iter().enumerate() {
+            let prev = pts[i.saturating_sub(1)];
+            let next = pts[(i + 1).min(pts.len() - 1)];
+            let tx = next[0] - prev[0];
+            let ty = next[1] - prev[1];
+            let tlen = tx.hypot(ty).max(1e-6);
+            let tangent = [tx / tlen, ty / tlen];
+            let normal = [-tangent[1], tangent[0]];
+
+            let ground_msl = tin
+                .map(|t| t.sample_elevation_and_slope(p[0] as f32, p[1] as f32).0)
+                .unwrap_or(ref_z);
+            let ground_z_rel_m = ground_msl - ref_z;
+            let over_water = tin.is_some() && ground_msl < sea_level_m + 0.45;
+
+            let deck_z_rel_m = if self.is_bridge && tin.is_none() {
+                self.deck_elev_m as f32
+            } else if self.is_bridge || (self.auto_bridge_over_water && over_water) {
+                let t_f = i as f32 / steps as f32;
+                let arch = (std::f32::consts::PI * t_f).sin() * 2.4;
+                let water_clear_rel = (sea_level_m - ref_z) + 5.8 + arch;
+                let terr_clear_rel =
+                    ground_z_rel_m + (self.elevation_offset_m.max(4.5) as f32) + arch * 0.4;
+                if over_water {
+                    water_clear_rel.max(terr_clear_rel)
+                } else {
+                    terr_clear_rel.max((sea_level_m - ref_z) + 2.5)
+                }
+            } else {
+                ground_z_rel_m + 0.22 + self.elevation_offset_m as f32
+            };
+
+            samples.push(RoadProfileSample {
+                east_m: p[0],
+                north_m: p[1],
+                deck_z_rel_m,
+                ground_z_rel_m,
+                over_water,
+                is_elevated: (deck_z_rel_m - ground_z_rel_m) > 1.4 || over_water || self.is_bridge,
+                tangent,
+                normal,
+            });
+        }
+
+        // Smooth interior vertical grades across terrain transitions & bridge approaches
+        if samples.len() >= 4 {
+            for _ in 0..2 {
+                let prev_z: Vec<f32> = samples.iter().map(|s| s.deck_z_rel_m).collect();
+                for i in 1..(samples.len() - 1) {
+                    let smoothed = 0.25 * prev_z[i - 1] + 0.50 * prev_z[i] + 0.25 * prev_z[i + 1];
+                    let min_floor = if samples[i].over_water {
+                        (sea_level_m - ref_z) + 5.4
+                    } else {
+                        samples[i].ground_z_rel_m + 0.18
+                    };
+                    samples[i].deck_z_rel_m = smoothed.max(min_floor);
+                    samples[i].is_elevated =
+                        (samples[i].deck_z_rel_m - samples[i].ground_z_rel_m) > 1.4
+                            || samples[i].over_water
+                            || self.is_bridge;
+                }
+            }
+        }
+        samples
     }
 
     pub fn bearing_deg(&self) -> f64 {
@@ -267,6 +419,10 @@ pub struct IfcxCityScene {
     pub active_zone_kind: IfcxZoneKind,
     pub road_snap_enabled: bool,
     pub synthesize_zone_towers: bool,
+    #[serde(default)]
+    pub road_draw_mode: RoadDrawMode,
+    #[serde(default = "default_auto_bridge_true")]
+    pub auto_bridge_enabled: bool,
 }
 
 impl Default for IfcxCityScene {
@@ -280,6 +436,8 @@ impl Default for IfcxCityScene {
             active_zone_kind: IfcxZoneKind::Commercial,
             road_snap_enabled: true,
             synthesize_zone_towers: true,
+            road_draw_mode: RoadDrawMode::CurvedSpline,
+            auto_bridge_enabled: true,
         }
     }
 }
@@ -318,7 +476,85 @@ impl IfcxCityScene {
             is_bridge,
             deck_elev_m: if is_bridge { 6.5 } else { 0.14 },
             pier_spacing_m: 18.0,
+            control_enu_m: None,
+            auto_bridge_over_water: true,
+            elevation_offset_m: 0.0,
         });
+        self.roads.last()
+    }
+
+    /// Snaps a candidate junction point to the nearest existing road endpoint within `tol_m`.
+    pub fn snap_road_endpoint(&self, pt_enu_m: [f64; 2], tol_m: f64) -> Option<[f64; 2]> {
+        let mut best: Option<(f64, [f64; 2])> = None;
+        for r in &self.roads {
+            for ep in [r.start_enu_m, r.end_enu_m] {
+                let d = (pt_enu_m[0] - ep[0]).hypot(pt_enu_m[1] - ep[1]);
+                if d <= tol_m && best.is_none_or(|(bd, _)| d < bd) {
+                    best = Some((d, ep));
+                }
+            }
+        }
+        best.map(|(_, ep)| ep)
+    }
+
+    /// Authors a linear or quadratic Bézier curved road corridor, automatically promoting coastal
+    /// water or canyon crossings to `IfcBridge` when `auto_bridge_enabled` is active.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_curved_road_with_auto_bridge(
+        &mut self,
+        start_enu_m: [f64; 2],
+        control_enu_m: Option<[f64; 2]>,
+        end_enu_m: [f64; 2],
+        kind: IfcxRoadKind,
+        force_bridge: bool,
+        elevation_offset_m: f64,
+        tin: Option<&TinSurfaceMesh>,
+        sea_level_m: f32,
+    ) -> Option<&IfcxRoadSegment> {
+        let chord = (end_enu_m[0] - start_enu_m[0]).hypot(end_enu_m[1] - start_enu_m[1]);
+        if chord < 2.0 {
+            return None;
+        }
+        let mut candidate = IfcxRoadSegment {
+            id: self.next_id,
+            name: String::new(),
+            kind,
+            start_enu_m,
+            end_enu_m,
+            width_m: kind.default_width_m(),
+            lanes: kind.default_lanes(),
+            is_bridge: force_bridge || elevation_offset_m > 2.2,
+            deck_elev_m: if force_bridge {
+                elevation_offset_m.max(6.5)
+            } else {
+                0.14 + elevation_offset_m
+            },
+            pier_spacing_m: 18.0,
+            control_enu_m,
+            auto_bridge_over_water: self.auto_bridge_enabled,
+            elevation_offset_m,
+        };
+        if self.auto_bridge_enabled {
+            if let Some(t) = tin {
+                for p in candidate.sample_centerline(16) {
+                    let (gz, _) = t.sample_elevation_and_slope(p[0] as f32, p[1] as f32);
+                    if gz < sea_level_m + 0.45 {
+                        candidate.is_bridge = true;
+                        candidate.deck_elev_m = candidate.deck_elev_m.max(6.5);
+                        break;
+                    }
+                }
+            }
+        }
+        let id = self.next_id;
+        self.next_id += 1;
+        candidate.id = id;
+        candidate.name = if candidate.is_bridge {
+            format!("Bridge_BR{id}")
+        } else {
+            format!("Road_RD{id}")
+        };
+        self.roads.push(candidate);
         self.roads.last()
     }
 
@@ -364,35 +600,41 @@ impl IfcxCityScene {
         }
         let mut best: Option<(f64, RoadParcelSnapHit)> = None;
 
-        // 1. Snap to road setback line (parallel offset = half road width + 4.0m setback)
+        // 1. Snap to road setback line (parallel offset = half road width + 4.0m setback), supporting curves
         for road in &self.roads {
-            let ax = road.start_enu_m[0];
-            let ay = road.start_enu_m[1];
-            let dx = road.end_enu_m[0] - ax;
-            let dy = road.end_enu_m[1] - ay;
-            let len2 = dx * dx + dy * dy;
-            if len2 < 1.0 {
-                continue;
-            }
-            let len = len2.sqrt();
-            let t = (((pt_enu_m[0] - ax) * dx + (pt_enu_m[1] - ay) * dy) / len2).clamp(0.0, 1.0);
-            let proj = [ax + dx * t, ay + dy * t];
-            let nx = -dy / len;
-            let ny = dx / len;
-            let signed_off = (pt_enu_m[0] - proj[0]) * nx + (pt_enu_m[1] - proj[1]) * ny;
-            let setback = road.width_m * 0.5 + 4.0;
-            let side = if signed_off >= 0.0 { 1.0 } else { -1.0 };
-            let candidate = [proj[0] + nx * side * setback, proj[1] + ny * side * setback];
-            let dist = (pt_enu_m[0] - candidate[0]).hypot(pt_enu_m[1] - candidate[1]);
-            if dist <= tol_m && best.is_none_or(|(bd, _)| dist < bd) {
-                best = Some((
-                    dist,
-                    RoadParcelSnapHit {
-                        snapped_enu_m: candidate,
-                        bearing_deg: road.bearing_deg(),
-                        is_road: true,
-                    },
-                ));
+            let sub_steps = if road.control_enu_m.is_some() { 10 } else { 1 };
+            let pts = road.sample_centerline(sub_steps);
+            for seg in pts.windows(2) {
+                let ax = seg[0][0];
+                let ay = seg[0][1];
+                let dx = seg[1][0] - ax;
+                let dy = seg[1][1] - ay;
+                let len2 = dx * dx + dy * dy;
+                if len2 < 1.0 {
+                    continue;
+                }
+                let len = len2.sqrt();
+                let t =
+                    (((pt_enu_m[0] - ax) * dx + (pt_enu_m[1] - ay) * dy) / len2).clamp(0.0, 1.0);
+                let proj = [ax + dx * t, ay + dy * t];
+                let nx = -dy / len;
+                let ny = dx / len;
+                let signed_off = (pt_enu_m[0] - proj[0]) * nx + (pt_enu_m[1] - proj[1]) * ny;
+                let setback = road.width_m * 0.5 + 4.0;
+                let side = if signed_off >= 0.0 { 1.0 } else { -1.0 };
+                let candidate = [proj[0] + nx * side * setback, proj[1] + ny * side * setback];
+                let dist = (pt_enu_m[0] - candidate[0]).hypot(pt_enu_m[1] - candidate[1]);
+                if dist <= tol_m && best.is_none_or(|(bd, _)| dist < bd) {
+                    let seg_bearing = dy.atan2(dx).to_degrees().rem_euclid(360.0);
+                    best = Some((
+                        dist,
+                        RoadParcelSnapHit {
+                            snapped_enu_m: candidate,
+                            bearing_deg: seg_bearing,
+                            is_road: true,
+                        },
+                    ));
+                }
             }
         }
 
@@ -559,6 +801,11 @@ impl IfcxCityScene {
             mix(&mut h, (r.start_enu_m[0] * 100.0) as i64 as u64);
             mix(&mut h, (r.end_enu_m[1] * 100.0) as i64 as u64);
             mix(&mut h, (r.width_m * 100.0) as u64);
+            mix(&mut h, (r.elevation_offset_m * 100.0) as i64 as u64);
+            if let Some(c) = r.control_enu_m {
+                mix(&mut h, (c[0] * 100.0) as i64 as u64);
+                mix(&mut h, (c[1] * 100.0) as i64 as u64);
+            }
         }
         for z in &self.zones {
             mix(&mut h, z.id as u64);
@@ -579,35 +826,92 @@ impl IfcxCityScene {
     pub fn to_ifcx_nodes(&self, site_path: &str) -> Vec<IfcxNode> {
         let mut nodes = Vec::new();
         for road in &self.roads {
-            let fp = road.footprint_enu_m();
-            let z0 = if road.is_bridge { road.deck_elev_m - 0.8 } else { 0.0 };
-            let z1 = road.deck_elev_m;
-            let points = vec![
-                [fp[0][0], fp[0][1], z0],
-                [fp[1][0], fp[1][1], z0],
-                [fp[2][0], fp[2][1], z0],
-                [fp[3][0], fp[3][1], z0],
-                [fp[0][0], fp[0][1], z1],
-                [fp[1][0], fp[1][1], z1],
-                [fp[2][0], fp[2][1], z1],
-                [fp[3][0], fp[3][1], z1],
-            ];
-            let mesh = UsdGeomMesh {
-                points,
-                face_vertex_counts: vec![3; 12],
-                face_vertex_indices: vec![
-                    0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 1, 2,
-                    6, 1, 6, 5, 3, 0, 4, 3, 4, 7,
-                ],
-                normals: Vec::new(),
-                display_color: Some(if road.is_bridge {
-                    [0.72, 0.76, 0.80, 1.0]
-                } else {
-                    [0.24, 0.27, 0.32, 1.0]
-                }),
-                vertex_colors: Vec::new(),
-                vertex_meta: Vec::new(),
-                material_kind: 3.0,
+            let mesh = if road.control_enu_m.is_some() {
+                let profile = road.sample_3d_profile(None, 0.0);
+                let hw = road.width_m * 0.5;
+                let mut points = Vec::new();
+                let mut counts = Vec::new();
+                let mut idxs = Vec::new();
+                for w in profile.windows(2) {
+                    let (a, b) = (w[0], w[1]);
+                    let za0 = if road.is_bridge { a.deck_z_rel_m as f64 - 0.8 } else { 0.0 };
+                    let za1 = a.deck_z_rel_m as f64;
+                    let zb0 = if road.is_bridge { b.deck_z_rel_m as f64 - 0.8 } else { 0.0 };
+                    let zb1 = b.deck_z_rel_m as f64;
+                    let base = points.len();
+                    points.extend_from_slice(&[
+                        [a.east_m - a.normal[0] * hw, a.north_m - a.normal[1] * hw, za0],
+                        [b.east_m - b.normal[0] * hw, b.north_m - b.normal[1] * hw, zb0],
+                        [b.east_m + b.normal[0] * hw, b.north_m + b.normal[1] * hw, zb0],
+                        [a.east_m + a.normal[0] * hw, a.north_m + a.normal[1] * hw, za0],
+                        [a.east_m - a.normal[0] * hw, a.north_m - a.normal[1] * hw, za1],
+                        [b.east_m - b.normal[0] * hw, b.north_m - b.normal[1] * hw, zb1],
+                        [b.east_m + b.normal[0] * hw, b.north_m + b.normal[1] * hw, zb1],
+                        [a.east_m + a.normal[0] * hw, a.north_m + a.normal[1] * hw, za1],
+                    ]);
+                    for &tri in &[
+                        [0, 2, 1],
+                        [0, 3, 2],
+                        [4, 5, 6],
+                        [4, 6, 7],
+                        [0, 1, 5],
+                        [0, 5, 4],
+                        [2, 3, 7],
+                        [2, 7, 6],
+                    ] {
+                        counts.push(3);
+                        idxs.extend_from_slice(&[
+                            base as u32 + tri[0],
+                            base as u32 + tri[1],
+                            base as u32 + tri[2],
+                        ]);
+                    }
+                }
+                UsdGeomMesh {
+                    points,
+                    face_vertex_counts: counts,
+                    face_vertex_indices: idxs,
+                    normals: Vec::new(),
+                    display_color: Some(if road.is_bridge {
+                        [0.72, 0.76, 0.80, 1.0]
+                    } else {
+                        [0.24, 0.27, 0.32, 1.0]
+                    }),
+                    vertex_colors: Vec::new(),
+                    vertex_meta: Vec::new(),
+                    material_kind: 3.0,
+                }
+            } else {
+                let fp = road.footprint_enu_m();
+                let z0 = if road.is_bridge { road.deck_elev_m - 0.8 } else { 0.0 };
+                let z1 = road.deck_elev_m;
+                let points = vec![
+                    [fp[0][0], fp[0][1], z0],
+                    [fp[1][0], fp[1][1], z0],
+                    [fp[2][0], fp[2][1], z0],
+                    [fp[3][0], fp[3][1], z0],
+                    [fp[0][0], fp[0][1], z1],
+                    [fp[1][0], fp[1][1], z1],
+                    [fp[2][0], fp[2][1], z1],
+                    [fp[3][0], fp[3][1], z1],
+                ];
+                UsdGeomMesh {
+                    points,
+                    face_vertex_counts: vec![3; 12],
+                    face_vertex_indices: vec![
+                        0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6,
+                        1, 2, 6, 1, 6, 5, 3, 0, 4, 3, 4, 7,
+                    ],
+                    normals: Vec::new(),
+                    display_color: Some(if road.is_bridge {
+                        [0.72, 0.76, 0.80, 1.0]
+                    } else {
+                        [0.24, 0.27, 0.32, 1.0]
+                    }),
+                    vertex_colors: Vec::new(),
+                    vertex_meta: Vec::new(),
+                    material_kind: 3.0,
+                }
             };
             let folder = if road.is_bridge { "bridges" } else { "roads" };
             let path = format!("{site_path}/{folder}/{}", road.name.to_lowercase());
@@ -784,5 +1088,73 @@ mod tests {
         assert_eq!(restored.roads.len(), 2);
         assert_eq!(restored.zones.len(), 2);
         assert_eq!(restored.graded_pads.len(), 1);
+    }
+
+    #[test]
+    fn test_v0867_curved_spline_road_and_auto_bridge_over_water() {
+        let tin = TinSurfaceMesh::generate_from_dem_preset(
+            DemTerrainPreset::ArchipelagoBayAndVolcano,
+            680.0,
+            680.0,
+            46,
+            46,
+            1.0,
+        );
+        let (ref_z, _) = tin.sample_elevation_and_slope(0.0, 0.0);
+        let mut city = IfcxCityScene::default();
+        let seg = city
+            .add_curved_road_with_auto_bridge(
+                [-190.0, -190.0],
+                Some([10.0, -155.0]),
+                [45.0, 35.0],
+                IfcxRoadKind::Arterial,
+                false,
+                0.0,
+                Some(&tin),
+                0.0,
+            )
+            .expect("curved road created")
+            .clone();
+
+        let chord = (45.0_f64 + 190.0).hypot(35.0 + 190.0);
+        assert!(
+            seg.length_m() > chord + 10.0,
+            "Quadratic Bezier arc length {} must exceed chord {}",
+            seg.length_m(),
+            chord
+        );
+        assert!(
+            seg.is_bridge,
+            "Coastal water crossing must auto-promote road to IfcBridge"
+        );
+
+        let profile = seg.sample_3d_profile(Some(&tin), 0.0);
+        assert!(profile.len() >= 18);
+        assert!(
+            profile.iter().any(|s| s.over_water),
+            "Coastal road profile must detect submerged water crossing"
+        );
+        for s in profile.iter().filter(|s| s.over_water) {
+            assert!(
+                s.deck_z_rel_m > (0.0 - ref_z) + 4.0,
+                "Auto-bridge deck {} must clear sea surface {}",
+                s.deck_z_rel_m,
+                0.0 - ref_z
+            );
+        }
+
+        // Junction endpoint snapping
+        let snapped = city
+            .snap_road_endpoint([49.0, 32.0], 10.0)
+            .expect("should snap to curved road endpoint");
+        assert!((snapped[0] - 45.0).abs() < 1e-6 && (snapped[1] - 35.0).abs() < 1e-6);
+
+        // IFCX multi-segment node export
+        let nodes = city.to_ifcx_nodes("/earth/sites/coast");
+        let bridge_node = nodes
+            .iter()
+            .find(|n| n.ifc_class() == Some("IfcBridge"))
+            .expect("bridge IFCX node");
+        assert!(bridge_node.mesh().unwrap().points.len() > 24);
     }
 }

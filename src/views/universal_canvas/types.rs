@@ -456,6 +456,8 @@ pub struct EarthBimAuthorConfig {
     pub active_modal_mode: usize,
     pub modal_anim_playing: bool,
     pub pending_start_mm: Option<[f64; 2]>,
+    pub pending_road_control_mm: Option<[f64; 2]>,
+    pub road_elevation_offset_m: f64,
     pub hover_snap_mm: Option<[f64; 2]>,
 }
 
@@ -480,6 +482,8 @@ impl Default for EarthBimAuthorConfig {
             active_modal_mode: 0,
             modal_anim_playing: true,
             pending_start_mm: None,
+            pending_road_control_mm: None,
+            road_elevation_offset_m: 0.0,
             hover_snap_mm: None,
         }
     }

@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.7 (6/10)]
+## [Unreleased — Next: v0.8.7 (7/10)]
+
+### Update 7/10 (`v0.8.6.7` -> `v0.8.7`) — Cities: Skylines II Curved Road & Auto-Bridge Spline Authoring (`IfcRoad` / `IfcBridge`)
+- **Curved Quadratic Bézier Road & Auto-Bridge Kernel (`src/core/gis/city_builder.rs`, `src/core/evacuation_routing.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`)**:
+  - Added [`RoadDrawMode`](src/core/gis/city_builder.rs) (`Straight`, `CurvedSpline`) and [`RoadProfileSample`](src/core/gis/city_builder.rs) plus backward-compatible `control_enu_m`, `auto_bridge_over_water`, and `elevation_offset_m` fields on [`IfcxRoadSegment`](src/core/gis/city_builder.rs).
+  - Implemented [`IfcxRoadSegment::sample_centerline`](src/core/gis/city_builder.rs), vertical-smoothed [`IfcxRoadSegment::sample_3d_profile`](src/core/gis/city_builder.rs), junction snapping [`IfcxCityScene::snap_road_endpoint`](src/core/gis/city_builder.rs), automatic coastal/river water crossing promotion [`IfcxCityScene::add_curved_road_with_auto_bridge`](src/core/gis/city_builder.rs), curved setback snapping, multi-segment IFCX `UsdGeomMesh` emission, and [`test_v0867_curved_spline_road_and_auto_bridge_over_water`](src/core/gis/city_builder.rs).
+- **3D Sloped Spline Extrusion, Piers & Cable-Stayed Coastal Bridges (`src/views/webgpu_earth/mesh_builders.rs`, `src/views/webgpu_earth/tests.rs`)**:
+  - Upgraded [`push_city_builder_scene_enu`](src/views/webgpu_earth/mesh_builders.rs) with [`push_sloped_ribbon_strip_enu`](src/views/webgpu_earth/mesh_builders.rs) and [`push_curved_road_or_bridge_enu`](src/views/webgpu_earth/mesh_builders.rs) generating continuous mitered curved decks, guardrails, dashed center striping, terrain-grounded piers, diagonal stay cables & twin pylons on coastal water spans `>= 65 m`, plus [`test_v0867_curved_road_and_auto_bridge_webgpu_mesh`](src/views/webgpu_earth/tests.rs).
+- **3-Click Curved Spline UX, Live Preview, Ribbon `"Roads"` & Slash Commands (`src/views/universal_canvas/`, `src/views/spatial_workspace/`)**:
+  - Added 3-click `Start -> Bend -> End` curved spline authoring in `interaction.rs`, real-time 3D `[AUTO-BRIDGE]` corridor preview (`paint_road_spline_preview`), [`synthesize_demo_coastal_highway`](src/views/universal_canvas/mod.rs), Smart Ribbon `"Roads"` group (`Curve Rd`, `Straight`, `Bridge`, `Road Type`, `Undo Rd`) + live elevation/auto-bridge bar, and `/road-curve`, `/road-straight`, `/bridge-curve`, `/road-demo` commands.
 
 ### Update 6/10 (`v0.8.6.6` -> `v0.8.7`) — Interactive 3D Terrain & Water Sculpting (`IfcSite` Live Terraform)
 - **Live 3D TIN Sculpting Engine (`src/core/gis/tin_surface.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`)**:
