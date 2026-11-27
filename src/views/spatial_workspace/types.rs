@@ -1717,6 +1717,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Globe,
     },
     SlashCommandSpec {
+        cmd: "/landscape",
+        category: "Canvas",
+        description: "Load realistic tropical Bay, Beach & Volcano coastal landscape",
+        icon: AppIcon::Mountain,
+    },
+    SlashCommandSpec {
+        cmd: "/bay",
+        category: "Canvas",
+        description: "Switch terrain to Archipelago Bay & Volcanic Peak with ocean waves",
+        icon: AppIcon::Mountain,
+    },
+    SlashCommandSpec {
+        cmd: "/fjord",
+        category: "Canvas",
+        description: "Switch terrain to Alpine Fjord River Valley & Cliffs",
+        icon: AppIcon::Waves,
+    },
+    SlashCommandSpec {
+        cmd: "/island",
+        category: "Canvas",
+        description: "Switch terrain to Coastal Island Harbor Metropolis",
+        icon: AppIcon::Globe,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",

@@ -1638,12 +1638,47 @@ pub fn build_rtc_site_scene_mesh(
     urban_vectors: &UrbanVectorLayerCache,
     city_scene: Option<&IfcxCityScene>,
 ) -> GpuMeshPayload {
+    build_rtc_site_scene_mesh_with_landscape(
+        theme,
+        origin_lat_lon,
+        zoom_level,
+        show_terrain_contours,
+        active_site_tin,
+        world_index,
+        active_rel_path,
+        urban_vectors,
+        city_scene,
+        true,
+        0.0,
+    )
+}
+
+/// Builds the Floating-Origin RTC 3D local city/site GPU mesh with configurable realistic biome
+/// terrain shader mode (`material_kind = 28.0`) and coastal sea level datum (`m MSL`).
+#[allow(clippy::too_many_arguments)]
+pub fn build_rtc_site_scene_mesh_with_landscape(
+    theme: VectorEarthTheme,
+    origin_lat_lon: (f64, f64),
+    zoom_level: f32,
+    show_terrain_contours: bool,
+    active_site_tin: Option<&TinSurfaceMesh>,
+    world_index: &WorldSpatialIndex,
+    active_rel_path: Option<&str>,
+    urban_vectors: &UrbanVectorLayerCache,
+    city_scene: Option<&IfcxCityScene>,
+    realistic_landscape: bool,
+    sea_level_m: f32,
+) -> GpuMeshPayload {
     let pal = theme.palette();
-    let mut vertices = Vec::with_capacity(4_096);
-    let mut indices = Vec::with_capacity(8_192);
+    let mut vertices = Vec::with_capacity(8_192);
+    let mut indices = Vec::with_capacity(16_384);
+    let has_coastal_water_tin = show_terrain_contours
+        && realistic_landscape
+        && active_site_tin.is_some_and(|t| t.min_elevation < sea_level_m - 0.1);
 
     // 1. Stylized Ground Terrain Apron & City-Builder Parcel Pads at site scale
-    if zoom_level >= 12.5 {
+    // Suppressed when a realistic coastal TIN spans below sea level so seabed bathymetry stays visible.
+    if zoom_level >= 12.5 && !has_coastal_water_tin {
         let apron_half = 4_500.0_f32;
         let land_col = color_to_rgba(pal.land_base);
         let base = vertices.len() as u32;
@@ -1663,25 +1698,27 @@ pub fn build_rtc_site_scene_mesh(
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 
         // Stylized raised buildable parcel pads separated by avenue channels
-        let block_step = if zoom_level >= 16.5 { 60.0_f32 } else { 180.0_f32 };
-        let road_half = block_step * 0.065;
-        let pad_col = mix_rgb(color_to_rgba(pal.land_base), color_to_rgba(pal.parcel_fill), 0.55);
-        for bx in -3..=2 {
-            for by in -3..=2 {
-                let x0 = bx as f32 * block_step + road_half;
-                let x1 = (bx + 1) as f32 * block_step - road_half;
-                let y0 = by as f32 * block_step + road_half;
-                let y1 = (by + 1) as f32 * block_step - road_half;
-                let pb = vertices.len() as u32;
-                for (px, py) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
-                    vertices.push(GpuEarthVertex {
-                        pos: [px, py, -0.05],
-                        normal: [0.0, 0.0, 1.0],
-                        color: pad_col,
-                        meta: [1.0, 0.0, 1.0, 0.0],
-                    });
+        if !(show_terrain_contours && realistic_landscape && active_site_tin.is_some()) {
+            let block_step = if zoom_level >= 16.5 { 60.0_f32 } else { 180.0_f32 };
+            let road_half = block_step * 0.065;
+            let pad_col = mix_rgb(color_to_rgba(pal.land_base), color_to_rgba(pal.parcel_fill), 0.55);
+            for bx in -3..=2 {
+                for by in -3..=2 {
+                    let x0 = bx as f32 * block_step + road_half;
+                    let x1 = (bx + 1) as f32 * block_step - road_half;
+                    let y0 = by as f32 * block_step + road_half;
+                    let y1 = (by + 1) as f32 * block_step - road_half;
+                    let pb = vertices.len() as u32;
+                    for (px, py) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
+                        vertices.push(GpuEarthVertex {
+                            pos: [px, py, -0.05],
+                            normal: [0.0, 0.0, 1.0],
+                            color: pad_col,
+                            meta: [1.0, 0.0, 1.0, 0.0],
+                        });
+                    }
+                    indices.extend_from_slice(&[pb, pb + 1, pb + 2, pb, pb + 2, pb + 3]);
                 }
-                indices.extend_from_slice(&[pb, pb + 1, pb + 2, pb, pb + 2, pb + 3]);
             }
         }
     }
@@ -1690,32 +1727,81 @@ pub fn build_rtc_site_scene_mesh(
     if show_terrain_contours {
         if let Some(tin) = active_site_tin {
             let (ref_z, _) = tin.sample_elevation_and_slope(0.0, 0.0);
-            let span_z = (tin.max_elevation - tin.min_elevation).max(1.0);
-            let low_col = color_to_rgba(pal.land_base);
-            let high_col = mix_rgb(color_to_rgba(pal.land_arid), [0.85, 0.90, 0.88, 1.0], 0.35);
-            let hazard_col = [0.88_f32, 0.25, 0.25, 1.0];
-
-            for tm in tin.triangle_metrics.iter().take(6_000) {
-                let p0 = tin.points[tm.indices[0]];
-                let p1 = tin.points[tm.indices[1]];
-                let p2 = tin.points[tm.indices[2]];
-                let n = tm.normal;
-                let t_elev = ((tm.centroid[2] - tin.min_elevation) / span_z).clamp(0.0, 1.0);
-                let col = if tm.is_steep_hazard {
-                    mix_rgb(mix_rgb(low_col, high_col, t_elev), hazard_col, 0.58)
-                } else {
-                    mix_rgb(low_col, high_col, t_elev)
-                };
-                let tb = vertices.len() as u32;
-                for p in [p0, p1, p2] {
-                    vertices.push(GpuEarthVertex {
-                        pos: [p.x, p.y, p.z - ref_z],
-                        normal: n,
-                        color: col,
-                        meta: [1.0, (p.z - ref_z).max(0.0), 0.95, 0.0],
-                    });
+            if realistic_landscape {
+                let mut v_norms = vec![[0.0_f32, 0.0, 0.0]; tin.points.len()];
+                for tm in &tin.triangle_metrics {
+                    let w = tm.area_3d_m2.max(1e-4) as f32;
+                    for &vi in &tm.indices {
+                        if let Some(acc) = v_norms.get_mut(vi) {
+                            acc[0] += tm.normal[0] * w;
+                            acc[1] += tm.normal[1] * w;
+                            acc[2] += tm.normal[2] * w;
+                        }
+                    }
                 }
-                indices.extend_from_slice(&[tb, tb + 1, tb + 2]);
+                for n in &mut v_norms {
+                    let nz = n[2].max(0.05);
+                    let len = (n[0] * n[0] + n[1] * n[1] + nz * nz).sqrt().max(1e-6);
+                    n[0] /= len;
+                    n[1] /= len;
+                    n[2] = nz / len;
+                }
+
+                for tm in tin.triangle_metrics.iter().take(12_000) {
+                    let tb = vertices.len() as u32;
+                    for &idx in &tm.indices {
+                        let p = tin.points[idx];
+                        let vn = v_norms.get(idx).copied().unwrap_or(tm.normal);
+                        let elev_sea = p.z - sea_level_m;
+                        let slope_norm = (1.0 - vn[2].clamp(0.0, 1.0)).clamp(0.0, 1.0);
+                        let ao = (0.82 + 0.18 * ((elev_sea + 12.0) / 36.0).clamp(0.0, 1.0))
+                            .clamp(0.76, 1.0);
+                        let col = if elev_sea < 0.0 {
+                            [0.48, 0.52, 0.44, 1.0]
+                        } else if elev_sea < 3.0 {
+                            [0.82, 0.76, 0.58, 1.0]
+                        } else if elev_sea < 32.0 {
+                            [0.24, 0.52, 0.25, 1.0]
+                        } else {
+                            [0.34, 0.36, 0.38, 1.0]
+                        };
+                        vertices.push(GpuEarthVertex {
+                            pos: [p.x, p.y, p.z - ref_z],
+                            normal: vn,
+                            color: col,
+                            meta: [28.0, elev_sea, ao, slope_norm],
+                        });
+                    }
+                    indices.extend_from_slice(&[tb, tb + 1, tb + 2]);
+                }
+            } else {
+                let span_z = (tin.max_elevation - tin.min_elevation).max(1.0);
+                let low_col = color_to_rgba(pal.land_base);
+                let high_col = mix_rgb(color_to_rgba(pal.land_arid), [0.85, 0.90, 0.88, 1.0], 0.35);
+                let hazard_col = [0.88_f32, 0.25, 0.25, 1.0];
+
+                for tm in tin.triangle_metrics.iter().take(6_000) {
+                    let p0 = tin.points[tm.indices[0]];
+                    let p1 = tin.points[tm.indices[1]];
+                    let p2 = tin.points[tm.indices[2]];
+                    let n = tm.normal;
+                    let t_elev = ((tm.centroid[2] - tin.min_elevation) / span_z).clamp(0.0, 1.0);
+                    let col = if tm.is_steep_hazard {
+                        mix_rgb(mix_rgb(low_col, high_col, t_elev), hazard_col, 0.58)
+                    } else {
+                        mix_rgb(low_col, high_col, t_elev)
+                    };
+                    let tb = vertices.len() as u32;
+                    for p in [p0, p1, p2] {
+                        vertices.push(GpuEarthVertex {
+                            pos: [p.x, p.y, p.z - ref_z],
+                            normal: n,
+                            color: col,
+                            meta: [1.0, (p.z - ref_z).max(0.0), 0.95, 0.0],
+                        });
+                    }
+                    indices.extend_from_slice(&[tb, tb + 1, tb + 2]);
+                }
             }
         }
     }
@@ -4367,4 +4453,102 @@ pub fn build_rtc_daylight_interior_mesh(input: &DaylightInteriorGpuInput<'_>) ->
         indices: idxs,
     }
 }
+
+/// GPU input parameters for realistic coastal ocean & river water surface rendering (`material_kind = 29.0`).
+#[derive(Clone, Copy)]
+pub struct CoastalWaterGpuInput<'a> {
+    pub tin: &'a TinSurfaceMesh,
+    pub sea_level_m: f32,
+    pub visible: bool,
+}
+
+/// Builds the translucent 3D coastal ocean & river water mesh (`material_kind = 29.0`) around `input.tin`.
+///
+/// Each vertex encodes `[29.0, depth_m, 1.0, shore_phase]` in `meta` so `EARTH_WGSL` can synthesize
+/// Beer-Lambert optical water depth absorption, multi-octave Gerstner ripples, and animated surf foam.
+pub fn build_rtc_coastal_water_mesh(input: &CoastalWaterGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible || input.tin.points.is_empty() || input.tin.min_elevation >= input.sea_level_m {
+        return GpuMeshPayload::default();
+    }
+    let tin = input.tin;
+    let (ref_z, _) = tin.sample_elevation_and_slope(0.0, 0.0);
+    let z_water_rel = input.sea_level_m - ref_z;
+
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for p in &tin.points {
+        min_x = min_x.min(p.x);
+        max_x = max_x.max(p.x);
+        min_y = min_y.min(p.y);
+        max_y = max_y.max(p.y);
+    }
+    let skirt_m = 220.0_f32;
+    let w_min_x = min_x - skirt_m;
+    let w_max_x = max_x + skirt_m;
+    let w_min_y = min_y - skirt_m;
+    let w_max_y = max_y + skirt_m;
+    let span_x = (w_max_x - w_min_x).max(10.0);
+    let span_y = (w_max_y - w_min_y).max(10.0);
+
+    let cols = 44usize;
+    let rows = 44usize;
+    let mut depths = Vec::with_capacity(cols * rows);
+    let mut verts = Vec::with_capacity(cols * rows);
+
+    for r in 0..rows {
+        let v = r as f32 / (rows - 1) as f32;
+        let wy = w_min_y + v * span_y;
+        for c in 0..cols {
+            let u = c as f32 / (cols - 1) as f32;
+            let wx = w_min_x + u * span_x;
+            let cx = wx.clamp(min_x, max_x);
+            let cy = wy.clamp(min_y, max_y);
+            let outside_dist = (wx - cx).hypot(wy - cy);
+            let (sampled_z, _) = tin.sample_elevation_and_slope(cx, cy);
+            let bed_z = if outside_dist <= 0.1 {
+                sampled_z
+            } else if sampled_z < input.sea_level_m + 1.2 {
+                // Smooth bathymetry deepening into open ocean horizon outside coastal edges
+                let t_far = (outside_dist / skirt_m).clamp(0.0, 1.0);
+                sampled_z * (1.0 - t_far) + (-14.0) * t_far
+            } else {
+                // Dry highland edge: do not extend ocean beneath mountain cliffs
+                sampled_z
+            };
+            let depth_m = (input.sea_level_m - bed_z).max(0.0);
+            let shore_phase = (wx * 0.017 + wy * 0.013).sin() * 0.5 + 0.5;
+            depths.push(depth_m);
+            verts.push(GpuEarthVertex {
+                pos: [wx, wy, z_water_rel],
+                normal: [0.0, 0.0, 1.0],
+                color: [0.06, 0.44, 0.62, 0.86],
+                meta: [29.0, depth_m, 1.0, shore_phase],
+            });
+        }
+    }
+
+    let mut idxs = Vec::with_capacity((cols - 1) * (rows - 1) * 6);
+    for r in 0..(rows - 1) {
+        for c in 0..(cols - 1) {
+            let i00 = r * cols + c;
+            let i10 = r * cols + (c + 1);
+            let i01 = (r + 1) * cols + c;
+            let i11 = (r + 1) * cols + (c + 1);
+            if depths[i00] > 0.01 || depths[i10] > 0.01 || depths[i01] > 0.01 {
+                idxs.extend_from_slice(&[i00 as u32, i10 as u32, i01 as u32]);
+            }
+            if depths[i10] > 0.01 || depths[i11] > 0.01 || depths[i01] > 0.01 {
+                idxs.extend_from_slice(&[i10 as u32, i11 as u32, i01 as u32]);
+            }
+        }
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
 

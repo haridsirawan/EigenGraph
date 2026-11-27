@@ -7,7 +7,18 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.7 (4/10)]
+## [Unreleased — Next: v0.8.7 (5/10)]
+
+### Update 5/10 (`v0.8.6.5` -> `v0.8.7`) — Realistic Living Earth Landscape Engine (`Cities: Skylines II × IFCX`: Mountains, Biomes, Ocean Waves & Shoreline Foam)
+- **Coastal & Mountain Morphology Presets (`src/core/gis/tin_surface.rs`)**:
+  - Extended [`DemTerrainPreset`](src/core/gis/tin_surface.rs) with `ArchipelagoBayAndVolcano`, `FjordRiverValley`, and `CoastalIslandMetropolis` featuring sub-sea bathymetry (`< -2 m MSL`), graded buildable urban harbor terraces (`~ +3.2 m` at site origin), meandering fjord waterways, and volcanic peaks up to `+90 m`, plus [`DemTerrainPreset::has_coastal_water`](src/core/gis/tin_surface.rs) and [`test_v0865_realistic_landscape_presets_have_sea_and_mountains`](src/core/gis/tin_surface.rs).
+- **Pure WebGPU Biome Mountains (`material_kind = 28.0`) & Coastal Ocean Water (`material_kind = 29.0`) (`src/views/webgpu_earth/mesh_builders.rs`, `src/views/webgpu_earth/mod.rs`, `src/views/webgpu_earth/tests.rs`)**:
+  - Added [`build_rtc_site_scene_mesh_with_landscape`](src/views/webgpu_earth/mesh_builders.rs) emitting smooth area-weighted terrain normals with elevation/slope biome metadata and [`build_rtc_coastal_water_mesh`](src/views/webgpu_earth/mesh_builders.rs) (`CoastalWaterGpuInput`) with optical depth and horizon sea skirts.
+  - Implemented analytical WGSL terrain FBM biomes (seabed sandbars, wet/dry beach, meadow grass, hillside forest, stratified basalt rock cliffs, alpine snow caps, `5 m` contour hairlines) and animated ocean water (4-train Gerstner wave normals, Beer-Lambert depth absorption, dual-band shoreline surf foam, Schlick Fresnel sky reflections, Blinn-Phong sun specular) inside `EARTH_WGSL` + `water_surface` GPU mesh slot.
+  - Added GPU mesh & live headless `wgpu` validation test [`test_v0865_realistic_biome_and_coastal_water_gpu_meshes`](src/views/webgpu_earth/tests.rs).
+- **Canvas Controls, Persistence & Ribbon UX (`src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/views/settings.rs`)**:
+  - Added [`UniversalCanvasState::apply_landscape_preset`](src/views/universal_canvas/mod.rs) plus persisted `realistic_landscape_enabled`, `sea_level_m`, and `show_water_surface` fields in [`UnifiedWorkspaceArchive`](src/views/universal_canvas/types.rs).
+  - Added horizontal `"Landscape"` ribbon tiles (`Bay & Peak`, `Fjord`, `Island`, `Ocean`, `Biomes`) under `RibbonCategoryTab::Planning` and `/landscape`, `/bay`, `/fjord`, `/island` slash commands, plus updated `Settings -> About EigenGraph` Entry #18.
 
 ### Update 4/10 (`v0.8.6.4` -> `v0.8.7`) — Interior Daylight Autonomy (`sDA / ASE / DGP`), LEED v4.1 & Architectural Finishes Engine
 - **Daylight Autonomy, Glare & Room Finishes Core (`src/core/daylight_interior.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:

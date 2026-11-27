@@ -472,6 +472,7 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
     let hemi = 0.84 + 0.16 * clamp(n.z * 0.5 + 0.5, 0.0, 1.0);
     let sun_tint = mix(vec3<f32>(1.0, 0.99, 0.96), vec3<f32>(1.0, 0.72, 0.44), u_gold * 0.75);
     var col = f_in.color.rgb * sun_tint * lit * hemi * ao;
+    var out_alpha = f_in.color.a;
 
     if (kind < 0.5) {
         let hv = l + v;
@@ -492,6 +493,80 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 28.5) {
+        // Update v0.8.6.5 (5/10 -> v0.8.7): Realistic Coastal Ocean & River Water Surface (0% raster)
+        let depth_m = max(height_m, 0.0);
+        let p2 = f_in.world_pos.xy;
+        let w_a = sin(p2.x * 0.22 + p2.y * 0.14 - u_time * 1.45);
+        let w_b = cos(p2.x * 0.16 - p2.y * 0.27 - u_time * 1.85);
+        let w_c = sin(p2.x * 0.58 + p2.y * 0.49 + u_time * 2.55) * 0.45;
+        let w_d = cos(p2.x * 0.94 - p2.y * 0.82 - u_time * 3.10) * 0.25;
+        let wave_amp = mix(0.06, 0.13, smoothstep(0.3, 6.0, depth_m));
+        let n_w = normalize(vec3<f32>(
+            -(w_a * 0.36 + w_b * 0.24 + w_c) * wave_amp,
+            -(w_b * 0.34 - w_a * 0.22 + w_d) * wave_amp,
+            1.0
+        ));
+        let shallow_col = vec3<f32>(0.15, 0.72, 0.76);
+        let deep_col = vec3<f32>(0.02, 0.13, 0.29);
+        let absorb = exp(-depth_m * vec3<f32>(0.42, 0.15, 0.07));
+        let water_body = mix(deep_col, shallow_col, absorb);
+
+        let surf_wave = sin(depth_m * 6.8 - u_time * 2.35 + phase * 4.2 + w_a * 1.4);
+        let surf_band = smoothstep(0.35, 0.92, surf_wave) * (1.0 - smoothstep(0.15, 2.2, depth_m));
+        let shore_froth = (1.0 - smoothstep(0.02, 0.42, depth_m)) * (0.72 + 0.28 * sin(p2.x * 0.65 - u_time * 2.0));
+        let crest_foam = smoothstep(0.74, 0.96, abs(w_a * w_b) + abs(w_c)) * smoothstep(2.0, 9.0, depth_m) * 0.20;
+        let foam = clamp(surf_band * 0.85 + shore_froth + crest_foam, 0.0, 1.0);
+
+        let ndotl_w = max(dot(n_w, l), 0.0);
+        let hv_w = l + v;
+        let h_w = select(n_w, normalize(hv_w), dot(hv_w, hv_w) > 1e-8);
+        let spec_w = pow(max(dot(n_w, h_w), 0.0), 110.0) * ndotl_w * 0.95;
+        let fresnel_w = 0.04 + 0.96 * pow(clamp(1.0 - max(dot(n_w, v), 0.0), 0.0, 1.0), 4.0);
+        let day_sky = mix(u_atmo * 1.15, vec3<f32>(0.38, 0.66, 0.92), 0.35);
+        let sky_refl = mix(day_sky, vec3<f32>(0.98, 0.64, 0.36), u_gold * 0.55) * (1.0 - u_night * 0.72);
+        let w_lit = mix(1.0, 0.32 + 0.68 * ndotl_w, u_lit);
+        var base_water = mix(water_body * sun_tint * w_lit, sky_refl, clamp(fresnel_w * 0.76, 0.0, 0.85));
+        base_water += sun_tint * spec_w * (1.0 - foam * 0.60);
+        let foam_col = vec3<f32>(0.93, 0.97, 0.99) * sun_tint * (0.45 + 0.55 * w_lit);
+        col = mix(base_water, foam_col, foam);
+        out_alpha = clamp(0.46 + depth_m * 0.12 + foam * 0.45, 0.48, 0.96);
+    } else if (kind >= 27.5) {
+        // Update v0.8.6.5 (5/10 -> v0.8.7): Realistic Procedural Biome & Stratified Rock Mountain Terrain (0% raster)
+        let px = f_in.world_pos.x;
+        let py = f_in.world_pos.y;
+        let n1 = sin(px * 0.055 + cos(py * 0.048) * 1.3) * cos(py * 0.052 - sin(px * 0.041) * 1.1);
+        let n2 = sin(px * 0.17 - py * 0.14 + n1 * 1.6) * cos(px * 0.13 + py * 0.19);
+        let n3 = sin(px * 0.46 + py * 0.41) * 0.5;
+        let fbm = clamp(0.5 + 0.30 * n1 + 0.15 * n2 + 0.08 * n3, 0.0, 1.0);
+
+        let elev_j = height_m + (fbm - 0.5) * 4.2;
+        let seabed = mix(vec3<f32>(0.08, 0.22, 0.24), vec3<f32>(0.74, 0.70, 0.52), smoothstep(-10.0, -0.2, height_m));
+        let wet_sand = mix(vec3<f32>(0.58, 0.52, 0.38), vec3<f32>(0.84, 0.78, 0.58), smoothstep(-0.3, 0.8, height_m));
+        let grass_col = mix(vec3<f32>(0.24, 0.50, 0.22), vec3<f32>(0.36, 0.60, 0.27), fbm);
+        let forest_col = mix(vec3<f32>(0.11, 0.31, 0.15), vec3<f32>(0.19, 0.42, 0.20), fbm);
+        let rock_high = mix(vec3<f32>(0.27, 0.28, 0.30), vec3<f32>(0.44, 0.42, 0.39), fbm);
+        let snow_cap = vec3<f32>(0.88, 0.91, 0.95);
+
+        var biome = seabed;
+        biome = mix(biome, wet_sand, smoothstep(-0.4, 0.4, elev_j));
+        biome = mix(biome, grass_col, smoothstep(2.0, 5.5, elev_j));
+        biome = mix(biome, forest_col, smoothstep(14.0, 26.0, elev_j));
+        biome = mix(biome, rock_high, smoothstep(42.0, 56.0, elev_j));
+        let snow_mask = smoothstep(68.0, 80.0, elev_j) * (1.0 - smoothstep(0.20, 0.50, phase));
+        biome = mix(biome, snow_cap, snow_mask);
+
+        let strata = 0.80 + 0.20 * sin(height_m * 1.45 + n1 * 2.2);
+        let cliff_rock = mix(vec3<f32>(0.30, 0.29, 0.28), vec3<f32>(0.46, 0.43, 0.39), fbm) * strata;
+        let cliff_m = smoothstep(0.15, 0.42, phase);
+        var albedo = mix(biome, cliff_rock, cliff_m);
+
+        let contour_p = fract(height_m / 5.0);
+        let contour_line = (smoothstep(0.0, 0.03, contour_p) - smoothstep(0.03, 0.07, contour_p)) * step(0.2, height_m);
+        albedo = mix(albedo, albedo * 0.72, contour_line * 0.22);
+
+        let rim_terr = pow(max(1.0 - max(dot(n, v), 0.0), 0.0), 3.6);
+        col = albedo * sun_tint * lit * hemi * ao + u_atmo * (rim_terr * 0.10);
     } else if (kind >= 26.5) {
         // Update v0.8.6.4 (4/10 -> v0.8.7): Pure Analytical WGSL Interior Daylight Autonomy & Lux Grid (0% raster)
         let lux_n = clamp(height_m, 0.0, 1.0);
@@ -653,7 +728,7 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         col = mix(col, u_fog_c, clamp(fog_f, 0.0, 0.82));
     }
 
-    return vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), f_in.color.a);
+    return vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), out_alpha);
 }
 "#;
 
@@ -817,6 +892,7 @@ pub struct WebGpuEarthResources {
     massing_study: GpuMeshSlot,
     solar_envelope: GpuMeshSlot,
     daylight_interior: GpuMeshSlot,
+    water_surface: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
 }
 
@@ -1019,6 +1095,7 @@ impl WebGpuEarthResources {
             planet_theme_uploaded: None,
             planet: GpuMeshSlot::default(),
             site: GpuMeshSlot::default(),
+            water_surface: GpuMeshSlot::default(),
             bim: GpuMeshSlot::default(),
             hinges: GpuMeshSlot::default(),
             subsurface: GpuMeshSlot::default(),
@@ -1156,6 +1233,7 @@ impl WebGpuEarthResources {
 
         // Pass 2: Floating-Origin RTC Local Site Scene with fresh [0.0, 1.0] 24-bit depth
         let has_site = self.site.index_count > 0
+            || self.water_surface.index_count > 0
             || self.bim.index_count > 0
             || self.hinges.index_count > 0
             || self.subsurface.index_count > 0
@@ -1217,6 +1295,7 @@ impl WebGpuEarthResources {
 
             pass.set_pipeline(&self.translucent_pipeline);
             pass.set_bind_group(0, &self.site_bind_group, &[]);
+            self.water_surface.draw(&mut pass);
             self.hinges.draw(&mut pass);
             self.subsurface.draw(&mut pass);
             self.risk_heatmap.draw(&mut pass);
@@ -1278,6 +1357,7 @@ struct WebGpuEarthPaintCallback {
     pending_massing_study: Option<(u64, GpuMeshPayload)>,
     pending_solar_envelope: Option<(u64, GpuMeshPayload)>,
     pending_daylight_interior: Option<(u64, GpuMeshPayload)>,
+    pending_water_surface: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
 }
 
@@ -1455,6 +1535,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
                     .upload(device, queue, "daylight_interior_mesh", dl_in.0, &dl_in.1);
             }
         }
+        if let Some(ref ws_in) = self.pending_water_surface {
+            if res.water_surface.revision_uploaded != ws_in.0 {
+                res.water_surface
+                    .upload(device, queue, "water_surface_mesh", ws_in.0, &ws_in.1);
+            }
+        }
         if let Some(ref h_cmp) = self.pending_hazard_compute {
             res.hazard_compute.dispatch(queue, egui_encoder, h_cmp);
         } else {
@@ -1558,6 +1644,7 @@ pub struct WebGpuEarthState {
     cached_massing_study_hash: u64,
     cached_solar_envelope_hash: u64,
     cached_daylight_interior_hash: u64,
+    cached_water_surface_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1586,6 +1673,7 @@ pub struct WebGpuEarthState {
     pub last_massing_study_tris: usize,
     pub last_solar_envelope_tris: usize,
     pub last_daylight_interior_tris: usize,
+    pub last_water_surface_tris: usize,
     pub last_compute_particles: u32,
     #[cfg(not(target_arch = "wasm32"))]
     wgpu_device: Option<wgpu::Device>,
@@ -1680,6 +1768,8 @@ impl WebGpuEarthState {
         origin: (f64, f64),
         zoom_bucket: i32,
         show_tin: bool,
+        realistic_landscape: bool,
+        sea_level_m: f32,
         tin: Option<&TinSurfaceMesh>,
         world_index: &WorldSpatialIndex,
         active_rel: Option<&str>,
@@ -1696,10 +1786,14 @@ impl WebGpuEarthState {
         mix(&mut h, (origin.1 * 1e5).round() as i64 as u64);
         mix(&mut h, zoom_bucket as u64);
         mix(&mut h, u64::from(show_tin));
+        mix(&mut h, u64::from(realistic_landscape) * 71);
+        mix(&mut h, sea_level_m.to_bits() as u64);
         if let Some(t) = tin {
             mix(&mut h, t.points.len() as u64);
             mix(&mut h, t.triangles.len() as u64);
+            mix(&mut h, t.min_elevation.to_bits() as u64);
             mix(&mut h, (t.max_elevation * 100.0) as i32 as u64);
+            mix(&mut h, t.extent_x_m.to_bits() as u64);
         }
         mix(&mut h, world_index.buildings.len() as u64);
         for b in world_index.buildings.iter().take(64) {
@@ -1842,11 +1936,14 @@ impl WebGpuEarthState {
         ground_origin_lat_lon: (f64, f64),
         ground_origin_anchored: bool,
         show_terrain_contours: bool,
+        realistic_landscape: bool,
+        sea_level_m: f32,
         active_site_tin: Option<&TinSurfaceMesh>,
         world_index: &WorldSpatialIndex,
         active_rel_path: Option<&str>,
         urban_vectors: &UrbanVectorLayerCache,
         city_scene: Option<&IfcxCityScene>,
+        water_surface_input: Option<CoastalWaterGpuInput<'_>>,
         active_bim: Option<ActiveBimGpuInput<'_>>,
         hazard_input: Option<DistrictHazardGpuInput<'_>>,
         subsurface_input: Option<SubsurfaceSsiGpuInput<'_>>,
@@ -1939,6 +2036,8 @@ impl WebGpuEarthState {
                 site_origin,
                 zoom_bucket,
                 show_terrain_contours,
+                realistic_landscape,
+                sea_level_m,
                 active_site_tin,
                 world_index,
                 active_rel_path,
@@ -1946,7 +2045,7 @@ impl WebGpuEarthState {
                 city_scene,
             );
             if rev != self.cached_site_hash {
-                let mesh = build_rtc_site_scene_mesh(
+                let mesh = build_rtc_site_scene_mesh_with_landscape(
                     theme,
                     site_origin,
                     world_map.zoom_level,
@@ -1956,6 +2055,8 @@ impl WebGpuEarthState {
                     active_rel_path,
                     urban_vectors,
                     city_scene,
+                    realistic_landscape,
+                    sea_level_m,
                 );
                 self.last_site_tris = mesh.indices.len() / 3;
                 self.cached_site_hash = rev;
@@ -2728,6 +2829,34 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_water_surface = if render_site_pass {
+            if let Some(ref ws) = water_surface_input.as_ref().filter(|w| w.visible) {
+                let t = ws.tin;
+                let rev: u64 = (t.points.len() as u64).wrapping_mul(1_000_003)
+                    ^ (t.triangles.len() as u64).wrapping_mul(2_654_435_761)
+                    ^ ws.sea_level_m.to_bits() as u64
+                    ^ t.min_elevation.to_bits().rotate_left(13) as u64
+                    ^ t.max_elevation.to_bits().rotate_left(23) as u64
+                    ^ u64::from(ws.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                if rev != self.cached_water_surface_hash {
+                    let mesh = build_rtc_coastal_water_mesh(ws);
+                    self.last_water_surface_tris = mesh.indices.len() / 3;
+                    self.cached_water_surface_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_water_surface_hash != 0 {
+                self.cached_water_surface_hash = 0;
+                self.last_water_surface_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let pending_hazard_compute = if render_site_pass {
             if let Some(hc) = hazard_compute_input {
                 if hc.enabled {
@@ -2781,6 +2910,7 @@ impl WebGpuEarthState {
                 pending_massing_study,
                 pending_solar_envelope,
                 pending_daylight_interior,
+                pending_water_surface,
                 pending_hazard_compute,
             },
         ));
@@ -2819,6 +2949,7 @@ impl WebGpuEarthState {
         let massing_animated = massing_study_input.as_ref().is_some_and(|m| m.visible);
         let solar_animated = solar_envelope_input.as_ref().is_some_and(|s| s.visible);
         let daylight_animated = daylight_interior_input.as_ref().is_some_and(|d| d.visible);
+        let water_animated = water_surface_input.as_ref().is_some_and(|w| w.visible);
         let frame_ms = if hazard_animated
             || compute_animated
             || subsurface_animated
@@ -2843,6 +2974,7 @@ impl WebGpuEarthState {
             || massing_animated
             || solar_animated
             || daylight_animated
+            || water_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

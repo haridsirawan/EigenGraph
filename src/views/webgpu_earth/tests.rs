@@ -2837,3 +2837,147 @@ use crate::core::ifcx::IfcxDocument;
             "Phase 84.9 4D/5D/6D Construction LCA WGSL pass triggered WebGPU validation error: {val_err:?}"
         );
     }
+
+    #[test]
+    fn test_v0865_realistic_biome_and_coastal_water_gpu_meshes() {
+        let tin = TinSurfaceMesh::generate_from_dem_preset(
+            DemTerrainPreset::ArchipelagoBayAndVolcano,
+            680.0,
+            680.0,
+            46,
+            46,
+            1.0,
+        );
+        let site_mesh = build_rtc_site_scene_mesh_with_landscape(
+            VectorEarthTheme::CityDaylight,
+            (-6.2088, 106.8456),
+            17.0,
+            true,
+            Some(&tin),
+            &WorldSpatialIndex::default(),
+            None,
+            &UrbanVectorLayerCache::default(),
+            None,
+            true,
+            0.0,
+        );
+        let biome_verts: Vec<&GpuEarthVertex> = site_mesh
+            .vertices
+            .iter()
+            .filter(|v| (v.meta[0] - 28.0).abs() < 0.05)
+            .collect();
+        assert!(
+            biome_verts.len() > 3_000,
+            "Realistic biome TIN must emit material_kind=28.0 triangles, got {}",
+            biome_verts.len()
+        );
+        assert!(
+            biome_verts.iter().any(|v| v.meta[1] < -2.0),
+            "Biome terrain must include submerged seabed bathymetry below sea level"
+        );
+        assert!(
+            biome_verts.iter().any(|v| v.meta[1] > 40.0),
+            "Biome terrain must include elevated volcanic peaks"
+        );
+        for v in biome_verts.iter().take(64) {
+            let n_len = (v.normal[0] * v.normal[0]
+                + v.normal[1] * v.normal[1]
+                + v.normal[2] * v.normal[2])
+                .sqrt();
+            assert!(
+                (n_len - 1.0).abs() < 0.02,
+                "Smooth terrain normal must be unit length, got {n_len}"
+            );
+        }
+
+        let water_mesh = build_rtc_coastal_water_mesh(&CoastalWaterGpuInput {
+            tin: &tin,
+            sea_level_m: 0.0,
+            visible: true,
+        });
+        assert!(
+            water_mesh.indices.len() / 3 > 400,
+            "Coastal water mesh must emit ocean surface triangles"
+        );
+        assert!(
+            water_mesh
+                .vertices
+                .iter()
+                .all(|v| (v.meta[0] - 29.0).abs() < 0.05),
+            "Coastal water vertices must use material_kind=29.0"
+        );
+        assert!(
+            water_mesh.vertices.iter().any(|v| v.meta[1] > 5.0),
+            "Coastal water must encode Beer-Lambert optical depth > 5m in bay waters"
+        );
+
+        // Live headless WGPU pipeline & WGSL shader validation when a GPU adapter is present
+        fn poll_fut<F: std::future::Future>(fut: F) -> F::Output {
+            let mut fut = std::pin::pin!(fut);
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(&waker);
+            loop {
+                if let std::task::Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
+                    return out;
+                }
+                std::thread::yield_now();
+            }
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = poll_fut(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let Ok((device, queue)) =
+            poll_fut(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        res.site.upload(&device, &queue, "site_biome_v0865", 1, &site_mesh);
+        res.water_surface
+            .upload(&device, &queue, "water_surface_v0865", 1, &water_mesh);
+
+        let mut cam = GlobeCamera::default();
+        cam.tilt_deg = 48.0;
+        let xf = GlobeScreenTransform::from_view(
+            Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(64.0, 64.0)),
+            -6.2088,
+            106.8456,
+            16.5,
+            &cam,
+        );
+        let uniforms = RtcCameraUniforms::from_globe_xform(
+            &xf,
+            VectorEarthTheme::CityDaylight,
+            &cam,
+            (-6.2088, 106.8456),
+            1.25,
+            true,
+        );
+        queue.write_buffer(
+            &res.planet_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_planet_pass_uniforms()),
+        );
+        queue.write_buffer(
+            &res.site_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_site_pass_uniforms()),
+        );
+        res.ensure_targets(&device, 64, 64);
+
+        let mut encoder = device.create_command_encoder(&Default::default());
+        res.render_offscreen_passes(&mut encoder, true);
+        queue.submit([encoder.finish()]);
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let val_err = poll_fut(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "Realistic biome & coastal ocean WGSL pass triggered WebGPU validation error: {val_err:?}"
+        );
+    }

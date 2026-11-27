@@ -62,6 +62,12 @@ pub enum DemTerrainPreset {
     KarstLimestoneEscarpment,
     /// Graded industrial cut-and-fill structural pad with engineered batters
     TerracedCutFillPad,
+    /// Realistic Cities: Skylines II style tropical bay, sandy beach, coastal city plateau & volcanic peak
+    ArchipelagoBayAndVolcano,
+    /// Realistic alpine river fjord valley with meandering waterway, buildable terrace & steep rocky cliffs
+    FjordRiverValley,
+    /// Realistic sculpted coastal island harbor surrounded by sea with upland scenic ridge
+    CoastalIslandMetropolis,
 }
 
 impl DemTerrainPreset {
@@ -71,6 +77,9 @@ impl DemTerrainPreset {
             DemTerrainPreset::CoastalAlluvialBasin,
             DemTerrainPreset::KarstLimestoneEscarpment,
             DemTerrainPreset::TerracedCutFillPad,
+            DemTerrainPreset::ArchipelagoBayAndVolcano,
+            DemTerrainPreset::FjordRiverValley,
+            DemTerrainPreset::CoastalIslandMetropolis,
         ]
     }
 
@@ -80,7 +89,35 @@ impl DemTerrainPreset {
             DemTerrainPreset::CoastalAlluvialBasin => "SRTM Coastal Alluvial Basin",
             DemTerrainPreset::KarstLimestoneEscarpment => "Karst Escarpment (>30° Slope Hazard)",
             DemTerrainPreset::TerracedCutFillPad => "Engineered Cut/Fill Structural Pad",
+            DemTerrainPreset::ArchipelagoBayAndVolcano => {
+                "Archipelago Bay & Volcanic Peak (Coastal + Mountains)"
+            }
+            DemTerrainPreset::FjordRiverValley => "Alpine Fjord River Valley & Cliffs",
+            DemTerrainPreset::CoastalIslandMetropolis => "Coastal Island Harbor Metropolis",
         }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            DemTerrainPreset::VolcanicFoothillsRidge => "Volcano",
+            DemTerrainPreset::CoastalAlluvialBasin => "Basin",
+            DemTerrainPreset::KarstLimestoneEscarpment => "Karst",
+            DemTerrainPreset::TerracedCutFillPad => "Pad",
+            DemTerrainPreset::ArchipelagoBayAndVolcano => "Bay & Peak",
+            DemTerrainPreset::FjordRiverValley => "Fjord",
+            DemTerrainPreset::CoastalIslandMetropolis => "Island",
+        }
+    }
+
+    /// True when the preset features open coastal sea or navigable water below `0.0 m MSL`.
+    pub fn has_coastal_water(self) -> bool {
+        matches!(
+            self,
+            DemTerrainPreset::ArchipelagoBayAndVolcano
+                | DemTerrainPreset::FjordRiverValley
+                | DemTerrainPreset::CoastalIslandMetropolis
+                | DemTerrainPreset::CoastalAlluvialBasin
+        )
     }
 }
 
@@ -487,6 +524,64 @@ impl TinSurfaceMesh {
                     natural_hill
                 }
             }
+            DemTerrainPreset::ArchipelagoBayAndVolcano => {
+                // Tropical coastal bay (SW sea down to -12.5m) + harbor terrace (~+3.2m at origin) + NE volcanic mountain (~+90m)
+                let shore_diag = nx + ny + 0.16 + 0.08 * ((nx - ny) * 3.2).sin();
+                let bay_sigmoid = 1.0 / (1.0 + (-4.8 * shore_diag).exp());
+                let sea_floor = -12.5 * (1.0 - bay_sigmoid);
+                let coastal_plain = (3.4 + 2.6 * shore_diag.max(0.0)) * bay_sigmoid;
+                let peak_d2 = (nx - 0.42).powi(2) + (ny - 0.44).powi(2);
+                let main_volcano = 86.0 * (-peak_d2 * 5.2).exp();
+                let summit_crater = -9.5 * (-peak_d2 * 48.0).exp();
+                let ridge_spur =
+                    24.0 * (-((nx - 0.18).powi(2) * 8.5 + (ny - 0.68).powi(2) * 3.5)).exp()
+                        + 18.0 * (-((nx - 0.68).powi(2) * 3.8 + (ny - 0.12).powi(2) * 9.0)).exp();
+                let harmonic = (4.2 * (nx * 4.5).sin() * (ny * 4.2).cos()
+                    + 2.1 * (nx * 9.2 + ny * 7.8).cos())
+                    * (0.35 + 0.65 * bay_sigmoid);
+                let natural_z =
+                    sea_floor + coastal_plain + main_volcano + summit_crater + ridge_spur + harmonic;
+                // Smoothly grade a buildable urban harbor terrace around site origin (0, 0)
+                let r_origin_m = x.hypot(y);
+                let urban_blend = (-((r_origin_m / 78.0).powi(2))).exp();
+                natural_z * (1.0 - urban_blend) + 3.2 * urban_blend
+            }
+            DemTerrainPreset::FjordRiverValley => {
+                // Alpine fjord valley: meandering navigable river (~ -7.5m), flat urban valley terrace (+3.4m), steep cliffs (+82m)
+                let river_center_ny = -0.24 + 0.12 * (nx * 2.6).sin();
+                let dist_river = (ny - river_center_ny).abs();
+                let river_trench = -11.2 * (-((dist_river / 0.13).powi(2))).exp();
+                let north_cliff = 82.0 / (1.0 + (-8.5 * (ny - (0.34 + 0.08 * (nx * 3.1).sin()))).exp());
+                let north_peaks = 14.0 * (nx * 4.2).cos().abs() * (ny - 0.25).max(0.0);
+                let south_headland = 40.0 / (1.0 + (-9.0 * (-ny - 0.62)).exp());
+                let valley_floor = 3.6 + 2.2 * (nx * 2.2).sin() * (ny * 2.0).cos();
+                let relief = 3.2 * (nx * 6.5).sin() * (ny * 5.8).cos();
+                let natural_z =
+                    valley_floor + river_trench + north_cliff + north_peaks + south_headland + relief;
+                let r_origin_m = x.hypot(y);
+                let urban_blend = (-((r_origin_m / 68.0).powi(2))).exp();
+                natural_z * (1.0 - urban_blend) + 3.4 * urban_blend
+            }
+            DemTerrainPreset::CoastalIslandMetropolis => {
+                // Sculpted urban harbor island surrounded by ocean (-11m) with scenic northern mountain peak (+44m)
+                let r = nx.hypot(ny);
+                let theta = ny.atan2(nx);
+                let coast_r = 0.72 + 0.08 * (3.0 * theta).sin() + 0.05 * (5.0 * theta).cos();
+                let inland_sigmoid = 1.0 / (1.0 + (7.5 * (r - coast_r)).exp());
+                let sea_bathymetry = -11.0 * (1.0 - inland_sigmoid);
+                let island_plateau = (4.2 + 2.0 * (1.0 - (r / coast_r.max(0.2)).min(1.0))) * inland_sigmoid;
+                let north_hill =
+                    41.0 * (-((nx - 0.08).powi(2) * 8.5 + (ny - 0.42).powi(2) * 10.5)).exp()
+                        * inland_sigmoid;
+                let east_knoll =
+                    22.0 * (-((nx - 0.42).powi(2) * 14.0 + (ny + 0.14).powi(2) * 14.0)).exp()
+                        * inland_sigmoid;
+                let micro = 1.8 * (nx * 6.0).sin() * (ny * 6.0).cos() * inland_sigmoid;
+                let natural_z = sea_bathymetry + island_plateau + north_hill + east_knoll + micro;
+                let r_origin_m = x.hypot(y);
+                let urban_blend = (-((r_origin_m / 76.0).powi(2))).exp();
+                natural_z * (1.0 - urban_blend) + 3.2 * urban_blend
+            }
         }
     }
 
@@ -786,5 +881,32 @@ mod tests {
         let report = mesh.compute_cut_fill_report(105.0, 30.0);
         assert!(report.max_slope_deg > 30.0);
         assert!(report.steep_hazard_area_m2 > 0.0);
+    }
+
+    #[test]
+    fn test_v0865_realistic_landscape_presets_have_sea_and_mountains() {
+        for preset in [
+            DemTerrainPreset::ArchipelagoBayAndVolcano,
+            DemTerrainPreset::FjordRiverValley,
+            DemTerrainPreset::CoastalIslandMetropolis,
+        ] {
+            assert!(preset.has_coastal_water());
+            let tin = TinSurfaceMesh::generate_from_dem_preset(preset, 680.0, 680.0, 46, 46, 1.0);
+            assert!(
+                tin.min_elevation < -2.0,
+                "{preset:?} must carve coastal seabed below sea level, got min={}",
+                tin.min_elevation
+            );
+            assert!(
+                tin.max_elevation > 32.0,
+                "{preset:?} must elevate mountain/hilltop terrain, got max={}",
+                tin.max_elevation
+            );
+            let (origin_z, _) = tin.sample_elevation_and_slope(0.0, 0.0);
+            assert!(
+                (1.0..=6.5).contains(&origin_z),
+                "{preset:?} must maintain a buildable harbor terrace at (0,0), got z={origin_z}"
+            );
+        }
     }
 }

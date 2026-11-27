@@ -226,8 +226,8 @@ pub const ENGINEERING_MATH_CATALOG: &[AboutFeatureMathSpec] = &[
         category_badge: "Geometry & IFCX",
         title: "Half-Edge Geometry, BSP Solid CSG, Living Earth WebGPU & IFCX SHA-256",
         modules_and_codes: "core/geom.rs, core/csg.rs, core/gis.rs, core/ifcx.rs, vector_dossier.rs • IFC 5 ECS, FIPS 180-4, S-000",
-        capabilities: "Provides planar half-edge arrangement, straight-skeleton roofs, non-recursive BSP CSG wall openings, WGS-84/ECEF/RTC-ENU Pure WebGPU WGSL shaders (material_kind 0..26), 3-way IFCX merging, and SHA-256 vector PDF/DXF/SVG sheets.",
-        math_logic: "Geodesic Transform: Geodetic(lat, lon, h) -> ECEF(X,Y,Z) -> RTC ENU(e,n,u) - cam_origin\nNon-Recursive BSP CSG: Solid_A \\ Solid_B for parametric Doors/Windows inside 3D Walls\nIFCX ECS Composition: Layer_n o ... o Layer_1 with path-level 3-Way Merge\nAudit Seal: SHA-256 (NIST FIPS 180-4) embedded across Sheet S-000..S-115 vector dossiers",
+        capabilities: "Provides planar half-edge arrangement, straight-skeleton roofs, non-recursive BSP CSG wall openings, WGS-84/ECEF/RTC-ENU Pure WebGPU WGSL shaders (material_kind 0..29 including biome mountains & Beer-Lambert ocean waves), 3-way IFCX merging, and SHA-256 vector PDF/DXF/SVG sheets.",
+        math_logic: "Geodesic Transform: Geodetic(lat, lon, h) -> ECEF(X,Y,Z) -> RTC ENU(e,n,u) - cam_origin\nOcean Beer-Lambert & Foam: C = mix(C_deep, C_shallow, exp(-depth * k_rgb)), Gerstner waves\nNon-Recursive BSP CSG: Solid_A \\ Solid_B for parametric Doors/Windows inside 3D Walls\nIFCX ECS Composition: Layer_n o ... o Layer_1 with path-level 3-Way Merge + SHA-256 seal",
     },
 ];
 

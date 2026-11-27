@@ -2047,6 +2047,42 @@ impl SpatialWorkspaceState {
                         crate::views::universal_canvas::EarthBimTool::None;
                     self.push_trace("Focused 3D Earth Globe", true);
                 }
+                "/landscape" | "/bay" => {
+                    self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                    universal_canvas.globe_mode = true;
+                    universal_canvas.apply_landscape_preset(
+                        crate::core::gis::DemTerrainPreset::ArchipelagoBayAndVolcano,
+                    );
+                    actions.fit_camera = true;
+                    self.push_trace(
+                        "Loaded Realistic Bay, Beach & Volcanic Peak Landscape + Coastal Ocean",
+                        true,
+                    );
+                }
+                "/fjord" => {
+                    self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                    universal_canvas.globe_mode = true;
+                    universal_canvas.apply_landscape_preset(
+                        crate::core::gis::DemTerrainPreset::FjordRiverValley,
+                    );
+                    actions.fit_camera = true;
+                    self.push_trace(
+                        "Loaded Realistic Alpine Fjord River Valley Landscape",
+                        true,
+                    );
+                }
+                "/island" => {
+                    self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                    universal_canvas.globe_mode = true;
+                    universal_canvas.apply_landscape_preset(
+                        crate::core::gis::DemTerrainPreset::CoastalIslandMetropolis,
+                    );
+                    actions.fit_camera = true;
+                    self.push_trace(
+                        "Loaded Realistic Coastal Island Harbor Landscape",
+                        true,
+                    );
+                }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");
                     actions.fit_camera = true;

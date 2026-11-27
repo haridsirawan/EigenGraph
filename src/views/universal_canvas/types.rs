@@ -304,6 +304,12 @@ pub struct UnifiedWorkspaceArchive {
     pub solar_envelope_config: crate::core::solar_envelope::SolarEnvelopeConfig,
     #[serde(default)]
     pub daylight_config: crate::core::daylight_interior::DaylightInteriorConfig,
+    #[serde(default = "default_globe_true")]
+    pub realistic_landscape_enabled: bool,
+    #[serde(default)]
+    pub sea_level_m: f32,
+    #[serde(default = "default_globe_true")]
+    pub show_water_surface: bool,
     pub sha256_seal: String,
 }
 

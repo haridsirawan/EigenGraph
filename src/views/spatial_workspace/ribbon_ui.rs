@@ -622,6 +622,101 @@ impl SpatialWorkspaceState {
                         actions.run_district_hazard_audit = true;
                     }
                 });
+                Self::ribbon_group(ui, theme, "Landscape", |ui| {
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Mountain,
+                        "Bay & Peak",
+                        universal_canvas.show_terrain_contours
+                            && universal_canvas.site_tin_preset
+                                == crate::core::gis::DemTerrainPreset::ArchipelagoBayAndVolcano,
+                        theme.accent_green,
+                        "Generate realistic tropical Bay, Sandy Beach, Urban Terrace & Volcanic Peak landscape",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.apply_landscape_preset(
+                            crate::core::gis::DemTerrainPreset::ArchipelagoBayAndVolcano,
+                        );
+                        self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                        universal_canvas.globe_mode = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Waves,
+                        "Fjord",
+                        universal_canvas.show_terrain_contours
+                            && universal_canvas.site_tin_preset
+                                == crate::core::gis::DemTerrainPreset::FjordRiverValley,
+                        theme.accent_blue,
+                        "Generate alpine Fjord River Valley with navigable waterway and steep coastal cliffs",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.apply_landscape_preset(
+                            crate::core::gis::DemTerrainPreset::FjordRiverValley,
+                        );
+                        self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                        universal_canvas.globe_mode = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Globe,
+                        "Island",
+                        universal_canvas.show_terrain_contours
+                            && universal_canvas.site_tin_preset
+                                == crate::core::gis::DemTerrainPreset::CoastalIslandMetropolis,
+                        theme.accent_blue,
+                        "Generate sculpted Coastal Island Harbor surrounded by animated ocean waters",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.apply_landscape_preset(
+                            crate::core::gis::DemTerrainPreset::CoastalIslandMetropolis,
+                        );
+                        self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+                        universal_canvas.globe_mode = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Waves,
+                        "Ocean",
+                        universal_canvas.show_water_surface,
+                        theme.accent_blue,
+                        "Toggle animated coastal ocean waves, Beer-Lambert depth absorption & shoreline foam",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.show_water_surface = !universal_canvas.show_water_surface;
+                        if universal_canvas.show_water_surface {
+                            universal_canvas.show_terrain_contours = true;
+                            universal_canvas.realistic_landscape_enabled = true;
+                            universal_canvas.ensure_site_tin_generated();
+                        }
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Trees,
+                        "Biomes",
+                        universal_canvas.realistic_landscape_enabled,
+                        theme.accent_green,
+                        "Toggle realistic elevation/slope biomes (sand, grass, forest, stratified basalt rock, snow)",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.realistic_landscape_enabled =
+                            !universal_canvas.realistic_landscape_enabled;
+                        if universal_canvas.realistic_landscape_enabled {
+                            universal_canvas.show_terrain_contours = true;
+                            universal_canvas.ensure_site_tin_generated();
+                        }
+                    }
+                });
                 Self::ribbon_group(ui, theme, "Zoning & Brief", |ui| {
                     if Self::ribbon_tool_tile(
                         ui,

@@ -103,6 +103,10 @@ pub struct UniversalCanvasState {
     pub active_site_tin: Option<crate::core::gis::TinSurfaceMesh>,
     pub site_tin_preset: crate::core::gis::DemTerrainPreset,
     pub show_terrain_contours: bool,
+    // Update v0.8.6.5 (5/10 -> v0.8.7): Realistic Biome Terrain & Coastal Ocean Shader Controls
+    pub realistic_landscape_enabled: bool,
+    pub sea_level_m: f32,
+    pub show_water_surface: bool,
     pub hovered_world_building_rel_path: Option<String>,
     // Phase 59 & 64: Offline Pure-Vector Site Layer, OpenBIM IFC Site TIN & Neighborhood Physics
     pub urban_vectors: crate::core::gis::UrbanVectorLayerCache,
@@ -327,6 +331,9 @@ impl Default for UniversalCanvasState {
             active_site_tin: None,
             site_tin_preset: crate::core::gis::DemTerrainPreset::TerracedCutFillPad,
             show_terrain_contours: false,
+            realistic_landscape_enabled: true,
+            sea_level_m: 0.0,
+            show_water_surface: true,
             hovered_world_building_rel_path: None,
             urban_vectors: crate::core::gis::UrbanVectorLayerCache::default(),
             site_tin_from_ifc: false,
@@ -480,16 +487,32 @@ impl UniversalCanvasState {
     /// when no OpenBIM IFC `IfcSite` or local XYZ survey TIN has been loaded yet.
     pub fn ensure_site_tin_generated(&mut self) {
         if self.active_site_tin.is_none() {
+            let (extent_m, grid_n) = if self.site_tin_preset.has_coastal_water() {
+                (680.0_f32, 46usize)
+            } else {
+                (400.0_f32, 28usize)
+            };
             self.active_site_tin = Some(crate::core::gis::TinSurfaceMesh::generate_from_dem_preset(
                 self.site_tin_preset,
-                400.0,
-                400.0,
-                28,
-                28,
+                extent_m,
+                extent_m,
+                grid_n,
+                grid_n,
                 1.0,
             ));
             self.site_tin_from_ifc = false;
         }
+    }
+
+    /// Switches to a realistic landscape morphology preset (mountains, valleys, and coastal sea),
+    /// enabling procedural biome shading and coastal ocean surface waves cleanly in one click.
+    pub fn apply_landscape_preset(&mut self, preset: crate::core::gis::DemTerrainPreset) {
+        self.site_tin_preset = preset;
+        self.show_terrain_contours = true;
+        self.realistic_landscape_enabled = true;
+        self.show_water_surface = preset.has_coastal_water();
+        self.active_site_tin = None;
+        self.ensure_site_tin_generated();
     }
 
     /// Evaluates seismic pounding gaps, urban wind exposure & Venturi channeling, and debris zones
@@ -1636,6 +1659,9 @@ impl UniversalCanvasState {
             massing_config: self.massing_config.clone(),
             solar_envelope_config: self.solar_envelope_config.clone(),
             daylight_config: self.daylight_config.clone(),
+            realistic_landscape_enabled: self.realistic_landscape_enabled,
+            sea_level_m: self.sea_level_m,
+            show_water_surface: self.show_water_surface,
             sha256_seal: String::new(),
         }
     }
@@ -1787,6 +1813,9 @@ impl UniversalCanvasState {
         self.last_solar_envelope_report = None;
         self.daylight_config = archive.daylight_config;
         self.last_daylight_report = None;
+        self.realistic_landscape_enabled = archive.realistic_landscape_enabled;
+        self.sea_level_m = archive.sea_level_m;
+        self.show_water_surface = archive.show_water_surface;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2537,6 +2566,21 @@ impl UniversalCanvasState {
             let hazard_compute_opt = hazard_compute_input
                 .enabled
                 .then_some(hazard_compute_input.clone());
+            let coastal_water_gpu_input = if self.show_terrain_contours
+                && self.realistic_landscape_enabled
+                && self.show_water_surface
+            {
+                self.active_site_tin
+                    .as_ref()
+                    .filter(|t| t.min_elevation < self.sea_level_m)
+                    .map(|tin| crate::views::webgpu_earth::CoastalWaterGpuInput {
+                        tin,
+                        sea_level_m: self.sea_level_m,
+                        visible: true,
+                    })
+            } else {
+                None
+            };
             let gpu_globe_active = self.webgpu_earth.schedule_paint_pass(
                 ui,
                 &painter,
@@ -2546,11 +2590,14 @@ impl UniversalCanvasState {
                 self.ground_origin_lat_lon,
                 self.ground_origin_anchored,
                 self.show_terrain_contours,
+                self.realistic_landscape_enabled,
+                self.sea_level_m,
                 self.active_site_tin.as_ref(),
                 &self.world_index,
                 self.active_world_project_rel_path.as_deref(),
                 &self.urban_vectors,
                 Some(&self.city_scene),
+                coastal_water_gpu_input,
                 active_bim_gpu,
                 hazard_gpu_input,
                 subsurface_gpu_input,
