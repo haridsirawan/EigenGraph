@@ -85,6 +85,7 @@ pub mod ns {
     pub const EG_MEP_SYSTEMS: &str = "eigengraph::mep::systems";
     pub const EG_CLASH_GUARDRAIL: &str = "eigengraph::coordination::clash_bcf";
     pub const EG_URBAN_UTILITIES: &str = "eigengraph::gis::urban_utilities";
+    pub const EG_CITY_INTERSECTIONS: &str = "eigengraph::gis::city_intersections";
     pub const EG_SITE_TERRAFORM: &str = "eigengraph::gis::site_terraform";
     pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
@@ -2265,6 +2266,42 @@ impl IfcxStage {
         stage.to_composed_document(&format!("{}_urban_utilities", base_doc.header.id))
     }
 
+    /// Composes a base `.ifcx` document with a non-destructive Smart Road Intersections & LOS overlay.
+    pub fn compose_with_city_intersections_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::gis::CityIntersectionsIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_city_intersections", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcRoadPart", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Smart Road Intersections & HCM Level-of-Service Network",
+                "totalIntersections": overlay.total_intersections,
+                "roundaboutCount": overlay.roundabout_count,
+                "signalizedCount": overlay.signalized_count,
+                "worstLos": overlay.worst_los,
+                "avgDelaySec": overlay.avg_delay_sec,
+                "allLosAcceptable": overlay.all_los_acceptable,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_CITY_INTERSECTIONS.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/city/intersections".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_city_intersections", base_doc.header.id))
+    }
+
     /// Composes a base `.ifcx` document with a non-destructive sculpted `IfcSite` terraform layer.
     pub fn compose_with_site_terraform_overlay(
         base_doc: &IfcxDocument,
@@ -2396,6 +2433,8 @@ fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
         "Subsurface SSI".to_string()
     } else if node.attributes.contains_key(ns::EG_URBAN_UTILITIES) {
         "Urban Utilities".to_string()
+    } else if node.attributes.contains_key(ns::EG_CITY_INTERSECTIONS) {
+        "Road Intersections".to_string()
     } else if node.attributes.contains_key("eigengraph::hazard::district") {
         "District Hazard".to_string()
     } else if node.attributes.contains_key(ns::EG_IFCX_DIFF) {

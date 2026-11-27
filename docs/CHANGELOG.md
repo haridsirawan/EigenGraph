@@ -7,7 +7,17 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.8 (7/10)]
+## [Unreleased — Next: v0.8.8 (8/10)]
+
+### Update 8/10 (`v0.8.7.8` -> `v0.8.8`) — Interactive City-to-BIM Promotion & Smart Road Intersections (`T-Junction`, `4-Way Cross`, `Roundabout`, `HCM LOS`) & Gemini Tools #14–#15
+- **City-to-BIM Promotion & Smart Road Intersections Core (`src/core/gis/city_promotion.rs`, `src/core/gis/city_builder.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:
+  - Added `city_promotion` (`NS_EG_CITY_INTERSECTIONS = "eigengraph::gis::city_intersections"`) automatically detecting road endpoint hubs and spline crossings across ground `IfcRoad` networks, classifying `TJunction`, `FourWayCross`, `Roundabout`, and `MergeJunction` nodes, and computing HCM 6th Edition control delay & `LOS A..F`.
+  - Implemented [`promote_city_building_to_bim`](src/core/gis/city_promotion.rs) converting any procedural city parcel building (`IfcxSpatialZone`) into a full parametric, 6-DOF FEM-solvable OpenBIM `BimProject` while setting `IfcxCityScene::promoted_zone_id`, recentering surrounding roads/parcels via [`IfcxCityScene::recenter_origin_enu`](src/core/gis/city_builder.rs), and composing non-destructive IFCX overlays via [`IfcxStage::compose_with_city_intersections_overlay`](src/core/ifcx.rs).
+- **3D WebGPU Intersection Geometry, City Hub Drawer, Ribbon & Gemini Tools #14–#15 (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/core/agent_tools.rs`, `src/app.rs`)**:
+  - Upgraded [`push_city_builder_scene_enu`](src/views/webgpu_earth/mesh_builders.rs) to suppress promoted procedural tower shells (zero Z-fighting) and render 16-sided asphalt junction aprons, zebra crosswalks, landscaped roundabout islands with trees, and LOS-colored traffic signal poles.
+  - Added [`paint_cpu_city_intersections_fallback`](src/views/universal_canvas/render_layers.rs), width-first 2-tab [`render_city_hub_drawer`](src/views/spatial_workspace/drawers.rs), `"City -> BIM"` group (`Promote` & `Junctions`) in `RibbonCategoryTab::Planning`, `/promote-bim`, `/intersections`, `/roundabout`, `/intersections-ifcx` commands, and Tools #14 (`evaluate_road_intersections`) & #15 (`promote_city_building_to_bim`) in [`agent_tools.rs`](src/core/agent_tools.rs).
+- **Verification (`src/core/gis/city_promotion.rs`, `src/views/webgpu_earth/tests.rs`, `src/views/spatial_workspace/tests.rs`)**:
+  - Added [`test_v0878_city_to_bim_promotion_and_smart_road_intersections`](src/core/gis/city_promotion.rs), [`test_v0878_city_intersections_3d_webgpu_roundabout_and_promoted_shell_suppression`](src/views/webgpu_earth/tests.rs), and [`test_v0878_city_to_bim_drawer_slash_commands_and_gemini_tools`](src/views/spatial_workspace/tests.rs).
 
 ### Update 7/10 (`v0.8.7.7` -> `v0.8.8`) — Subsurface Urban Utilities Network (`Water`, `Sewer/Storm`, `20kV Power`), WebGPU Underground X-Ray & Gemini Tool #13
 - **Road-Following Subsurface Urban Utilities Core Engine & Non-Destructive IFCX Overlay (`src/core/gis/urban_utilities.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:

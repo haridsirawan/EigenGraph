@@ -74,7 +74,7 @@ impl ToolExecutionOutcome {
     }
 }
 
-const TOOL_NAMES: [&str; 13] = [
+const TOOL_NAMES: [&str; 15] = [
     "inspect_model",
     "run_structural_audit",
     "run_solar_ottv",
@@ -82,6 +82,8 @@ const TOOL_NAMES: [&str; 13] = [
     "run_mep_systems",
     "run_clash_detection",
     "run_urban_utilities",
+    "evaluate_road_intersections",
+    "promote_city_building_to_bim",
     "resize_column",
     "resize_beam",
     "add_story",
@@ -226,6 +228,36 @@ pub fn gemini_function_declarations() -> Value {
                             "substation_mva": {
                                 "type": "NUMBER",
                                 "description": "20kV district substation transformer rating in MVA (1..250)."
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "evaluate_road_intersections",
+                    "description": "Detect road intersections (4-Way Cross, T-Junction, Roundabout) along authored IfcRoad corridors and evaluate HCM Level of Service delay.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "prefer_roundabouts": {
+                                "type": "BOOLEAN",
+                                "description": "Upgrade eligible >=3-branch junctions to Modern Roundabouts (default false)."
+                            },
+                            "snap_radius_m": {
+                                "type": "NUMBER",
+                                "description": "Cluster snap tolerance in meters (4..24, default 8.5)."
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "promote_city_building_to_bim",
+                    "description": "Convert a procedural city parcel building (or largest zoned tower) into a full editable 6-DOF FEM-ready OpenBIM project.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "zone_id": {
+                                "type": "INTEGER",
+                                "description": "Optional target IfcxSpatialZone ID to promote."
                             }
                         }
                     }
@@ -848,6 +880,122 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
             }
         }
+        "evaluate_road_intersections" => {
+            use crate::core::gis::{
+                detect_and_evaluate_road_intersections, CityIntersectionConfig, IfcxCityScene,
+            };
+            let mut cfg = CityIntersectionConfig::default();
+            if let Some(rb) = call
+                .args
+                .get("prefer_roundabouts")
+                .and_then(|v| v.as_bool())
+            {
+                cfg.prefer_roundabouts = rb;
+            }
+            if let Some(sr) = arg_f64(&call.args, "snap_radius_m") {
+                cfg.snap_radius_m = sr.clamp(4.0, 24.0);
+            }
+            let fallback_city = IfcxCityScene::default();
+            let city = city_scene.unwrap_or(&fallback_city);
+            let rep = detect_and_evaluate_road_intersections(city, tin, sea_level_m, &cfg);
+            let junctions: Vec<Value> = rep
+                .intersections
+                .iter()
+                .take(8)
+                .map(|j| {
+                    json!({
+                        "name": j.name,
+                        "kind": j.kind.short_label(),
+                        "branches": j.branch_count,
+                        "peak_vph": j.peak_vph,
+                        "avg_delay_sec": j.avg_delay_sec,
+                        "los": j.los.short_label(),
+                    })
+                })
+                .collect();
+            ToolExecutionOutcome {
+                name: name.to_string(),
+                ok: true,
+                summary: rep.summary_verdict.clone(),
+                result_json: json!({
+                    "ok": true,
+                    "total_intersections": rep.total_intersections,
+                    "roundabout_count": rep.roundabout_count,
+                    "signalized_count": rep.signalized_count,
+                    "worst_los": rep.worst_los.short_label(),
+                    "avg_delay_sec": rep.avg_delay_sec,
+                    "all_los_acceptable": rep.all_los_acceptable,
+                    "junctions": junctions,
+                }),
+                mutated_bim: false,
+                sync_fem_and_earth: false,
+                fit_camera: false,
+                section_box_update: None,
+                fly_target: None,
+            }
+        }
+        "promote_city_building_to_bim" => {
+            use crate::core::gis::{
+                promote_city_building_to_bim, IfcxSpatialZone, IfcxZoneKind, ZoneDensityTier,
+            };
+            let requested_id = arg_usize(&call.args, "zone_id");
+            let candidate_zone = city_scene
+                .and_then(|c| {
+                    if let Some(zid) = requested_id {
+                        c.zones.iter().find(|z| z.id == zid).cloned()
+                    } else {
+                        c.zones
+                            .iter()
+                            .filter(|z| Some(z.id) != c.promoted_zone_id)
+                            .filter_map(|z| z.synthesize_procedural_building().map(|b| (z, b.gfa_m2)))
+                            .max_by(|a, b| a.1.total_cmp(&b.1))
+                            .map(|(z, _)| z.clone())
+                    }
+                })
+                .unwrap_or_else(|| IfcxSpatialZone {
+                    id: requested_id.unwrap_or(1),
+                    name: "Zone_Com_Promo".to_string(),
+                    kind: IfcxZoneKind::Commercial,
+                    center_enu_m: [0.0, 0.0],
+                    width_m: 28.0,
+                    depth_m: 24.0,
+                    rotation_deg: 0.0,
+                    synthesize_context_towers: true,
+                    tree_density: 2,
+                    density: ZoneDensityTier::MediumDensity,
+                });
+            let Some((new_bim, summary)) =
+                promote_city_building_to_bim(&candidate_zone, site_lat_lon)
+            else {
+                return ToolExecutionOutcome::err(
+                    name,
+                    "Selected parcel does not contain a promotable procedural building.",
+                );
+            };
+            bim_bus.project = new_bim;
+            ToolExecutionOutcome {
+                name: name.to_string(),
+                ok: true,
+                summary: summary.summary_line.clone(),
+                result_json: json!({
+                    "ok": true,
+                    "zone_id": summary.zone_id,
+                    "building_name": summary.building_name,
+                    "zone_kind": summary.zone_kind_label,
+                    "floors": summary.floors,
+                    "gfa_m2": summary.gfa_m2,
+                    "columns": summary.columns,
+                    "beams": summary.beams,
+                    "walls": summary.walls,
+                    "levels": summary.levels,
+                }),
+                mutated_bim: true,
+                sync_fem_and_earth: true,
+                fit_camera: true,
+                section_box_update: None,
+                fly_target: Some((summary.target_lat_lon.0, summary.target_lat_lon.1, 17.8)),
+            }
+        }
         "resize_column" => {
             let Some(column_id) = arg_usize(&call.args, "column_id") else {
                 return ToolExecutionOutcome::err(name, "Missing integer argument 'column_id'.");
@@ -1107,7 +1255,7 @@ mod tests {
         let fn_decls = decls[0]["functionDeclarations"]
             .as_array()
             .expect("functionDeclarations array");
-        assert_eq!(fn_decls.len(), 13);
+        assert_eq!(fn_decls.len(), 15);
         for expected in registered_tool_names() {
             assert!(
                 fn_decls.iter().any(|d| d["name"].as_str() == Some(*expected)),
@@ -1217,6 +1365,34 @@ mod tests {
         assert!(util.ok);
         assert!(util.result_json["water_trunk_dn_mm"].as_u64().unwrap_or(0) >= 150);
         assert!(util.result_json["segment_count"].as_u64().unwrap_or(0) >= 6);
+
+        let inter = execute_headless_tool(
+            &GeminiToolCall {
+                name: "evaluate_road_intersections".to_string(),
+                args: json!({ "prefer_roundabouts": true }),
+            },
+            &mut bus,
+            &site,
+            (-6.2088, 106.8456),
+            0,
+            false,
+        );
+        assert!(inter.ok);
+        assert!(inter.result_json["total_intersections"].as_u64().is_some());
+
+        let promo = execute_headless_tool(
+            &GeminiToolCall {
+                name: "promote_city_building_to_bim".to_string(),
+                args: json!({}),
+            },
+            &mut bus,
+            &site,
+            (-6.2088, 106.8456),
+            0,
+            false,
+        );
+        assert!(promo.ok && promo.mutated_bim && promo.sync_fem_and_earth);
+        assert!(promo.result_json["columns"].as_u64().unwrap_or(0) >= 6);
 
         let col_id = bus.project.columns[0].id;
         let resize = execute_headless_tool(

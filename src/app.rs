@@ -4812,6 +4812,62 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if let Some(zid_opt) = hud_actions.promote_city_zone_to_bim {
+            if let Some((new_bim, summary)) = self.universal_canvas.promote_city_zone_to_bim(zid_opt)
+            {
+                self.build_view.bim_bus.project = new_bim.clone();
+                self.parametric_view.bim_bus.project = new_bim;
+                self.sync_bim_to_fem();
+                let cp_msg = self.universal_canvas.create_signed_ifcx_checkpoint(
+                    &self.build_view.bim_bus.project,
+                    &self.members,
+                    &format!("City-to-BIM: {}", summary.building_name),
+                );
+                self.spatial_workspace
+                    .push_trace(format!("{} • {cp_msg}", summary.summary_line), true);
+            } else {
+                self.spatial_workspace.push_trace(
+                    "No zoned procedural building found to promote — use Auto-Zone first",
+                    false,
+                );
+            }
+        }
+        if hud_actions.run_road_intersections {
+            let rep = self.universal_canvas.run_road_intersections();
+            self.spatial_workspace
+                .push_trace(rep.summary_verdict, rep.all_los_acceptable);
+        }
+        if hud_actions.toggle_roundabout_mode {
+            self.universal_canvas.intersection_config.prefer_roundabouts =
+                !self.universal_canvas.intersection_config.prefer_roundabouts;
+            let rep = self.universal_canvas.run_road_intersections();
+            self.spatial_workspace
+                .push_trace(rep.summary_verdict, rep.all_los_acceptable);
+        }
+        if hud_actions.export_intersections_ifcx {
+            let rep = self.universal_canvas.run_road_intersections();
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_city_intersections_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_intersections.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported Smart Road Intersections IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {

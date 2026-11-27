@@ -13,8 +13,16 @@ pub mod dem_stream;
 pub mod neighborhood_physics;
 pub mod world_vectors;
 pub mod city_builder;
+pub mod city_promotion;
 pub mod district_hazard;
 pub mod urban_utilities;
+
+pub use city_promotion::{
+    detect_and_evaluate_road_intersections, promote_city_building_to_bim,
+    CityIntersectionConfig, CityIntersectionNetworkReport, CityIntersectionsIfcxOverlay,
+    CityRoadIntersection, CityToBimPromotionSummary, IntersectionKind, IntersectionLosGrade,
+    NS_EG_CITY_INTERSECTIONS,
+};
 
 pub use urban_utilities::{
     evaluate_urban_utilities, UrbanUtilitiesConfig, UrbanUtilitiesIfcxOverlay,

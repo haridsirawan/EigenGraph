@@ -3741,3 +3741,157 @@ use crate::core::ifcx::IfcxDocument;
             "Subsurface Urban Utilities X-Ray WGSL pass triggered WebGPU validation error: {val_err:?}"
         );
     }
+
+    #[test]
+    fn test_v0878_city_intersections_3d_webgpu_roundabout_and_promoted_shell_suppression() {
+        use crate::core::gis::{
+            IfcxCityScene, IfcxRoadKind, IfcxZoneKind, UrbanVectorLayerCache, WorldSpatialIndex,
+        };
+        use crate::core::BimProject;
+        use crate::views::universal_canvas::{EarthBimLens, SectionBoxConfig};
+
+        let mut city = IfcxCityScene::default();
+        city.prefer_roundabouts = true;
+        city.add_road([-60.0, 0.0], [60.0, 0.0], IfcxRoadKind::Arterial, false);
+        city.add_road([0.0, -55.0], [0.0, 55.0], IfcxRoadKind::Collector, false);
+        let z = city
+            .add_zone([26.0, 24.0], 26.0, 22.0, 0.0, IfcxZoneKind::Commercial)
+            .clone();
+
+        let world_idx = WorldSpatialIndex::default();
+        let urban_vecs = UrbanVectorLayerCache::default();
+
+        let before_mesh = build_rtc_site_scene_mesh(
+            VectorEarthTheme::CoastalBlueprint,
+            (-6.2088, 106.8456),
+            17.0,
+            false,
+            None,
+            &world_idx,
+            None,
+            &urban_vecs,
+            Some(&city),
+        );
+        let sig_before_tris = before_mesh.indices.len() / 3;
+        assert!(sig_before_tris > 40);
+
+        // Switching promoted_zone_id suppresses the procedural tower triangles
+        city.promoted_zone_id = Some(z.id);
+        let after_mesh = build_rtc_site_scene_mesh(
+            VectorEarthTheme::CoastalBlueprint,
+            (-6.2088, 106.8456),
+            17.0,
+            false,
+            None,
+            &world_idx,
+            None,
+            &urban_vecs,
+            Some(&city),
+        );
+        let after_tris = after_mesh.indices.len() / 3;
+        assert!(
+            after_tris < sig_before_tris,
+            "Promoting zone {} must suppress its procedural tower shell ({after_tris} < {sig_before_tris})",
+            z.id
+        );
+
+        let (promoted_bim, _) =
+            crate::core::gis::promote_city_building_to_bim(&z, (-6.2088, 106.8456))
+                .expect("promote zone");
+        let bim_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
+            project: &promoted_bim,
+            members: &[],
+            lens: EarthBimLens::Clean,
+            erection_day_limit: 365,
+            deform_scale: 12.0,
+            active_modal_mode: 0,
+            modal_phase_sin: 0.0,
+            n1_removed_bim: None,
+            cascade_failed_bim: &[],
+            cascade_step_progress: 1.0,
+            subsurface_pile_depth_m: 12.0,
+            heading_deg: 0.0,
+            diff_overlay_active: false,
+            diff_added_bim: &[],
+            diff_modified_bim: &[],
+            diff_deleted_ghosts: &[],
+            replay_story_elevs_m: &[],
+            replay_story_disp_xyz_m: &[],
+            replay_ground_shake_xyz_m: [0.0; 3],
+            replay_hinge_states: &[],
+            shm_story_retention: &[],
+        });
+        assert!(bim_mesh.indices.len() / 3 > 100);
+
+        fn poll_fut<F: std::future::Future>(fut: F) -> F::Output {
+            let mut fut = std::pin::pin!(fut);
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(&waker);
+            loop {
+                if let std::task::Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
+                    return out;
+                }
+                std::thread::yield_now();
+            }
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = poll_fut(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let Ok((device, queue)) =
+            poll_fut(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        res.site.upload(&device, &queue, "site_v0878", 1, &after_mesh);
+        res.bim.upload(&device, &queue, "bim_v0878", 1, &bim_mesh);
+
+        let mut cam = GlobeCamera::default();
+        cam.tilt_deg = 42.0;
+        let xf = GlobeScreenTransform::from_view(
+            Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(64.0, 64.0)),
+            -6.2088,
+            106.8456,
+            17.0,
+            &cam,
+        );
+        let sb = SectionBoxConfig::default();
+        let uniforms = RtcCameraUniforms::from_globe_xform(
+            &xf,
+            VectorEarthTheme::CoastalBlueprint,
+            &cam,
+            (-6.2088, 106.8456),
+            1.6,
+            true,
+        )
+        .with_section_box(&sb);
+        queue.write_buffer(
+            &res.planet_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_planet_pass_uniforms()),
+        );
+        queue.write_buffer(
+            &res.site_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_site_pass_uniforms()),
+        );
+        res.ensure_targets(&device, 64, 64);
+
+        let mut encoder = device.create_command_encoder(&Default::default());
+        res.render_offscreen_passes(&mut encoder, true);
+        queue.submit([encoder.finish()]);
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let val_err = poll_fut(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "City-to-BIM & Smart Intersections WebGPU pass triggered validation error: {val_err:?}"
+        );
+        let _ = BimProject::default();
+    }

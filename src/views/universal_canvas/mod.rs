@@ -265,6 +265,10 @@ pub struct UniversalCanvasState {
     pub urban_utilities_overlay_visible: bool,
     pub urban_utilities_config: crate::core::gis::UrbanUtilitiesConfig,
     pub last_urban_utilities_report: Option<crate::core::gis::UrbanUtilitiesReport>,
+    // Update v0.8.7.8 (8/10 -> v0.8.8): Interactive City-to-BIM Promotion & Smart Road Intersections
+    pub intersection_config: crate::core::gis::CityIntersectionConfig,
+    pub last_intersection_report: Option<crate::core::gis::CityIntersectionNetworkReport>,
+    pub last_promotion_summary: Option<crate::core::gis::CityToBimPromotionSummary>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -469,6 +473,9 @@ impl Default for UniversalCanvasState {
             urban_utilities_overlay_visible: false,
             urban_utilities_config: crate::core::gis::UrbanUtilitiesConfig::default(),
             last_urban_utilities_report: None,
+            intersection_config: crate::core::gis::CityIntersectionConfig::default(),
+            last_intersection_report: None,
+            last_promotion_summary: None,
         }
     }
 }
@@ -2138,6 +2145,52 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Detects road junctions, updates roundabout/signal geometry, and evaluates HCM Level of Service.
+    pub fn run_road_intersections(&mut self) -> crate::core::gis::CityIntersectionNetworkReport {
+        self.city_scene.prefer_roundabouts = self.intersection_config.prefer_roundabouts;
+        let rep = crate::core::gis::detect_and_evaluate_road_intersections(
+            &self.city_scene,
+            self.active_site_tin.as_ref(),
+            self.sea_level_m,
+            &self.intersection_config,
+        );
+        self.last_intersection_report = Some(rep.clone());
+        self.status_message = Some(rep.summary_verdict.clone());
+        rep
+    }
+
+    /// Promotes a zoned procedural city building (`zone_id_opt`, or highest-GFA zone) into a full
+    /// editable 6-DOF OpenBIM `BimProject`, suppressing its shell and recentering the surrounding city.
+    pub fn promote_city_zone_to_bim(
+        &mut self,
+        zone_id_opt: Option<usize>,
+    ) -> Option<(crate::core::BimProject, crate::core::gis::CityToBimPromotionSummary)> {
+        let target_zone = if let Some(zid) = zone_id_opt {
+            self.city_scene.zones.iter().find(|z| z.id == zid).cloned()
+        } else {
+            self.city_scene
+                .zones
+                .iter()
+                .filter(|z| Some(z.id) != self.city_scene.promoted_zone_id)
+                .filter_map(|z| z.synthesize_procedural_building().map(|b| (z, b.gfa_m2)))
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(z, _)| z.clone())
+        }?;
+
+        let (bim, summary) =
+            crate::core::gis::promote_city_building_to_bim(&target_zone, self.ground_origin_lat_lon)?;
+        self.city_scene.promoted_zone_id = Some(target_zone.id);
+        self.city_scene.recenter_origin_enu(target_zone.center_enu_m);
+        self.ground_origin_lat_lon = summary.target_lat_lon;
+        self.ground_origin_anchored = true;
+        self.world_map
+            .set_center(summary.target_lat_lon.0, summary.target_lat_lon.1);
+        self.last_promotion_summary = Some(summary.clone());
+        let _ = self.run_road_intersections();
+        self.status_message = Some(summary.summary_line.clone());
+        Some((bim, summary))
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -2488,6 +2541,7 @@ impl UniversalCanvasState {
             mep_config: self.mep_config.clone(),
             clash_config: self.clash_config.clone(),
             urban_utilities_config: self.urban_utilities_config.clone(),
+            intersection_config: self.intersection_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -2651,6 +2705,9 @@ impl UniversalCanvasState {
         self.last_clash_report = None;
         self.urban_utilities_config = archive.urban_utilities_config;
         self.last_urban_utilities_report = None;
+        self.intersection_config = archive.intersection_config;
+        self.last_intersection_report = None;
+        self.last_promotion_summary = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -3609,6 +3666,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.urban_utilities_overlay_visible {
                 self.paint_cpu_urban_utilities_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.last_intersection_report.is_some() {
+                self.paint_cpu_city_intersections_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

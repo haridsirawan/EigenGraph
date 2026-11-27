@@ -2647,6 +2647,23 @@ impl SpatialWorkspaceState {
                 "/utilities-ifcx" => {
                     actions.export_urban_utilities_ifcx = true;
                 }
+                "/promote-bim" => {
+                    let zid = arg.trim().parse::<usize>().ok();
+                    self.open_city_hub_drawer(0);
+                    actions.promote_city_zone_to_bim = Some(zid);
+                    self.push_trace("Promoting city parcel building -> editable 6-DOF OpenBIM", true);
+                }
+                "/intersections" => {
+                    self.open_city_hub_drawer(1);
+                    actions.run_road_intersections = true;
+                }
+                "/roundabout" => {
+                    self.open_city_hub_drawer(1);
+                    actions.toggle_roundabout_mode = true;
+                }
+                "/intersections-ifcx" => {
+                    actions.export_intersections_ifcx = true;
+                }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");
                     actions.fit_camera = true;

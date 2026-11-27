@@ -8239,4 +8239,325 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.7.8` (`8/10` -> `v0.8.8`): Interactive City-to-BIM Promotion & Smart Road Intersections.
+    pub(super) fn render_city_hub_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Building,
+                13.0,
+                theme.accent_green,
+                "City-to-BIM Promotion & Smart Road Intersections",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [(0usize, "City-to-BIM Promote"), (1usize, "Smart Intersections")] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.city_hub_drawer_tab == idx,
+                    theme.accent_green,
+                    "",
+                )
+                .clicked()
+                {
+                    self.city_hub_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close City-to-BIM & Intersections Drawer",
+            )
+            .clicked()
+            {
+                self.city_hub_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Building),
+                    "Promote Largest -> BIM",
+                    false,
+                    theme.accent_green,
+                    "Convert the highest-GFA procedural city parcel into the editable 6-DOF OpenBIM model",
+                )
+                .clicked()
+                {
+                    actions.promote_city_zone_to_bim = Some(None);
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::NodesGraph),
+                    "Evaluate Junctions",
+                    false,
+                    theme.accent_blue,
+                    "Detect T-Junctions, 4-Way Crosses, Roundabouts & evaluate HCM LOS delay",
+                )
+                .clicked()
+                {
+                    actions.run_road_intersections = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::CircleShape),
+                    if universal_canvas.intersection_config.prefer_roundabouts {
+                        "Roundabouts: ON"
+                    } else {
+                        "Roundabouts: OFF"
+                    },
+                    universal_canvas.intersection_config.prefer_roundabouts,
+                    theme.accent_blue,
+                    "Switch eligible >=3-branch junctions between Modern Roundabouts and Signalized Crosses",
+                )
+                .clicked()
+                {
+                    actions.toggle_roundabout_mode = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "Intersections .ifcx",
+                    false,
+                    theme.accent_orange,
+                    "Export non-destructive eigengraph::gis::city_intersections IFCX overlay",
+                )
+                .clicked()
+                {
+                    actions.export_intersections_ifcx = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.city_hub_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    if tab == 0 {
+                        if is_left {
+                            ui.label(
+                                RichText::new("Promotable District Parcels")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.add_space(2.0);
+                            let mut any = false;
+                            let mut clicked_id: Option<usize> = None;
+                            let zones_snap: Vec<_> = universal_canvas
+                                .city_scene
+                                .zones
+                                .iter()
+                                .filter_map(|z| z.synthesize_procedural_building().map(|b| (z.id, b)))
+                                .take(5)
+                                .collect();
+                            for (zid, b) in &zones_snap {
+                                any = true;
+                                let is_promoted =
+                                    universal_canvas.city_scene.promoted_zone_id == Some(*zid);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{} ({}F, {:.0}m²)",
+                                            b.name, b.floors, b.gfa_m2
+                                        ))
+                                        .size(8.6)
+                                        .color(theme.text_primary),
+                                    );
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        None,
+                                        if is_promoted { "Active BIM" } else { "Promote -> BIM" },
+                                        is_promoted,
+                                        theme.accent_green,
+                                        "Promote this parcel building to active 6-DOF FEM OpenBIM",
+                                    )
+                                    .clicked()
+                                    {
+                                        clicked_id = Some(*zid);
+                                    }
+                                });
+                            }
+                            if let Some(zid) = clicked_id {
+                                actions.promote_city_zone_to_bim = Some(Some(zid));
+                            }
+                            if !any {
+                                ui.label(
+                                    RichText::new("No zoned procedural buildings yet — use Auto-Zone or Spawn Demo City.")
+                                        .size(8.6)
+                                        .color(theme.text_muted),
+                                );
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    Some(AppIcon::Sparkles),
+                                    "Spawn Demo City & Zones",
+                                    false,
+                                    theme.accent_orange,
+                                    "Generate sample coastal highway, junctions & commercial/residential parcels",
+                                )
+                                .clicked()
+                                {
+                                    universal_canvas.synthesize_demo_coastal_highway();
+                                    universal_canvas.auto_populate_road_parcels();
+                                    actions.run_road_intersections = true;
+                                }
+                            }
+                        } else {
+                            ui.label(
+                                RichText::new("Active Promoted OpenBIM Status")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.add_space(2.0);
+                            if let Some(ref ps) = universal_canvas.last_promotion_summary {
+                                ui.label(
+                                    RichText::new(ps.summary_line.clone())
+                                        .size(8.8)
+                                        .strong()
+                                        .color(theme.accent_green),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Levels: {} • Cols: {} • Beams: {} • Walls: {} • Openings: {} • Slabs: {} • Footings: {}",
+                                        ps.levels, ps.columns, ps.beams, ps.walls, ps.openings, ps.slabs, ps.footings
+                                    ))
+                                    .size(8.2)
+                                    .monospace()
+                                    .color(theme.text_secondary),
+                                );
+                            } else {
+                                ui.label(
+                                    RichText::new("Select any district building on the left or click 'Promote Largest -> BIM' to convert it into an editable FEM structure.")
+                                        .size(8.6)
+                                        .color(theme.text_muted),
+                                );
+                            }
+                        }
+                    } else if is_left {
+                        ui.label(
+                            RichText::new("Junction Geometry & Signal Controls")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ui.add_space(2.0);
+                        let cfg = &mut universal_canvas.intersection_config;
+                        let mut changed = false;
+                        changed |= ui
+                            .checkbox(&mut cfg.prefer_roundabouts, "Modern Landscaped Roundabouts")
+                            .changed();
+                        changed |= ui
+                            .checkbox(&mut cfg.auto_crosswalks, "Painted Zebra Crosswalks")
+                            .changed();
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Snap:").size(8.6).color(theme.text_muted));
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut cfg.snap_radius_m)
+                                        .range(4.0..=24.0)
+                                        .speed(0.5)
+                                        .suffix(" m"),
+                                )
+                                .changed();
+                            ui.label(RichText::new("PHF:").size(8.6).color(theme.text_muted));
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut cfg.peak_hour_factor)
+                                        .range(0.65..=1.0)
+                                        .speed(0.02)
+                                        .max_decimals(2),
+                                )
+                                .changed();
+                        });
+                        if changed {
+                            universal_canvas.city_scene.prefer_roundabouts = cfg.prefer_roundabouts;
+                            actions.run_road_intersections = true;
+                        }
+                    } else if let Some(ref rep) = universal_canvas.last_intersection_report {
+                        ui.label(
+                            RichText::new("HCM Level-of-Service Junction Ledger")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new(rep.summary_verdict.clone())
+                                .size(8.8)
+                                .strong()
+                                .color(if rep.all_los_acceptable {
+                                    theme.accent_green
+                                } else {
+                                    theme.accent_red
+                                }),
+                        );
+                        for inter in rep.intersections.iter().take(5) {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} [{}] {} branches • {:.0} vph • {:.1}s ({})",
+                                    inter.name,
+                                    inter.kind.short_label(),
+                                    inter.branch_count,
+                                    inter.peak_vph,
+                                    inter.avg_delay_sec,
+                                    inter.los.short_label(),
+                                ))
+                                .size(8.2)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new("Click 'Evaluate Junctions' to detect road intersections & calculate HCM delay.")
+                                .size(8.6)
+                                .color(theme.text_muted),
+                        );
+                    }
+                });
+            });
+        });
+    }
 }

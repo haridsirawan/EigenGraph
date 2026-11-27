@@ -203,6 +203,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.7.7 (7/10 -> v0.8.8): Subsurface Urban Utilities & Underground X-Ray Drawer
     pub utilities_drawer_open: bool,
     pub utilities_drawer_tab: usize,
+    // Update v0.8.7.8 (8/10 -> v0.8.8): City-to-BIM Promotion & Smart Road Intersections Drawer
+    pub city_hub_drawer_open: bool,
+    pub city_hub_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -351,6 +354,8 @@ impl Default for SpatialWorkspaceState {
             clash_drawer_tab: 0,
             utilities_drawer_open: false,
             utilities_drawer_tab: 0,
+            city_hub_drawer_open: false,
+            city_hub_drawer_tab: 0,
         }
     }
 }
@@ -425,6 +430,7 @@ impl SpatialWorkspaceState {
             || self.mep_drawer_open
             || self.clash_drawer_open
             || self.utilities_drawer_open
+            || self.city_hub_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -467,6 +473,7 @@ impl SpatialWorkspaceState {
         self.mep_drawer_open = false;
         self.clash_drawer_open = false;
         self.utilities_drawer_open = false;
+        self.city_hub_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -635,6 +642,11 @@ impl SpatialWorkspaceState {
             self.utilities_drawer_open = false;
         } else {
             self.utilities_drawer_open = !self.utilities_drawer_open;
+        }
+        if drawer != "city_hub" {
+            self.city_hub_drawer_open = false;
+        } else {
+            self.city_hub_drawer_open = !self.city_hub_drawer_open;
         }
     }
 
@@ -830,6 +842,14 @@ impl SpatialWorkspaceState {
         self.utilities_drawer_open = true;
     }
 
+    /// Idempotently opens the Update `v0.8.7.8` (`8/10` -> `v0.8.8`) City-to-BIM Promotion & Smart Intersections drawer
+    /// (`0` = City-to-BIM Promote, `1` = Smart Intersections & LOS).
+    pub fn open_city_hub_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.city_hub_drawer_tab = tab.min(1);
+        self.city_hub_drawer_open = true;
+    }
+
     /// Returns the active Layer 2 exclusive focus overlay `(title, icon)` when a drawer,
     /// Project Browser, AI chat, Smart Inspector, or Slash Palette is open inside the Dynamic Island.
     pub fn active_focus_layer_info(&self, slash_mode: bool) -> Option<(&'static str, crate::icons::AppIcon)> {
@@ -858,6 +878,8 @@ impl SpatialWorkspaceState {
             Some(("3D Clash & BCF Guardrail", AppIcon::AlertTriangle))
         } else if self.utilities_drawer_open {
             Some(("Urban Utilities & Subsurface X-Ray", AppIcon::Layers))
+        } else if self.city_hub_drawer_open {
+            Some(("City-to-BIM & Road Intersections", AppIcon::Building))
         } else if self.design_agent_drawer_open {
             Some(("AI Design Agent", AppIcon::Sparkles))
         } else if self.massing_drawer_open {

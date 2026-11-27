@@ -320,6 +320,8 @@ pub struct UnifiedWorkspaceArchive {
     pub clash_config: crate::core::clash_engine::SpatialClashConfig,
     #[serde(default)]
     pub urban_utilities_config: crate::core::gis::UrbanUtilitiesConfig,
+    #[serde(default)]
+    pub intersection_config: crate::core::gis::CityIntersectionConfig,
     pub sha256_seal: String,
 }
 

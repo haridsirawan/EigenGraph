@@ -3174,6 +3174,18 @@ impl SpatialWorkspaceState {
                         ui.separator();
                     }
 
+                    if self.city_hub_drawer_open {
+                        self.render_city_hub_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
                     if self.vault_drawer_open || self.vault_path_popover_open {
                         let vault_act = self.render_vault_workspace_bar(
                             ui,

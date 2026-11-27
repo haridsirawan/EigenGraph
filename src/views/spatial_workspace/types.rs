@@ -2011,6 +2011,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::SaveDisk,
     },
     SlashCommandSpec {
+        cmd: "/promote-bim",
+        category: "GIS",
+        description: "Promote procedural city parcel building into editable 6-DOF OpenBIM project",
+        icon: AppIcon::Building,
+    },
+    SlashCommandSpec {
+        cmd: "/intersections",
+        category: "GIS",
+        description: "Detect Smart Road Intersections (4-Way, T-Junc, Roundabout) & HCM LOS",
+        icon: AppIcon::NodesGraph,
+    },
+    SlashCommandSpec {
+        cmd: "/roundabout",
+        category: "GIS",
+        description: "Toggle landscaped Modern Roundabouts at eligible city road intersections",
+        icon: AppIcon::CircleShape,
+    },
+    SlashCommandSpec {
+        cmd: "/intersections-ifcx",
+        category: "GIS",
+        description: "Export non-destructive eigengraph::gis::city_intersections IFCX overlay",
+        icon: AppIcon::SaveDisk,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",
@@ -3592,6 +3616,11 @@ pub struct SpatialHudActions {
     pub toggle_urban_utilities_3d: bool,
     pub toggle_urban_utilities_xray: bool,
     pub export_urban_utilities_ifcx: bool,
+    // Update v0.8.7.8 (8/10 -> v0.8.8): Interactive City-to-BIM Promotion & Smart Road Intersections
+    pub promote_city_zone_to_bim: Option<Option<usize>>,
+    pub run_road_intersections: bool,
+    pub toggle_roundabout_mode: bool,
+    pub export_intersections_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -4074,5 +4103,11 @@ impl SpatialHudActions {
         self.toggle_urban_utilities_3d |= other.toggle_urban_utilities_3d;
         self.toggle_urban_utilities_xray |= other.toggle_urban_utilities_xray;
         self.export_urban_utilities_ifcx |= other.export_urban_utilities_ifcx;
+        if other.promote_city_zone_to_bim.is_some() {
+            self.promote_city_zone_to_bim = other.promote_city_zone_to_bim;
+        }
+        self.run_road_intersections |= other.run_road_intersections;
+        self.toggle_roundabout_mode |= other.toggle_roundabout_mode;
+        self.export_intersections_ifcx |= other.export_intersections_ifcx;
     }
 }

@@ -7043,3 +7043,144 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_v0878_city_to_bim_drawer_slash_commands_and_gemini_tools() {
+        for cmd in [
+            "/promote-bim",
+            "/intersections",
+            "/roundabout",
+            "/intersections-ifcx",
+        ] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|c| c.cmd == cmd),
+                "Missing v0.8.7.8 City Hub slash command {cmd} in SLASH_COMMANDS"
+            );
+        }
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        canvas.city_scene.add_road(
+            [-55.0, 0.0],
+            [55.0, 0.0],
+            crate::core::gis::IfcxRoadKind::Arterial,
+            false,
+        );
+        canvas.city_scene.add_road(
+            [0.0, -50.0],
+            [0.0, 50.0],
+            crate::core::gis::IfcxRoadKind::Collector,
+            false,
+        );
+        canvas.city_scene.add_zone(
+            [24.0, 22.0],
+            26.0,
+            22.0,
+            0.0,
+            crate::core::gis::IfcxZoneKind::Commercial,
+        );
+
+        let act_int = spatial.execute_spatial_input(
+            "/intersections",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_int.run_road_intersections);
+        assert!(spatial.city_hub_drawer_open && spatial.city_hub_drawer_tab == 1);
+
+        let act_rb = spatial.execute_spatial_input(
+            "/roundabout",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_rb.toggle_roundabout_mode);
+
+        let act_promo = spatial.execute_spatial_input(
+            "/promote-bim",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_promo.promote_city_zone_to_bim.is_some());
+        assert!(spatial.city_hub_drawer_open && spatial.city_hub_drawer_tab == 0);
+
+        let (promoted_bim, promo_sum) = canvas
+            .promote_city_zone_to_bim(None)
+            .expect("promoted zone to BIM");
+        assert!(promoted_bim.columns.len() >= 6);
+        assert_eq!(canvas.city_scene.promoted_zone_id, Some(promo_sum.zone_id));
+
+        // Gemini tools #14 & #15
+        let sim_reply = crate::core::web_bridge::GeminiApiReply {
+            request_id: 108,
+            model: "gemini-3.5-pro".to_string(),
+            ok: true,
+            text: String::new(),
+            error: None,
+            function_calls: vec![
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "evaluate_road_intersections".to_string(),
+                    args: serde_json::json!({ "prefer_roundabouts": true }),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "promote_city_building_to_bim".to_string(),
+                    args: serde_json::json!({}),
+                },
+            ],
+            raw_model_content: None,
+        };
+        let _ = spatial.handle_gemini_reply(sim_reply, &mut canvas, &mut build, &mut ai);
+        assert!(spatial.gemini_tool_loop_contents.len() >= 2);
+
+        // Render City Hub Drawer cleanly across Desktop / Tablet / Mobile
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            let ctx = egui::Context::default();
+            spatial.mobile_deck_pinned = true;
+            spatial.open_city_hub_drawer(0);
+            for _ in 0..4 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            assert!(
+                spatial.hud_rects[0].right() <= win_w + 1.0,
+                "City Hub Drawer overflowed {win_w}: {:?}",
+                spatial.hud_rects[0]
+            );
+        }
+    }

@@ -1392,6 +1392,36 @@ impl SpatialWorkspaceState {
                         universal_canvas.auto_populate_road_parcels();
                     }
                 });
+                Self::ribbon_group(ui, theme, "City -> BIM", |ui| {
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Building,
+                        "Promote",
+                        self.city_hub_drawer_open && self.city_hub_drawer_tab == 0,
+                        theme.accent_green,
+                        "Promote any procedural city building parcel into an editable 6-DOF OpenBIM project",
+                    )
+                    .clicked()
+                    {
+                        self.open_city_hub_drawer(0);
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::NodesGraph,
+                        "Junctions",
+                        (self.city_hub_drawer_open && self.city_hub_drawer_tab == 1)
+                            || universal_canvas.city_scene.prefer_roundabouts,
+                        theme.accent_blue,
+                        "Detect Smart Road Intersections (4-Way, T-Junc, Roundabout) & evaluate HCM LOS",
+                    )
+                    .clicked()
+                    {
+                        self.open_city_hub_drawer(1);
+                        actions.run_road_intersections = true;
+                    }
+                });
                 Self::ribbon_group(ui, theme, "Utilities", |ui| {
                     if Self::ribbon_tool_tile(
                         ui,

@@ -400,5 +400,11 @@ pub use gis::urban_utilities::{
     UrbanUtilitiesReport, UrbanUtilityCapacityBalance, UrbanUtilityDiscipline,
     UrbanUtilityPlantNode3D, UrbanUtilitySegment3D, NS_EG_URBAN_UTILITIES,
 };
+pub use gis::city_promotion::{
+    detect_and_evaluate_road_intersections, promote_city_building_to_bim,
+    CityIntersectionConfig, CityIntersectionNetworkReport, CityIntersectionsIfcxOverlay,
+    CityRoadIntersection, CityToBimPromotionSummary, IntersectionKind, IntersectionLosGrade,
+    NS_EG_CITY_INTERSECTIONS,
+};
 
 

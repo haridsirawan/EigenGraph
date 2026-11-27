@@ -660,6 +660,13 @@ pub struct IfcxCityScene {
     pub active_zone_density: ZoneDensityTier,
     #[serde(default)]
     pub ambience: CityAmbienceConfig,
+    /// Update `v0.8.7.8`: ID of an `IfcxSpatialZone` promoted to the editable active OpenBIM project
+    /// so its procedural shell is suppressed (preventing Z-fighting with detailed structural BIM).
+    #[serde(default)]
+    pub promoted_zone_id: Option<usize>,
+    /// Update `v0.8.7.8`: Prefer signal-free landscaped Roundabouts at >=3-branch road intersections.
+    #[serde(default)]
+    pub prefer_roundabouts: bool,
 }
 
 impl Default for IfcxCityScene {
@@ -677,6 +684,8 @@ impl Default for IfcxCityScene {
             auto_bridge_enabled: true,
             active_zone_density: ZoneDensityTier::MediumDensity,
             ambience: CityAmbienceConfig::default(),
+            promoted_zone_id: None,
+            prefer_roundabouts: false,
         }
     }
 }
@@ -1055,6 +1064,9 @@ impl IfcxCityScene {
 
         let mut shadows = Vec::with_capacity(self.zones.len());
         for zone in &self.zones {
+            if self.promoted_zone_id == Some(zone.id) {
+                continue;
+            }
             let Some(bldg) = zone.synthesize_procedural_building() else {
                 continue;
             };
@@ -1385,6 +1397,29 @@ impl IfcxCityScene {
         pad
     }
 
+    /// Recenters all city roads, zones, and graded pads in ENU meters when promoting a district
+    /// building so the promoted lot becomes `(0, 0)` while surrounding infrastructure stays aligned.
+    pub fn recenter_origin_enu(&mut self, delta_enu_m: [f64; 2]) {
+        for r in &mut self.roads {
+            r.start_enu_m[0] -= delta_enu_m[0];
+            r.start_enu_m[1] -= delta_enu_m[1];
+            r.end_enu_m[0] -= delta_enu_m[0];
+            r.end_enu_m[1] -= delta_enu_m[1];
+            if let Some(ref mut c) = r.control_enu_m {
+                c[0] -= delta_enu_m[0];
+                c[1] -= delta_enu_m[1];
+            }
+        }
+        for z in &mut self.zones {
+            z.center_enu_m[0] -= delta_enu_m[0];
+            z.center_enu_m[1] -= delta_enu_m[1];
+        }
+        for p in &mut self.graded_pads {
+            p.center_enu_m[0] -= delta_enu_m[0];
+            p.center_enu_m[1] -= delta_enu_m[1];
+        }
+    }
+
     /// Deterministic FNV-1a revision hash for O(1) WebGPU buffer cache invalidation.
     pub fn content_revision_hash(&self) -> u64 {
         let mut h: u64 = 0xcbf29ce484222325;
@@ -1395,6 +1430,8 @@ impl IfcxCityScene {
         mix(&mut h, self.roads.len() as u64);
         mix(&mut h, self.zones.len() as u64);
         mix(&mut h, self.graded_pads.len() as u64);
+        mix(&mut h, self.promoted_zone_id.unwrap_or(0) as u64);
+        mix(&mut h, u64::from(self.prefer_roundabouts));
         mix(&mut h, u64::from(self.ambience.show_procedural_forests));
         mix(&mut h, self.ambience.forest_density as u64);
         for r in &self.roads {

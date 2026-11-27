@@ -801,6 +801,152 @@ pub(super) fn push_city_builder_scene_enu(
         );
     }
 
+    // 1b. Update v0.8.7.8: Smart Road Intersections (Aprons, Crosswalks, Roundabout Islands & Signal Poles)
+    let int_rep = crate::core::gis::detect_and_evaluate_road_intersections(
+        city,
+        active_site_tin,
+        sea_level_m,
+        &crate::core::gis::CityIntersectionConfig {
+            prefer_roundabouts: city.prefer_roundabouts,
+            ..Default::default()
+        },
+    );
+    for inter in &int_rep.intersections {
+        let z0 = inter.elev_z_rel_m + 0.04;
+        let n_poly = 16usize;
+        let apron_pts: Vec<[f64; 2]> = (0..n_poly)
+            .map(|k| {
+                let th = (k as f64 / n_poly as f64) * std::f64::consts::TAU;
+                [
+                    inter.center_enu_m[0] + inter.apron_radius_m * th.cos(),
+                    inter.center_enu_m[1] + inter.apron_radius_m * th.sin(),
+                ]
+            })
+            .collect();
+        push_extruded_building_prism_enu(
+            verts,
+            idxs,
+            &apron_pts,
+            z0,
+            0.22,
+            curb_col,
+            asphalt_col,
+        );
+
+        // Zebra crosswalk stripes across each approach branch outside apron perimeter
+        if int_rep.config.auto_crosswalks {
+            let cw_dist = inter.apron_radius_m + 1.4;
+            let road_hw = (inter.max_road_width_m * 0.42).clamp(2.4, 6.2);
+            for &deg in &inter.approach_bearings_deg {
+                let rad = deg.to_radians();
+                let dir = [rad.cos(), rad.sin()];
+                let perp = [-dir[1], dir[0]];
+                let cx = inter.center_enu_m[0] + dir[0] * cw_dist;
+                let cy = inter.center_enu_m[1] + dir[1] * cw_dist;
+                for s_idx in [-2_i32, -1, 0, 1, 2] {
+                    let off = (s_idx as f64) * (road_hw * 0.36);
+                    let sx = cx + perp[0] * off;
+                    let sy = cy + perp[1] * off;
+                    let hw_s = 0.28_f64;
+                    let hl_s = 1.15_f64;
+                    let s_fp: [[f64; 2]; 4] = [
+                        [sx - dir[0] * hl_s - perp[0] * hw_s, sy - dir[1] * hl_s - perp[1] * hw_s],
+                        [sx + dir[0] * hl_s - perp[0] * hw_s, sy + dir[1] * hl_s - perp[1] * hw_s],
+                        [sx + dir[0] * hl_s + perp[0] * hw_s, sy + dir[1] * hl_s + perp[1] * hw_s],
+                        [sx - dir[0] * hl_s + perp[0] * hw_s, sy - dir[1] * hl_s + perp[1] * hw_s],
+                    ];
+                    push_box_prism_enu(verts, idxs, &s_fp, z0 + 0.20, z0 + 0.27, stripe_col, 1.0);
+                }
+            }
+        }
+
+        if inter.kind == crate::core::gis::IntersectionKind::Roundabout
+            && inter.island_radius_m > 1.5
+        {
+            let curb_r = inter.island_radius_m + 0.65;
+            let curb_pts: Vec<[f64; 2]> = (0..n_poly)
+                .map(|k| {
+                    let th = (k as f64 / n_poly as f64) * std::f64::consts::TAU;
+                    [
+                        inter.center_enu_m[0] + curb_r * th.cos(),
+                        inter.center_enu_m[1] + curb_r * th.sin(),
+                    ]
+                })
+                .collect();
+            push_extruded_building_prism_enu(
+                verts,
+                idxs,
+                &curb_pts,
+                z0 + 0.22,
+                0.24,
+                curb_col,
+                curb_col,
+            );
+            let grass_pts: Vec<[f64; 2]> = (0..n_poly)
+                .map(|k| {
+                    let th = (k as f64 / n_poly as f64) * std::f64::consts::TAU;
+                    [
+                        inter.center_enu_m[0] + inter.island_radius_m * th.cos(),
+                        inter.center_enu_m[1] + inter.island_radius_m * th.sin(),
+                    ]
+                })
+                .collect();
+            push_extruded_building_prism_enu(
+                verts,
+                idxs,
+                &grass_pts,
+                z0 + 0.44,
+                0.18,
+                [0.24, 0.56, 0.28, 1.0],
+                [0.26, 0.66, 0.34, 1.0],
+            );
+            push_stylized_tree_enu(
+                verts,
+                idxs,
+                inter.center_enu_m[0] as f32,
+                inter.center_enu_m[1] as f32,
+                z0 + 0.62,
+                5.4,
+                theme,
+            );
+        } else if matches!(
+            inter.kind,
+            crate::core::gis::IntersectionKind::FourWayCross
+                | crate::core::gis::IntersectionKind::TJunction
+        ) {
+            let sig_r = inter.apron_radius_m + 0.55;
+            for side in [-1.0_f64, 1.0] {
+                let px = inter.center_enu_m[0] + sig_r * 0.707 * side;
+                let py = inter.center_enu_m[1] - sig_r * 0.707 * side;
+                let pr = 0.20_f64;
+                let pole_fp: [[f64; 2]; 4] = [
+                    [px - pr, py - pr],
+                    [px + pr, py - pr],
+                    [px + pr, py + pr],
+                    [px - pr, py + pr],
+                ];
+                push_box_prism_enu(
+                    verts,
+                    idxs,
+                    &pole_fp,
+                    z0 + 0.20,
+                    z0 + 4.8,
+                    [0.28, 0.32, 0.38, 1.0],
+                    1.0,
+                );
+                let lamp_col = inter.los.rgba();
+                let lr = 0.34_f64;
+                let lamp_fp: [[f64; 2]; 4] = [
+                    [px - lr, py - lr],
+                    [px + lr, py - lr],
+                    [px + lr, py + lr],
+                    [px - lr, py + lr],
+                ];
+                push_box_prism_enu(verts, idxs, &lamp_fp, z0 + 4.4, z0 + 5.1, lamp_col, 30.0);
+            }
+        }
+    }
+
     // 2. Authored `IfcSpatialZone` parcels, optional context towers & instanced stylized trees
     for zone in &city.zones {
         let ground_z = active_site_tin
@@ -814,7 +960,8 @@ pub(super) fn push_city_builder_scene_enu(
         let zcol = mix_rgb(zone.kind.fill_rgba(), [0.9, 0.94, 0.96, 1.0], 0.12);
         push_box_prism_enu(verts, idxs, &fp, ground_z, ground_z + 0.22, zcol, 1.0);
 
-        if let Some(bldg) = zone.synthesize_procedural_building() {
+        if city.promoted_zone_id != Some(zone.id) {
+            if let Some(bldg) = zone.synthesize_procedural_building() {
             let rad = bldg.rotation_deg.to_radians();
             let (sr, cr) = (rad.sin(), rad.cos());
             let rot_rect = |w: f64, d: f64| -> Vec<[f64; 2]> {
@@ -873,6 +1020,7 @@ pub(super) fn push_city_builder_scene_enu(
                     pent_wall,
                     proof,
                 );
+            }
             }
         }
 

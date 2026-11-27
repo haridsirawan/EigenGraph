@@ -4770,4 +4770,39 @@ impl UniversalCanvasState {
             }
         }
     }
+
+    /// Pure-vector CPU fallback rendering detected road intersections & HCM LOS signal badges.
+    pub(super) fn paint_cpu_city_intersections_fallback(
+        &self,
+        painter: &egui::Painter,
+        _rect: Rect,
+        xform: &GlobeScreenTransform,
+    ) {
+        let Some(ref rep) = self.last_intersection_report else {
+            return;
+        };
+        for inter in &rep.intersections {
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                self.ground_origin_lat_lon,
+                [inter.center_enu_m[0] * 1000.0, inter.center_enu_m[1] * 1000.0],
+            );
+            if let Some((sp, _, true)) =
+                xform.project_lat_lon_elev(ll.0, ll.1, inter.elev_z_rel_m as f64 + 0.5)
+            {
+                let rgba = inter.los.rgba();
+                let col = Color32::from_rgb(
+                    (rgba[0] * 255.0) as u8,
+                    (rgba[1] * 255.0) as u8,
+                    (rgba[2] * 255.0) as u8,
+                );
+                if inter.kind == crate::core::gis::IntersectionKind::Roundabout {
+                    painter.circle_stroke(sp, 9.0, Stroke::new(2.2, col));
+                    painter.circle_filled(sp, 4.0, Color32::from_rgb(38, 165, 92));
+                } else {
+                    painter.circle_filled(sp, 6.0, col);
+                    painter.circle_stroke(sp, 8.0, Stroke::new(1.4, Color32::WHITE));
+                }
+            }
+        }
+    }
 }
