@@ -4868,6 +4868,99 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if hud_actions.export_mep_s116 {
+            let mep = self
+                .universal_canvas
+                .run_mep_systems(&self.build_view.bim_bus.project);
+            let cp_hash = self
+                .universal_canvas
+                .collab_state
+                .active_checkpoint()
+                .map(|c| c.short_sha256());
+            let annex = crate::core::build_mep_systems_annex_svg(
+                &self.build_view.bim_bus.project.project_name,
+                &mep,
+                "S-116",
+                cp_hash.as_deref(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_sheet_S116_mep_systems.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &annex.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(annex.sha256_seal);
+                    self.spatial_workspace.push_trace(annex.summary, true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.export_clash_s117 {
+            let clash = self
+                .universal_canvas
+                .run_clash_guardrail(&self.build_view.bim_bus.project);
+            let cp_hash = self
+                .universal_canvas
+                .collab_state
+                .active_checkpoint()
+                .map(|c| c.short_sha256());
+            let annex = crate::core::build_clash_bcf_annex_svg(
+                &self.build_view.bim_bus.project.project_name,
+                &clash,
+                "S-117",
+                cp_hash.as_deref(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_sheet_S117_clash_bcf.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &annex.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(annex.sha256_seal);
+                    self.spatial_workspace.push_trace(annex.summary, true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
+        if hud_actions.export_city_infra_s118 {
+            let utilities = self
+                .universal_canvas
+                .run_urban_utilities(&self.build_view.bim_bus.project);
+            let inter = self.universal_canvas.run_road_intersections();
+            let cp_hash = self
+                .universal_canvas
+                .collab_state
+                .active_checkpoint()
+                .map(|c| c.short_sha256());
+            let annex = crate::core::build_urban_utilities_intersections_annex_svg(
+                &self.build_view.bim_bus.project.project_name,
+                &utilities,
+                &inter,
+                self.universal_canvas.last_promotion_summary.as_ref(),
+                "S-118",
+                cp_hash.as_deref(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_sheet_S118_urban_infra.svg");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &annex.svg_content,
+                "image/svg+xml;charset=utf-8",
+            ) {
+                Ok(_) => {
+                    self.universal_canvas.last_vector_dossier_seal = Some(annex.sha256_seal);
+                    self.spatial_workspace.push_trace(annex.summary, true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {

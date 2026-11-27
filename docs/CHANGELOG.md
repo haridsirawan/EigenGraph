@@ -7,7 +7,19 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.8 (8/10)]
+## [Unreleased — Next: v0.8.8 (9/10)]
+
+### Update 9/10 (`v0.8.7.9` -> `v0.8.8`) — Archival Pure-Vector Engineering Sheets `S-116`–`S-118` & Dynamic 15-Tool Gemini Copilot Prompt
+- **Archival Pure-Vector Engineering Sheets `S-116`, `S-117` & `S-118` (`src/core/vector_dossier.rs`, `src/core/mod.rs`)**:
+  - Added [`build_mep_systems_annex_svg`](src/core/vector_dossier.rs) (`Sheet S-116` — 4-discipline Building MEP sizing across ASHRAE HVAC, IPC Plumbing, IEC Electrical, and NFPA 13 Fire Sprinkler, vector vertical core riser schematic, 3D ENU conduit schedule & plant equipment schedule).
+  - Added [`build_clash_bcf_annex_svg`](src/core/vector_dossier.rs) (`Sheet S-117` — Unified 3D Structure × MEP × Openings clash scorecard, ceiling plenum clearance diagram, and BCF 2.1 topic ledger).
+  - Added [`build_urban_utilities_intersections_annex_svg`](src/core/vector_dossier.rs) (`Sheet S-118` — Municipal Utilities Demand vs. Supply balance, subsurface roadway utility trench cross-section, plant nodes `WTP-01`/`SWD-01`/`SUB-01`, Active City-to-BIM summary, and Smart Road Intersections HCM LOS ledger).
+  - All three sheets are `1600×1131` A3 landscape, 0% raster (`<image` forbidden), and FIPS 180-4 SHA-256 sealed.
+- **Studio UI, Deliverables Ribbon, Slash Commands & Dynamic Copilot System Prompt (`src/views/spatial_workspace/`, `src/app.rs`)**:
+  - Added `/sheet-s116`, `/sheet-s117`, `/sheet-s118` slash commands, Deliverables Ribbon tiles (`MEP S-116`, `Clash S-117`, `City S-118`), drawer export buttons, and `src/app.rs` file export wiring.
+  - Replaced the static Gemini Copilot prompt with [`SpatialWorkspaceState::build_gemini_copilot_system_prompt`](src/views/spatial_workspace/commands.rs) dynamically enumerating all 15 registered engineering tools (`registered_tool_names()`) alongside live Section Box, MEP, Clash BCF, Urban Utilities, Road Intersections, and Promoted City Parcel telemetry.
+- **Verification (`src/core/vector_dossier.rs`, `src/views/spatial_workspace/tests.rs`)**:
+  - Added [`test_v0879_pure_vector_sheets_s116_s117_s118_and_sha256_seals`](src/core/vector_dossier.rs) and [`test_v0879_sheets_s116_s118_slash_commands_and_copilot_prompt_polish`](src/views/spatial_workspace/tests.rs).
 
 ### Update 8/10 (`v0.8.7.8` -> `v0.8.8`) — Interactive City-to-BIM Promotion & Smart Road Intersections (`T-Junction`, `4-Way Cross`, `Roundabout`, `HCM LOS`) & Gemini Tools #14–#15
 - **City-to-BIM Promotion & Smart Road Intersections Core (`src/core/gis/city_promotion.rs`, `src/core/gis/city_builder.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:

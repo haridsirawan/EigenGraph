@@ -7184,3 +7184,125 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_v0879_sheets_s116_s118_slash_commands_and_copilot_prompt_polish() {
+        for cmd in ["/sheet-s116", "/sheet-s117", "/sheet-s118"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|c| c.cmd == cmd),
+                "Missing v0.8.7.9 Deliverable slash command {cmd} in SLASH_COMMANDS"
+            );
+        }
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act116 = spatial.execute_spatial_input(
+            "/sheet-s116",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act116.export_mep_s116);
+
+        let act117 = spatial.execute_spatial_input(
+            "/sheet-s117",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act117.export_clash_s117);
+
+        let act118 = spatial.execute_spatial_input(
+            "/sheet-s118",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act118.export_city_infra_s118);
+
+        // Populate live MEP, Clash, Urban Utilities & Road Intersections telemetry
+        canvas.city_scene.add_road(
+            [-50.0, 0.0],
+            [50.0, 0.0],
+            crate::core::gis::IfcxRoadKind::Arterial,
+            false,
+        );
+        canvas.city_scene.add_road(
+            [0.0, -45.0],
+            [0.0, 45.0],
+            crate::core::gis::IfcxRoadKind::Collector,
+            false,
+        );
+        let _ = canvas.run_mep_systems(&build.bim_bus.project);
+        let _ = canvas.run_clash_guardrail(&build.bim_bus.project);
+        let _ = canvas.run_urban_utilities(&build.bim_bus.project);
+        let _ = canvas.run_road_intersections();
+
+        let sys_prompt = spatial.build_gemini_copilot_system_prompt(
+            &canvas,
+            &build.bim_bus.project,
+            &members,
+        );
+        for tool_name in crate::core::agent_tools::registered_tool_names() {
+            assert!(
+                sys_prompt.contains(tool_name),
+                "Gemini Copilot system prompt must expose registered tool '{tool_name}'"
+            );
+        }
+        assert!(sys_prompt.contains("MEP:"));
+        assert!(sys_prompt.contains("Clash BCF:"));
+        assert!(sys_prompt.contains("Urban Utilities:"));
+        assert!(sys_prompt.contains("Road Junctions:"));
+        assert!(sys_prompt.contains("S-100..S-118"));
+
+        // Verify Deliverables ribbon tab with S-116..S-118 tiles has zero overflow
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            let ctx = egui::Context::default();
+            spatial.mobile_deck_pinned = true;
+            spatial.close_focus_layer_return_to_ribbon();
+            spatial.active_ribbon_tab = RibbonCategoryTab::Drafting;
+            for _ in 0..4 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            assert!(
+                spatial.hud_rects[0].right() <= win_w + 1.0,
+                "Deliverables ribbon overflowed {win_w}: {:?}",
+                spatial.hud_rects[0]
+            );
+        }
+    }

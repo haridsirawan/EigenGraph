@@ -4467,6 +4467,15 @@ impl SpatialWorkspaceState {
                 "/sheet-s115" => {
                     actions.export_feasibility_s115 = true;
                 }
+                "/sheet-s116" => {
+                    actions.export_mep_s116 = true;
+                }
+                "/sheet-s117" => {
+                    actions.export_clash_s117 = true;
+                }
+                "/sheet-s118" => {
+                    actions.export_city_infra_s118 = true;
+                }
                 "/design-ifcx" => {
                     actions.export_design_ifcx = true;
                 }
@@ -4948,25 +4957,10 @@ impl SpatialWorkspaceState {
 
         // 4. Live Google Gemini REST Client when Gemini model + API Key are configured
         if self.is_live_gemini_armed() {
-            let (lat, lon) = universal_canvas.ground_origin_lat_lon;
-            let site = compute_site_environmental_coupling(lat, lon, &universal_canvas.earth_world);
-            let crit_ctx = Self::format_critical_bim_context(&build_view.bim_bus.project, members);
-            let sys_prompt = format!(
-                "You are EigenAI inside EigenGraph (Geospatial Earth + Structural BIM/FEM & EigenGate platform). \
-                 Respond concisely in professional civil & structural engineering English. \
-                 Prefer calling the registered engineering function tools (inspect_model, run_structural_audit, \
-                 run_solar_ottv, run_daylight_analysis, resize_column, resize_beam, add_story, auto_repair_model, \
-                 set_section_box, fly_to_location) to read deterministic physics and verify modifications rather than guessing numbers. \
-                 Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s. \
-                 Active BIM elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}. \
-                 For legacy studio sheets not covered by function declarations, you may append bracket directives such as \
-                 [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
-                site.elevation_m,
-                site.seismic_pga_ss_g,
-                site.design_wind_ms,
-                build_view.bim_bus.project.element_count(),
-                build_view.bim_bus.project.slabs.len(),
-                members.len()
+            let sys_prompt = self.build_gemini_copilot_system_prompt(
+                universal_canvas,
+                &build_view.bim_bus.project,
+                members,
             );
             let mut contents: Vec<serde_json::Value> = ai_assistant
                 .chat_history
@@ -5199,4 +5193,112 @@ impl SpatialWorkspaceState {
         }
     }
 
+    /// Update `v0.8.7.9` (`9/10` -> `v0.8.8`): Builds the unified Gemini Copilot system prompt,
+    /// dynamically enumerating all 15 registered native function tools alongside live MEP, Clash,
+    /// Subsurface Utilities, Road Intersections, City-to-BIM & Section Box telemetry.
+    pub fn build_gemini_copilot_system_prompt(
+        &self,
+        universal_canvas: &UniversalCanvasState,
+        project: &BimProject,
+        members: &[StructuralMember],
+    ) -> String {
+        let (lat, lon) = universal_canvas.ground_origin_lat_lon;
+        let site = compute_site_environmental_coupling(lat, lon, &universal_canvas.earth_world);
+        let crit_ctx = Self::format_critical_bim_context(project, members);
+        let tool_list = crate::core::agent_tools::registered_tool_names().join(", ");
+
+        let sec_box = if universal_canvas.section_box.enabled {
+            if universal_canvas.section_box.level_cut_mode {
+                format!(
+                    "LEVEL_CUT z<={:.2}m (Story {})",
+                    universal_canvas.section_box.max_enu_m[2], self.active_story_idx
+                )
+            } else {
+                format!(
+                    "ON [{:.1}..{:.1}, {:.1}..{:.1}, {:.1}..{:.1}]m",
+                    universal_canvas.section_box.min_enu_m[0],
+                    universal_canvas.section_box.max_enu_m[0],
+                    universal_canvas.section_box.min_enu_m[1],
+                    universal_canvas.section_box.max_enu_m[1],
+                    universal_canvas.section_box.min_enu_m[2],
+                    universal_canvas.section_box.max_enu_m[2],
+                )
+            }
+        } else {
+            "OFF".to_string()
+        };
+
+        let mep_ctx = universal_canvas
+            .last_mep_report
+            .as_ref()
+            .map(|r| {
+                format!(
+                    " | MEP: {:.1} TR HVAC, {:.1} kVA, NFPA={} heads, codes={}",
+                    r.cooling_tr,
+                    r.elec_demand_kva,
+                    r.fire.total_sprinkler_heads,
+                    if r.all_codes_compliant { "PASS" } else { "REVIEW" }
+                )
+            })
+            .unwrap_or_default();
+        let clash_ctx = universal_canvas
+            .last_clash_report
+            .as_ref()
+            .map(|r| {
+                format!(
+                    " | Clash BCF: {} hard, {} warn, rec_plenum={:.2}m",
+                    r.hard_clashes, r.clearance_warnings, r.recommended_plenum_drop_m
+                )
+            })
+            .unwrap_or_default();
+        let util_ctx = universal_canvas
+            .last_urban_utilities_report
+            .as_ref()
+            .map(|r| {
+                format!(
+                    " | Urban Utilities: Water={:.0}%, Sewer={:.0}%, Power={:.0}%",
+                    r.balance.water_utilization_pct,
+                    r.balance.sewer_utilization_pct,
+                    r.balance.power_utilization_pct,
+                )
+            })
+            .unwrap_or_default();
+        let int_ctx = universal_canvas
+            .last_intersection_report
+            .as_ref()
+            .map(|r| {
+                format!(
+                    " | Road Junctions: {} ({} roundabout, worst {})",
+                    r.total_intersections,
+                    r.roundabout_count,
+                    r.worst_los.short_label(),
+                )
+            })
+            .unwrap_or_default();
+        let promo_ctx = universal_canvas
+            .last_promotion_summary
+            .as_ref()
+            .map(|p| format!(" | Promoted Parcel: {} ({}F)", p.building_name, p.floors))
+            .unwrap_or_default();
+
+        format!(
+            "You are EigenAI inside EigenGraph (Geospatial Earth + OpenBIM/6-DOF FEM + MEP/BCF/Urban Infra platform). \
+             Respond concisely in professional civil & structural engineering English. \
+             Prefer calling the registered engineering function tools ({tool_list}) to inspect deterministic physics and verify modifications rather than guessing numbers. \
+             Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s, SectionBox={sec_box}. \
+             Active BIM '{}': elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}{mep_ctx}{clash_ctx}{util_ctx}{int_ctx}{promo_ctx}. \
+             City Scene: {} roads, {} zones. Pure-Vector Sheets available: S-000, S-100..S-118. \
+             For legacy studio sheets not covered by function declarations, you may append bracket directives such as \
+             [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
+            site.elevation_m,
+            site.seismic_pga_ss_g,
+            site.design_wind_ms,
+            project.project_name,
+            project.element_count(),
+            project.slabs.len(),
+            members.len(),
+            universal_canvas.city_scene.roads.len(),
+            universal_canvas.city_scene.zones.len(),
+        )
+    }
 }

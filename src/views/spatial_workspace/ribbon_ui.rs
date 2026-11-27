@@ -1750,6 +1750,45 @@ impl SpatialWorkspaceState {
                     if Self::ribbon_tool_tile(
                         ui,
                         theme,
+                        AppIcon::Wrench,
+                        "MEP S-116",
+                        false,
+                        theme.accent_blue,
+                        "Export Archival A3 Sheet S-116 Building MEP Systems Annex (.svg)",
+                    )
+                    .clicked()
+                    {
+                        actions.export_mep_s116 = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::AlertTriangle,
+                        "Clash S-117",
+                        false,
+                        theme.accent_orange,
+                        "Export Archival A3 Sheet S-117 3D Clash & BCF 2.1 Coordination Annex (.svg)",
+                    )
+                    .clicked()
+                    {
+                        actions.export_clash_s117 = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Layers,
+                        "City S-118",
+                        false,
+                        theme.accent_green,
+                        "Export Archival A3 Sheet S-118 Subsurface Utilities & Smart Intersections Annex (.svg)",
+                    )
+                    .clicked()
+                    {
+                        actions.export_city_infra_s118 = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
                         AppIcon::Layers,
                         "IFCX Diff",
                         self.ifcx_diff_drawer_open,

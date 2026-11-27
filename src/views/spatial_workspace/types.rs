@@ -3337,6 +3337,24 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Document,
     },
     SlashCommandSpec {
+        cmd: "/sheet-s116",
+        category: "Export",
+        description: "Export A3 Pure-Vector Sheet S-116 Building MEP Systems Annex (.svg)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/sheet-s117",
+        category: "Export",
+        description: "Export A3 Pure-Vector Sheet S-117 3D Clash & BCF 2.1 Coordination Annex (.svg)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
+        cmd: "/sheet-s118",
+        category: "Export",
+        description: "Export A3 Pure-Vector Sheet S-118 Subsurface Urban Utilities & Smart Intersections Annex (.svg)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
         cmd: "/design-ifcx",
         category: "Export",
         description: "Export non-destructive eigengraph::design::concept_pipeline IFCX (.ifcx)",
@@ -3621,6 +3639,10 @@ pub struct SpatialHudActions {
     pub run_road_intersections: bool,
     pub toggle_roundabout_mode: bool,
     pub export_intersections_ifcx: bool,
+    // Update v0.8.7.9 (9/10 -> v0.8.8): Archival Pure-Vector Engineering Sheets S-116..S-118
+    pub export_mep_s116: bool,
+    pub export_clash_s117: bool,
+    pub export_city_infra_s118: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -4109,5 +4131,8 @@ impl SpatialHudActions {
         self.run_road_intersections |= other.run_road_intersections;
         self.toggle_roundabout_mode |= other.toggle_roundabout_mode;
         self.export_intersections_ifcx |= other.export_intersections_ifcx;
+        self.export_mep_s116 |= other.export_mep_s116;
+        self.export_clash_s117 |= other.export_clash_s117;
+        self.export_city_infra_s118 |= other.export_city_infra_s118;
     }
 }

@@ -7486,6 +7486,19 @@ impl SpatialWorkspaceState {
                 {
                     actions.export_mep_ifcx = true;
                 }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Book),
+                    "Sheet S-116",
+                    false,
+                    theme.accent_green,
+                    "Export Archival A3 Pure-Vector Sheet S-116 Building MEP Annex (.svg)",
+                )
+                .clicked()
+                {
+                    actions.export_mep_s116 = true;
+                }
             });
         });
 
@@ -7799,6 +7812,19 @@ impl SpatialWorkspaceState {
                 {
                     actions.export_clash_ifcx = true;
                 }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Book),
+                    "Sheet S-117",
+                    false,
+                    theme.accent_orange,
+                    "Export Archival A3 Pure-Vector Sheet S-117 Clash & BCF 2.1 Annex (.svg)",
+                )
+                .clicked()
+                {
+                    actions.export_clash_s117 = true;
+                }
             });
         });
 
@@ -8054,6 +8080,19 @@ impl SpatialWorkspaceState {
                 .clicked()
                 {
                     actions.export_urban_utilities_ifcx = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Book),
+                    "Sheet S-118",
+                    false,
+                    theme.accent_green,
+                    "Export Archival A3 Pure-Vector Sheet S-118 Urban Utilities & Intersections Annex (.svg)",
+                )
+                .clicked()
+                {
+                    actions.export_city_infra_s118 = true;
                 }
             });
         });
@@ -8358,6 +8397,19 @@ impl SpatialWorkspaceState {
                 .clicked()
                 {
                     actions.export_intersections_ifcx = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Book),
+                    "Sheet S-118",
+                    false,
+                    theme.accent_green,
+                    "Export Archival A3 Pure-Vector Sheet S-118 Urban Utilities & Intersections Annex (.svg)",
+                )
+                .clicked()
+                {
+                    actions.export_city_infra_s118 = true;
                 }
             });
         });

@@ -5361,6 +5361,910 @@ pub fn build_feasibility_brief_annex_svg(
     }
 }
 
+/// Pure-Vector Archival A3 Sheet `S-116` — Building MEP Systems (`HVAC`, `Plumbing`, `Electrical`, `NFPA 13 Fire`) SVG (`0` raster tags).
+pub fn build_mep_systems_annex_svg(
+    project_name: &str,
+    mep: &crate::core::mep_engine::MepSystemsReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(24_000);
+    let seal_token = "__EIGENGRAPH_MEP_SYSTEMS_S116_SHA256__";
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH BUILDING MEP SYSTEMS ENGINEERING ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • ASHRAE / IPC / IEC 60364 / NFPA 13 • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: 4-Discipline MEP Sizing Summary (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. 4-DISCIPLINE BUILDING MEP SIZING SUMMARY",
+        &format!(
+            "{} Stories • GFA={:.0} m2 • Occ={} • Plenum Drop={:.2}m",
+            mep.stories, mep.total_gfa_m2, mep.occupants, mep.config.plenum_drop_below_slab_m,
+        ),
+    );
+    let cards = [
+        (
+            "HVAC Cooling & Main Ductwork (ASHRAE)",
+            format!(
+                "{} | {:.1} TR ({:.1} kW) | Duct {:.0}x{:.0} mm @ {:.1} m/s",
+                escape_xml(mep.config.hvac_preset.short_label()),
+                mep.cooling_tr,
+                mep.cooling_kw,
+                mep.duct_width_mm,
+                mep.duct_height_mm,
+                mep.duct_velocity_ms
+            ),
+            "#0284c7",
+        ),
+        (
+            "Potable & Sanitary Plumbing Risers (IPC)",
+            format!(
+                "Peak {:.2} L/s | Riser DN{:.0} @ {:.2} m/s | Headloss {:.1} kPa",
+                mep.plumbing_peak_flow_ls,
+                mep.plumbing_pipe_dn_mm,
+                mep.plumbing_velocity_ms,
+                mep.plumbing_head_loss_kpa
+            ),
+            "#059669",
+        ),
+        (
+            "3-Phase Electrical Power & Feeder (IEC 60364)",
+            format!(
+                "{:.1} kVA ({:.0} A) | Breaker {} AT | Cable {} mm2 | dV={:.2}%",
+                mep.elec_demand_kva,
+                mep.elec_design_current_a,
+                mep.elec_breaker_at,
+                mep.elec_cable_mm2,
+                mep.elec_voltage_drop_pct
+            ),
+            if mep.elec_voltage_drop_ok { "#d97706" } else { "#dc2626" },
+        ),
+        (
+            "Automatic Fire Sprinkler Hydraulics (NFPA 13)",
+            format!(
+                "{} | {} Heads | DN{:.0} Main | Pump {:.0} LPM @ {:.0} kPa | Tank {:.1} m3",
+                escape_xml(mep.fire.hazard_class.short_label()),
+                mep.fire.total_sprinkler_heads,
+                mep.fire.sprinkler_main_dn_mm,
+                mep.fire.fire_pump_flow_lpm,
+                mep.fire.fire_pump_head_kpa,
+                mep.fire.water_tank_m3
+            ),
+            "#dc2626",
+        ),
+        (
+            "Solar OTTV Coupling & Estimated MEP Cost",
+            format!(
+                "Coupled Solar={:.1} kW | Estimated MEP Capex: ${:.0}k",
+                mep.solar_ottv_coupled_kw,
+                mep.estimated_mep_cost_usd * 0.001
+            ),
+            "#0f172a",
+        ),
+    ];
+    for (idx, (lbl, val, col)) in cards.iter().enumerate() {
+        let ry = p1y + 52.0 + (idx as f64) * 88.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="74" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>
+<rect x="{:.1}" y="{ry:.1}" width="8" height="74" rx="2" fill="{col}"/>
+<text x="{:.1}" y="{:.1}" font-size="10.0" font-weight="bold" fill="#0f172a">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-family="monospace" fill="{col}">{val}</text>"##,
+            p1x + 16.0,
+            p1w - 32.0,
+            p1x + 16.0,
+            p1x + 34.0,
+            ry + 26.0,
+            p1x + 34.0,
+            ry + 52.0,
+        );
+    }
+
+    // Panel 2: Vector Vertical Core Riser & Plenum Schematic + Seal (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. VECTOR VERTICAL CORE RISERS, CEILING PLENUMS &amp; GOVERNANCE SEAL",
+        &format!(
+            "{} ENU Conduits • {} Plant Nodes • Compliance={}",
+            mep.segments_3d.len(),
+            mep.equipment_3d.len(),
+            if mep.all_codes_compliant { "PASS" } else { "REVIEW" }
+        ),
+    );
+    let sx0 = p2x + 76.0;
+    let sy0 = p2y + 56.0;
+    let sw = p2w - 152.0;
+    let sh = 276.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{sx0:.1}" y="{sy0:.1}" width="{sw:.1}" height="{sh:.1}" fill="#f8fafc" stroke="#334155" stroke-width="1.6"/>"##
+    );
+    let st_vis = mep.stories.clamp(2, 8);
+    let st_h = sh / st_vis as f64;
+    for s in 0..st_vis {
+        let y_fl = sy0 + sh - (s as f64) * st_h;
+        let y_pl = y_fl - st_h * 0.72;
+        let _ = writeln!(
+            svg,
+            r##"<line x1="{sx0:.1}" y1="{y_fl:.1}" x2="{:.1}" y2="{y_fl:.1}" stroke="#64748b" stroke-width="1.8"/>
+<line x1="{:.1}" y1="{y_pl:.1}" x2="{:.1}" y2="{y_pl:.1}" stroke="#0284c7" stroke-width="2.6"/>
+<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="#dc2626" stroke-width="1.8"/>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">L{}</text>"##,
+            sx0 + sw,
+            sx0 + 18.0,
+            sx0 + sw - 26.0,
+            sx0 + 18.0,
+            y_pl + 6.0,
+            sx0 + sw - 26.0,
+            y_pl + 6.0,
+            sx0 + 6.0,
+            y_fl - 6.0,
+            s + 1,
+        );
+    }
+    let rx_hvac = sx0 + sw * 0.25;
+    let rx_plmb = sx0 + sw * 0.45;
+    let rx_elec = sx0 + sw * 0.65;
+    let rx_fire = sx0 + sw * 0.85;
+    let _ = writeln!(
+        svg,
+        r##"<line x1="{rx_hvac:.1}" y1="{sy0:.1}" x2="{rx_hvac:.1}" y2="{:.1}" stroke="#0284c7" stroke-width="4.2"/>
+<line x1="{rx_plmb:.1}" y1="{sy0:.1}" x2="{rx_plmb:.1}" y2="{:.1}" stroke="#059669" stroke-width="3.6"/>
+<line x1="{rx_elec:.1}" y1="{sy0:.1}" x2="{rx_elec:.1}" y2="{:.1}" stroke="#d97706" stroke-width="3.2"/>
+<line x1="{rx_fire:.1}" y1="{sy0:.1}" x2="{rx_fire:.1}" y2="{:.1}" stroke="#dc2626" stroke-width="3.6"/>
+<text x="{rx_hvac:.1}" y="{:.1}" font-size="8.4" font-weight="bold" text-anchor="middle" fill="#0284c7">HVAC</text>
+<text x="{rx_plmb:.1}" y="{:.1}" font-size="8.4" font-weight="bold" text-anchor="middle" fill="#059669">PLUMB</text>
+<text x="{rx_elec:.1}" y="{:.1}" font-size="8.4" font-weight="bold" text-anchor="middle" fill="#b45309">ELEC</text>
+<text x="{rx_fire:.1}" y="{:.1}" font-size="8.4" font-weight="bold" text-anchor="middle" fill="#dc2626">FIRE</text>"##,
+        sy0 + sh,
+        sy0 + sh,
+        sy0 + sh,
+        sy0 + sh,
+        sy0 + sh + 16.0,
+        sy0 + sh + 16.0,
+        sy0 + sh + 16.0,
+        sy0 + sh + 16.0,
+    );
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="122" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#1e3a8a">MEP ENGINEERING GOVERNANCE SEAL</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p2x + 16.0,
+        p2y + 378.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 402.0,
+        p2x + 26.0,
+        p2y + 428.0,
+        escape_xml(&truncate_clean(&mep.summary_verdict, 84)),
+        p2x + 26.0,
+        p2y + 454.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX NAMESPACE: eigengraph::mep::systems".to_string()),
+        ),
+        p2x + 26.0,
+        p2y + 480.0,
+    );
+
+    // Panel 3: 3D ENU Conduit & Riser Schedule (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. COORDINATED 3D ENU CONDUIT &amp; CORE RISER SCHEDULE",
+        &format!("Showing top 8 of {} routed segments", mep.segments_3d.len()),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="8.8" font-weight="bold" font-family="monospace" fill="#0369a1">TAG           DISC    KIND    SIZE(m)       Z_START..Z_END(m)   FLOW / RATING</text>"##,
+        p3x + 18.0,
+        p3y + 48.0,
+    );
+    for (idx, seg) in mep.segments_3d.iter().take(8).enumerate() {
+        let ry = p3y + 58.0 + (idx as f64) * 53.0;
+        let kind_lbl = if seg.is_riser { "RISER" } else { "BRANCH" };
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="43" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#0f172a">{:<12}  {:<6}  {:<6}  {:.2}x{:.2}   {:>5.2} -> {:>5.2}   {}</text>"##,
+            p3x + 14.0,
+            p3w - 28.0,
+            p3x + 20.0,
+            ry + 25.0,
+            escape_xml(&truncate_clean(&seg.tag, 12)),
+            seg.discipline.short_label(),
+            kind_lbl,
+            seg.width_m,
+            seg.height_m,
+            seg.start_enu_m[2],
+            seg.end_enu_m[2],
+            escape_xml(&truncate_clean(&seg.flow_label, 24)),
+        );
+    }
+
+    // Panel 4: Plant Equipment Nodes & Compliance Matrix (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. MEP PLANT EQUIPMENT SCHEDULE &amp; CODE COMPLIANCE MATRIX",
+        &format!("{} Major Plant Nodes • Duct {:.0}x{:.0} mm", mep.equipment_3d.len(), mep.duct_width_mm, mep.duct_height_mm),
+    );
+    for (idx, eq) in mep.equipment_3d.iter().take(5).enumerate() {
+        let ry = p4y + 52.0 + (idx as f64) * 62.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="50" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.4" font-weight="bold" fill="#0f172a">{} [{}]</text>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-family="monospace" fill="#475569">ENU ({:.1}, {:.1}, {:.1})m | Envelope {:.1}x{:.1}x{:.1}m | {}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 22.0,
+            ry + 19.0,
+            escape_xml(&truncate_clean(&eq.tag, 24)),
+            eq.discipline.short_label(),
+            p4x + 22.0,
+            ry + 38.0,
+            eq.center_enu_m[0],
+            eq.center_enu_m[1],
+            eq.center_enu_m[2],
+            eq.size_enu_m[0],
+            eq.size_enu_m[1],
+            eq.size_enu_m[2],
+            escape_xml(&truncate_clean(&eq.rating_label, 34)),
+        );
+    }
+    let badge_col = if mep.all_codes_compliant { "#059669" } else { "#d97706" };
+    let badge_txt = if mep.all_codes_compliant { "ALL CODES PASS" } else { "REVIEW REQUIRED" };
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="106" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.8" font-weight="bold" fill="#0f172a">MULTI-CODE SIGN-OFF: ASHRAE 90.1 / IPC / IEC 60364 / NFPA 13</text>
+<rect x="{:.1}" y="{:.1}" width="160" height="30" rx="5" fill="{badge_col}"/>
+<text x="{:.1}" y="{:.1}" font-size="10.0" font-weight="bold" text-anchor="middle" fill="#ffffff">{badge_txt}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#334155">Voltage Drop: {:.2}% (<=5%) | Drain Slope: {:.1}% | NFPA 13 Pump: {:.0} LPM</text>"##,
+        p4x + 14.0,
+        p4y + 374.0,
+        p4w - 28.0,
+        p4x + 26.0,
+        p4y + 402.0,
+        p4x + p4w - 190.0,
+        p4y + 388.0,
+        p4x + p4w - 110.0,
+        p4y + 407.0,
+        p4x + 26.0,
+        p4y + 454.0,
+        mep.elec_voltage_drop_pct,
+        mep.drain_slope_pct,
+        mep.fire.fire_pump_flow_lpm,
+    );
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_MEP_SYSTEMS_S116");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = mep.segments_3d.len() + mep.equipment_3d.len();
+    let summary = format!(
+        "Exported Building MEP Systems Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
+/// Pure-Vector Archival A3 Sheet `S-117` — Unified 3D Clash Detection & BCF 2.1 Coordination Annex SVG (`0` raster tags).
+pub fn build_clash_bcf_annex_svg(
+    project_name: &str,
+    clash: &crate::core::clash_engine::SpatialClashReport,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(24_000);
+    let seal_token = "__EIGENGRAPH_CLASH_BCF_S117_SHA256__";
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH 3D CLASH DETECTION &amp; BCF 2.1 COORDINATION GUARDRAIL (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • STRUCTURE x MEP x OPENINGS • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: Clash Severity Distribution & Tolerance Summary (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. UNIFIED 3D SPATIAL INTERFERENCE SCORECARD",
+        &format!(
+            "Checked Pairs={} • Tolerance={:.0} mm • Rec. Plenum Drop={:.2} m",
+            clash.total_checked_pairs, clash.config.clearance_tolerance_mm, clash.recommended_plenum_drop_m,
+        ),
+    );
+    let bars = [
+        ("Hard Structural / MEP Clashes", clash.hard_clashes, "#dc2626"),
+        ("Clearance Envelope Warnings", clash.clearance_warnings, "#d97706"),
+        ("Slab Penetration Sleeve Advisories", clash.sleeve_advisories, "#0284c7"),
+    ];
+    let max_cnt = bars.iter().map(|(_, c, _)| *c).max().unwrap_or(1).max(4) as f64;
+    for (idx, (lbl, cnt, col)) in bars.iter().enumerate() {
+        let ry = p1y + 56.0 + (idx as f64) * 86.0;
+        let bw = ((*cnt as f64 / max_cnt).clamp(0.04, 1.0)) * 460.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="70" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="10.0" font-weight="bold" fill="#0f172a">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="12.0" font-weight="bold" font-family="monospace" text-anchor="end" fill="{col}">{cnt}</text>
+<rect x="{:.1}" y="{:.1}" width="460" height="14" rx="4" fill="#e2e8f0"/>
+<rect x="{:.1}" y="{:.1}" width="{bw:.1}" height="14" rx="4" fill="{col}"/>"##,
+            p1x + 16.0,
+            p1w - 32.0,
+            p1x + 28.0,
+            ry + 25.0,
+            p1x + p1w - 30.0,
+            ry + 26.0,
+            p1x + 28.0,
+            ry + 42.0,
+            p1x + 28.0,
+            ry + 42.0,
+        );
+    }
+    let verdict_col = if clash.coordination_pass { "#059669" } else { "#dc2626" };
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="162" rx="5" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="10.0" font-weight="bold" fill="#0f172a">COORDINATION VERDICT &amp; PENETRATION ENVELOPE</text>
+<text x="{:.1}" y="{:.1}" font-size="11.0" font-weight="bold" font-family="monospace" fill="{verdict_col}">Status: {} | Max Overlap: {:.0} mm</text>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-family="monospace" fill="#334155">Active Scope: StructurexMEP={} | MEPxMEP={} | Sleeves={}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#475569">{}</text>"##,
+        p1x + 16.0,
+        p1y + 332.0,
+        p1w - 32.0,
+        p1x + 28.0,
+        p1y + 360.0,
+        p1x + 28.0,
+        p1y + 390.0,
+        if clash.coordination_pass { "COORDINATED CLEAR" } else { "HARD CLASHES DETECTED" },
+        clash.max_penetration_mm,
+        p1x + 28.0,
+        p1y + 420.0,
+        clash.config.check_structure_vs_mep,
+        clash.config.check_mep_vs_mep,
+        clash.config.include_sleeve_advisories,
+        p1x + 28.0,
+        p1y + 450.0,
+        escape_xml(&truncate_clean(&clash.summary_verdict, 82)),
+    );
+
+    // Panel 2: Ceiling Plenum Clearance Section & Governance Seal (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. CEILING PLENUM CLEARANCE SECTION &amp; GOVERNANCE SEAL",
+        &format!("Recommended Soffit Drop: {:.2} m below slab", clash.recommended_plenum_drop_m),
+    );
+    let dx0 = p2x + 68.0;
+    let dy0 = p2y + 72.0;
+    let dw = p2w - 136.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{dx0:.1}" y="{dy0:.1}" width="{dw:.1}" height="34" fill="#94a3b8" stroke="#0f172a" stroke-width="1.8"/>
+<rect x="{:.1}" y="{:.1}" width="84" height="110" fill="#cbd5e1" stroke="#0f172a" stroke-width="1.8"/>
+<rect x="{:.1}" y="{:.1}" width="210" height="58" rx="4" fill="#dbeafe" stroke="#0284c7" stroke-width="2.0"/>
+<rect x="{:.1}" y="{:.1}" width="110" height="36" rx="4" fill="#fee2e2" stroke="#dc2626" stroke-width="1.8"/>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-weight="bold" fill="#0f172a">STRUCTURAL SLAB</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" text-anchor="middle" fill="#0f172a">RC BEAM</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-weight="bold" text-anchor="middle" fill="#0369a1">HVAC TRUNK ZONE</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" text-anchor="middle" fill="#dc2626">FIRE MAIN</text>
+<text x="{dx0:.1}" y="{:.1}" font-size="9.0" font-family="monospace" fill="#059669">Clear Routing Band: Drop MEP plenum >= {:.2} m to clear beam soffits</text>"##,
+        dx0 + 80.0,
+        dy0 + 34.0,
+        dx0 + 210.0,
+        dy0 + 162.0,
+        dx0 + 460.0,
+        dy0 + 168.0,
+        dx0 + 14.0,
+        dy0 + 21.0,
+        dx0 + 122.0,
+        dy0 + 94.0,
+        dx0 + 315.0,
+        dy0 + 195.0,
+        dx0 + 515.0,
+        dy0 + 190.0,
+        dy0 + 258.0,
+        clash.recommended_plenum_drop_m,
+    );
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="122" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#1e3a8a">BCF 2.1 COORDINATION GOVERNANCE SEAL</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#0f172a">Site: {} | Topics: {} | Pass: {}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p2x + 16.0,
+        p2y + 378.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 402.0,
+        p2x + 26.0,
+        p2y + 428.0,
+        escape_xml(&truncate_clean(&clash.site_label, 34)),
+        clash.clashes.len(),
+        clash.coordination_pass,
+        p2x + 26.0,
+        p2y + 454.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX NAMESPACE: eigengraph::coordination::clash_bcf".to_string()),
+        ),
+        p2x + 26.0,
+        p2y + 480.0,
+    );
+
+    // Panel 3: BCF 2.1 Issue Register (Bottom Wide Span Left+Right? Let's keep 4 clean balanced panels!)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 1020.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. BCF 2.1 COORDINATION ISSUE REGISTER",
+        &format!("Showing top 8 of {} detected BCF topics", clash.clashes.len()),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="8.8" font-weight="bold" font-family="monospace" fill="#0369a1">SEV     BCF GUID         PAIR (ELEMENT A vs ELEMENT B)            PEN(mm)  RECOMMENDED RESOLUTION</text>"##,
+        p3x + 18.0,
+        p3y + 48.0,
+    );
+    if clash.clashes.is_empty() {
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="80" rx="5" fill="#ecfdf5" stroke="#10b981" stroke-width="1.2"/>
+<text x="{:.1}" y="{:.1}" font-size="11.0" font-weight="bold" fill="#047857">ZERO 3D INTERFERENCES DETECTED AT CURRENT CLEARANCE TOLERANCE</text>"##,
+            p3x + 24.0,
+            p3y + 92.0,
+            p3w - 48.0,
+            p3x + 42.0,
+            p3y + 138.0,
+        );
+    } else {
+        for (idx, c) in clash.clashes.iter().take(8).enumerate() {
+            let ry = p3y + 58.0 + (idx as f64) * 53.0;
+            let sev_col = match c.severity {
+                crate::core::clash_engine::SpatialClashSeverity::HardClash => "#dc2626",
+                crate::core::clash_engine::SpatialClashSeverity::ClearanceWarning => "#d97706",
+                crate::core::clash_engine::SpatialClashSeverity::SleeveAdvisory => "#0284c7",
+            };
+            let pair = format!("{} vs {}", c.element_a_tag, c.element_b_tag);
+            let _ = writeln!(
+                svg,
+                r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="43" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<rect x="{:.1}" y="{:.1}" width="54" height="22" rx="3" fill="{sev_col}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-weight="bold" text-anchor="middle" fill="#ffffff">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.5" font-family="monospace" fill="#0f172a">{:<15}  {:<38}  {:>5.0}mm  {}</text>"##,
+                p3x + 14.0,
+                p3w - 28.0,
+                p3x + 20.0,
+                ry + 10.5,
+                p3x + 47.0,
+                ry + 25.0,
+                c.severity.short_label(),
+                p3x + 84.0,
+                ry + 25.0,
+                escape_xml(&truncate_clean(&c.bcf_guid, 15)),
+                escape_xml(&truncate_clean(&pair, 38)),
+                c.penetration_mm,
+                escape_xml(&truncate_clean(&c.recommended_action, 44)),
+            );
+        }
+    }
+
+    // Panel 4: Coordination Rules & Auto-Fix Protocol (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (1068.0, 592.0, 500.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. CLASH PROTOCOL &amp; MATRIX",
+        "Auto-Resolve Ready",
+    );
+    let rules = [
+        ("Wall Opening Filtering", "Conduits cleanly passing inside Doors/Windows skipped"),
+        ("Structure x MEP Guard", "Beams & Columns audited with clearance buffer"),
+        ("Cross-MEP Separation", "HVAC vs Plumbing/Fire/Power clearances checked"),
+        ("Slab Riser Sleeves", "Vertical core shafts emit sleeve cut-lists"),
+    ];
+    for (idx, (t, desc)) in rules.iter().enumerate() {
+        let ry = p4y + 56.0 + (idx as f64) * 98.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="82" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.6" font-weight="bold" fill="#0f172a">{t}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" fill="#475569">{desc}</text>"##,
+            p4x + 14.0,
+            p4w - 28.0,
+            p4x + 22.0,
+            ry + 28.0,
+            p4x + 22.0,
+            ry + 54.0,
+        );
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_CLASH_BCF_S117");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = clash.total_checked_pairs.max(clash.clashes.len());
+    let summary = format!(
+        "Exported 3D Clash & BCF 2.1 Coordination Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
+/// Pure-Vector Archival A3 Sheet `S-118` — Subsurface Urban Utilities & Smart Road Intersections Annex SVG (`0` raster tags).
+pub fn build_urban_utilities_intersections_annex_svg(
+    project_name: &str,
+    utilities: &crate::core::gis::UrbanUtilitiesReport,
+    intersections: &crate::core::gis::CityIntersectionNetworkReport,
+    promotion: Option<&crate::core::gis::CityToBimPromotionSummary>,
+    sheet_code: &str,
+    checkpoint_hash: Option<&str>,
+) -> VectorDossierExport {
+    let mut svg = String::with_capacity(24_000);
+    let seal_token = "__EIGENGRAPH_URBAN_INFRA_S118_SHA256__";
+    let b = &utilities.balance;
+    let _ = writeln!(
+        svg,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
+<rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.4"/>
+<rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="0.9"/>
+<text x="32" y="42" font-size="15" font-weight="bold" fill="#0b1427">EIGENGRAPH SUBSURFACE URBAN UTILITIES &amp; SMART INTERSECTIONS ANNEX (SHEET {}) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET {} • MUNICIPAL UTILITIES + HCM 6TH ED. LOS + CITY-TO-BIM • 100% PURE VECTOR</text>"##,
+        escape_xml(sheet_code),
+        escape_xml(project_name),
+        escape_xml(sheet_code),
+    );
+
+    // Panel 1: City Demand vs. Supply Capacity Utilization (Top Left)
+    let (p1x, p1y, p1w, p1h) = (32.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p1x,
+        p1y,
+        p1w,
+        p1h,
+        "1. MUNICIPAL UTILITIES DEMAND VS. SUPPLY CAPACITY BALANCE",
+        &format!(
+            "{} Road Corridors • {} Connected Parcels • Rain={:.0} mm/hr",
+            utilities.road_corridor_count,
+            utilities.connected_parcels,
+            utilities.config.design_rainfall_mm_hr,
+        ),
+    );
+    let u_bars = [
+        (
+            format!("Potable Water Trunk DN{} (Hazen-Williams)", b.water_trunk_dn_mm),
+            format!("{:.1} / {:.1} L/s ({:.0}%)", b.water_peak_demand_lps, b.water_supply_capacity_lps, b.water_utilization_pct),
+            b.water_utilization_pct,
+            if b.water_adequate { "#0284c7" } else { "#dc2626" },
+        ),
+        (
+            format!("Sanitary & Rational Storm Sewer DN{}", b.sewer_trunk_dn_mm),
+            format!("{:.1} / {:.1} L/s ({:.0}%)", b.total_drainage_demand_lps, b.sewer_plant_capacity_lps, b.sewer_utilization_pct),
+            b.sewer_utilization_pct,
+            if b.sewer_adequate { "#059669" } else { "#dc2626" },
+        ),
+        (
+            format!("20kV Underground MV Power ({} mm2)", b.mv_cable_mm2),
+            format!("{:.2} / {:.1} MVA ({:.0}%)", b.power_demand_mva, b.substation_capacity_mva, b.power_utilization_pct),
+            b.power_utilization_pct,
+            if b.power_adequate { "#d97706" } else { "#dc2626" },
+        ),
+    ];
+    for (idx, (lbl, metric, pct, col)) in u_bars.iter().enumerate() {
+        let ry = p1y + 58.0 + (idx as f64) * 102.0;
+        let fill_w = ((*pct / 100.0).clamp(0.04, 1.0)) * 520.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="86" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="10.0" font-weight="bold" fill="#0f172a">{lbl}</text>
+<text x="{:.1}" y="{:.1}" font-size="9.6" font-weight="bold" font-family="monospace" text-anchor="end" fill="{col}">{metric}</text>
+<rect x="{:.1}" y="{:.1}" width="520" height="14" rx="4" fill="#e2e8f0"/>
+<rect x="{:.1}" y="{:.1}" width="{fill_w:.1}" height="14" rx="4" fill="{col}"/>"##,
+            p1x + 16.0,
+            p1w - 32.0,
+            p1x + 28.0,
+            ry + 28.0,
+            p1x + p1w - 28.0,
+            ry + 28.0,
+            p1x + 28.0,
+            ry + 52.0,
+            p1x + 28.0,
+            ry + 52.0,
+        );
+    }
+    let promo_line = promotion.map_or_else(
+        || "Active OpenBIM Lot: Origin BIM Site (use /promote-bim to convert a city parcel)".to_string(),
+        |p| p.summary_line.clone(),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="122" rx="5" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.6" font-weight="bold" fill="#0f172a">NETWORK LENGTHS &amp; CITY-TO-BIM STATUS</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#0369a1">Water: {:.0}m | Sewer/Storm: {:.0}m | 20kV Power: {:.0}m | Est. CAPEX: ${:.0}k</text>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#059669">{}</text>"##,
+        p1x + 16.0,
+        p1y + 372.0,
+        p1w - 32.0,
+        p1x + 28.0,
+        p1y + 402.0,
+        p1x + 28.0,
+        p1y + 432.0,
+        utilities.total_water_length_m,
+        utilities.total_sewer_length_m,
+        utilities.total_power_length_m,
+        utilities.estimated_infra_capex_usd * 0.001,
+        p1x + 28.0,
+        p1y + 462.0,
+        escape_xml(&truncate_clean(&promo_line, 84)),
+    );
+
+    // Panel 2: Vector Utility Trench Cross-Section & Seal (Top Right)
+    let (p2x, p2y, p2w, p2h) = (808.0, 56.0, 760.0, 520.0);
+    draw_panel_chrome(
+        &mut svg,
+        p2x,
+        p2y,
+        p2w,
+        p2h,
+        "2. ROADWAY SUBSURFACE UTILITY TRENCH SECTION &amp; GOVERNANCE SEAL",
+        &format!(
+            "Cover: Power -{:.2}m | Water -{:.2}m | Sewer -{:.2}m",
+            utilities.config.power_burial_depth_m,
+            utilities.config.water_burial_depth_m,
+            utilities.config.sewer_burial_depth_m,
+        ),
+    );
+    let tx0 = p2x + 70.0;
+    let ty0 = p2y + 84.0;
+    let tw = p2w - 140.0;
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{tx0:.1}" y="{ty0:.1}" width="{tw:.1}" height="24" fill="#334155" stroke="#0f172a" stroke-width="1.6"/>
+<rect x="{tx0:.1}" y="{:.1}" width="{tw:.1}" height="232" fill="#fef3c7" stroke="#b45309" stroke-width="1.2"/>
+<circle cx="{:.1}" cy="{:.1}" r="16" fill="#0284c7" stroke="#0f172a" stroke-width="1.6"/>
+<circle cx="{:.1}" cy="{:.1}" r="22" fill="#059669" stroke="#0f172a" stroke-width="1.6"/>
+<circle cx="{:.1}" cy="{:.1}" r="14" fill="#d97706" stroke="#0f172a" stroke-width="1.6"/>
+<text x="{:.1}" y="{:.1}" font-size="9.0" font-weight="bold" text-anchor="middle" fill="#ffffff">IFCROAD ASPHALT PAVEMENT (+0.00m DATUM)</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" text-anchor="middle" fill="#0369a1">WATER DN{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" text-anchor="middle" fill="#047857">SEWER DN{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" text-anchor="middle" fill="#b45309">20kV {}mm2</text>"##,
+        ty0 + 24.0,
+        tx0 + tw * 0.25,
+        ty0 + 116.0,
+        tx0 + tw * 0.50,
+        ty0 + 190.0,
+        tx0 + tw * 0.75,
+        ty0 + 92.0,
+        tx0 + tw * 0.50,
+        ty0 + 16.0,
+        tx0 + tw * 0.25,
+        ty0 + 150.0,
+        b.water_trunk_dn_mm,
+        tx0 + tw * 0.50,
+        ty0 + 230.0,
+        b.sewer_trunk_dn_mm,
+        tx0 + tw * 0.75,
+        ty0 + 124.0,
+        b.mv_cable_mm2,
+    );
+    let _ = writeln!(
+        svg,
+        r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="122" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#1e3a8a">URBAN INFRASTRUCTURE GOVERNANCE SEAL</text>
+<text x="{:.1}" y="{:.1}" font-size="8.3" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+        p2x + 16.0,
+        p2y + 378.0,
+        p2w - 32.0,
+        p2x + 26.0,
+        p2y + 402.0,
+        p2x + 26.0,
+        p2y + 428.0,
+        escape_xml(&truncate_clean(&utilities.summary_verdict, 84)),
+        p2x + 26.0,
+        p2y + 454.0,
+        escape_xml(
+            &checkpoint_hash
+                .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
+                .unwrap_or_else(|| "IFCX NAMESPACE: eigengraph::gis::urban_utilities + city_intersections".to_string()),
+        ),
+        p2x + 26.0,
+        p2y + 480.0,
+    );
+
+    // Panel 3: Municipal Plant Stations Schedule (Bottom Left)
+    let (p3x, p3y, p3w, p3h) = (32.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p3x,
+        p3y,
+        p3w,
+        p3h,
+        "3. MUNICIPAL UTILITY PLANTS &amp; TRUNK FEEDER TELEMETRY",
+        &format!("{} Facility Nodes • {} Total Pipe/Cable Segments", utilities.plants_3d.len(), utilities.segments_3d.len()),
+    );
+    for (idx, plant) in utilities.plants_3d.iter().take(4).enumerate() {
+        let ry = p3y + 56.0 + (idx as f64) * 96.0;
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="80" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="10.0" font-weight="bold" fill="#0f172a">{} — {} ({})</text>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#0369a1">Location ENU: ({:.1}, {:.1}, {:.1})m | Rating: {}</text>"##,
+            p3x + 14.0,
+            p3w - 28.0,
+            p3x + 24.0,
+            ry + 30.0,
+            escape_xml(&plant.tag),
+            escape_xml(&plant.name),
+            plant.discipline.short_label(),
+            p3x + 24.0,
+            ry + 58.0,
+            plant.center_enu_m[0],
+            plant.center_enu_m[1],
+            plant.center_enu_m[2],
+            escape_xml(&plant.capacity_label),
+        );
+    }
+
+    // Panel 4: Smart Road Intersections & HCM Level of Service (Bottom Right)
+    let (p4x, p4y, p4w, p4h) = (808.0, 592.0, 760.0, 506.0);
+    draw_panel_chrome(
+        &mut svg,
+        p4x,
+        p4y,
+        p4w,
+        p4h,
+        "4. SMART ROAD INTERSECTIONS &amp; HCM LEVEL OF SERVICE (LOS)",
+        &format!(
+            "{} Junctions ({} Roundabout, {} Signalized) • Worst {}",
+            intersections.total_intersections,
+            intersections.roundabout_count,
+            intersections.signalized_count,
+            intersections.worst_los.short_label(),
+        ),
+    );
+    let _ = writeln!(
+        svg,
+        r##"<text x="{:.1}" y="{:.1}" font-size="8.8" font-weight="bold" font-family="monospace" fill="#0369a1">ID      TYPOLOGY     ARMS   PEAK VPH   CAP VPH    DELAY    LOS</text>"##,
+        p4x + 18.0,
+        p4y + 48.0,
+    );
+    if intersections.intersections.is_empty() {
+        let _ = writeln!(
+            svg,
+            r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="80" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="9.6" fill="#475569">No multi-road intersections detected yet — author >=2 crossing/snapped roads.</text>"##,
+            p4x + 18.0,
+            p4y + 78.0,
+            p4w - 36.0,
+            p4x + 32.0,
+            p4y + 122.0,
+        );
+    } else {
+        for (idx, j) in intersections.intersections.iter().take(8).enumerate() {
+            let ry = p4y + 58.0 + (idx as f64) * 53.0;
+            let los_col = if j.los.is_acceptable() { "#059669" } else { "#dc2626" };
+            let _ = writeln!(
+                svg,
+                r##"<rect x="{:.1}" y="{ry:.1}" width="{:.1}" height="43" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="{:.1}" y="{:.1}" font-size="8.8" font-family="monospace" fill="#0f172a">{:<6}  {:<11}  {:>2}     {:>6.0}     {:>6.0}    {:>5.1}s</text>
+<rect x="{:.1}" y="{:.1}" width="64" height="22" rx="4" fill="{los_col}"/>
+<text x="{:.1}" y="{:.1}" font-size="8.6" font-weight="bold" text-anchor="middle" fill="#ffffff">{}</text>"##,
+                p4x + 14.0,
+                p4w - 28.0,
+                p4x + 20.0,
+                ry + 25.0,
+                escape_xml(&j.name),
+                j.kind.short_label(),
+                j.branch_count,
+                j.peak_vph,
+                j.capacity_vph,
+                j.avg_delay_sec,
+                p4x + p4w - 92.0,
+                ry + 10.5,
+                p4x + p4w - 60.0,
+                ry + 25.0,
+                j.los.short_label(),
+            );
+        }
+    }
+
+    svg.push_str("</svg>\n");
+    let canonical_bytes = svg.replace(seal_token, "EIGENGRAPH_URBAN_INFRA_S118");
+    let digest = Sha256Hasher::digest(canonical_bytes.as_bytes());
+    let sha256_seal: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    let final_svg = svg.replace(seal_token, &sha256_seal);
+
+    let element_count = utilities.segments_3d.len() + intersections.total_intersections;
+    let summary = format!(
+        "Exported Subsurface Urban Utilities & Intersections Annex A3 SVG ({}, SHA-256 {}...)",
+        sheet_code,
+        &sha256_seal[..12]
+    );
+    VectorDossierExport {
+        svg_content: final_svg,
+        sha256_seal,
+        panel_count: 4,
+        element_count,
+        summary,
+    }
+}
+
 /// Canonical row entry in Sheet `S-000` Master Engineering Dossier Drawing Index (`S-100`–`S-114`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MasterDossierSheetEntry {
@@ -6314,5 +7218,75 @@ mod tests {
         assert!(s115.svg_content.contains("SHEET S-115"));
         assert!(!s115.svg_content.contains("<image"));
         assert_eq!(s115.sha256_seal.len(), 64);
+    }
+
+    #[test]
+    fn test_v0879_pure_vector_sheets_s116_s117_s118_and_sha256_seals() {
+        let proj = crate::core::bim::BimProject::sample_bimcraft_building();
+        let site = crate::core::lifecycle_ops::SiteEnvironmentalCoupling::default();
+
+        let mep = crate::core::mep_engine::evaluate_mep_systems(
+            &proj,
+            Some(&site),
+            None,
+            &crate::core::mep_engine::MepSystemsConfig::default(),
+        );
+        let s116 =
+            build_mep_systems_annex_svg(&proj.project_name, &mep, "S-116", Some("v088mepseal"));
+        assert!(s116.svg_content.starts_with("<svg"));
+        assert!(s116.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s116.svg_content.contains("SHEET S-116"));
+        assert!(!s116.svg_content.contains("<image"));
+        assert_eq!(s116.sha256_seal.len(), 64);
+
+        let clash = crate::core::clash_engine::evaluate_spatial_clashes(
+            &proj,
+            &mep,
+            &crate::core::clash_engine::SpatialClashConfig::default(),
+        );
+        let s117 =
+            build_clash_bcf_annex_svg(&proj.project_name, &clash, "S-117", Some("v088clash"));
+        assert!(s117.svg_content.starts_with("<svg"));
+        assert!(s117.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s117.svg_content.contains("SHEET S-117"));
+        assert!(!s117.svg_content.contains("<image"));
+        assert_eq!(s117.sha256_seal.len(), 64);
+
+        let mut city = crate::core::gis::IfcxCityScene::default();
+        city.add_road([-60.0, 0.0], [60.0, 0.0], crate::core::gis::IfcxRoadKind::Arterial, false);
+        city.add_road([0.0, -50.0], [0.0, 50.0], crate::core::gis::IfcxRoadKind::Collector, false);
+        let z = city
+            .add_zone([24.0, 22.0], 26.0, 22.0, 0.0, crate::core::gis::IfcxZoneKind::Commercial)
+            .clone();
+        let (_, promo_sum) =
+            crate::core::gis::promote_city_building_to_bim(&z, (-6.2088, 106.8456))
+                .expect("promo");
+        let utilities = crate::core::gis::evaluate_urban_utilities(
+            &city,
+            &proj,
+            None,
+            0.0,
+            Some(&site),
+            &crate::core::gis::UrbanUtilitiesConfig::default(),
+        );
+        let inter = crate::core::gis::detect_and_evaluate_road_intersections(
+            &city,
+            None,
+            0.0,
+            &crate::core::gis::CityIntersectionConfig::default(),
+        );
+        let s118 = build_urban_utilities_intersections_annex_svg(
+            &proj.project_name,
+            &utilities,
+            &inter,
+            Some(&promo_sum),
+            "S-118",
+            Some("v088cityseal"),
+        );
+        assert!(s118.svg_content.starts_with("<svg"));
+        assert!(s118.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
+        assert!(s118.svg_content.contains("SHEET S-118"));
+        assert!(!s118.svg_content.contains("<image"));
+        assert_eq!(s118.sha256_seal.len(), 64);
     }
 }
