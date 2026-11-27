@@ -7,7 +7,12 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.7 (2/10)]
+## [Unreleased — Next: v0.8.7 (3/10)]
+
+### Update 3/10 (`v0.8.6.3` -> `v0.8.7`) — `Settings -> About EigenGraph`: Complete Feature Catalog & Mathematical Logic Reference
+- **Feature & Mathematical Formulation Catalog (`src/views/settings.rs`)**:
+  - Replaced chronological release highlights inside [`SettingsView::render_about`](src/views/settings.rs) with [`ENGINEERING_MATH_CATALOG`](src/views/settings.rs) (`18` core computational engines grouped across `8` domain tabs [`ABOUT_MATH_CATEGORIES`](src/views/settings.rs)), detailing governing equations (`Sherman-Morrison`, `Woodbury Rank-2`, `HHT-alpha`, `Bouc-Wen`, `Kingery-Bulmash`, `ISO 834`, `ASCE 7/41`, `ACI 318 / SNI 2847`, `Hasofer-Lind FORM/SORM`, `Seed-Idriss`, `SNI 6389 OTTV/RTTV`, `CPM/AHSP/EN 15978`, `STA/LTA`, `MAC`, `A*`, `BSP CSG`, `ECEF->RTC ENU`) and applicable engineering standards.
+  - Added interactive domain filter pills and live keyword search (`about_category_filter`, `about_search_query`) plus unit test [`test_v0863_about_feature_catalog_and_math_logic_filters`](src/views/settings.rs).
 
 ### Update 2/10 (`v0.8.6.2` -> `v0.8.7`) — Smart Layered Ribbon Dynamic Island (`10-Category AEC Lifecycle Ribbon`)
 - **10-Category Horizontal AEC Lifecycle Ribbon (`src/views/spatial_workspace/types.rs`, `src/views/spatial_workspace/ribbon_ui.rs`, `src/views/spatial_workspace/mod.rs`)**:
