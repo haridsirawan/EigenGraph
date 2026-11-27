@@ -5371,8 +5371,8 @@ pub struct MasterDossierSheetEntry {
     pub is_compliant: bool,
 }
 
-/// Evaluates all 15 engineering deliverable sheets (`S-100`–`S-114`) across BIM, Nonlinear/Extreme Hazards,
-/// and the 9 `v0.8.5` Specialized Studios using cached studio reports or fresh BIM-coupled evaluations.
+/// Evaluates all 16 engineering deliverable sheets (`S-100`–`S-115`) across BIM, Nonlinear/Extreme Hazards,
+/// the 9 `v0.8.5` Specialized Studios, and the `v0.8.6` AI Building Design Agent using cached or live-coupled reports.
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_master_dossier_entries(
     bim: &crate::core::bim::BimProject,
@@ -5386,6 +5386,9 @@ pub fn evaluate_master_dossier_entries(
     rel_opt: Option<&crate::core::reliability_studio::ReliabilityStudioReport>,
     fnd_opt: Option<&crate::core::foundation_studio::FoundationStudioReport>,
     lca_opt: Option<&crate::core::construction_lca_studio::ConstructionLcaStudioReport>,
+    zoning_opt: Option<&crate::core::zoning_agent::SiteZoningReport>,
+    program_opt: Option<&crate::core::program_agent::SpatialProgramReport>,
+    massing_opt: Option<&crate::core::massing_agent::MassingStudyReport>,
 ) -> Vec<MasterDossierSheetEntry> {
     let iso_own;
     let iso = match iso_opt {
@@ -5648,16 +5651,70 @@ pub fn evaluate_master_dossier_entries(
             ),
             is_compliant: true,
         },
+        {
+            let zon_own;
+            let zon = match zoning_opt {
+                Some(z) => z,
+                None => {
+                    zon_own = crate::core::zoning_agent::evaluate_site_zoning(
+                        bim,
+                        site,
+                        &crate::core::zoning_agent::SiteZoningConfig::default(),
+                    );
+                    &zon_own
+                }
+            };
+            let prg_own;
+            let prg = match program_opt {
+                Some(p) => p,
+                None => {
+                    prg_own = crate::core::program_agent::evaluate_spatial_program(
+                        Some(zon),
+                        &crate::core::program_agent::SpatialProgramConfig::default(),
+                    );
+                    &prg_own
+                }
+            };
+            let msg_own;
+            let msg = match massing_opt {
+                Some(m) => m,
+                None => {
+                    let site_owned = site.cloned().unwrap_or_default();
+                    msg_own = crate::core::massing_agent::evaluate_massing_options(
+                        zon,
+                        prg,
+                        &site_owned,
+                        &crate::core::massing_agent::MassingStudyConfig::default(),
+                    );
+                    &msg_own
+                }
+            };
+            let act_opt = msg.active_option();
+            let arch_lbl = act_opt.map_or("Mass", |o| o.archetype.short_label());
+            let gfa = act_opt.map_or(prg.total_gfa_m2, |o| o.gfa_m2);
+            let klb = act_opt.map_or(zon.actual_klb_far, |o| o.klb_far);
+            let score = act_opt.map_or(80.0, |o| o.composite_score);
+            MasterDossierSheetEntry {
+                sheet_code: "S-115".to_string(),
+                title: "Zoning, Spatial Program & Concept Feasibility Brief".to_string(),
+                standard: "KDB/KLB/GSB / Concept-to-BIM".to_string(),
+                key_metric: format!(
+                    "{arch_lbl} | GFA {:.0}m2 | KLB {:.2} | {:.0}/100",
+                    gfa, klb, score
+                ),
+                is_compliant: zon.overall_compliant && prg.fits_zoning_envelope,
+            }
+        },
     ]
 }
 
-/// Generates Archival A3 Landscape Sheet `S-000` — Master Engineering Dossier Drawing Index (`S-100`–`S-114`).
+/// Generates Archival A3 Landscape Sheet `S-000` — Master Engineering Dossier Drawing Index (`S-100`–`S-115`).
 pub fn build_master_dossier_index_svg(
     project_name: &str,
     entries: &[MasterDossierSheetEntry],
     checkpoint_hash: Option<&str>,
 ) -> VectorDossierExport {
-    let mut svg = String::with_capacity(32_000);
+    let mut svg = String::with_capacity(34_000);
     let seal_token = "__EIGENGRAPH_MASTER_INDEX_S000_SHA256__";
     let passed = entries.iter().filter(|e| e.is_compliant).count();
     let total = entries.len().max(1);
@@ -5666,15 +5723,15 @@ pub fn build_master_dossier_index_svg(
         r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
 <rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.6"/>
 <rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="1.0"/>
-<text x="32" y="42" font-size="16" font-weight="bold" fill="#0b1427">EIGENGRAPH v0.8.5 MASTER ENGINEERING DOSSIER DRAWING INDEX (SHEET S-000) — {}</text>
-<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET S-000 • S-100 TO S-114 REGISTER • 100% PURE VECTOR</text>
+<text x="32" y="42" font-size="16" font-weight="bold" fill="#0b1427">EIGENGRAPH v0.8.6 MASTER ENGINEERING DOSSIER DRAWING INDEX (SHEET S-000) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET S-000 • S-100 TO S-115 REGISTER • 100% PURE VECTOR</text>
 <rect x="32" y="56" width="1536" height="36" rx="4" fill="#0f172a"/>
 <text x="48" y="79" font-size="10.2" font-weight="bold" font-family="monospace" fill="#ffffff">SHEET    ENGINEERING DELIVERABLE / STUDIO                     GOVERNING CODE                KEY TELEMETRY                              STATUS</text>"##,
         escape_xml(project_name),
     );
 
-    for (idx, row) in entries.iter().take(15).enumerate() {
-        let ry = 98.0 + (idx as f64) * 58.0;
+    for (idx, row) in entries.iter().take(16).enumerate() {
+        let ry = 96.0 + (idx as f64) * 54.0;
         let bg = if idx % 2 == 0 { "#ffffff" } else { "#f8fafc" };
         let (st_col, st_lbl) = if row.is_compliant {
             ("#059669", "PASS")
@@ -5683,30 +5740,30 @@ pub fn build_master_dossier_index_svg(
         };
         let _ = writeln!(
             svg,
-            r##"<rect x="32" y="{ry:.1}" width="1536" height="52" rx="4" fill="{bg}" stroke="#cbd5e1" stroke-width="0.9"/>
-<text x="48" y="{:.1}" font-size="10.2" font-weight="bold" font-family="monospace" fill="#0369a1">{:<8} </text>
-<text x="128" y="{:.1}" font-size="10.2" font-weight="bold" fill="#0f172a">{}</text>
-<text x="640" y="{:.1}" font-size="9.4" font-family="monospace" fill="#334155">{}</text>
-<text x="950" y="{:.1}" font-size="9.2" font-family="monospace" fill="#0f172a">{}</text>
+            r##"<rect x="32" y="{ry:.1}" width="1536" height="48" rx="4" fill="{bg}" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="48" y="{:.1}" font-size="10.0" font-weight="bold" font-family="monospace" fill="#0369a1">{:<8} </text>
+<text x="128" y="{:.1}" font-size="10.0" font-weight="bold" fill="#0f172a">{}</text>
+<text x="640" y="{:.1}" font-size="9.2" font-family="monospace" fill="#334155">{}</text>
+<text x="950" y="{:.1}" font-size="9.0" font-family="monospace" fill="#0f172a">{}</text>
 <rect x="1474" y="{:.1}" width="76" height="24" rx="4" fill="{st_col}"/>
 <text x="1512" y="{:.1}" font-size="9.0" font-weight="bold" text-anchor="middle" fill="#ffffff">{st_lbl}</text>"##,
-            ry + 31.0,
+            ry + 29.0,
             escape_xml(&row.sheet_code),
-            ry + 31.0,
+            ry + 29.0,
             escape_xml(&truncate_clean(&row.title, 48)),
-            ry + 31.0,
+            ry + 29.0,
             escape_xml(&truncate_clean(&row.standard, 28)),
-            ry + 31.0,
+            ry + 29.0,
             escape_xml(&truncate_clean(&row.key_metric, 48)),
-            ry + 14.0,
-            ry + 30.0,
+            ry + 12.0,
+            ry + 28.0,
         );
     }
 
     let _ = writeln!(
         svg,
         r##"<rect x="32" y="974" width="1536" height="122" rx="6" fill="#f0f9ff" stroke="#38bdf8" stroke-width="1.2"/>
-<text x="48" y="1004" font-size="12" font-weight="bold" fill="#0c4a6e">EIGENGRAPH v0.8.5 UNIFIED DELIVERABLE COMPLIANCE: {passed}/{total} SHEETS COMPLIANT (S-100 THROUGH S-114)</text>
+<text x="48" y="1004" font-size="12" font-weight="bold" fill="#0c4a6e">EIGENGRAPH v0.8.6 UNIFIED DELIVERABLE COMPLIANCE: {passed}/{total} SHEETS COMPLIANT (S-100 THROUGH S-115)</text>
 <text x="48" y="1032" font-size="9.6" font-family="monospace" fill="#334155">SHA-256 SEAL: {seal_token}</text>
 <text x="48" y="1058" font-size="9.4" font-family="monospace" fill="#475569">{}</text>
 <text x="48" y="1082" font-size="9.0" font-family="monospace" fill="#0369a1">100% Pure Rust • Pure WebGPU WGSL • OpenBIM IFCX (IFC 5) • Zero Legacy STEP IFC • Zero Raster Pixels</text>
@@ -5714,7 +5771,7 @@ pub fn build_master_dossier_index_svg(
         escape_xml(
             &checkpoint_hash
                 .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
-                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: EigenGraph v0.8.5 Master Dossier Release".to_string()),
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: EigenGraph v0.8.6 Master Dossier Release".to_string()),
         ),
     );
 
@@ -6214,18 +6271,22 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
+            None,
         );
-        assert_eq!(master_entries.len(), 15);
+        assert_eq!(master_entries.len(), 16);
         let s000 = build_master_dossier_index_svg(
             &field_proj.project_name,
             &master_entries,
-            Some("v085masterseal"),
+            Some("v086masterseal"),
         );
         assert!(s000.svg_content.starts_with("<svg"));
         assert!(s000.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
         assert!(s000.svg_content.contains("SHEET S-000"));
         assert!(s000.svg_content.contains("S-100"));
         assert!(s000.svg_content.contains("S-114"));
+        assert!(s000.svg_content.contains("S-115"));
         assert!(!s000.svg_content.contains("<image"));
         assert!(!s000.svg_content.contains("ARI"));
         assert_eq!(s000.sha256_seal.len(), 64);

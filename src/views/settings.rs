@@ -719,10 +719,16 @@ impl SettingsView {
             ui.separator();
             ui.add_space(6.0);
 
-            let releases: [(&str, bool, &str, &str); 16] = [
+            let releases: [(&str, bool, &str, &str); 17] = [
+                (
+                    "v0.8.6",
+                    true,
+                    "AI Building Design Agent (Concept-to-BIM) & Minimalist Icon-Only Dynamic Island",
+                    "Introduces the Snaptrude-style 6-stage AI Building Design Agent (Site Zoning KDB/KLB/GSB + Sun Path material_kind 23.0, Spatial Program & 2D Slicing-Tree Stack/Pack material_kind 24.0, Multi-Option Massing Explorer material_kind 25.0 with 1-Click Mass-to-Engineered-BIM synthesis, and Chained RFP Brief -> Live EigenGate Audit pipeline), archival A3 Sheet S-115 Concept Feasibility Brief integrated into Master Index S-000 (S-100..S-115), eigengraph::design::* IFCX overlays, and a streamlined 100% Icon-Only Liquid Glass Dynamic Island.",
+                ),
                 (
                     "v0.8.5",
-                    true,
+                    false,
                     "9-Studio Structural Engineering Suite (S-106..S-114) & Master Dossier Index (S-000)",
                     "Unifies nine BIM-coupled 3D Pure WebGPU/WGSL studios (Seismic Base Isolation & Dampers S-106, Wind Aeroelasticity & ISO 10137 Comfort S-107, Special RC Shear Wall SBE & Coupling Beams S-108, Steel Seismic Connections & Panel Zones S-109, Post-Tensioned Tendon Drape & Losses S-110, Composite Steel-Concrete Deck & DG11 Vibration S-111, Structural Reliability FORM/SORM & FEMA P-58 Fragility S-112, Deep Foundation Pile Group & Punching Shear S-113, and 4D CPM / 5D AHSP Cost S-Curve / 6D Carbon LCA S-114) alongside Master Dossier Drawing Index Sheet S-000 (S-100..S-114) and eigengraph::governance::master_dossier_index IFCX overlay.",
                 ),

@@ -4222,6 +4222,9 @@ impl EigenGraphApp {
                 self.universal_canvas.last_reliability_report.as_ref(),
                 self.universal_canvas.last_foundation_report.as_ref(),
                 self.universal_canvas.last_construction_lca_report.as_ref(),
+                self.universal_canvas.last_zoning_report.as_ref(),
+                self.universal_canvas.last_program_report.as_ref(),
+                self.universal_canvas.last_massing_report.as_ref(),
             );
             let cp_hash = self
                 .universal_canvas

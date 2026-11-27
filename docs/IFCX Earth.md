@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.5` Delivered**  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.6` Delivered**  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% External Raster**  
-> **Current Platform**: EigenGraph `v0.8.5` (9-Studio Engineering Suite `S-106`–`S-114` & Master Dossier Drawing Index `S-000` on Pure WebGPU/WGSL)  
+> **Current Platform**: EigenGraph `v0.8.6` (AI Building Design Agent `Concept -> BIM` + 9-Studio Engineering Suite `S-106`–`S-115` & Master Dossier Drawing Index `S-000` on Pure WebGPU/WGSL)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -259,3 +259,10 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
   - **S-113 (`v0.8.4.8`)**: Deep Foundation Pile Group, 6-DOF Winkler Springs & Two-Way Punching Shear (`eigengraph::analysis::deep_foundation`)
   - **S-114 (`v0.8.4.9`)**: 4D CPM Construction Sequence, 5D AHSP Cost S-Curve & 6D EN 15978 Carbon LCA (`eigengraph::analysis::construction_4d5d6d`)
   - **S-000 (`v0.8.5`)**: Master Engineering Dossier Drawing Index (`evaluate_master_dossier_entries`, `build_master_dossier_index_svg`, `eigengraph::governance::master_dossier_index`, `/master-dossier`).
+
+### Phase 86 (`v0.8.6`) — AI Building Design Agent (`Concept -> BIM`), Minimalist Icon-Only Dynamic Island & Sheet `S-115` *(Implemented)*
+- **Concept-to-Engineered-BIM Pipeline (`src/core/zoning_agent.rs`, `program_agent.rs`, `massing_agent.rs`, `design_agent.rs`, `ifcx.rs`)**:
+  - **Site Zoning (`v0.8.5.6`, `material_kind = 23.0`)**: Urban KDB/KLB/GSB setbacks, height caps & analytical Sun Path (`eigengraph::design::zoning_envelope`).
+  - **Spatial Program (`v0.8.5.7`, `material_kind = 24.0`)**: 5 building typologies, vertical stacking, deterministic binary slicing-tree 2D floor-plate packing & AEC adjacency matrix (`eigengraph::design::spatial_program`).
+  - **Massing Explorer & 1-Click Mass-to-BIM (`v0.8.5.8`, `material_kind = 25.0`)**: 4 massing archetypes (`PodiumTower`, `CourtyardBlock`, `LinearSlabBar`, `SteppedTerrace`) with EigenGate ARI, DCR%, 5D Cost, 6D Carbon & instant parametric `BimProject` synthesis (`eigengraph::design::massing_study`).
+  - **Chained 6-Stage AI Design Agent & Sheet `S-115` (`v0.8.5.9`–`v0.8.6`)**: Natural-language RFP brief -> 6-stage pipeline + live EigenGate 6-DOF audit (`eigengraph::design::concept_pipeline`), archival A3 Sheet `S-115` integrated into Master Index `S-000` (`S-100`–`S-115`), and Minimalist 100% Icon-Only Liquid Glass Dynamic Island chrome.

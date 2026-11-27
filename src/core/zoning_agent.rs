@@ -290,7 +290,7 @@ fn extract_bim_envelope_metrics(project: &BimProject) -> (f64, f64, f64, usize) 
         }
     }
     for slab in &project.slabs {
-        for p in &slab.outline {
+        for p in &slab.boundary {
             let x = p.0 * 0.001;
             let y = p.1 * 0.001;
             min_x = min_x.min(x);
@@ -664,9 +664,10 @@ mod tests {
                 pos: P2(0.0, 0.0),
                 width_mm: 500.0,
                 depth_mm: 500.0,
+                rotation_deg: 0.0,
                 is_round: false,
+                is_wf_profile: false,
                 profile_name: "C500".to_string(),
-                rebars: vec![],
             },
             BimColumn {
                 id: 2,
@@ -676,9 +677,10 @@ mod tests {
                 pos: P2(18_000.0, 14_000.0),
                 width_mm: 500.0,
                 depth_mm: 500.0,
+                rotation_deg: 0.0,
                 is_round: false,
+                is_wf_profile: false,
                 profile_name: "C500".to_string(),
-                rebars: vec![],
             },
         ];
 

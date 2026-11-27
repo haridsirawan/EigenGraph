@@ -7,7 +7,14 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.6 (9/10)]
+## [v0.8.6] — 2026-11-26
+
+### Update 10/10 (`v0.8.6` Milestone Release) — Master Index `S-000` (`S-100`–`S-115`), Full Verification & Production Release
+- **Master Engineering Dossier Index (`src/core/vector_dossier.rs`, `src/app.rs`, `src/views/spatial_workspace/`)**:
+  - Integrated Sheet `S-115` (*Zoning, Spatial Program & Concept Feasibility Brief*) into [`evaluate_master_dossier_entries`](src/core/vector_dossier.rs) and [`build_master_dossier_index_svg`](src/core/vector_dossier.rs) (`16` deliverable sheets `S-100`–`S-115` on Archival A3 Landscape Sheet `S-000` with SHA-256 governance seal).
+- **Version Bump, Documentation & Full Verification (`Cargo.toml`, `src/views/settings.rs`, `docs/`, `README.md`, `sw.js`)**:
+  - Bumped semantic version to `v0.8.6` across `Cargo.toml`, `Settings -> About EigenGraph`, `docs/CHANGELOG.md`, `docs/IFCX Earth.md`, `README.md`, `docs/UI_ARCHITECTURE.md`, and `sw.js`.
+  - Executed full native library unit tests (`cargo test --lib`), `wasm32-unknown-unknown` verification (`cargo check`), and release WebAssembly build before pushing to `origin main`.
 
 ### Update 9/10 (`v0.8.5.9` -> `v0.8.6`) — Chained 6-Stage AI Building Design Agent (`Concept -> Engineered BIM`) & Archival Sheet `S-115`
 - **Chained AI Building Design Pipeline (`src/core/design_agent.rs`, `src/core/ifcx.rs`, `src/core/mod.rs`)**:

@@ -3723,7 +3723,7 @@ impl SpatialWorkspaceState {
                     actions.export_program_ifcx = true;
                 }
                 "/massing" => {
-                    let lo = rest.to_ascii_lowercase();
+                    let lo = arg.to_ascii_lowercase();
                     if lo.contains("court") {
                         universal_canvas.massing_config.selected_archetype =
                             crate::core::massing_agent::MassingArchetype::CourtyardBlock;
@@ -3757,7 +3757,7 @@ impl SpatialWorkspaceState {
                     actions.export_massing_ifcx = true;
                 }
                 "/design" | "/rfp" | "/brief" | "/feasibility" => {
-                    let brief = rest.trim();
+                    let brief = arg.trim();
                     self.open_design_agent_drawer();
                     if !brief.is_empty() {
                         self.design_agent_brief_draft = brief.to_string();

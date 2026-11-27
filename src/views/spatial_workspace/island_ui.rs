@@ -1863,7 +1863,9 @@ impl SpatialWorkspaceState {
                 || self.evacuation_drawer_open
                 || self.collab_drawer_open
                 || self.zoning_drawer_open
-                || self.program_drawer_open,
+                || self.program_drawer_open
+                || self.massing_drawer_open
+                || self.design_agent_drawer_open,
         );
 
         let compact_w = if is_mobile {
@@ -1882,7 +1884,7 @@ impl SpatialWorkspaceState {
             (vp.x - 24.0).clamp(700.0, 1680.0)
         };
         let base_w = egui::lerp(compact_w..=expanded_w, expand_t);
-        let dock_w = egui::lerp(base_w..=wide_w, wide_t).min((vp.x - 14.0).max(220.0));
+        let dock_w = egui::lerp(base_w..=wide_w, wide_t).min((vp.x - 16.0).max(200.0));
 
         let frame_theme = host.island_theme();
         let mut render_embedded_opt = Some(render_embedded_panel);
@@ -1933,7 +1935,7 @@ impl SpatialWorkspaceState {
                     let island_glass = Self::antigravity_glass_frame(&frame_theme, 20, Margin::symmetric(12, 9)).show(
                         ui,
                         |ui| {
-                            let cap_w = (dock_w - 30.0).max(180.0);
+                            let cap_w = (dock_w - 32.0).max(160.0);
                             ui.set_width(cap_w);
                             ui.set_max_width(cap_w);
 
@@ -5638,7 +5640,7 @@ impl SpatialWorkspaceState {
                                                         AppIcon::Book,
                                                         false,
                                                         theme.accent_green,
-                                                        "Export Sheet S-000 Master Engineering Dossier Drawing Index (S-100..S-114)",
+                                                        "Export Sheet S-000 Master Engineering Dossier Drawing Index (S-100..S-115)",
                                                     )
                                                     .clicked()
                                                     {
@@ -5863,9 +5865,9 @@ impl SpatialWorkspaceState {
                                                 )
                                             });
 
-                                        let trailing_reserve = 58.0;
+                                        let trailing_reserve = 76.0;
                                         let input_w =
-                                            (ui.available_width() - trailing_reserve).max(60.0);
+                                            (ui.available_width() - trailing_reserve).max(40.0);
                                         let edit_resp = ui.add(
                                             egui::TextEdit::singleline(&mut self.command_input)
                                                 .desired_width(input_w)

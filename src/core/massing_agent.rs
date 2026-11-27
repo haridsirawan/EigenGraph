@@ -906,11 +906,6 @@ pub fn convert_massing_option_to_bim(
     let bay_y_m = report.config.bay_y_m.clamp(4.8, 10.8);
 
     let mut next_id = 1usize;
-    let mut alloc_id = || {
-        let id = next_id;
-        next_id += 1;
-        id
-    };
 
     // 1. Levels (1 = Ground +0.00m .. N+1 = Roof)
     let mut levels = Vec::with_capacity(opt.stories + 1);
@@ -923,8 +918,10 @@ pub fn convert_massing_option_to_bim(
         } else {
             format!("Level {} (+{elev_m:.2}m)", s + 1)
         };
+        let lid = next_id;
+        next_id += 1;
         levels.push(BimLevel {
-            id: alloc_id(),
+            id: lid,
             name,
             elevation_mm: elev_m * 1000.0,
         });
@@ -946,8 +943,10 @@ pub fn convert_massing_option_to_bim(
     let mut grids = Vec::with_capacity(xs_m.len() + ys_m.len());
     let ext_pad_mm = 1800.0;
     for (idx, &xm) in xs_m.iter().enumerate() {
+        let gid = next_id;
+        next_id += 1;
         grids.push(BimGrid {
-            id: alloc_id(),
+            id: gid,
             label: format!("{}", idx + 1),
             start: P2(xm * 1000.0, base_min_m[1] * 1000.0 - ext_pad_mm),
             end: P2(xm * 1000.0, base_max_m[1] * 1000.0 + ext_pad_mm),
@@ -957,8 +956,10 @@ pub fn convert_massing_option_to_bim(
         let lbl = char::from_u32(('A' as u32) + (idx as u32))
             .map(|c| c.to_string())
             .unwrap_or_else(|| format!("G{idx}"));
+        let gid = next_id;
+        next_id += 1;
         grids.push(BimGrid {
-            id: alloc_id(),
+            id: gid,
             label: lbl,
             start: P2(base_min_m[0] * 1000.0 - ext_pad_mm, ym * 1000.0),
             end: P2(base_max_m[0] * 1000.0 + ext_pad_mm, ym * 1000.0),
@@ -989,8 +990,10 @@ pub fn convert_massing_option_to_bim(
             P2(h0[0] * 1000.0, h1[1] * 1000.0),
         ]);
     }
+    let gs_id = next_id;
+    next_id += 1;
     slabs.push(BimSlab {
-        id: alloc_id(),
+        id: gs_id,
         name: "Ground Slab S0".to_string(),
         level_id: levels[0].id,
         boundary: ground_ring,
@@ -1026,7 +1029,8 @@ pub fn convert_massing_option_to_bim(
             for (iy, &ym) in ys_m.iter().enumerate() {
                 if point_active_in_story(xm, ym, s, &opt) {
                     active_grid[ix][iy] = true;
-                    let cid = alloc_id();
+                    let cid = next_id;
+                    next_id += 1;
                     let pos = P2(xm * 1000.0, ym * 1000.0);
                     columns.push(BimColumn {
                         id: cid,
@@ -1053,8 +1057,10 @@ pub fn convert_massing_option_to_bim(
                     if s == 0 && report.config.include_basement_footings {
                         let f_dim = (1900.0 + (opt.stories as f64) * 140.0).clamp(2000.0, 3600.0);
                         let f_thick = (550.0 + (opt.stories as f64) * 35.0).clamp(550.0, 1000.0);
+                        let fid = next_id;
+                        next_id += 1;
                         footings.push(BimFooting {
-                            id: alloc_id(),
+                            id: fid,
                             name: format!("F-{}{}", ix + 1, (b'A' + (iy as u8)) as char),
                             level_id: base_lvl_id,
                             pos,
@@ -1083,8 +1089,10 @@ pub fn convert_massing_option_to_bim(
                 if ix + 1 < xs_m.len() && active_grid[ix + 1][iy] {
                     let mid_x = 0.5 * (xs_m[ix] + xs_m[ix + 1]);
                     if point_active_in_story(mid_x, ys_m[iy], s, &opt) {
+                        let bid = next_id;
+                        next_id += 1;
                         runs.push(BimRun {
-                            id: alloc_id(),
+                            id: bid,
                             name: format!("BX-L{}", s + 2),
                             category: RunCategory::StructuralBeam,
                             level_id: top_lvl_id,
@@ -1105,8 +1113,10 @@ pub fn convert_massing_option_to_bim(
                 if iy + 1 < ys_m.len() && active_grid[ix][iy + 1] {
                     let mid_y = 0.5 * (ys_m[iy] + ys_m[iy + 1]);
                     if point_active_in_story(xs_m[ix], mid_y, s, &opt) {
+                        let bid = next_id;
+                        next_id += 1;
                         runs.push(BimRun {
-                            id: alloc_id(),
+                            id: bid,
                             name: format!("BY-L{}", s + 2),
                             category: RunCategory::StructuralBeam,
                             level_id: top_lvl_id,
@@ -1142,8 +1152,10 @@ pub fn convert_massing_option_to_bim(
                 P2(h0[0] * 1000.0, h1[1] * 1000.0),
             ]);
         }
+        let sid = next_id;
+        next_id += 1;
         slabs.push(BimSlab {
-            id: alloc_id(),
+            id: sid,
             name: if s + 1 == opt.stories {
                 "Roof Slab".to_string()
             } else {
@@ -1165,8 +1177,10 @@ pub fn convert_massing_option_to_bim(
             ("Core-W", P2(core_min_x_mm, core_max_y_mm), P2(core_min_x_mm, core_min_y_mm), false),
         ];
         for (lbl, ws, we, has_access) in core_edges {
+            let wid = next_id;
+            next_id += 1;
             let mut cw = BimWall {
-                id: alloc_id(),
+                id: wid,
                 name: format!("{lbl}-L{}", s + 1),
                 base_level_id: base_lvl_id,
                 top_level_id: Some(top_lvl_id),
@@ -1179,7 +1193,8 @@ pub fn convert_massing_option_to_bim(
                 openings: Vec::new(),
             };
             if has_access && cw.length_mm() > 2600.0 {
-                let oid = alloc_id();
+                let oid = next_id;
+                next_id += 1;
                 cw.openings.push(BimOpening {
                     id: oid,
                     mark: format!("CD{oid}"),
@@ -1204,8 +1219,10 @@ pub fn convert_massing_option_to_bim(
             ("Facade-W", P2(x0, y1), P2(x0, y0), false),
         ];
         for (lbl, ws, we, is_south) in facade_edges {
+            let wid = next_id;
+            next_id += 1;
             let mut fw = BimWall {
-                id: alloc_id(),
+                id: wid,
                 name: format!("{lbl}-L{}", s + 1),
                 base_level_id: base_lvl_id,
                 top_level_id: Some(top_lvl_id),
@@ -1241,8 +1258,10 @@ pub fn convert_massing_option_to_bim(
                 ("Atrium-W", P2(hx0, hy1), P2(hx0, hy0)),
             ];
             for (lbl, ws, we) in inner_edges {
+                let wid = next_id;
+                next_id += 1;
                 let mut aw = BimWall {
-                    id: alloc_id(),
+                    id: wid,
                     name: format!("{lbl}-L{}", s + 1),
                     base_level_id: base_lvl_id,
                     top_level_id: Some(top_lvl_id),

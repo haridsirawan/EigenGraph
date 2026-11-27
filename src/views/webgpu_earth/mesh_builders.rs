@@ -4174,8 +4174,8 @@ pub fn build_rtc_massing_study_mesh(input: &MassingStudyGpuInput<'_>) -> GpuMesh
     } else {
         [0.94, 0.30, 0.30, 0.95]
     };
-    let crown_z = opt.total_height_m + 3.2;
-    push_octahedron_beacon_enu(&mut verts, &mut idxs, [0.0, 0.0, crown_z], 1.15, ari_col, 25.0);
+    let crown_z = (opt.total_height_m + 3.2) as f32;
+    push_octahedron_beacon_enu(&mut verts, &mut idxs, [0.0, 0.0, crown_z], 1.15, ari_col, 0.45, 25.0);
 
     GpuMeshPayload {
         vertices: verts,

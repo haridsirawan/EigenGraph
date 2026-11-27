@@ -5946,6 +5946,7 @@ impl SpatialWorkspaceState {
                             changed |= ui.add(egui::DragValue::new(&mut cfg.core_ratio_pct).range(6.0..=30.0).speed(0.5).suffix("%")).changed();
                         });
                         let mut remove_idx = None;
+                        let total_spaces = cfg.spaces.len();
                         ScrollArea::vertical()
                             .id_salt("spatial_program_table_scroll")
                             .max_width(inner_w)
@@ -5978,7 +5979,7 @@ impl SpatialWorkspaceState {
                                         changed |= ui.add(egui::DragValue::new(&mut sp.unit_count).range(1..=200).speed(1.0).suffix("u")).changed();
                                         changed |= ui.add(egui::DragValue::new(&mut sp.area_per_unit_m2).range(6.0..=2000.0).speed(2.0).suffix("m2")).changed();
                                         ui.label(RichText::new(format!("={:.0}", sp.total_area_m2())).size(8.4).monospace().color(theme.text_muted));
-                                        if cfg.spaces.len() > 1 && ui.small_button("x").clicked() {
+                                        if total_spaces > 1 && ui.small_button("x").clicked() {
                                             remove_idx = Some(idx);
                                         }
                                     });
@@ -6102,7 +6103,7 @@ impl SpatialWorkspaceState {
                                 if br.width() > 36.0 && br.height() > 14.0 {
                                     painter.text(
                                         br.center(),
-                                        Align2::CENTER_CENTER,
+                                        egui::Align2::CENTER_CENTER,
                                         b.department.short_label(),
                                         egui::FontId::proportional(8.5),
                                         theme.text_primary,
@@ -6395,7 +6396,7 @@ impl SpatialWorkspaceState {
                                     let pass_tag = if opt.zoning_compliant { "OK" } else { "LIM" };
                                     ui.label(
                                         RichText::new(format!(
-                                            "{} [{}] {}F ({:.1}m) | GFA {:.0} | KLB {:.2} | ARI {:.2} | DCR {:.0}% | ${:.1}M / Rp{:.1}B | {:.0}tCO2 | {:.0}pts",
+                                            "{} [{}] {} {}F ({:.1}m) | GFA {:.0} | KLB {:.2} | ARI {:.2} | DCR {:.0}% | ${:.1}M / Rp{:.1}B | {:.0}tCO2 | {:.0}pts",
                                             if is_sel { ">" } else { " " },
                                             pass_tag,
                                             opt.archetype.short_label(),
@@ -6481,7 +6482,7 @@ impl SpatialWorkspaceState {
                             egui::Sense::hover(),
                         );
                         let painter = ui.painter_at(plot_rect);
-                        painter.rect_filled(plot_rect, CornerRadius::same(6), theme.card_bg_subtle);
+                        painter.rect_filled(plot_rect, CornerRadius::same(6), theme.bg_card);
                         let row_h = (plot_h - 14.0) / 4.0;
                         for (idx, opt) in rep.options.iter().enumerate() {
                             let y = plot_rect.top() + 8.0 + (idx as f32) * row_h;
@@ -6496,7 +6497,7 @@ impl SpatialWorkspaceState {
                             );
                             painter.text(
                                 egui::Pos2::new(plot_rect.left() + 6.0, y + 6.0),
-                                Align2::LEFT_CENTER,
+                                egui::Align2::LEFT_CENTER,
                                 opt.archetype.short_label(),
                                 egui::FontId::proportional(8.4),
                                 if idx == rep.selected_index {
@@ -6512,7 +6513,7 @@ impl SpatialWorkspaceState {
                             painter.rect_filled(bar_r, CornerRadius::same(3), col);
                             painter.text(
                                 egui::Pos2::new(bar_r.right() + 6.0, y + 7.0),
-                                Align2::LEFT_CENTER,
+                                egui::Align2::LEFT_CENTER,
                                 format!("{:.0}", opt.composite_score),
                                 egui::FontId::monospace(8.2),
                                 col,
