@@ -261,6 +261,10 @@ pub struct UniversalCanvasState {
     pub clash_overlay_visible: bool,
     pub clash_config: crate::core::clash_engine::SpatialClashConfig,
     pub last_clash_report: Option<crate::core::clash_engine::SpatialClashReport>,
+    // Update v0.8.7.7 (7/10 -> v0.8.8): Subsurface Urban Utilities Network & Underground X-Ray
+    pub urban_utilities_overlay_visible: bool,
+    pub urban_utilities_config: crate::core::gis::UrbanUtilitiesConfig,
+    pub last_urban_utilities_report: Option<crate::core::gis::UrbanUtilitiesReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -462,6 +466,9 @@ impl Default for UniversalCanvasState {
             clash_overlay_visible: false,
             clash_config: crate::core::clash_engine::SpatialClashConfig::default(),
             last_clash_report: None,
+            urban_utilities_overlay_visible: false,
+            urban_utilities_config: crate::core::gis::UrbanUtilitiesConfig::default(),
+            last_urban_utilities_report: None,
         }
     }
 }
@@ -2110,6 +2117,27 @@ impl UniversalCanvasState {
         self.run_clash_guardrail(bim_project)
     }
 
+    /// Evaluates road-following Subsurface Urban Utilities (Water, Sewer/Storm, MV Power)
+    /// and updates the 3D Underground X-Ray mesh + Demand vs. Supply telemetry.
+    pub fn run_urban_utilities(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::gis::UrbanUtilitiesReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::gis::evaluate_urban_utilities(
+            &self.city_scene,
+            bim_project,
+            self.active_site_tin.as_ref(),
+            self.sea_level_m,
+            Some(&site),
+            &self.urban_utilities_config,
+        );
+        self.last_urban_utilities_report = Some(rep.clone());
+        self.urban_utilities_overlay_visible = true;
+        self.status_message = Some(rep.summary_verdict.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -2459,6 +2487,7 @@ impl UniversalCanvasState {
             section_box: self.section_box.clone(),
             mep_config: self.mep_config.clone(),
             clash_config: self.clash_config.clone(),
+            urban_utilities_config: self.urban_utilities_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -2620,6 +2649,8 @@ impl UniversalCanvasState {
         self.last_mep_report = None;
         self.clash_config = archive.clash_config;
         self.last_clash_report = None;
+        self.urban_utilities_config = archive.urban_utilities_config;
+        self.last_urban_utilities_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -3386,6 +3417,16 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let urban_utilities_gpu_input = if self.urban_utilities_overlay_visible {
+                self.last_urban_utilities_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::UrbanUtilitiesGpuInput {
+                        report: rep,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -3452,6 +3493,7 @@ impl UniversalCanvasState {
                 daylight_interior_gpu_input,
                 mep_systems_gpu_input,
                 clash_guardrail_gpu_input,
+                urban_utilities_gpu_input,
                 hazard_compute_opt,
                 &self.section_box,
             );
@@ -3564,6 +3606,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.clash_overlay_visible {
                 self.paint_cpu_clash_guardrail_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.urban_utilities_overlay_visible {
+                self.paint_cpu_urban_utilities_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

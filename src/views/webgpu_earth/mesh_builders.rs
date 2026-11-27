@@ -4911,6 +4911,100 @@ pub fn build_rtc_clash_guardrail_mesh(input: &ClashGuardrailGpuInput<'_>) -> Gpu
     }
 }
 
+/// GPU input payload for Update `v0.8.7.7` (`7/10` -> `v0.8.8`) Subsurface Urban Utilities (`material_kind = 33.0`).
+#[derive(Clone, Copy)]
+pub struct UrbanUtilitiesGpuInput<'a> {
+    pub report: &'a crate::core::gis::UrbanUtilitiesReport,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU road-following potable water mains, sanitary/storm sewers, MV power
+/// conduits, lateral service drops, and municipal plant stations (`material_kind = 33.0`).
+pub fn build_rtc_urban_utilities_mesh(input: &UrbanUtilitiesGpuInput<'_>) -> GpuMeshPayload {
+    use crate::core::gis::UrbanUtilityDiscipline;
+
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rep = input.report;
+    let cfg = &rep.config;
+    let is_disc_visible = |disc: UrbanUtilityDiscipline| match disc {
+        UrbanUtilityDiscipline::WaterSupply => cfg.show_water,
+        UrbanUtilityDiscipline::SanitaryStormSewer => cfg.show_sewer,
+        UrbanUtilityDiscipline::UndergroundPower => cfg.show_power,
+    };
+
+    let mut verts = Vec::with_capacity(rep.segments_3d.len() * 24 + rep.plants_3d.len() * 48);
+    let mut idxs = Vec::with_capacity(rep.segments_3d.len() * 36 + rep.plants_3d.len() * 72);
+
+    for (seg_idx, seg) in rep.segments_3d.iter().enumerate() {
+        if !is_disc_visible(seg.discipline) {
+            continue;
+        }
+        let mut rgba = seg.discipline.rgba();
+        if seg.is_lateral {
+            rgba[3] = 0.86;
+        }
+        let vis_diam = ((seg.diameter_mm * 0.001) * 1.45).clamp(0.24, 0.95);
+        let v_start = verts.len();
+        push_animated_flow_strut_enu(
+            &mut verts,
+            &mut idxs,
+            seg.start_enu_m,
+            seg.end_enu_m,
+            vis_diam,
+            vis_diam,
+            rgba,
+            seg.discipline.discipline_code(),
+            33.0,
+        );
+        let phase_base = (seg_idx as f32) * 0.35;
+        for v in &mut verts[v_start..] {
+            v.meta[3] += phase_base;
+        }
+    }
+
+    for (p_idx, plant) in rep.plants_3d.iter().enumerate() {
+        if !is_disc_visible(plant.discipline) {
+            continue;
+        }
+        let rgba = plant.discipline.rgba();
+        let hx = plant.size_enu_m[0] * 0.5;
+        let hy = plant.size_enu_m[1] * 0.5;
+        let cx = plant.center_enu_m[0];
+        let cy = plant.center_enu_m[1];
+        let fp: [[f64; 2]; 4] = [
+            [cx - hx, cy - hy],
+            [cx + hx, cy - hy],
+            [cx + hx, cy + hy],
+            [cx - hx, cy + hy],
+        ];
+        let z0 = (plant.center_enu_m[2] - plant.size_enu_m[2] * 0.5) as f32;
+        let z1 = (plant.center_enu_m[2] + plant.size_enu_m[2] * 0.5) as f32;
+        let body_col = [rgba[0], rgba[1], rgba[2], 0.82];
+        let v_start = verts.len();
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z1, body_col, 33.0);
+        for v in &mut verts[v_start..] {
+            v.meta[1] = plant.discipline.discipline_code();
+            v.meta[3] = (p_idx as f32) * 0.9;
+        }
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [cx as f32, cy as f32, z1 + 1.4],
+            1.15,
+            rgba,
+            plant.discipline.discipline_code(),
+            33.0,
+        );
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
 /// GPU input parameters for realistic coastal ocean & river water surface rendering (`material_kind = 29.0`).
 #[derive(Clone, Copy)]
 pub struct CoastalWaterGpuInput<'a> {

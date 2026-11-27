@@ -84,6 +84,7 @@ pub mod ns {
     pub const EG_DAYLIGHT_INTERIOR: &str = "eigengraph::design::daylight_interior";
     pub const EG_MEP_SYSTEMS: &str = "eigengraph::mep::systems";
     pub const EG_CLASH_GUARDRAIL: &str = "eigengraph::coordination::clash_bcf";
+    pub const EG_URBAN_UTILITIES: &str = "eigengraph::gis::urban_utilities";
     pub const EG_SITE_TERRAFORM: &str = "eigengraph::gis::site_terraform";
     pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
@@ -2220,6 +2221,50 @@ impl IfcxStage {
         stage.to_composed_document(&format!("{}_clash_bcf", base_doc.header.id))
     }
 
+    /// Composes a base `.ifcx` document with a non-destructive Subsurface Urban Utilities overlay.
+    pub fn compose_with_urban_utilities_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::gis::UrbanUtilitiesIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_urban_utilities", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcDistributionSystem", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Subsurface Urban Utilities Network (Water, Sewer/Storm, MV Power)",
+                "roadCorridorCount": overlay.road_corridor_count,
+                "connectedParcels": overlay.connected_parcels,
+                "totalWaterLengthM": overlay.total_water_length_m,
+                "totalSewerLengthM": overlay.total_sewer_length_m,
+                "totalPowerLengthM": overlay.total_power_length_m,
+                "waterUtilizationPct": overlay.water_utilization_pct,
+                "sewerUtilizationPct": overlay.sewer_utilization_pct,
+                "powerUtilizationPct": overlay.power_utilization_pct,
+                "waterTrunkDnMm": overlay.water_trunk_dn_mm,
+                "sewerTrunkDnMm": overlay.sewer_trunk_dn_mm,
+                "mvCableMm2": overlay.mv_cable_mm2,
+                "plantCount": overlay.plant_count,
+                "estimatedInfraCapexUsd": overlay.estimated_infra_capex_usd,
+                "allUtilitiesAdequate": overlay.all_utilities_adequate,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_URBAN_UTILITIES.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/city/urban_utilities".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_urban_utilities", base_doc.header.id))
+    }
+
     /// Composes a base `.ifcx` document with a non-destructive sculpted `IfcSite` terraform layer.
     pub fn compose_with_site_terraform_overlay(
         base_doc: &IfcxDocument,
@@ -2349,6 +2394,8 @@ fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
         || node.attributes.contains_key(ns::EG_GEOTECH_SSI)
     {
         "Subsurface SSI".to_string()
+    } else if node.attributes.contains_key(ns::EG_URBAN_UTILITIES) {
+        "Urban Utilities".to_string()
     } else if node.attributes.contains_key("eigengraph::hazard::district") {
         "District Hazard".to_string()
     } else if node.attributes.contains_key(ns::EG_IFCX_DIFF) {

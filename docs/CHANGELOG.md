@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.8 (6/10)]
+## [Unreleased — Next: v0.8.8 (7/10)]
+
+### Update 7/10 (`v0.8.7.7` -> `v0.8.8`) — Subsurface Urban Utilities Network (`Water`, `Sewer/Storm`, `20kV Power`), WebGPU Underground X-Ray & Gemini Tool #13
+- **Road-Following Subsurface Urban Utilities Core Engine & Non-Destructive IFCX Overlay (`src/core/gis/urban_utilities.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:
+  - Added `urban_utilities` (`NS_EG_URBAN_UTILITIES = "eigengraph::gis::urban_utilities"`) automatically routing staggered 3D buried potable water mains, sanitary/stormwater trunk sewers, and 20 kV underground power feeders along authored `IfcRoad` straight/curved splines and under-deck `IfcBridge` utility sleeves, plus parcel/building service laterals and municipal plant facilities (`WTP-01`, `SWD-01`, `SUB-01`).
+  - Evaluates city-scale Demand vs. Supply capacity balance (peak + NFPA hydrant water `L/s` & Hazen-Williams DN/headloss, Rational storm + sanitary `L/s` & Manning DN, 20 kV feeder `MVA` & voltage drop `%`), persists `urban_utilities_config` in `.eigen.json`, and composes non-destructive IFCX overlays via [`IfcxStage::compose_with_urban_utilities_overlay`](src/core/ifcx.rs).
+- **WebGPU Underground X-Ray Pass (`material_kind = 33.0`), Drawer, Ribbon & Gemini Tool #13 (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/core/agent_tools.rs`, `src/app.rs`)**:
+  - Added [`build_rtc_urban_utilities_mesh`](src/views/webgpu_earth/mesh_builders.rs), `kind >= 32.5` WGSL flow shader branch, dedicated `xray_pipeline` (`wgpu::CompareFunction::Always`), `urban_utilities` GPU slot, CPU fallback [`paint_cpu_urban_utilities_fallback`](src/views/universal_canvas/render_layers.rs), width-first 2-tab [`render_urban_utilities_drawer`](src/views/spatial_workspace/drawers.rs), `"Utilities"` group (`Utilities` & `X-Ray`) under `RibbonCategoryTab::Planning`, `/utilities`, `/water-net`, `/sewer-net`, `/power-grid`, `/xray-util`, `/utilities-ifcx` commands, and Tool #13 (`run_urban_utilities`) in [`agent_tools.rs`](src/core/agent_tools.rs).
+- **Verification (`src/core/gis/urban_utilities.rs`, `src/views/webgpu_earth/tests.rs`, `src/views/spatial_workspace/tests.rs`)**:
+  - Added [`test_v0877_urban_utilities_road_splines_capacity_and_ifcx_overlay`](src/core/gis/urban_utilities.rs), [`test_v0877_urban_utilities_3d_webgpu_xray_and_section_box`](src/views/webgpu_earth/tests.rs), and [`test_v0877_urban_utilities_drawer_slash_commands_and_gemini_tool`](src/views/spatial_workspace/tests.rs).
 
 ### Update 6/10 (`v0.8.7.6` -> `v0.8.8`) — Unified 3D Clash Detection & BCF Coordination Guardrail (`Structure × MEP × Openings`), WebGPU Clash Beacons & Gemini Tool #12
 - **Unified 3D Spatial Clash Detection & BCF Guardrail (`src/core/clash_engine.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:

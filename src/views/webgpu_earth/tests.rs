@@ -3624,3 +3624,120 @@ use crate::core::ifcx::IfcxDocument;
             "Clash Guardrail WGSL pass triggered WebGPU validation error: {val_err:?}"
         );
     }
+
+    #[test]
+    fn test_v0877_urban_utilities_3d_webgpu_xray_and_section_box() {
+        use crate::core::gis::{
+            evaluate_urban_utilities, DemTerrainPreset, IfcxCityScene, IfcxRoadKind,
+            TinSurfaceMesh, UrbanUtilitiesConfig,
+        };
+        use crate::core::lifecycle_ops::SiteEnvironmentalCoupling;
+        use crate::views::universal_canvas::SectionBoxConfig;
+
+        let proj = BimProject::sample_bimcraft_building();
+        let site = SiteEnvironmentalCoupling::default();
+        let tin = TinSurfaceMesh::generate_from_dem_preset(
+            DemTerrainPreset::TerracedCutFillPad,
+            320.0,
+            320.0,
+            20,
+            20,
+            1.0,
+        );
+        let mut city = IfcxCityScene::default();
+        let _ = city.add_curved_road_with_auto_bridge(
+            [-55.0, -18.0],
+            Some([0.0, -4.0]),
+            [55.0, 12.0],
+            IfcxRoadKind::Collector,
+            false,
+            0.0,
+            Some(&tin),
+            0.0,
+        );
+        let cfg = UrbanUtilitiesConfig::default();
+        let rep = evaluate_urban_utilities(&city, &proj, Some(&tin), 0.0, Some(&site), &cfg);
+
+        let util_mesh = build_rtc_urban_utilities_mesh(&UrbanUtilitiesGpuInput {
+            report: &rep,
+            visible: true,
+        });
+        assert!(util_mesh.indices.len() / 3 >= 24);
+        assert!(
+            util_mesh.vertices.iter().all(|v| (v.meta[0] - 33.0).abs() < 1e-3),
+            "All Subsurface Urban Utilities vertices must carry material_kind = 33.0"
+        );
+
+        fn poll_fut<F: std::future::Future>(fut: F) -> F::Output {
+            let mut fut = std::pin::pin!(fut);
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(&waker);
+            loop {
+                if let std::task::Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
+                    return out;
+                }
+                std::thread::yield_now();
+            }
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = poll_fut(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let Ok((device, queue)) =
+            poll_fut(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        res.urban_utilities_xray = true;
+        res.urban_utilities
+            .upload(&device, &queue, "urban_util_v0877", 1, &util_mesh);
+
+        let mut cam = GlobeCamera::default();
+        cam.tilt_deg = 42.0;
+        let xf = GlobeScreenTransform::from_view(
+            Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(64.0, 64.0)),
+            -6.2088,
+            106.8456,
+            17.0,
+            &cam,
+        );
+        let mut sb = SectionBoxConfig::default();
+        sb.fit_to_bim_project(&proj, 35.0);
+        let uniforms = RtcCameraUniforms::from_globe_xform(
+            &xf,
+            VectorEarthTheme::CoastalBlueprint,
+            &cam,
+            (-6.2088, 106.8456),
+            1.6,
+            true,
+        )
+        .with_section_box(&sb);
+        queue.write_buffer(
+            &res.planet_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_planet_pass_uniforms()),
+        );
+        queue.write_buffer(
+            &res.site_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_site_pass_uniforms()),
+        );
+        res.ensure_targets(&device, 64, 64);
+
+        let mut encoder = device.create_command_encoder(&Default::default());
+        res.render_offscreen_passes(&mut encoder, true);
+        queue.submit([encoder.finish()]);
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let val_err = poll_fut(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "Subsurface Urban Utilities X-Ray WGSL pass triggered WebGPU validation error: {val_err:?}"
+        );
+    }

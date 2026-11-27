@@ -74,13 +74,14 @@ impl ToolExecutionOutcome {
     }
 }
 
-const TOOL_NAMES: [&str; 12] = [
+const TOOL_NAMES: [&str; 13] = [
     "inspect_model",
     "run_structural_audit",
     "run_solar_ottv",
     "run_daylight_analysis",
     "run_mep_systems",
     "run_clash_detection",
+    "run_urban_utilities",
     "resize_column",
     "resize_beam",
     "add_story",
@@ -94,7 +95,7 @@ pub fn registered_tool_names() -> &'static [&'static str] {
     &TOOL_NAMES
 }
 
-/// Returns the Gemini REST `tools` array containing `functionDeclarations` for all 10 engineering tools.
+/// Returns the Gemini REST `tools` array containing `functionDeclarations` for all engineering tools.
 pub fn gemini_function_declarations() -> Value {
     json!([
         {
@@ -200,6 +201,31 @@ pub fn gemini_function_declarations() -> Value {
                             "auto_resolve": {
                                 "type": "BOOLEAN",
                                 "description": "Automatically apply recommended plenum drop below beam soffits and re-verify."
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "run_urban_utilities",
+                    "description": "Route subsurface potable water mains, sanitary/stormwater trunk sewers, and 20kV underground power feeders along authored IfcRoad corridors and evaluate city Demand vs. Supply balance.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "rainfall_mm_hr": {
+                                "type": "NUMBER",
+                                "description": "Design storm rainfall intensity in mm/hr (20..240, default 95)."
+                            },
+                            "water_capacity_lps": {
+                                "type": "NUMBER",
+                                "description": "Municipal water supply booster capacity in L/s (10..1500)."
+                            },
+                            "sewer_capacity_lps": {
+                                "type": "NUMBER",
+                                "description": "Drainage / wastewater plant capacity in L/s (20..4000)."
+                            },
+                            "substation_mva": {
+                                "type": "NUMBER",
+                                "description": "20kV district substation transformer rating in MVA (1..250)."
                             }
                         }
                     }
@@ -347,6 +373,32 @@ pub fn execute_headless_tool(
     site_lat_lon: (f64, f64),
     active_story_idx: usize,
     section_box_enabled: bool,
+) -> ToolExecutionOutcome {
+    execute_headless_tool_with_city(
+        call,
+        bim_bus,
+        site,
+        site_lat_lon,
+        active_story_idx,
+        section_box_enabled,
+        None,
+        None,
+        0.0,
+    )
+}
+
+/// Executes a structured engineering tool call with optional urban GIS scene & TIN terrain context.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_headless_tool_with_city(
+    call: &GeminiToolCall,
+    bim_bus: &mut BimCommandBus,
+    site: &SiteEnvironmentalCoupling,
+    site_lat_lon: (f64, f64),
+    active_story_idx: usize,
+    section_box_enabled: bool,
+    city_scene: Option<&crate::core::gis::IfcxCityScene>,
+    tin: Option<&crate::core::gis::TinSurfaceMesh>,
+    sea_level_m: f32,
 ) -> ToolExecutionOutcome {
     let name = call.name.trim();
     match name {
@@ -740,6 +792,62 @@ pub fn execute_headless_tool(
                 fly_target: None,
             }
         }
+        "run_urban_utilities" => {
+            use crate::core::gis::{
+                evaluate_urban_utilities, IfcxCityScene, UrbanUtilitiesConfig,
+            };
+            let mut cfg = UrbanUtilitiesConfig::default();
+            if let Some(r) = arg_f64(&call.args, "rainfall_mm_hr") {
+                cfg.design_rainfall_mm_hr = r.clamp(20.0, 240.0);
+            }
+            if let Some(w) = arg_f64(&call.args, "water_capacity_lps") {
+                cfg.water_supply_capacity_lps = w.clamp(10.0, 1500.0);
+            }
+            if let Some(s) = arg_f64(&call.args, "sewer_capacity_lps") {
+                cfg.sewer_plant_capacity_lps = s.clamp(20.0, 4000.0);
+            }
+            if let Some(mva) = arg_f64(&call.args, "substation_mva") {
+                cfg.substation_capacity_mva = mva.clamp(1.0, 250.0);
+            }
+            let fallback_city = IfcxCityScene::default();
+            let city = city_scene.unwrap_or(&fallback_city);
+            let rep = evaluate_urban_utilities(
+                city,
+                &bim_bus.project,
+                tin,
+                sea_level_m,
+                Some(site),
+                &cfg,
+            );
+            let b = &rep.balance;
+            ToolExecutionOutcome {
+                name: name.to_string(),
+                ok: true,
+                summary: rep.summary_verdict.clone(),
+                result_json: json!({
+                    "ok": true,
+                    "road_corridor_count": rep.road_corridor_count,
+                    "connected_parcels": rep.connected_parcels,
+                    "water_peak_demand_lps": b.water_peak_demand_lps,
+                    "water_utilization_pct": b.water_utilization_pct,
+                    "water_trunk_dn_mm": b.water_trunk_dn_mm,
+                    "sewer_total_demand_lps": b.total_drainage_demand_lps,
+                    "sewer_utilization_pct": b.sewer_utilization_pct,
+                    "sewer_trunk_dn_mm": b.sewer_trunk_dn_mm,
+                    "power_demand_mva": b.power_demand_mva,
+                    "power_utilization_pct": b.power_utilization_pct,
+                    "mv_cable_mm2": b.mv_cable_mm2,
+                    "estimated_infra_capex_usd": rep.estimated_infra_capex_usd,
+                    "all_utilities_adequate": rep.all_utilities_adequate,
+                    "segment_count": rep.segments_3d.len(),
+                }),
+                mutated_bim: false,
+                sync_fem_and_earth: false,
+                fit_camera: false,
+                section_box_update: None,
+                fly_target: None,
+            }
+        }
         "resize_column" => {
             let Some(column_id) = arg_usize(&call.args, "column_id") else {
                 return ToolExecutionOutcome::err(name, "Missing integer argument 'column_id'.");
@@ -999,7 +1107,7 @@ mod tests {
         let fn_decls = decls[0]["functionDeclarations"]
             .as_array()
             .expect("functionDeclarations array");
-        assert_eq!(fn_decls.len(), 12);
+        assert_eq!(fn_decls.len(), 13);
         for expected in registered_tool_names() {
             assert!(
                 fn_decls.iter().any(|d| d["name"].as_str() == Some(*expected)),
@@ -1094,6 +1202,21 @@ mod tests {
         );
         assert!(clash.ok);
         assert!(clash.result_json["recommended_plenum_drop_m"].as_f64().is_some());
+
+        let util = execute_headless_tool(
+            &GeminiToolCall {
+                name: "run_urban_utilities".to_string(),
+                args: json!({ "rainfall_mm_hr": 110.0, "water_capacity_lps": 80.0 }),
+            },
+            &mut bus,
+            &site,
+            (-6.2088, 106.8456),
+            0,
+            false,
+        );
+        assert!(util.ok);
+        assert!(util.result_json["water_trunk_dn_mm"].as_u64().unwrap_or(0) >= 150);
+        assert!(util.result_json["segment_count"].as_u64().unwrap_or(0) >= 6);
 
         let col_id = bus.project.columns[0].id;
         let resize = execute_headless_tool(

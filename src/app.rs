@@ -4742,6 +4742,76 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if hud_actions.run_urban_utilities {
+            let rep = self
+                .universal_canvas
+                .run_urban_utilities(&self.build_view.bim_bus.project);
+            self.spatial_workspace
+                .push_trace(rep.summary_verdict, rep.all_utilities_adequate);
+        }
+        if hud_actions.toggle_urban_utilities_3d {
+            self.universal_canvas.urban_utilities_overlay_visible =
+                !self.universal_canvas.urban_utilities_overlay_visible;
+            if self.universal_canvas.urban_utilities_overlay_visible
+                && self.universal_canvas.last_urban_utilities_report.is_none()
+            {
+                let _ = self
+                    .universal_canvas
+                    .run_urban_utilities(&self.build_view.bim_bus.project);
+            }
+            let st = if self.universal_canvas.urban_utilities_overlay_visible {
+                "ON"
+            } else {
+                "OFF"
+            };
+            self.spatial_workspace
+                .push_trace(format!("3D Subsurface Urban Utilities: {st}"), true);
+        }
+        if hud_actions.toggle_urban_utilities_xray {
+            self.universal_canvas.urban_utilities_config.xray_underground =
+                !self.universal_canvas.urban_utilities_config.xray_underground;
+            if self.universal_canvas.urban_utilities_config.xray_underground {
+                self.universal_canvas.urban_utilities_overlay_visible = true;
+                if self.universal_canvas.last_urban_utilities_report.is_none() {
+                    let _ = self
+                        .universal_canvas
+                        .run_urban_utilities(&self.build_view.bim_bus.project);
+                }
+            }
+            let st = if self.universal_canvas.urban_utilities_config.xray_underground {
+                "ON"
+            } else {
+                "OFF"
+            };
+            self.spatial_workspace
+                .push_trace(format!("Underground Utilities X-Ray: {st}"), true);
+        }
+        if hud_actions.export_urban_utilities_ifcx {
+            let rep = self
+                .universal_canvas
+                .run_urban_utilities(&self.build_view.bim_bus.project);
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_urban_utilities_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_urban_utilities.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported Subsurface Urban Utilities IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {

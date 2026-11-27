@@ -557,6 +557,14 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 32.5) {
+        // Update v0.8.7.7 (7/10 -> v0.8.8): Pure Analytical WGSL Subsurface Urban Utilities & Underground X-Ray (0% raster)
+        let speed = 2.6 + clamp(height_m, 0.0, 1.0) * 2.4;
+        let pulse = 0.78 + 0.28 * sin(phase * 2.8 - u_time * speed);
+        let ndotv = max(abs(dot(n, v)), 0.14);
+        let rim = pow(1.0 - ndotv, 1.45) * 0.52;
+        col = f_in.color.rgb * (pulse + rim);
+        out_alpha = f_in.color.a;
     } else if (kind >= 31.5) {
         // Update v0.8.7.6 (6/10 -> v0.8.8): Pure Analytical WGSL 3D Clash Detection Beacons & Overlap Boxes (0% raster)
         let sev = clamp(height_m, 0.2, 1.0);
@@ -944,6 +952,7 @@ pub struct WebGpuEarthResources {
     target_format: wgpu::TextureFormat,
     opaque_pipeline: wgpu::RenderPipeline,
     translucent_pipeline: wgpu::RenderPipeline,
+    xray_pipeline: wgpu::RenderPipeline,
     composite_pipeline: wgpu::RenderPipeline,
     composite_bgl: wgpu::BindGroupLayout,
     composite_sampler: wgpu::Sampler,
@@ -987,6 +996,8 @@ pub struct WebGpuEarthResources {
     daylight_interior: GpuMeshSlot,
     mep_systems: GpuMeshSlot,
     clash_guardrail: GpuMeshSlot,
+    urban_utilities: GpuMeshSlot,
+    urban_utilities_xray: bool,
     water_surface: GpuMeshSlot,
     city_ambience: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
@@ -1033,7 +1044,7 @@ impl WebGpuEarthResources {
         // Always use Depth24PlusStencil8 with explicit depth_ops & stencil_ops on our offscreen pass
         // so wgpu 30's WebGPU backend emits `stencilReadOnly: false` (valid under W3C WebGPU spec).
         let depth_format = wgpu::TextureFormat::Depth24PlusStencil8;
-        let build_pipeline = |label: &str, depth_write: bool| {
+        let build_pipeline = |label: &str, depth_write: bool, depth_compare: wgpu::CompareFunction| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&pipeline_layout),
@@ -1061,7 +1072,7 @@ impl WebGpuEarthResources {
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: depth_format,
                     depth_write_enabled: Some(depth_write),
-                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    depth_compare: Some(depth_compare),
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
@@ -1075,8 +1086,21 @@ impl WebGpuEarthResources {
             })
         };
 
-        let opaque_pipeline = build_pipeline("eigengraph_earth_opaque", true);
-        let translucent_pipeline = build_pipeline("eigengraph_earth_translucent", false);
+        let opaque_pipeline = build_pipeline(
+            "eigengraph_earth_opaque",
+            true,
+            wgpu::CompareFunction::LessEqual,
+        );
+        let translucent_pipeline = build_pipeline(
+            "eigengraph_earth_translucent",
+            false,
+            wgpu::CompareFunction::LessEqual,
+        );
+        let xray_pipeline = build_pipeline(
+            "eigengraph_earth_xray",
+            false,
+            wgpu::CompareFunction::Always,
+        );
 
         let composite_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("eigengraph_earth_composite_wgsl"),
@@ -1187,6 +1211,7 @@ impl WebGpuEarthResources {
             target_format,
             opaque_pipeline,
             translucent_pipeline,
+            xray_pipeline,
             composite_pipeline,
             composite_bgl,
             composite_sampler,
@@ -1232,6 +1257,8 @@ impl WebGpuEarthResources {
             daylight_interior: GpuMeshSlot::default(),
             mep_systems: GpuMeshSlot::default(),
             clash_guardrail: GpuMeshSlot::default(),
+            urban_utilities: GpuMeshSlot::default(),
+            urban_utilities_xray: true,
             hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
@@ -1373,6 +1400,7 @@ impl WebGpuEarthResources {
             || self.daylight_interior.index_count > 0
             || self.mep_systems.index_count > 0
             || self.clash_guardrail.index_count > 0
+            || self.urban_utilities.index_count > 0
             || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1445,6 +1473,14 @@ impl WebGpuEarthResources {
             self.fragility_loss.draw(&mut pass);
             self.shm_triage.draw(&mut pass);
             self.evacuation.draw(&mut pass);
+            if self.urban_utilities.index_count > 0 {
+                if self.urban_utilities_xray {
+                    pass.set_pipeline(&self.xray_pipeline);
+                } else {
+                    pass.set_pipeline(&self.translucent_pipeline);
+                }
+                self.urban_utilities.draw(&mut pass);
+            }
         }
     }
 }
@@ -1482,6 +1518,8 @@ struct WebGpuEarthPaintCallback {
     pending_daylight_interior: Option<(u64, GpuMeshPayload)>,
     pending_mep_systems: Option<(u64, GpuMeshPayload)>,
     pending_clash_guardrail: Option<(u64, GpuMeshPayload)>,
+    pending_urban_utilities: Option<(u64, GpuMeshPayload)>,
+    urban_utilities_xray: bool,
     pending_water_surface: Option<(u64, GpuMeshPayload)>,
     pending_city_ambience: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
@@ -1673,6 +1711,13 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
                     .upload(device, queue, "clash_guardrail_mesh", cl_in.0, &cl_in.1);
             }
         }
+        res.urban_utilities_xray = self.urban_utilities_xray;
+        if let Some(ref util_in) = self.pending_urban_utilities {
+            if res.urban_utilities.revision_uploaded != util_in.0 {
+                res.urban_utilities
+                    .upload(device, queue, "urban_utilities_mesh", util_in.0, &util_in.1);
+            }
+        }
         if let Some(ref ws_in) = self.pending_water_surface {
             if res.water_surface.revision_uploaded != ws_in.0 {
                 res.water_surface
@@ -1798,6 +1843,7 @@ pub struct WebGpuEarthState {
     cached_daylight_interior_hash: u64,
     cached_mep_systems_hash: u64,
     cached_clash_guardrail_hash: u64,
+    cached_urban_utilities_hash: u64,
     cached_water_surface_hash: u64,
     cached_city_ambience_hash: u64,
     pub last_planet_tris: usize,
@@ -1830,6 +1876,7 @@ pub struct WebGpuEarthState {
     pub last_daylight_interior_tris: usize,
     pub last_mep_systems_tris: usize,
     pub last_clash_guardrail_tris: usize,
+    pub last_urban_utilities_tris: usize,
     pub last_water_surface_tris: usize,
     pub last_city_ambience_tris: usize,
     pub last_compute_particles: u32,
@@ -2131,6 +2178,7 @@ impl WebGpuEarthState {
         daylight_interior_input: Option<DaylightInteriorGpuInput<'_>>,
         mep_systems_input: Option<MepSystemsGpuInput<'_>>,
         clash_guardrail_input: Option<ClashGuardrailGpuInput<'_>>,
+        urban_utilities_input: Option<UrbanUtilitiesGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
         section_box: &crate::views::universal_canvas::SectionBoxConfig,
     ) -> bool {
@@ -3155,6 +3203,43 @@ impl WebGpuEarthState {
             None
         };
 
+        let urban_utilities_xray = urban_utilities_input
+            .as_ref()
+            .map_or(true, |u| u.report.config.xray_underground);
+        let pending_urban_utilities = if render_site_pass {
+            if let Some(ref ut) = urban_utilities_input.as_ref().filter(|u| u.visible) {
+                let c = &ut.report.config;
+                let vis_mask = u64::from(c.show_water)
+                    | (u64::from(c.show_sewer) << 1)
+                    | (u64::from(c.show_power) << 2)
+                    | (u64::from(c.xray_underground) << 3);
+                let rev: u64 = (vis_mask << 2)
+                    ^ ((ut.report.segments_3d.len() as u64) << 10)
+                    ^ ((ut.report.plants_3d.len() as u64) << 20)
+                    ^ ut.report.total_water_length_m.to_bits().rotate_left(13)
+                    ^ ut.report.total_sewer_length_m.to_bits().rotate_left(29)
+                    ^ ut.report.total_power_length_m.to_bits().rotate_left(41)
+                    ^ c.water_burial_depth_m.to_bits().rotate_left(53)
+                    ^ u64::from(ut.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                if rev != self.cached_urban_utilities_hash {
+                    let mesh = build_rtc_urban_utilities_mesh(ut);
+                    self.last_urban_utilities_tris = mesh.indices.len() / 3;
+                    self.cached_urban_utilities_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_urban_utilities_hash != 0 {
+                self.cached_urban_utilities_hash = 0;
+                self.last_urban_utilities_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         painter.add(egui_wgpu::Callback::new_paint_callback(
             rect,
             WebGpuEarthPaintCallback {
@@ -3190,6 +3275,8 @@ impl WebGpuEarthState {
                 pending_daylight_interior,
                 pending_mep_systems,
                 pending_clash_guardrail,
+                pending_urban_utilities,
+                urban_utilities_xray,
                 pending_water_surface,
                 pending_city_ambience,
                 pending_hazard_compute,
@@ -3232,6 +3319,7 @@ impl WebGpuEarthState {
         let daylight_animated = daylight_interior_input.as_ref().is_some_and(|d| d.visible);
         let mep_animated = mep_systems_input.as_ref().is_some_and(|m| m.visible);
         let clash_animated = clash_guardrail_input.as_ref().is_some_and(|c| c.visible);
+        let urban_utilities_animated = urban_utilities_input.as_ref().is_some_and(|u| u.visible);
         let water_animated = water_surface_input.as_ref().is_some_and(|w| w.visible);
         let ambience_animated = render_site_pass
             && city_scene.is_some_and(|c| c.ambience.show_animated_traffic && !c.roads.is_empty());
@@ -3261,6 +3349,7 @@ impl WebGpuEarthState {
             || daylight_animated
             || mep_animated
             || clash_animated
+            || urban_utilities_animated
             || water_animated
             || ambience_animated
             || active_bim

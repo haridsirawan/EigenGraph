@@ -7930,4 +7930,313 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.7.7` (`7/10` -> `v0.8.8`): Subsurface Urban Utilities Network & Underground X-Ray.
+    pub(super) fn render_urban_utilities_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Layers,
+                13.0,
+                theme.accent_blue,
+                "Subsurface Urban Utilities & Underground X-Ray",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [(0usize, "Network & Capacity"), (1usize, "Pipes & Plants")] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.utilities_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.utilities_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Urban Utilities Drawer",
+            )
+            .clicked()
+            {
+                self.utilities_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Layers),
+                    "Evaluate",
+                    false,
+                    theme.accent_blue,
+                    "Route Water, Sewer/Storm & 20kV Power along IfcRoad splines and balance Demand vs. Supply",
+                )
+                .clicked()
+                {
+                    universal_canvas.urban_utilities_overlay_visible = true;
+                    actions.run_urban_utilities = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::SectionCut),
+                    if universal_canvas.urban_utilities_config.xray_underground {
+                        "X-Ray: ON"
+                    } else {
+                        "X-Ray: OFF"
+                    },
+                    universal_canvas.urban_utilities_config.xray_underground,
+                    theme.accent_green,
+                    "Render buried utilities through terrain & roadways via WebGPU X-Ray depth pass",
+                )
+                .clicked()
+                {
+                    actions.toggle_urban_utilities_xray = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    if universal_canvas.urban_utilities_overlay_visible {
+                        "3D Pipes: ON"
+                    } else {
+                        "3D Pipes: OFF"
+                    },
+                    universal_canvas.urban_utilities_overlay_visible,
+                    theme.accent_blue,
+                    "Toggle 3D Pure WebGPU Subsurface Utility Mains & Plants",
+                )
+                .clicked()
+                {
+                    actions.toggle_urban_utilities_3d = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "Utilities .ifcx",
+                    false,
+                    theme.accent_orange,
+                    "Export non-destructive eigengraph::gis::urban_utilities IFCX overlay",
+                )
+                .clicked()
+                {
+                    actions.export_urban_utilities_ifcx = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.utilities_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    if is_left {
+                        ui.label(
+                            RichText::new("Corridor Layers & Plant Capacities")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ui.add_space(2.0);
+                        let cfg = &mut universal_canvas.urban_utilities_config;
+                        let mut changed = false;
+                        ui.horizontal_wrapped(|ui| {
+                            changed |= ui.checkbox(&mut cfg.show_water, "Water").changed();
+                            changed |= ui.checkbox(&mut cfg.show_sewer, "Sewer/Storm").changed();
+                            changed |= ui.checkbox(&mut cfg.show_power, "20kV Power").changed();
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Rain:").size(8.6).color(theme.text_muted));
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut cfg.design_rainfall_mm_hr)
+                                        .range(20.0..=240.0)
+                                        .speed(2.0)
+                                        .suffix(" mm/h"),
+                                )
+                                .changed();
+                            ui.label(RichText::new("WTP:").size(8.6).color(theme.text_muted));
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut cfg.water_supply_capacity_lps)
+                                        .range(10.0..=1500.0)
+                                        .speed(2.0)
+                                        .suffix(" L/s"),
+                                )
+                                .changed();
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("SWD:").size(8.6).color(theme.text_muted));
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut cfg.sewer_plant_capacity_lps)
+                                        .range(20.0..=4000.0)
+                                        .speed(5.0)
+                                        .suffix(" L/s"),
+                                )
+                                .changed();
+                            ui.label(RichText::new("Sub:").size(8.6).color(theme.text_muted));
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut cfg.substation_capacity_mva)
+                                        .range(1.0..=250.0)
+                                        .speed(0.5)
+                                        .suffix(" MVA"),
+                                )
+                                .changed();
+                        });
+                        if changed {
+                            universal_canvas.urban_utilities_overlay_visible = true;
+                            actions.run_urban_utilities = true;
+                        }
+                    } else if let Some(ref rep) = universal_canvas.last_urban_utilities_report {
+                        let b = &rep.balance;
+                        if tab == 0 {
+                            let status_col = if rep.all_utilities_adequate {
+                                theme.accent_green
+                            } else {
+                                theme.accent_red
+                            };
+                            ui.label(
+                                RichText::new("City Demand vs. Supply Capacity")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "Corridors: {} • Connected Parcels: {} [{}]",
+                                    rep.road_corridor_count,
+                                    rep.connected_parcels,
+                                    if rep.all_utilities_adequate { "BALANCED" } else { "OVERLOAD" },
+                                ))
+                                .size(9.0)
+                                .strong()
+                                .color(status_col),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Water DN{}: {:.1}/{:.1} L/s ({:.0}%) • Headloss {:.1} m/km",
+                                    b.water_trunk_dn_mm,
+                                    b.water_peak_demand_lps,
+                                    b.water_supply_capacity_lps,
+                                    b.water_utilization_pct,
+                                    b.water_headloss_m_per_km,
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(if b.water_adequate { theme.accent_blue } else { theme.accent_red }),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Sewer/Storm DN{}: {:.1}/{:.1} L/s ({:.0}%) • Slope {:.2}%",
+                                    b.sewer_trunk_dn_mm,
+                                    b.total_drainage_demand_lps,
+                                    b.sewer_plant_capacity_lps,
+                                    b.sewer_utilization_pct,
+                                    b.sewer_min_slope_pct,
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(if b.sewer_adequate { theme.accent_green } else { theme.accent_red }),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "20kV Power {}mm²: {:.2}/{:.1} MVA ({:.0}%) • ΔV {:.2}%",
+                                    b.mv_cable_mm2,
+                                    b.power_demand_mva,
+                                    b.substation_capacity_mva,
+                                    b.power_utilization_pct,
+                                    b.voltage_drop_pct,
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(if b.power_adequate { theme.accent_orange } else { theme.accent_red }),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new("Subsurface Trunk Lengths & Plant Facilities")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "Water {:.0}m • Sewer {:.0}m • Power {:.0}m • CAPEX ${:.0}k",
+                                    rep.total_water_length_m,
+                                    rep.total_sewer_length_m,
+                                    rep.total_power_length_m,
+                                    rep.estimated_infra_capex_usd * 0.001,
+                                ))
+                                .size(8.6)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                            for p in &rep.plants_3d {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} ({}): {} @ ({:.0}m,{:.0}m)",
+                                        p.tag,
+                                        p.discipline.short_label(),
+                                        p.capacity_label,
+                                        p.center_enu_m[0],
+                                        p.center_enu_m[1],
+                                    ))
+                                    .size(8.2)
+                                    .monospace()
+                                    .color(theme.text_primary),
+                                );
+                            }
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new("Click 'Evaluate' to route subsurface Water, Sewer & Power trunks along IfcRoad splines.")
+                                .size(8.8)
+                                .color(theme.text_muted),
+                        );
+                    }
+                });
+            });
+        });
+    }
 }

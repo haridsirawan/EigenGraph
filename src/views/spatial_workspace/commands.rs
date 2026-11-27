@@ -1093,13 +1093,16 @@ impl SpatialWorkspaceState {
             let mut summaries = Vec::with_capacity(reply.function_calls.len());
 
             for call in &reply.function_calls {
-                let outcome = crate::core::agent_tools::execute_headless_tool(
+                let outcome = crate::core::agent_tools::execute_headless_tool_with_city(
                     call,
                     &mut build_view.bim_bus,
                     &site,
                     (lat, lon),
                     self.active_story_idx,
                     universal_canvas.section_box.enabled,
+                    Some(&universal_canvas.city_scene),
+                    universal_canvas.active_site_tin.as_ref(),
+                    universal_canvas.sea_level_m,
                 );
                 if outcome.sync_fem_and_earth {
                     out.sync_fem_and_earth = true;
@@ -2617,6 +2620,32 @@ impl SpatialWorkspaceState {
                 }
                 "/clash-ifcx" => {
                     actions.export_clash_ifcx = true;
+                }
+                "/utilities" => {
+                    self.open_utilities_drawer(0);
+                    actions.run_urban_utilities = true;
+                    self.push_trace("Evaluating Subsurface Urban Utilities (Water/Sewer/Power)", true);
+                }
+                "/water-net" => {
+                    universal_canvas.urban_utilities_config.show_water = true;
+                    self.open_utilities_drawer(0);
+                    actions.run_urban_utilities = true;
+                }
+                "/sewer-net" => {
+                    universal_canvas.urban_utilities_config.show_sewer = true;
+                    self.open_utilities_drawer(0);
+                    actions.run_urban_utilities = true;
+                }
+                "/power-grid" => {
+                    universal_canvas.urban_utilities_config.show_power = true;
+                    self.open_utilities_drawer(1);
+                    actions.run_urban_utilities = true;
+                }
+                "/xray-util" => {
+                    actions.toggle_urban_utilities_xray = true;
+                }
+                "/utilities-ifcx" => {
+                    actions.export_urban_utilities_ifcx = true;
                 }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");

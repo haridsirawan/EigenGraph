@@ -4705,4 +4705,69 @@ impl UniversalCanvasState {
             }
         }
     }
+
+    /// Pure-vector CPU fallback rendering subsurface urban utility mains, laterals, and plant nodes.
+    pub(super) fn paint_cpu_urban_utilities_fallback(
+        &self,
+        painter: &egui::Painter,
+        _rect: Rect,
+        xform: &GlobeScreenTransform,
+    ) {
+        use crate::core::gis::UrbanUtilityDiscipline;
+        let Some(ref rep) = self.last_urban_utilities_report else {
+            return;
+        };
+        let cfg = &rep.config;
+        for seg in &rep.segments_3d {
+            let visible = match seg.discipline {
+                UrbanUtilityDiscipline::WaterSupply => cfg.show_water,
+                UrbanUtilityDiscipline::SanitaryStormSewer => cfg.show_sewer,
+                UrbanUtilityDiscipline::UndergroundPower => cfg.show_power,
+            };
+            if !visible {
+                continue;
+            }
+            let ll0 = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                self.ground_origin_lat_lon,
+                [seg.start_enu_m[0] * 1000.0, seg.start_enu_m[1] * 1000.0],
+            );
+            let ll1 = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                self.ground_origin_lat_lon,
+                [seg.end_enu_m[0] * 1000.0, seg.end_enu_m[1] * 1000.0],
+            );
+            if let (Some((p0, _, true)), Some((p1, _, true))) = (
+                xform.project_lat_lon_elev(ll0.0, ll0.1, seg.start_enu_m[2]),
+                xform.project_lat_lon_elev(ll1.0, ll1.1, seg.end_enu_m[2]),
+            ) {
+                let rgba = seg.discipline.rgba();
+                let col = Color32::from_rgb(
+                    (rgba[0] * 255.0) as u8,
+                    (rgba[1] * 255.0) as u8,
+                    (rgba[2] * 255.0) as u8,
+                );
+                painter.line_segment(
+                    [p0, p1],
+                    Stroke::new(if seg.is_lateral { 1.6 } else { 2.6 }, col),
+                );
+            }
+        }
+        for plant in &rep.plants_3d {
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                self.ground_origin_lat_lon,
+                [plant.center_enu_m[0] * 1000.0, plant.center_enu_m[1] * 1000.0],
+            );
+            if let Some((sp, _, true)) =
+                xform.project_lat_lon_elev(ll.0, ll.1, plant.center_enu_m[2] + 2.0)
+            {
+                let rgba = plant.discipline.rgba();
+                let col = Color32::from_rgb(
+                    (rgba[0] * 255.0) as u8,
+                    (rgba[1] * 255.0) as u8,
+                    (rgba[2] * 255.0) as u8,
+                );
+                painter.circle_filled(sp, 6.0, col);
+                painter.circle_stroke(sp, 8.5, Stroke::new(1.2, Color32::WHITE));
+            }
+        }
+    }
 }

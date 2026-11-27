@@ -1975,6 +1975,42 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Document,
     },
     SlashCommandSpec {
+        cmd: "/utilities",
+        category: "GIS",
+        description: "Evaluate Subsurface Urban Utilities (Water, Sewer/Storm, MV Power) & open drawer",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/water-net",
+        category: "GIS",
+        description: "Show & evaluate road-following potable water distribution mains",
+        icon: AppIcon::Waves,
+    },
+    SlashCommandSpec {
+        cmd: "/sewer-net",
+        category: "GIS",
+        description: "Show & evaluate gravity sanitary/stormwater drainage trunk sewers",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/power-grid",
+        category: "GIS",
+        description: "Show & evaluate 20kV underground medium-voltage power feeders",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/xray-util",
+        category: "GIS",
+        description: "Toggle WebGPU Underground X-Ray mode for buried urban utilities",
+        icon: AppIcon::SectionCut,
+    },
+    SlashCommandSpec {
+        cmd: "/utilities-ifcx",
+        category: "GIS",
+        description: "Export non-destructive eigengraph::gis::urban_utilities IFCX overlay",
+        icon: AppIcon::SaveDisk,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",
@@ -3551,6 +3587,11 @@ pub struct SpatialHudActions {
     pub toggle_clash_3d: bool,
     pub auto_resolve_clashes: bool,
     pub export_clash_ifcx: bool,
+    // Update v0.8.7.7 (7/10 -> v0.8.8): Subsurface Urban Utilities Network & Underground X-Ray
+    pub run_urban_utilities: bool,
+    pub toggle_urban_utilities_3d: bool,
+    pub toggle_urban_utilities_xray: bool,
+    pub export_urban_utilities_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -4029,5 +4070,9 @@ impl SpatialHudActions {
         self.toggle_clash_3d |= other.toggle_clash_3d;
         self.auto_resolve_clashes |= other.auto_resolve_clashes;
         self.export_clash_ifcx |= other.export_clash_ifcx;
+        self.run_urban_utilities |= other.run_urban_utilities;
+        self.toggle_urban_utilities_3d |= other.toggle_urban_utilities_3d;
+        self.toggle_urban_utilities_xray |= other.toggle_urban_utilities_xray;
+        self.export_urban_utilities_ifcx |= other.export_urban_utilities_ifcx;
     }
 }

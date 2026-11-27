@@ -318,6 +318,8 @@ pub struct UnifiedWorkspaceArchive {
     pub mep_config: crate::core::mep_engine::MepSystemsConfig,
     #[serde(default)]
     pub clash_config: crate::core::clash_engine::SpatialClashConfig,
+    #[serde(default)]
+    pub urban_utilities_config: crate::core::gis::UrbanUtilitiesConfig,
     pub sha256_seal: String,
 }
 

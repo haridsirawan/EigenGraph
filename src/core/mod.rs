@@ -395,5 +395,10 @@ pub use clash_engine::{
     evaluate_spatial_clashes, SpatialClashConfig, SpatialClashIfcxOverlay, SpatialClashPairKind,
     SpatialClashRecord3D, SpatialClashReport, SpatialClashSeverity, NS_EG_CLASH_GUARDRAIL,
 };
+pub use gis::urban_utilities::{
+    evaluate_urban_utilities, UrbanUtilitiesConfig, UrbanUtilitiesIfcxOverlay,
+    UrbanUtilitiesReport, UrbanUtilityCapacityBalance, UrbanUtilityDiscipline,
+    UrbanUtilityPlantNode3D, UrbanUtilitySegment3D, NS_EG_URBAN_UTILITIES,
+};
 
 

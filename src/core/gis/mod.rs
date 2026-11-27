@@ -14,6 +14,13 @@ pub mod neighborhood_physics;
 pub mod world_vectors;
 pub mod city_builder;
 pub mod district_hazard;
+pub mod urban_utilities;
+
+pub use urban_utilities::{
+    evaluate_urban_utilities, UrbanUtilitiesConfig, UrbanUtilitiesIfcxOverlay,
+    UrbanUtilitiesReport, UrbanUtilityCapacityBalance, UrbanUtilityDiscipline,
+    UrbanUtilityPlantNode3D, UrbanUtilitySegment3D, NS_EG_URBAN_UTILITIES,
+};
 
 pub use district_hazard::{
     evaluate_district_flood, evaluate_district_multi_hazard,

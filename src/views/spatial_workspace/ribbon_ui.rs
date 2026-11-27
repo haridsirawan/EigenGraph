@@ -1392,6 +1392,37 @@ impl SpatialWorkspaceState {
                         universal_canvas.auto_populate_road_parcels();
                     }
                 });
+                Self::ribbon_group(ui, theme, "Utilities", |ui| {
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Layers,
+                        "Utilities",
+                        self.utilities_drawer_open || universal_canvas.urban_utilities_overlay_visible,
+                        theme.accent_blue,
+                        "Open Subsurface Urban Utilities (Water, Sewer/Storm, MV Power) & evaluate city network",
+                    )
+                    .clicked()
+                    {
+                        self.open_utilities_drawer(0);
+                        actions.run_urban_utilities = true;
+                    }
+                    let xray_active = universal_canvas.urban_utilities_overlay_visible
+                        && universal_canvas.urban_utilities_config.xray_underground;
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::SectionCut,
+                        "X-Ray",
+                        xray_active,
+                        theme.accent_green,
+                        "Toggle Underground X-Ray view for buried Water, Sewer & MV Power mains",
+                    )
+                    .clicked()
+                    {
+                        actions.toggle_urban_utilities_xray = true;
+                    }
+                });
                 Self::ribbon_group(ui, theme, "Ambience", |ui| {
                     if Self::ribbon_tool_tile(
                         ui,
