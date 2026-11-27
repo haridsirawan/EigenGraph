@@ -71,6 +71,7 @@ pub mod web_bridge;
 pub mod vector_dossier;
 pub mod agent_tools;
 pub mod mep_engine;
+pub mod clash_engine;
 
 pub use linalg::{CsrMatrix, Matrix};
 pub use model::{
@@ -389,6 +390,10 @@ pub use mep_engine::{
     evaluate_mep_systems, FireHazardClass, FireSprinklerSummary, HvacSystemPreset,
     MepConduitSegment3D, MepDiscipline, MepEquipmentNode3D, MepSystemsConfig,
     MepSystemsIfcxOverlay, MepSystemsReport, NS_EG_MEP_SYSTEMS,
+};
+pub use clash_engine::{
+    evaluate_spatial_clashes, SpatialClashConfig, SpatialClashIfcxOverlay, SpatialClashPairKind,
+    SpatialClashRecord3D, SpatialClashReport, SpatialClashSeverity, NS_EG_CLASH_GUARDRAIL,
 };
 
 

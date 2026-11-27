@@ -2091,6 +2091,33 @@ impl SpatialWorkspaceState {
                         self.open_mep_drawer(1);
                         actions.run_mep_systems = true;
                     }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::AlertTriangle,
+                        "Clash",
+                        self.clash_drawer_open,
+                        theme.accent_orange,
+                        "Open 3D Structure × MEP Clash Detection & BCF Guardrail",
+                    )
+                    .clicked()
+                    {
+                        self.open_clash_drawer(0);
+                        actions.run_clash_guardrail = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Target,
+                        "Clash 3D",
+                        universal_canvas.clash_overlay_visible,
+                        theme.accent_red,
+                        "Toggle 3D Pure WebGPU Clash Beacons & interference prisms",
+                    )
+                    .clicked()
+                    {
+                        actions.toggle_clash_3d = true;
+                    }
                 });
             }
 

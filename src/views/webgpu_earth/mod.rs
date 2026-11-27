@@ -557,6 +557,14 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 31.5) {
+        // Update v0.8.7.6 (6/10 -> v0.8.8): Pure Analytical WGSL 3D Clash Detection Beacons & Overlap Boxes (0% raster)
+        let sev = clamp(height_m, 0.2, 1.0);
+        let pulse = 0.72 + 0.36 * sin(u_time * (3.0 + sev * 4.5) + phase * 1.5);
+        let ndotv = max(abs(dot(n, v)), 0.10);
+        let rim = pow(1.0 - ndotv, 1.45) * 0.55;
+        col = f_in.color.rgb * (pulse + rim);
+        out_alpha = f_in.color.a;
     } else if (kind >= 30.5) {
         // Update v0.8.7.5 (5/10 -> v0.8.8): Pure Analytical WGSL 3D Building MEP Ducts, Pipes & Risers (0% raster)
         let flow_wave = 0.84 + 0.16 * sin(phase * 2.4 - u_time * 3.0);
@@ -978,6 +986,7 @@ pub struct WebGpuEarthResources {
     solar_envelope: GpuMeshSlot,
     daylight_interior: GpuMeshSlot,
     mep_systems: GpuMeshSlot,
+    clash_guardrail: GpuMeshSlot,
     water_surface: GpuMeshSlot,
     city_ambience: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
@@ -1222,6 +1231,7 @@ impl WebGpuEarthResources {
             solar_envelope: GpuMeshSlot::default(),
             daylight_interior: GpuMeshSlot::default(),
             mep_systems: GpuMeshSlot::default(),
+            clash_guardrail: GpuMeshSlot::default(),
             hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
@@ -1362,6 +1372,7 @@ impl WebGpuEarthResources {
             || self.solar_envelope.index_count > 0
             || self.daylight_interior.index_count > 0
             || self.mep_systems.index_count > 0
+            || self.clash_guardrail.index_count > 0
             || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1427,6 +1438,7 @@ impl WebGpuEarthResources {
             self.solar_envelope.draw(&mut pass);
             self.daylight_interior.draw(&mut pass);
             self.mep_systems.draw(&mut pass);
+            self.clash_guardrail.draw(&mut pass);
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
             self.hazard_compute.draw(&mut pass);
@@ -1469,6 +1481,7 @@ struct WebGpuEarthPaintCallback {
     pending_solar_envelope: Option<(u64, GpuMeshPayload)>,
     pending_daylight_interior: Option<(u64, GpuMeshPayload)>,
     pending_mep_systems: Option<(u64, GpuMeshPayload)>,
+    pending_clash_guardrail: Option<(u64, GpuMeshPayload)>,
     pending_water_surface: Option<(u64, GpuMeshPayload)>,
     pending_city_ambience: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
@@ -1654,6 +1667,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
                     .upload(device, queue, "mep_systems_mesh", mep_in.0, &mep_in.1);
             }
         }
+        if let Some(ref cl_in) = self.pending_clash_guardrail {
+            if res.clash_guardrail.revision_uploaded != cl_in.0 {
+                res.clash_guardrail
+                    .upload(device, queue, "clash_guardrail_mesh", cl_in.0, &cl_in.1);
+            }
+        }
         if let Some(ref ws_in) = self.pending_water_surface {
             if res.water_surface.revision_uploaded != ws_in.0 {
                 res.water_surface
@@ -1778,6 +1797,7 @@ pub struct WebGpuEarthState {
     cached_solar_envelope_hash: u64,
     cached_daylight_interior_hash: u64,
     cached_mep_systems_hash: u64,
+    cached_clash_guardrail_hash: u64,
     cached_water_surface_hash: u64,
     cached_city_ambience_hash: u64,
     pub last_planet_tris: usize,
@@ -1809,6 +1829,7 @@ pub struct WebGpuEarthState {
     pub last_solar_envelope_tris: usize,
     pub last_daylight_interior_tris: usize,
     pub last_mep_systems_tris: usize,
+    pub last_clash_guardrail_tris: usize,
     pub last_water_surface_tris: usize,
     pub last_city_ambience_tris: usize,
     pub last_compute_particles: u32,
@@ -2109,6 +2130,7 @@ impl WebGpuEarthState {
         solar_envelope_input: Option<SolarEnvelopeGpuInput<'_>>,
         daylight_interior_input: Option<DaylightInteriorGpuInput<'_>>,
         mep_systems_input: Option<MepSystemsGpuInput<'_>>,
+        clash_guardrail_input: Option<ClashGuardrailGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
         section_box: &crate::views::universal_canvas::SectionBoxConfig,
     ) -> bool {
@@ -3101,6 +3123,38 @@ impl WebGpuEarthState {
             None
         };
 
+        let pending_clash_guardrail = if render_site_pass {
+            if let Some(ref cl) = clash_guardrail_input.as_ref().filter(|c| c.visible) {
+                let c = &cl.report.config;
+                let rev: u64 = ((cl.report.clashes.len() as u64) << 2)
+                    ^ ((cl.report.hard_clashes as u64) << 12)
+                    ^ ((cl.report.clearance_warnings as u64) << 20)
+                    ^ c.clearance_tolerance_mm.to_bits().rotate_left(27)
+                    ^ (u64::from(c.show_hard_only) << 39)
+                    ^ (u64::from(c.check_structure_vs_mep) << 40)
+                    ^ (u64::from(c.check_mep_vs_mep) << 41)
+                    ^ (u64::from(c.include_sleeve_advisories) << 42)
+                    ^ ((cl.heading_deg.round() as u64) << 51)
+                    ^ u64::from(cl.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                if rev != self.cached_clash_guardrail_hash {
+                    let mesh = build_rtc_clash_guardrail_mesh(cl);
+                    self.last_clash_guardrail_tris = mesh.indices.len() / 3;
+                    self.cached_clash_guardrail_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_clash_guardrail_hash != 0 {
+                self.cached_clash_guardrail_hash = 0;
+                self.last_clash_guardrail_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         painter.add(egui_wgpu::Callback::new_paint_callback(
             rect,
             WebGpuEarthPaintCallback {
@@ -3135,6 +3189,7 @@ impl WebGpuEarthState {
                 pending_solar_envelope,
                 pending_daylight_interior,
                 pending_mep_systems,
+                pending_clash_guardrail,
                 pending_water_surface,
                 pending_city_ambience,
                 pending_hazard_compute,
@@ -3176,6 +3231,7 @@ impl WebGpuEarthState {
         let solar_animated = solar_envelope_input.as_ref().is_some_and(|s| s.visible);
         let daylight_animated = daylight_interior_input.as_ref().is_some_and(|d| d.visible);
         let mep_animated = mep_systems_input.as_ref().is_some_and(|m| m.visible);
+        let clash_animated = clash_guardrail_input.as_ref().is_some_and(|c| c.visible);
         let water_animated = water_surface_input.as_ref().is_some_and(|w| w.visible);
         let ambience_animated = render_site_pass
             && city_scene.is_some_and(|c| c.ambience.show_animated_traffic && !c.roads.is_empty());
@@ -3204,6 +3260,7 @@ impl WebGpuEarthState {
             || solar_animated
             || daylight_animated
             || mep_animated
+            || clash_animated
             || water_animated
             || ambience_animated
             || active_bim

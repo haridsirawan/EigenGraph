@@ -83,6 +83,7 @@ pub mod ns {
     pub const EG_SOLAR_OTTV: &str = "eigengraph::design::solar_ottv";
     pub const EG_DAYLIGHT_INTERIOR: &str = "eigengraph::design::daylight_interior";
     pub const EG_MEP_SYSTEMS: &str = "eigengraph::mep::systems";
+    pub const EG_CLASH_GUARDRAIL: &str = "eigengraph::coordination::clash_bcf";
     pub const EG_SITE_TERRAFORM: &str = "eigengraph::gis::site_terraform";
     pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
@@ -2180,6 +2181,43 @@ impl IfcxStage {
         });
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_mep_systems", base_doc.header.id))
+    }
+
+    /// Composes a base `.ifcx` document with a non-destructive 3D Clash & BCF Coordination Guardrail overlay.
+    pub fn compose_with_clash_guardrail_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::clash_engine::SpatialClashIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_clash_bcf", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcBuilding", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Unified 3D Clash Detection & BCF Coordination Guardrail",
+                "totalClashes": overlay.total_clashes,
+                "hardClashes": overlay.hard_clashes,
+                "clearanceWarnings": overlay.clearance_warnings,
+                "sleeveAdvisories": overlay.sleeve_advisories,
+                "maxPenetrationMm": overlay.max_penetration_mm,
+                "recommendedPlenumDropM": overlay.recommended_plenum_drop_m,
+                "coordinationPass": overlay.coordination_pass,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_CLASH_GUARDRAIL.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/coordination/clash_bcf".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_clash_bcf", base_doc.header.id))
     }
 
     /// Composes a base `.ifcx` document with a non-destructive sculpted `IfcSite` terraform layer.

@@ -4832,6 +4832,85 @@ pub fn build_rtc_mep_systems_mesh(input: &MepSystemsGpuInput<'_>) -> GpuMeshPayl
     }
 }
 
+/// GPU input payload for Update `v0.8.7.6` (`6/10` -> `v0.8.8`) Unified 3D Clash Beacons (`material_kind = 32.0`).
+#[derive(Clone, Copy)]
+pub struct ClashGuardrailGpuInput<'a> {
+    pub report: &'a crate::core::clash_engine::SpatialClashReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU pulsing clash octahedron beacons & interference highlight volumes (`material_kind = 32.0`).
+pub fn build_rtc_clash_guardrail_mesh(input: &ClashGuardrailGpuInput<'_>) -> GpuMeshPayload {
+    use crate::core::clash_engine::SpatialClashSeverity;
+
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rep = input.report;
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+
+    let mut verts = Vec::with_capacity(1_024);
+    let mut idxs = Vec::with_capacity(1_536);
+
+    for (idx, clash) in rep.clashes.iter().enumerate() {
+        if rep.config.show_hard_only && clash.severity != SpatialClashSeverity::HardClash {
+            continue;
+        }
+        let cx = clash.center_enu_m[0] * cr - clash.center_enu_m[1] * sr;
+        let cy = clash.center_enu_m[0] * sr + clash.center_enu_m[1] * cr;
+        let cz = clash.center_enu_m[2];
+        let rgba = clash.severity.rgba();
+        let beacon_r = match clash.severity {
+            SpatialClashSeverity::HardClash => 0.42_f32,
+            SpatialClashSeverity::ClearanceWarning => 0.30_f32,
+            SpatialClashSeverity::SleeveAdvisory => 0.22_f32,
+        };
+        push_octahedron_beacon_enu(
+            &mut verts,
+            &mut idxs,
+            [cx as f32, cy as f32, cz as f32],
+            beacon_r,
+            rgba,
+            clash.severity.severity_norm(),
+            32.0,
+        );
+
+        let hx = (clash.overlap_size_enu_m[0] * 0.5).clamp(0.10, 0.85);
+        let hy = (clash.overlap_size_enu_m[1] * 0.5).clamp(0.10, 0.85);
+        let hz = (clash.overlap_size_enu_m[2] * 0.5).clamp(0.10, 0.65);
+        let rot_pt = |[lx, ly]: [f64; 2]| [cx + lx * cr - ly * sr, cy + lx * sr + ly * cr];
+        let fp: [[f64; 2]; 4] = [
+            rot_pt([-hx, -hy]),
+            rot_pt([hx, -hy]),
+            rot_pt([hx, hy]),
+            rot_pt([-hx, hy]),
+        ];
+        let box_col = [rgba[0], rgba[1], rgba[2], (rgba[3] * 0.45).clamp(0.25, 0.60)];
+        let mut v_start = verts.len();
+        push_box_prism_enu(
+            &mut verts,
+            &mut idxs,
+            &fp,
+            (cz - hz) as f32,
+            (cz + hz) as f32,
+            box_col,
+            32.0,
+        );
+        for v in &mut verts[v_start..] {
+            v.meta[1] = clash.severity.severity_norm();
+            v.meta[3] = (idx as f32) * 0.7;
+        }
+        let _ = &mut v_start;
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
 /// GPU input parameters for realistic coastal ocean & river water surface rendering (`material_kind = 29.0`).
 #[derive(Clone, Copy)]
 pub struct CoastalWaterGpuInput<'a> {

@@ -257,6 +257,10 @@ pub struct UniversalCanvasState {
     pub mep_overlay_visible: bool,
     pub mep_config: crate::core::mep_engine::MepSystemsConfig,
     pub last_mep_report: Option<crate::core::mep_engine::MepSystemsReport>,
+    // Update v0.8.7.6 (6/10 -> v0.8.8): Unified 3D Clash Detection & BCF Coordination Guardrail
+    pub clash_overlay_visible: bool,
+    pub clash_config: crate::core::clash_engine::SpatialClashConfig,
+    pub last_clash_report: Option<crate::core::clash_engine::SpatialClashReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -455,6 +459,9 @@ impl Default for UniversalCanvasState {
             mep_overlay_visible: false,
             mep_config: crate::core::mep_engine::MepSystemsConfig::default(),
             last_mep_report: None,
+            clash_overlay_visible: false,
+            clash_config: crate::core::clash_engine::SpatialClashConfig::default(),
+            last_clash_report: None,
         }
     }
 }
@@ -2069,6 +2076,40 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates unified 3D Structure × MEP × Openings clashes and updates BCF issue pins.
+    pub fn run_clash_guardrail(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::clash_engine::SpatialClashReport {
+        if self.last_mep_report.is_none() {
+            let _ = self.run_mep_systems(bim_project);
+        }
+        let mep = self
+            .last_mep_report
+            .clone()
+            .unwrap_or_else(|| self.run_mep_systems(bim_project));
+        let rep = crate::core::clash_engine::evaluate_spatial_clashes(
+            bim_project,
+            &mep,
+            &self.clash_config,
+        );
+        self.last_clash_report = Some(rep.clone());
+        self.clash_overlay_visible = true;
+        self.status_message = Some(rep.summary_verdict.clone());
+        rep
+    }
+
+    /// Automatically lowers ceiling plenum drop to clear structural beam soffits and re-audits clashes.
+    pub fn auto_resolve_mep_clashes(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::clash_engine::SpatialClashReport {
+        let initial = self.run_clash_guardrail(bim_project);
+        self.mep_config.plenum_drop_below_slab_m = initial.recommended_plenum_drop_m;
+        let _ = self.run_mep_systems(bim_project);
+        self.run_clash_guardrail(bim_project)
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -2417,6 +2458,7 @@ impl UniversalCanvasState {
             terrain_sculpt: self.terrain_sculpt.clone(),
             section_box: self.section_box.clone(),
             mep_config: self.mep_config.clone(),
+            clash_config: self.clash_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -2576,6 +2618,8 @@ impl UniversalCanvasState {
         self.section_box = archive.section_box;
         self.mep_config = archive.mep_config;
         self.last_mep_report = None;
+        self.clash_config = archive.clash_config;
+        self.last_clash_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -3331,6 +3375,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let clash_guardrail_gpu_input = if self.clash_overlay_visible {
+                self.last_clash_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::ClashGuardrailGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -3396,6 +3451,7 @@ impl UniversalCanvasState {
                 solar_envelope_gpu_input,
                 daylight_interior_gpu_input,
                 mep_systems_gpu_input,
+                clash_guardrail_gpu_input,
                 hazard_compute_opt,
                 &self.section_box,
             );
@@ -3505,6 +3561,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.mep_overlay_visible {
                 self.paint_cpu_mep_systems_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.clash_overlay_visible {
+                self.paint_cpu_clash_guardrail_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

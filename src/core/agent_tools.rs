@@ -74,12 +74,13 @@ impl ToolExecutionOutcome {
     }
 }
 
-const TOOL_NAMES: [&str; 11] = [
+const TOOL_NAMES: [&str; 12] = [
     "inspect_model",
     "run_structural_audit",
     "run_solar_ottv",
     "run_daylight_analysis",
     "run_mep_systems",
+    "run_clash_detection",
     "resize_column",
     "resize_beam",
     "add_story",
@@ -182,6 +183,23 @@ pub fn gemini_function_declarations() -> Value {
                             "occupant_density_m2": {
                                 "type": "NUMBER",
                                 "description": "Floor area per person in m^2/person (4..35)."
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "run_clash_detection",
+                    "description": "Run unified 3D clash detection (Structure beams/columns/walls x MEP ducts/pipes/trays/fire x openings), returning hard clashes, clearance warnings, BCF summary, and optionally auto-resolving ceiling plenum drop.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "clearance_mm": {
+                                "type": "NUMBER",
+                                "description": "Required clearance tolerance in mm (10..250, default 50)."
+                            },
+                            "auto_resolve": {
+                                "type": "BOOLEAN",
+                                "description": "Automatically apply recommended plenum drop below beam soffits and re-verify."
                             }
                         }
                     }
@@ -658,6 +676,70 @@ pub fn execute_headless_tool(
                 fly_target: None,
             }
         }
+        "run_clash_detection" => {
+            use crate::core::clash_engine::{evaluate_spatial_clashes, SpatialClashConfig};
+            use crate::core::mep_engine::{evaluate_mep_systems, MepSystemsConfig};
+            let solar_rep = evaluate_solar_envelope(
+                &bim_bus.project,
+                Some(site),
+                None,
+                &SolarEnvelopeConfig::default(),
+            );
+            let mut mep_cfg = MepSystemsConfig::default();
+            let mut clash_cfg = SpatialClashConfig::default();
+            if let Some(tol) = arg_f64(&call.args, "clearance_mm") {
+                clash_cfg.clearance_tolerance_mm = tol.clamp(10.0, 250.0);
+            }
+            let auto_resolve = call
+                .args
+                .get("auto_resolve")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let mep_rep =
+                evaluate_mep_systems(&bim_bus.project, Some(site), Some(&solar_rep), &mep_cfg);
+            let mut clash_rep = evaluate_spatial_clashes(&bim_bus.project, &mep_rep, &clash_cfg);
+            if auto_resolve && clash_rep.recommended_plenum_drop_m > mep_cfg.plenum_drop_below_slab_m {
+                mep_cfg.plenum_drop_below_slab_m = clash_rep.recommended_plenum_drop_m;
+                let mep_fixed =
+                    evaluate_mep_systems(&bim_bus.project, Some(site), Some(&solar_rep), &mep_cfg);
+                clash_rep = evaluate_spatial_clashes(&bim_bus.project, &mep_fixed, &clash_cfg);
+            }
+            let top_clashes: Vec<Value> = clash_rep
+                .clashes
+                .iter()
+                .take(8)
+                .map(|c| {
+                    json!({
+                        "bcf_guid": c.bcf_guid,
+                        "severity": c.severity.short_label(),
+                        "pair": format!("{} vs {}", c.element_a_tag, c.element_b_tag),
+                        "penetration_mm": c.penetration_mm,
+                        "action": c.recommended_action,
+                    })
+                })
+                .collect();
+            ToolExecutionOutcome {
+                name: name.to_string(),
+                ok: true,
+                summary: clash_rep.summary_verdict.clone(),
+                result_json: json!({
+                    "ok": true,
+                    "hard_clashes": clash_rep.hard_clashes,
+                    "clearance_warnings": clash_rep.clearance_warnings,
+                    "sleeve_advisories": clash_rep.sleeve_advisories,
+                    "max_penetration_mm": clash_rep.max_penetration_mm,
+                    "recommended_plenum_drop_m": clash_rep.recommended_plenum_drop_m,
+                    "coordination_pass": clash_rep.coordination_pass,
+                    "auto_resolved": auto_resolve,
+                    "top_clashes": top_clashes,
+                }),
+                mutated_bim: false,
+                sync_fem_and_earth: false,
+                fit_camera: false,
+                section_box_update: None,
+                fly_target: None,
+            }
+        }
         "resize_column" => {
             let Some(column_id) = arg_usize(&call.args, "column_id") else {
                 return ToolExecutionOutcome::err(name, "Missing integer argument 'column_id'.");
@@ -917,7 +999,7 @@ mod tests {
         let fn_decls = decls[0]["functionDeclarations"]
             .as_array()
             .expect("functionDeclarations array");
-        assert_eq!(fn_decls.len(), 11);
+        assert_eq!(fn_decls.len(), 12);
         for expected in registered_tool_names() {
             assert!(
                 fn_decls.iter().any(|d| d["name"].as_str() == Some(*expected)),
@@ -998,6 +1080,20 @@ mod tests {
         assert!(mep.ok);
         assert!(mep.result_json["hvac_cooling_tr"].as_f64().unwrap_or(0.0) > 0.0);
         assert!(mep.result_json["segment_count"].as_u64().unwrap_or(0) >= 8);
+
+        let clash = execute_headless_tool(
+            &GeminiToolCall {
+                name: "run_clash_detection".to_string(),
+                args: json!({ "clearance_mm": 60.0, "auto_resolve": true }),
+            },
+            &mut bus,
+            &site,
+            (-6.2088, 106.8456),
+            0,
+            false,
+        );
+        assert!(clash.ok);
+        assert!(clash.result_json["recommended_plenum_drop_m"].as_f64().is_some());
 
         let col_id = bus.project.columns[0].id;
         let resize = execute_headless_tool(

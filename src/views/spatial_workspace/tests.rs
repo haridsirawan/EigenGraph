@@ -6801,3 +6801,115 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_v0876_clash_guardrail_drawer_slash_commands_and_gemini_tool() {
+        for cmd in ["/clash", "/clash-3d", "/clash-fix", "/clash-ifcx", "/bcf"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|c| c.cmd == cmd),
+                "Missing v0.8.7.6 Clash slash command {cmd} in SLASH_COMMANDS"
+            );
+        }
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_clash = spatial.execute_spatial_input(
+            "/clash",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_clash.run_clash_guardrail);
+        assert!(spatial.clash_drawer_open && spatial.clash_drawer_tab == 0);
+
+        let act_bcf = spatial.execute_spatial_input(
+            "/bcf",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_bcf.run_clash_guardrail);
+        assert!(spatial.clash_drawer_open && spatial.clash_drawer_tab == 1);
+
+        let act_fix = spatial.execute_spatial_input(
+            "/clash-fix",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_fix.auto_resolve_clashes);
+
+        canvas.mep_config.plenum_drop_below_slab_m = 0.25;
+        let _ = canvas.run_mep_systems(&build.bim_bus.project);
+        let initial = canvas.run_clash_guardrail(&build.bim_bus.project);
+        assert!(!initial.clashes.is_empty());
+
+        let resolved = canvas.auto_resolve_mep_clashes(&build.bim_bus.project);
+        assert!(resolved.hard_clashes <= initial.hard_clashes);
+
+        // Gemini tool #12 `run_clash_detection`
+        let sim_reply = crate::core::web_bridge::GeminiApiReply {
+            request_id: 106,
+            model: "gemini-3.5-pro".to_string(),
+            ok: true,
+            text: String::new(),
+            error: None,
+            function_calls: vec![crate::core::agent_tools::GeminiToolCall {
+                name: "run_clash_detection".to_string(),
+                args: serde_json::json!({ "clearance_mm": 50.0, "auto_resolve": true }),
+            }],
+            raw_model_content: None,
+        };
+        let _ = spatial.handle_gemini_reply(sim_reply, &mut canvas, &mut build, &mut ai);
+        assert!(spatial.gemini_tool_loop_contents.len() >= 2);
+
+        // Render Clash Guardrail Drawer cleanly across Desktop / Tablet / Mobile
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            let ctx = egui::Context::default();
+            spatial.mobile_deck_pinned = true;
+            spatial.open_clash_drawer(0);
+            for _ in 0..4 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            assert!(
+                spatial.hud_rects[0].right() <= win_w + 1.0,
+                "Clash Guardrail Drawer overflowed {win_w}: {:?}",
+                spatial.hud_rects[0]
+            );
+        }
+    }

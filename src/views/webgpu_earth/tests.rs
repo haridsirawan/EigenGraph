@@ -3525,3 +3525,102 @@ use crate::core::ifcx::IfcxDocument;
             "Building MEP WGSL pass triggered WebGPU validation error: {val_err:?}"
         );
     }
+
+    #[test]
+    fn test_v0876_clash_guardrail_3d_webgpu_beacons_and_section_box() {
+        use crate::core::clash_engine::{evaluate_spatial_clashes, SpatialClashConfig};
+        use crate::core::lifecycle_ops::SiteEnvironmentalCoupling;
+        use crate::core::mep_engine::{evaluate_mep_systems, MepSystemsConfig};
+        use crate::views::universal_canvas::SectionBoxConfig;
+
+        let proj = BimProject::sample_bimcraft_building();
+        let site = SiteEnvironmentalCoupling::default();
+        let mut mep_cfg = MepSystemsConfig::default();
+        mep_cfg.plenum_drop_below_slab_m = 0.25;
+        let mep_rep = evaluate_mep_systems(&proj, Some(&site), None, &mep_cfg);
+        let clash_rep = evaluate_spatial_clashes(&proj, &mep_rep, &SpatialClashConfig::default());
+        assert!(!clash_rep.clashes.is_empty());
+
+        let clash_mesh = build_rtc_clash_guardrail_mesh(&ClashGuardrailGpuInput {
+            report: &clash_rep,
+            heading_deg: 0.0,
+            visible: true,
+        });
+        assert!(clash_mesh.indices.len() / 3 > 12);
+        assert!(
+            clash_mesh.vertices.iter().all(|v| (v.meta[0] - 32.0).abs() < 1e-3),
+            "All Clash Guardrail vertices must carry material_kind = 32.0"
+        );
+
+        fn poll_fut<F: std::future::Future>(fut: F) -> F::Output {
+            let mut fut = std::pin::pin!(fut);
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(&waker);
+            loop {
+                if let std::task::Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
+                    return out;
+                }
+                std::thread::yield_now();
+            }
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = poll_fut(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let Ok((device, queue)) =
+            poll_fut(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        res.clash_guardrail
+            .upload(&device, &queue, "clash_v0876", 1, &clash_mesh);
+
+        let mut cam = GlobeCamera::default();
+        cam.tilt_deg = 42.0;
+        let xf = GlobeScreenTransform::from_view(
+            Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(64.0, 64.0)),
+            -6.2088,
+            106.8456,
+            17.5,
+            &cam,
+        );
+        let mut sb = SectionBoxConfig::default();
+        sb.apply_level_cut(&proj, 0);
+        let uniforms = RtcCameraUniforms::from_globe_xform(
+            &xf,
+            VectorEarthTheme::CoastalBlueprint,
+            &cam,
+            (-6.2088, 106.8456),
+            1.6,
+            true,
+        )
+        .with_section_box(&sb);
+        queue.write_buffer(
+            &res.planet_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_planet_pass_uniforms()),
+        );
+        queue.write_buffer(
+            &res.site_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_site_pass_uniforms()),
+        );
+        res.ensure_targets(&device, 64, 64);
+
+        let mut encoder = device.create_command_encoder(&Default::default());
+        res.render_offscreen_passes(&mut encoder, true);
+        queue.submit([encoder.finish()]);
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let val_err = poll_fut(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "Clash Guardrail WGSL pass triggered WebGPU validation error: {val_err:?}"
+        );
+    }

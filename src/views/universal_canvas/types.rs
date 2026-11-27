@@ -316,6 +316,8 @@ pub struct UnifiedWorkspaceArchive {
     pub section_box: SectionBoxConfig,
     #[serde(default)]
     pub mep_config: crate::core::mep_engine::MepSystemsConfig,
+    #[serde(default)]
+    pub clash_config: crate::core::clash_engine::SpatialClashConfig,
     pub sha256_seal: String,
 }
 

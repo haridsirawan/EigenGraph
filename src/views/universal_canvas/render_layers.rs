@@ -4661,4 +4661,48 @@ impl UniversalCanvasState {
             }
         }
     }
+
+    /// Pure-vector CPU fallback rendering 3D Clash Beacons & BCF GUID labels when WebGPU is inactive.
+    pub(super) fn paint_cpu_clash_guardrail_fallback(
+        &self,
+        painter: &egui::Painter,
+        _rect: Rect,
+        xform: &GlobeScreenTransform,
+    ) {
+        use crate::core::clash_engine::SpatialClashSeverity;
+        let Some(ref rep) = self.last_clash_report else {
+            return;
+        };
+        let heading = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        for clash in &rep.clashes {
+            if rep.config.show_hard_only && clash.severity != SpatialClashSeverity::HardClash {
+                continue;
+            }
+            let rx = clash.center_enu_m[0] * cr - clash.center_enu_m[1] * sr;
+            let ry = clash.center_enu_m[0] * sr + clash.center_enu_m[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                self.ground_origin_lat_lon,
+                [rx * 1000.0, ry * 1000.0],
+            );
+            if let Some((sp, _, true)) =
+                xform.project_lat_lon_elev(ll.0, ll.1, clash.center_enu_m[2])
+            {
+                let rgba = clash.severity.rgba();
+                let col = Color32::from_rgb(
+                    (rgba[0] * 255.0) as u8,
+                    (rgba[1] * 255.0) as u8,
+                    (rgba[2] * 255.0) as u8,
+                );
+                painter.circle_filled(sp, 5.5, col);
+                painter.circle_stroke(sp, 8.0, Stroke::new(1.3, Color32::WHITE));
+            }
+        }
+    }
 }

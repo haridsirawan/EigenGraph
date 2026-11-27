@@ -1945,6 +1945,36 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::SaveDisk,
     },
     SlashCommandSpec {
+        cmd: "/clash",
+        category: "MEP",
+        description: "Run unified 3D Structure x MEP x Openings clash detection & open BCF Guardrail",
+        icon: AppIcon::AlertTriangle,
+    },
+    SlashCommandSpec {
+        cmd: "/clash-3d",
+        category: "MEP",
+        description: "Toggle 3D Pure WebGPU Clash Beacons & overlap highlight prisms",
+        icon: AppIcon::Target,
+    },
+    SlashCommandSpec {
+        cmd: "/clash-fix",
+        category: "MEP",
+        description: "Auto-resolve ceiling plenum drop to clear structural beam soffits",
+        icon: AppIcon::Wrench,
+    },
+    SlashCommandSpec {
+        cmd: "/clash-ifcx",
+        category: "MEP",
+        description: "Export non-destructive eigengraph::coordination::clash_bcf IFCX overlay",
+        icon: AppIcon::SaveDisk,
+    },
+    SlashCommandSpec {
+        cmd: "/bcf",
+        category: "MEP",
+        description: "Open BCF 2.1 Clash Issue Ledger inside Dynamic Island",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",
@@ -3516,6 +3546,11 @@ pub struct SpatialHudActions {
     pub run_mep_systems: bool,
     pub toggle_mep_3d: bool,
     pub export_mep_ifcx: bool,
+    // Update v0.8.7.6 (6/10 -> v0.8.8): Unified 3D Clash Detection & BCF Coordination Guardrail
+    pub run_clash_guardrail: bool,
+    pub toggle_clash_3d: bool,
+    pub auto_resolve_clashes: bool,
+    pub export_clash_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3990,5 +4025,9 @@ impl SpatialHudActions {
         self.run_mep_systems |= other.run_mep_systems;
         self.toggle_mep_3d |= other.toggle_mep_3d;
         self.export_mep_ifcx |= other.export_mep_ifcx;
+        self.run_clash_guardrail |= other.run_clash_guardrail;
+        self.toggle_clash_3d |= other.toggle_clash_3d;
+        self.auto_resolve_clashes |= other.auto_resolve_clashes;
+        self.export_clash_ifcx |= other.export_clash_ifcx;
     }
 }

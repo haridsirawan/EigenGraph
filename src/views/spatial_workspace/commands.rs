@@ -2599,6 +2599,25 @@ impl SpatialWorkspaceState {
                 "/mep-ifcx" => {
                     actions.export_mep_ifcx = true;
                 }
+                "/clash" => {
+                    self.open_clash_drawer(0);
+                    actions.run_clash_guardrail = true;
+                    self.push_trace("Scanning 3D Structure x MEP x Openings clashes", true);
+                }
+                "/bcf" => {
+                    self.open_clash_drawer(1);
+                    actions.run_clash_guardrail = true;
+                }
+                "/clash-3d" => {
+                    actions.toggle_clash_3d = true;
+                }
+                "/clash-fix" => {
+                    self.open_clash_drawer(0);
+                    actions.auto_resolve_clashes = true;
+                }
+                "/clash-ifcx" => {
+                    actions.export_clash_ifcx = true;
+                }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");
                     actions.fit_camera = true;

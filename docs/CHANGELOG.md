@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.8 (5/10)]
+## [Unreleased — Next: v0.8.8 (6/10)]
+
+### Update 6/10 (`v0.8.7.6` -> `v0.8.8`) — Unified 3D Clash Detection & BCF Coordination Guardrail (`Structure × MEP × Openings`), WebGPU Clash Beacons & Gemini Tool #12
+- **Unified 3D Spatial Clash Detection & BCF Guardrail (`src/core/clash_engine.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:
+  - Added `clash_engine` (`NS_EG_CLASH_GUARDRAIL = "eigengraph::coordination::clash_bcf"`) evaluating exact 3D ENU AABB interferences across `MepVsBeam`, `MepVsColumn`, `MepVsWall` (skipping conduits passing cleanly inside hosted Door/Window openings), `MepVsMep`, and `MepVsSlabSleeve` riser penetrations.
+  - Computes `recommended_plenum_drop_m` for 1-click beam soffit auto-resolution (`UniversalCanvasState::auto_resolve_mep_clashes`), generates BCF 2.1 topic JSON (`to_bcf_topics_json`), persists `clash_config` in `.eigen.json`, and composes non-destructive IFCX overlays via [`IfcxStage::compose_with_clash_guardrail_overlay`](src/core/ifcx.rs).
+- **Pure WebGPU 3D Clash Beacons (`material_kind = 32.0`), Drawer, Ribbon & Gemini Tool #12 (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/core/agent_tools.rs`, `src/app.rs`)**:
+  - Added [`build_rtc_clash_guardrail_mesh`](src/views/webgpu_earth/mesh_builders.rs), `kind >= 31.5` pulsing WGSL beacon shader, `clash_guardrail` GPU slot, CPU fallback [`paint_cpu_clash_guardrail_fallback`](src/views/universal_canvas/render_layers.rs), width-first 2-tab [`render_clash_guardrail_drawer`](src/views/spatial_workspace/drawers.rs), `"Clash"` & `"Clash 3D"` Ribbon tiles, `/clash`, `/bcf`, `/clash-3d`, `/clash-fix`, `/clash-ifcx` commands, and Tool #12 (`run_clash_detection`) in [`agent_tools.rs`](src/core/agent_tools.rs).
+- **Verification (`src/core/clash_engine.rs`, `src/views/webgpu_earth/tests.rs`, `src/views/spatial_workspace/tests.rs`)**:
+  - Added [`test_v0876_clash_detection_structure_mep_auto_resolve_and_ifcx_overlay`](src/core/clash_engine.rs), [`test_v0876_clash_guardrail_3d_webgpu_beacons_and_section_box`](src/views/webgpu_earth/tests.rs), and [`test_v0876_clash_guardrail_drawer_slash_commands_and_gemini_tool`](src/views/spatial_workspace/tests.rs).
 
 ### Update 5/10 (`v0.8.7.5` -> `v0.8.8`) — Building MEP Engine (`HVAC`, `Plumbing`, `Electrical`, `Fire Sprinkler`), 3D WebGPU Conduits, IFCX Overlay & Gemini Tool
 - **Building MEP Core Engine & Non-Destructive IFCX Overlay (`src/core/mep_engine.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:

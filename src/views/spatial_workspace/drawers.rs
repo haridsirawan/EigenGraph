@@ -7678,4 +7678,256 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.7.6` (`6/10` -> `v0.8.8`): Unified 3D Clash Detection & BCF Coordination Guardrail.
+    pub(super) fn render_clash_guardrail_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::AlertTriangle,
+                13.0,
+                theme.accent_orange,
+                "3D Clash Detection & BCF Coordination Guardrail",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [(0usize, "Scorecard & Auto-Fix"), (1usize, "BCF 2.1 Issue Ledger")] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.clash_drawer_tab == idx,
+                    theme.accent_orange,
+                    "",
+                )
+                .clicked()
+                {
+                    self.clash_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close 3D Clash & BCF Guardrail",
+            )
+            .clicked()
+            {
+                self.clash_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::AlertTriangle),
+                    "Scan Clashes",
+                    false,
+                    theme.accent_orange,
+                    "Scan 3D Structure (Beams/Cols/Walls) x MEP x Openings",
+                )
+                .clicked()
+                {
+                    universal_canvas.clash_overlay_visible = true;
+                    actions.run_clash_guardrail = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Wrench),
+                    "Auto-Fix Plenum",
+                    false,
+                    theme.accent_green,
+                    "Lower ceiling plenum drop to clear structural beam soffits and re-verify",
+                )
+                .clicked()
+                {
+                    actions.auto_resolve_clashes = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Target),
+                    if universal_canvas.clash_overlay_visible {
+                        "3D Pins: ON"
+                    } else {
+                        "3D Pins: OFF"
+                    },
+                    universal_canvas.clash_overlay_visible,
+                    theme.accent_red,
+                    "Toggle 3D Pure WebGPU Clash Beacons & Interference Volumes",
+                )
+                .clicked()
+                {
+                    actions.toggle_clash_3d = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "Clash .ifcx",
+                    false,
+                    theme.accent_blue,
+                    "Export non-destructive eigengraph::coordination::clash_bcf IFCX",
+                )
+                .clicked()
+                {
+                    actions.export_clash_ifcx = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.clash_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    if is_left {
+                        ui.label(
+                            RichText::new("Coordination Rules & Clearance Tolerance")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ui.add_space(2.0);
+                        let cfg = &mut universal_canvas.clash_config;
+                        let mut changed = false;
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Clearance:").size(8.6).color(theme.text_muted));
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut cfg.clearance_tolerance_mm)
+                                        .range(10.0..=250.0)
+                                        .speed(5.0)
+                                        .suffix(" mm"),
+                                )
+                                .changed();
+                        });
+                        changed |= ui
+                            .checkbox(&mut cfg.check_structure_vs_mep, "Check Structure × MEP × Openings")
+                            .changed();
+                        changed |= ui
+                            .checkbox(&mut cfg.check_mep_vs_mep, "Check Cross-Discipline MEP × MEP")
+                            .changed();
+                        changed |= ui
+                            .checkbox(&mut cfg.include_sleeve_advisories, "Include Slab Riser Sleeve Advisories")
+                            .changed();
+                        changed |= ui
+                            .checkbox(&mut cfg.show_hard_only, "Highlight Hard Clashes Only")
+                            .changed();
+                        if changed {
+                            universal_canvas.clash_overlay_visible = true;
+                            actions.run_clash_guardrail = true;
+                        }
+                    } else if let Some(ref rep) = universal_canvas.last_clash_report {
+                        if tab == 0 {
+                            let status_col = if rep.coordination_pass {
+                                theme.accent_green
+                            } else {
+                                theme.accent_red
+                            };
+                            ui.label(
+                                RichText::new("Unified 3D Clash Scorecard")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "Hard: {} • Clearance Warn: {} • Sleeves: {} [{}]",
+                                    rep.hard_clashes,
+                                    rep.clearance_warnings,
+                                    rep.sleeve_advisories,
+                                    if rep.coordination_pass { "CLEAR" } else { "ACTION REQUIRED" },
+                                ))
+                                .size(9.0)
+                                .strong()
+                                .color(status_col),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Checked Pairs: {} • Max Penetration: {:.0} mm • Rec. Plenum Drop: {:.2} m",
+                                    rep.total_checked_pairs,
+                                    rep.max_penetration_mm,
+                                    rep.recommended_plenum_drop_m,
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new("BCF 2.1 Coordination Issue Ledger")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.add_space(2.0);
+                            if rep.clashes.is_empty() {
+                                ui.label(
+                                    RichText::new("Zero interferences detected at current tolerance.")
+                                        .size(8.6)
+                                        .color(theme.accent_green),
+                                );
+                            } else {
+                                for c in rep.clashes.iter().take(7) {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "[{}] {} | {} vs {} ({:.0}mm) -> {}",
+                                            c.severity.short_label(),
+                                            c.bcf_guid,
+                                            c.element_a_tag,
+                                            c.element_b_tag,
+                                            c.penetration_mm,
+                                            c.recommended_action,
+                                        ))
+                                        .size(8.0)
+                                        .monospace()
+                                        .color(theme.text_secondary),
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new("Click 'Scan Clashes' to evaluate Structure × MEP × Openings 3D intersections & BCF pins.")
+                                .size(8.8)
+                                .color(theme.text_muted),
+                        );
+                    }
+                });
+            });
+        });
+    }
 }

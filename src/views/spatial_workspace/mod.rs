@@ -197,6 +197,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.7.5 (5/10 -> v0.8.8): Building MEP Systems Studio Drawer
     pub mep_drawer_open: bool,
     pub mep_drawer_tab: usize,
+    // Update v0.8.7.6 (6/10 -> v0.8.8): Unified 3D Clash & BCF Guardrail Drawer
+    pub clash_drawer_open: bool,
+    pub clash_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -341,6 +344,8 @@ impl Default for SpatialWorkspaceState {
             gemini_tool_loop_depth: 0,
             mep_drawer_open: false,
             mep_drawer_tab: 0,
+            clash_drawer_open: false,
+            clash_drawer_tab: 0,
         }
     }
 }
@@ -413,6 +418,7 @@ impl SpatialWorkspaceState {
             || self.solar_drawer_open
             || self.daylight_drawer_open
             || self.mep_drawer_open
+            || self.clash_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -453,6 +459,7 @@ impl SpatialWorkspaceState {
         self.solar_drawer_open = false;
         self.daylight_drawer_open = false;
         self.mep_drawer_open = false;
+        self.clash_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -611,6 +618,11 @@ impl SpatialWorkspaceState {
             self.mep_drawer_open = false;
         } else {
             self.mep_drawer_open = !self.mep_drawer_open;
+        }
+        if drawer != "clash" {
+            self.clash_drawer_open = false;
+        } else {
+            self.clash_drawer_open = !self.clash_drawer_open;
         }
     }
 
@@ -790,6 +802,14 @@ impl SpatialWorkspaceState {
         self.mep_drawer_open = true;
     }
 
+    /// Idempotently opens the Update `v0.8.7.6` (`6/10` -> `v0.8.8`) Unified 3D Clash & BCF Guardrail drawer
+    /// (`0` = Scorecard & Auto-Resolve, `1` = BCF 2.1 Issue Ledger).
+    pub fn open_clash_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.clash_drawer_tab = tab.min(1);
+        self.clash_drawer_open = true;
+    }
+
     /// Returns the active Layer 2 exclusive focus overlay `(title, icon)` when a drawer,
     /// Project Browser, AI chat, Smart Inspector, or Slash Palette is open inside the Dynamic Island.
     pub fn active_focus_layer_info(&self, slash_mode: bool) -> Option<(&'static str, crate::icons::AppIcon)> {
@@ -814,6 +834,8 @@ impl SpatialWorkspaceState {
             Some(("Daylight & Interior Studio", AppIcon::Sun))
         } else if self.mep_drawer_open {
             Some(("Building MEP Systems Studio", AppIcon::Wrench))
+        } else if self.clash_drawer_open {
+            Some(("3D Clash & BCF Guardrail", AppIcon::AlertTriangle))
         } else if self.design_agent_drawer_open {
             Some(("AI Design Agent", AppIcon::Sparkles))
         } else if self.massing_drawer_open {
