@@ -105,23 +105,26 @@ impl SpatialWorkspaceState {
         };
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            ui.horizontal(|ui| {
+            let tiles_resp = ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 3.0;
                 add_tiles(ui);
             });
-            Frame::new()
-                .fill(footer_bg)
-                .corner_radius(CornerRadius::same(4))
-                .inner_margin(Margin::symmetric(8, 1))
-                .show(ui, |ui| {
-                    ui.centered_and_justified(|ui| {
-                        ui.label(
-                            RichText::new(group_label)
-                                .size(8.2)
-                                .color(theme.text_muted),
-                        );
-                    });
-                });
+            let footer_font = FontId::proportional(8.2);
+            let label_w = ui.fonts_mut(|f| {
+                f.layout_no_wrap(group_label.to_string(), footer_font.clone(), Color32::WHITE)
+                    .size()
+                    .x
+            });
+            let footer_w = tiles_resp.response.rect.width().max(label_w + 16.0);
+            let (footer_rect, _) = ui.allocate_exact_size(Vec2::new(footer_w, 15.0), Sense::hover());
+            ui.painter().rect_filled(footer_rect, CornerRadius::same(4), footer_bg);
+            ui.painter().text(
+                footer_rect.center(),
+                Align2::CENTER_CENTER,
+                group_label,
+                footer_font,
+                theme.text_muted,
+            );
         });
 
         let (sep_rect, _) = ui.allocate_exact_size(Vec2::new(6.0, 58.0), Sense::hover());
@@ -151,6 +154,7 @@ impl SpatialWorkspaceState {
         ui.set_max_width(row_w);
         ui.horizontal(|ui| {
             ui.set_max_width(row_w);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             if Self::glass_pill_button(
                 ui,
                 theme,
@@ -243,6 +247,7 @@ impl SpatialWorkspaceState {
         // Row A: Quick-Access Top Bar (Vault / Save / Undo / Redo / 3D + Centered Model Title + Utilities)
         ui.horizontal(|ui| {
             ui.set_max_width(deck_w);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             ui.spacing_mut().item_spacing.x = 3.0;
             if vault_connected {
                 if Self::glass_icon_button(
@@ -323,12 +328,22 @@ impl SpatialWorkspaceState {
                 actions.fit_camera = true;
             }
 
-            if !is_mobile && deck_w >= 480.0 {
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new(format!("{proj_name}  ·  {story_lbl}"))
-                        .size(10.0)
-                        .color(theme.text_muted),
+            if !is_mobile && deck_w >= 540.0 {
+                ui.add_space(6.0);
+                let title_max_w = (deck_w - 320.0).max(60.0);
+                ui.allocate_ui_with_layout(
+                    Vec2::new(title_max_w, 22.0),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("{proj_name}  ·  {story_lbl}"))
+                                    .size(10.0)
+                                    .color(theme.text_muted),
+                            )
+                            .truncate(),
+                        );
+                    },
                 );
             }
 
@@ -426,7 +441,11 @@ impl SpatialWorkspaceState {
         ScrollArea::horizontal()
             .id_salt("smart_ribbon_category_tabs")
             .max_width(deck_w)
+            .max_height(28.0)
+            .auto_shrink([false, true])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(ui, |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     if ui
@@ -514,7 +533,11 @@ impl SpatialWorkspaceState {
                 ScrollArea::horizontal()
                     .id_salt(("smart_ribbon_tools", self.active_ribbon_tab as usize))
                     .max_width(inner_w)
+                    .max_height(78.0)
+                    .auto_shrink([false, true])
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                     .show(ui, |ui| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                         ui.horizontal_top(|ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
                             self.render_ribbon_tab_groups(

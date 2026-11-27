@@ -7,6 +7,18 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [Unreleased — Next: v0.8.8 (1/10)]
+
+### Update 1/10 (`v0.8.7.1` -> `v0.8.8`) — Dynamic Island Strict Dimension Clamping & Ribbon ScrollArea Fix
+- **Root-Cause Fix for Uncontrolled Dynamic Island Expansion (`src/views/spatial_workspace/ribbon_ui.rs`, `src/views/spatial_workspace/island_ui.rs`, `src/views/spatial_workspace/mod.rs`)**:
+  - Replaced `Frame` + `ui.centered_and_justified` inside [`SpatialWorkspaceState::ribbon_group`](src/views/spatial_workspace/ribbon_ui.rs) with content-fitted exact-size footer allocation (`footer_w = tiles_resp.response.rect.width().max(label_w + 16.0)` by `15.0 px`) so group labels inside `ScrollArea::horizontal()` no longer claim full viewport height.
+  - Constrained both horizontal `ScrollArea` trays in [`SpatialWorkspaceState::render_categorized_ribbon_deck`](src/views/spatial_workspace/ribbon_ui.rs) (`smart_ribbon_category_tabs` capped at `28.0 px` with `.auto_shrink([false, true])`, `smart_ribbon_tools` capped at `78.0 px` with `.auto_shrink([false, true])`), enforced `TextWrapMode::Extend` inside both horizontal Ribbon `ScrollArea` trays so category tabs and tiles stay single-line rather than wrapping letter-by-letter vertically on tablet/mobile widths, and enforced `TextWrapMode::Truncate` inside single-line Ribbon/Layer-2 headers.
+  - Clamped desktop width caps in [`SpatialWorkspaceState::render_dynamic_island_with_host`](src/views/spatial_workspace/island_ui.rs) (`compact_w <= 420.0`, `expanded_w <= 920.0`, `wide_w <= 1060.0`), enforced `ui.set_max_height(vp.y - 28.0)` on the `Area`, kept deterministic current-frame centered `LEFT_BOTTOM` anchoring, and tightened expanded hover hysteresis (`hover_margin = 12.0`) in [`SpatialWorkspaceState::is_dynamic_island_expanded`](src/views/spatial_workspace/mod.rs).
+- **Regression Coverage (`src/views/spatial_workspace/tests.rs`)**:
+  - Updated [`test_v0862_smart_layered_ribbon_dynamic_island`](src/views/spatial_workspace/tests.rs) with strict `height <= 260.0` bounds and added [`test_v0871_dynamic_island_strict_height_and_width_stability`](src/views/spatial_workspace/tests.rs) verifying zero runaway growth across Layer 0, all 10 Layer 1 Ribbon tabs, and Layer 2 overlays at Desktop (`1440x900`), Tablet (`768x900`), and Mobile (`390x844`).
+
+---
+
 ## [0.8.7] — 2026-11-27
 
 ### Update 10/10 (`v0.8.7` Milestone Release) — Unified Living City IFCX Export, Full Native + WASM Verification & Release Cut

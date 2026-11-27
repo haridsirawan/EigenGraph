@@ -334,7 +334,7 @@ impl SpatialWorkspaceState {
     /// or displays the active Earth Site Location card.
     pub fn is_dynamic_island_expanded(&self, ctx: &egui::Context) -> bool {
         let pointer_pos = ctx.input(|i| i.pointer.hover_pos());
-        let hover_margin = if self.island_expanded_prev { 18.0 } else { 4.0 };
+        let hover_margin = if self.island_expanded_prev { 12.0 } else { 4.0 };
         let hovered_island = self.dynamic_island_rect.is_positive()
             && pointer_pos.is_some_and(|p| {
                 self.dynamic_island_rect.expand(hover_margin).contains(p)

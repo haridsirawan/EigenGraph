@@ -1878,27 +1878,30 @@ impl SpatialWorkspaceState {
                 || self.daylight_drawer_open,
         );
 
+        let max_allowed_w = (vp.x - 16.0).max(200.0);
+        let max_desktop_w = (vp.x - 24.0).max(200.0);
         let compact_w = if is_mobile {
-            (vp.x - 16.0).clamp(220.0, 380.0)
+            max_allowed_w.min(360.0)
         } else {
-            (vp.x * 0.36).clamp(320.0, 440.0)
+            (vp.x * 0.34).clamp(320.0, 420.0).min(max_allowed_w)
         };
         let expanded_w = if is_mobile {
-            (vp.x - 14.0).clamp(220.0, 440.0)
+            max_allowed_w.min(420.0)
         } else {
-            (vp.x - 28.0).clamp(640.0, 1520.0)
+            (vp.x * 0.68).clamp(540.0, 920.0).min(max_desktop_w)
         };
         let wide_w = if is_mobile {
-            (vp.x - 14.0).clamp(220.0, 440.0)
+            max_allowed_w.min(420.0)
         } else {
-            (vp.x - 24.0).clamp(700.0, 1680.0)
+            (vp.x * 0.74).clamp(600.0, 1060.0).min(max_desktop_w)
         };
         let base_w = egui::lerp(compact_w..=expanded_w, expand_t);
-        let dock_w = egui::lerp(base_w..=wide_w, wide_t).min((vp.x - 16.0).max(200.0));
+        let dock_w = egui::lerp(base_w..=wide_w, wide_t).min(max_allowed_w);
+        let max_island_h = (vp.y - 28.0).max(120.0);
 
         let frame_theme = host.island_theme();
         let mut render_embedded_opt = Some(render_embedded_panel);
-        let island_left_x = ((vp.x - dock_w) * 0.5).max(6.0);
+        let island_left_x = ((vp.x - dock_w) * 0.5).max(8.0);
         let dock_resp = Area::new(Id::new("antigravity_ai_command_dock"))
             .order(Order::Foreground)
             .anchor(Align2::LEFT_BOTTOM, Vec2::new(island_left_x, -14.0))
@@ -1907,6 +1910,7 @@ impl SpatialWorkspaceState {
             .show(ctx, |ui| {
                 ui.set_width(dock_w);
                 ui.set_max_width(dock_w);
+                ui.set_max_height(max_island_h);
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
 
                 ui.vertical(|ui| {

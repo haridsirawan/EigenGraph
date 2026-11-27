@@ -6117,6 +6117,12 @@ use crate::theme::MacTheme;
                     "Ribbon tab {} overflowed viewport {win_w}: {r:?}",
                     tab.label()
                 );
+                assert!(
+                    r.height() <= 260.0,
+                    "Ribbon tab {} expanded excessively in height ({}): {r:?}",
+                    tab.label(),
+                    r.height()
+                );
             }
         }
 
@@ -6155,4 +6161,214 @@ use crate::theme::MacTheme;
         spatial.close_focus_layer_return_to_ribbon();
         assert_eq!(spatial.active_focus_layer_info(false), None);
         assert!(spatial.mobile_deck_pinned);
+    }
+
+    #[test]
+    fn test_v0871_dynamic_island_strict_height_and_width_stability() {
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let mut build = crate::views::build::BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = crate::views::ai_assistant::AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        for (win_w, win_h, is_desktop) in [
+            (1440.0_f32, 900.0_f32, true),
+            (768.0_f32, 900.0_f32, false),
+            (390.0_f32, 844.0_f32, false),
+        ] {
+            // 1. Layer 0 (Collapsed) over 6 frames
+            let ctx0 = egui::Context::default();
+            let mut spatial0 = SpatialWorkspaceState::default();
+            let mut canvas0 = UniversalCanvasState::default();
+            let mut rect0_f4 = Rect::NOTHING;
+            let mut rect0_f6 = Rect::NOTHING;
+            for frame_idx in 0..6 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx0.run_ui(raw, |ui| {
+                    let _ = spatial0.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas0,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial0.hud_rects.len(), 1);
+                let r = spatial0.hud_rects[0];
+                assert!(
+                    r.left() >= -1.0 && r.right() <= win_w + 1.0,
+                    "Collapsed island overflowed viewport {win_w}: {r:?}"
+                );
+                let max_collapsed_h = if win_w < MacTheme::MOBILE_BREAKPOINT {
+                    165.0
+                } else {
+                    130.0
+                };
+                assert!(
+                    r.height() <= max_collapsed_h,
+                    "Collapsed island too tall ({}) at {win_w}x{win_h}: {r:?}",
+                    r.height()
+                );
+                if is_desktop {
+                    assert!(
+                        r.width() <= 430.0,
+                        "Desktop collapsed island too wide ({}): {r:?}",
+                        r.width()
+                    );
+                } else {
+                    assert!(
+                        r.width() <= win_w + 1.0,
+                        "Mobile/tablet collapsed island exceeded viewport {win_w}: {r:?}"
+                    );
+                }
+                if frame_idx >= 3 {
+                    assert!(
+                        r.top() >= -1.0 && r.bottom() <= win_h + 1.0,
+                        "Collapsed island escaped vertical bounds at {win_w}x{win_h}: {r:?}"
+                    );
+                }
+                if frame_idx == 3 {
+                    rect0_f4 = r;
+                } else if frame_idx == 5 {
+                    rect0_f6 = r;
+                }
+            }
+            assert!(
+                (rect0_f6.width() - rect0_f4.width()).abs() <= 1.5
+                    && (rect0_f6.height() - rect0_f4.height()).abs() <= 1.5,
+                "Collapsed island drifted across frames: f4={rect0_f4:?}, f6={rect0_f6:?}"
+            );
+
+            // 2. Layer 1 (Categorized Ribbon) across ALL 10 tabs over 6 frames each
+            for tab in RibbonCategoryTab::ALL {
+                let ctx1 = egui::Context::default();
+                let mut spatial1 = SpatialWorkspaceState::default();
+                let mut canvas1 = UniversalCanvasState::default();
+                spatial1.active_ribbon_tab = tab;
+                spatial1.mobile_deck_pinned = true;
+                let mut rect1_f4 = Rect::NOTHING;
+                let mut rect1_f6 = Rect::NOTHING;
+                for frame_idx in 0..6 {
+                    let raw = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(win_w, win_h),
+                        )),
+                        ..Default::default()
+                    };
+                    let mut out = ctx1.run_ui(raw, |ui| {
+                        let _ = spatial1.render_hud_overlays(
+                            ui.ctx(),
+                            &theme,
+                            &mut canvas1,
+                            &mut build,
+                            &mut ai,
+                            &members,
+                            &projects,
+                            &mut db_components,
+                        );
+                    });
+                    out.textures_delta.clear();
+                    assert_eq!(spatial1.hud_rects.len(), 1);
+                    let r = spatial1.hud_rects[0];
+                    assert!(
+                        r.left() >= -1.0 && r.right() <= win_w + 1.0,
+                        "Layer 1 Ribbon {} overflowed {win_w}: {r:?}",
+                        tab.label()
+                    );
+                    if is_desktop {
+                        assert!(
+                            r.width() <= 935.0,
+                            "Desktop Ribbon {} too wide ({}): {r:?}",
+                            tab.label(),
+                            r.width()
+                        );
+                    }
+                    assert!(
+                        r.height() <= 260.0,
+                        "Ribbon {} blew up vertically ({}) at {win_w}x{win_h}: {r:?}",
+                        tab.label(),
+                        r.height()
+                    );
+                    if frame_idx >= 3 {
+                        assert!(
+                            r.top() >= -1.0 && r.bottom() <= win_h + 1.0,
+                            "Ribbon {} escaped vertical bounds at {win_w}x{win_h}: {r:?}",
+                            tab.label()
+                        );
+                    }
+                    if frame_idx == 3 {
+                        rect1_f4 = r;
+                    } else if frame_idx == 5 {
+                        rect1_f6 = r;
+                    }
+                }
+                assert!(
+                    (rect1_f6.width() - rect1_f4.width()).abs() <= 1.5
+                        && (rect1_f6.height() - rect1_f4.height()).abs() <= 1.5,
+                    "Ribbon {} drifted f4->f6 at {win_w}x{win_h}: f4={rect1_f4:?}, f6={rect1_f6:?}",
+                    tab.label()
+                );
+            }
+
+            // 3. Layer 2 (Vault / Focus Overlay) over 6 frames
+            let ctx2 = egui::Context::default();
+            let mut spatial2 = SpatialWorkspaceState::default();
+            let mut canvas2 = UniversalCanvasState::default();
+            spatial2.mobile_deck_pinned = true;
+            spatial2.vault_drawer_open = true;
+            for frame_idx in 0..6 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx2.run_ui(raw, |ui| {
+                    let _ = spatial2.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas2,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+                assert_eq!(spatial2.hud_rects.len(), 1);
+                let r = spatial2.hud_rects[0];
+                assert!(
+                    r.left() >= -1.0 && r.right() <= win_w + 1.0,
+                    "Layer 2 overlay overflowed {win_w}: {r:?}"
+                );
+                if frame_idx >= 3 {
+                    assert!(
+                        r.top() >= -1.0 && r.bottom() <= win_h + 1.0,
+                        "Layer 2 overlay escaped vertical bounds at {win_w}x{win_h}: {r:?}"
+                    );
+                }
+                if is_desktop {
+                    assert!(
+                        r.width() <= 1075.0,
+                        "Desktop Layer 2 overlay too wide ({}): {r:?}",
+                        r.width()
+                    );
+                }
+                assert!(
+                    r.height() <= (win_h - 20.0).min(875.0),
+                    "Layer 2 overlay exceeded height ceiling ({}) at {win_w}x{win_h}: {r:?}",
+                    r.height()
+                );
+            }
+        }
     }
