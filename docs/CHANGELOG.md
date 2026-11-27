@@ -7,7 +7,14 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.7 (3/10)]
+## [Unreleased — Next: v0.8.7 (4/10)]
+
+### Update 4/10 (`v0.8.6.4` -> `v0.8.7`) — Interior Daylight Autonomy (`sDA / ASE / DGP`), LEED v4.1 & Architectural Finishes Engine
+- **Daylight Autonomy, Glare & Room Finishes Core (`src/core/daylight_interior.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:
+  - Added [`evaluate_daylight_interior`](src/core/daylight_interior.rs) computing BRE Split-Flux Daylight Factor (`DF%`), spatial Daylight Autonomy (`sDA 300/50%`), Annual Sunlight Exposure (`ASE 1000,250h`), Useful Daylight Illuminance (`UDI 300-3000 lx`), simplified Wienold Daylight Glare Probability (`DGP`), `LEED v4.1 EQ` credits (`0-3`), `SNI 6197` lighting energy dimming savings (`kWh/m²/yr`), and per-zone room architectural finish + FF&E BOQ items under [`InteriorFinishPalette`](src/core/daylight_interior.rs) and [`InteriorSpaceTypology`](src/core/daylight_interior.rs).
+  - Registered non-destructive IFCX namespace `eigengraph::design::daylight_interior` via [`IfcxStage::compose_with_daylight_interior_overlay`](src/core/ifcx.rs).
+- **Pure WebGPU Work-Plane Lux Heatmap (`material_kind = 27.0`), CPU Fallback & Smart Ribbon Studio (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/views/settings.rs`, `src/app.rs`)**:
+  - Added [`build_rtc_daylight_interior_mesh`](src/views/webgpu_earth/mesh_builders.rs), WGSL shader branch `kind >= 26.5`, CPU vector fallback [`paint_cpu_daylight_interior_fallback`](src/views/universal_canvas/render_layers.rs), `.eigen.json` `daylight_config` persistence, 2-tab [`render_daylight_interior_drawer`](src/views/spatial_workspace/drawers.rs), `"Daylight & Interior"` horizontal tiles under `RibbonCategoryTab::Sustainability`, `/daylight`, `/lux`, `/sda`, `/daylight-3d`, `/daylight-ifcx` commands, Gemini directives, and updated `Settings -> About EigenGraph` Entry #15.
 
 ### Update 3/10 (`v0.8.6.3` -> `v0.8.7`) — `Settings -> About EigenGraph`: Complete Feature Catalog & Mathematical Logic Reference
 - **Feature & Mathematical Formulation Catalog (`src/views/settings.rs`)**:

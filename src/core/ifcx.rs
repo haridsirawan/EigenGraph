@@ -81,6 +81,7 @@ pub mod ns {
     pub const EG_MASSING_STUDY: &str = "eigengraph::design::massing_study";
     pub const EG_DESIGN_PIPELINE: &str = "eigengraph::design::concept_pipeline";
     pub const EG_SOLAR_OTTV: &str = "eigengraph::design::solar_ottv";
+    pub const EG_DAYLIGHT_INTERIOR: &str = "eigengraph::design::daylight_interior";
     pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
@@ -2098,6 +2099,43 @@ impl IfcxStage {
         });
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_solar_ottv", base_doc.header.id))
+    }
+
+    /// Composes a base `.ifcx` document with a non-destructive Interior Daylight Autonomy & Finishes overlay.
+    pub fn compose_with_daylight_interior_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::daylight_interior::DaylightInteriorIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_daylight_interior", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcBuilding", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Interior Daylight Autonomy (sDA/ASE/DGP), LEED v4.1 & Architectural Finishes",
+                "sda30050Pct": overlay.sda_300_50_pct,
+                "ase1000250Pct": overlay.ase_1000_250_pct,
+                "udi3003000Pct": overlay.udi_300_3000_pct,
+                "meanLux": overlay.mean_lux,
+                "peakDgpGlare": overlay.peak_dgp_glare,
+                "leedV41Credits": overlay.leed_v41_credits,
+                "en17037Compliant": overlay.en_17037_compliant,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_DAYLIGHT_INTERIOR.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/design/daylight_interior".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_daylight_interior", base_doc.header.id))
     }
 
     /// Composes a base `.ifcx` document with the `v0.8.5` Master Engineering Dossier Index (`S-000`).

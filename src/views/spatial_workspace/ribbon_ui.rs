@@ -1310,6 +1310,62 @@ impl SpatialWorkspaceState {
                         actions.export_solar_ifcx = true;
                     }
                 });
+                Self::ribbon_group(ui, theme, "Daylight & Interior", |ui| {
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Sun,
+                        "Daylight",
+                        self.daylight_drawer_open && self.daylight_drawer_tab == 0,
+                        theme.accent_green,
+                        "Open Interior Daylight Autonomy (sDA/ASE/DGP), LEED v4.1 & Finishes Studio",
+                    )
+                    .clicked()
+                    {
+                        self.open_daylight_drawer(0);
+                        actions.run_daylight_interior = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Grid,
+                        "Lux Grid",
+                        self.daylight_drawer_open && self.daylight_drawer_tab == 1,
+                        theme.accent_green,
+                        "Inspect Work-Plane Lux Heatmap & Room Architectural Finishes BOQ",
+                    )
+                    .clicked()
+                    {
+                        self.open_daylight_drawer(1);
+                        actions.run_daylight_interior = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Cube3D,
+                        "3D Lux",
+                        universal_canvas.daylight_overlay_visible,
+                        theme.accent_green,
+                        "Toggle 3D Pure WebGPU Interior Work-Plane Lux Heatmap overlay",
+                    )
+                    .clicked()
+                    {
+                        actions.toggle_daylight_3d = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::SaveDisk,
+                        "Lux IFCX",
+                        false,
+                        theme.accent_blue,
+                        "Export non-destructive eigengraph::design::daylight_interior IFCX",
+                    )
+                    .clicked()
+                    {
+                        actions.export_daylight_ifcx = true;
+                    }
+                });
                 Self::ribbon_group(ui, theme, "Carbon LCA", |ui| {
                     if Self::ribbon_tool_tile(
                         ui,

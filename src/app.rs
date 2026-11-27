@@ -4579,6 +4579,58 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if hud_actions.run_daylight_interior {
+            let rep = self
+                .universal_canvas
+                .run_daylight_interior(&self.build_view.bim_bus.project);
+            self.universal_canvas.daylight_overlay_visible = true;
+            self.spatial_workspace
+                .push_trace(rep.summary_verdict, rep.en_17037_compliant);
+        }
+        if hud_actions.toggle_daylight_3d {
+            self.universal_canvas.daylight_overlay_visible =
+                !self.universal_canvas.daylight_overlay_visible;
+            if self.universal_canvas.daylight_overlay_visible
+                && self.universal_canvas.last_daylight_report.is_none()
+            {
+                let _ = self
+                    .universal_canvas
+                    .run_daylight_interior(&self.build_view.bim_bus.project);
+            }
+            let st = if self.universal_canvas.daylight_overlay_visible {
+                "ON"
+            } else {
+                "OFF"
+            };
+            self.spatial_workspace
+                .push_trace(format!("3D Interior Daylight Lux Heatmap: {st}"), true);
+        }
+        if hud_actions.export_daylight_ifcx {
+            let rep = self
+                .universal_canvas
+                .run_daylight_interior(&self.build_view.bim_bus.project);
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_daylight_interior_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_daylight_interior.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported EN 17037 / LEED v4.1 Daylight IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {

@@ -239,6 +239,10 @@ pub struct UniversalCanvasState {
     pub solar_overlay_visible: bool,
     pub solar_envelope_config: crate::core::solar_envelope::SolarEnvelopeConfig,
     pub last_solar_envelope_report: Option<crate::core::solar_envelope::SolarEnvelopeReport>,
+    // Update v0.8.6.4 (4/10 -> v0.8.7): Interior Daylight Autonomy (sDA/ASE/DGP) & Room Finishes
+    pub daylight_overlay_visible: bool,
+    pub daylight_config: crate::core::daylight_interior::DaylightInteriorConfig,
+    pub last_daylight_report: Option<crate::core::daylight_interior::DaylightInteriorReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -424,6 +428,9 @@ impl Default for UniversalCanvasState {
             solar_overlay_visible: false,
             solar_envelope_config: crate::core::solar_envelope::SolarEnvelopeConfig::default(),
             last_solar_envelope_report: None,
+            daylight_overlay_visible: false,
+            daylight_config: crate::core::daylight_interior::DaylightInteriorConfig::default(),
+            last_daylight_report: None,
         }
     }
 }
@@ -1269,6 +1276,24 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Interior Daylight Autonomy (`sDA 300/50%`, `ASE 1000,250h`, `DGP`),
+    /// LEED v4.1 credits, SNI 6197 lighting energy savings, and room finish / FF&E schedules.
+    pub fn run_daylight_interior(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::daylight_interior::DaylightInteriorReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::daylight_interior::evaluate_daylight_interior(
+            bim_project,
+            Some(&site),
+            self.last_massing_report.as_ref(),
+            Some(&self.solar_envelope_config),
+            &self.daylight_config,
+        );
+        self.last_daylight_report = Some(rep.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -1610,6 +1635,7 @@ impl UniversalCanvasState {
             program_config: self.program_config.clone(),
             massing_config: self.massing_config.clone(),
             solar_envelope_config: self.solar_envelope_config.clone(),
+            daylight_config: self.daylight_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1759,6 +1785,8 @@ impl UniversalCanvasState {
         self.last_design_pipeline_report = None;
         self.solar_envelope_config = archive.solar_envelope_config;
         self.last_solar_envelope_report = None;
+        self.daylight_config = archive.daylight_config;
+        self.last_daylight_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2492,6 +2520,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let daylight_interior_gpu_input = if self.daylight_overlay_visible {
+                self.last_daylight_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::DaylightInteriorGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -2537,6 +2576,7 @@ impl UniversalCanvasState {
                 spatial_program_gpu_input,
                 massing_study_gpu_input,
                 solar_envelope_gpu_input,
+                daylight_interior_gpu_input,
                 hazard_compute_opt,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
@@ -2639,6 +2679,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.solar_overlay_visible {
                 self.paint_cpu_solar_envelope_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.daylight_overlay_visible {
+                self.paint_cpu_daylight_interior_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

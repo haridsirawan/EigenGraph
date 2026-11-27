@@ -200,10 +200,10 @@ pub const ENGINEERING_MATH_CATALOG: &[AboutFeatureMathSpec] = &[
     AboutFeatureMathSpec {
         category_idx: 5,
         category_badge: "Design & Solar",
-        title: "3D Solar Irradiation, Cast Ground Shadows & SNI 6389 / ASHRAE 90.1 OTTV",
-        modules_and_codes: "core/solar_envelope.rs • SNI 6389:2020, ASHRAE 90.1",
-        capabilities: "Computes astronomical sun altitude/azimuth vectors from site latitude & time, N/E/S/W/Roof Solar Factors, glazing SHGC & shading reduction (ESF), SNI 6389 OTTV/RTTV compliance (<= 35 W/m^2), 3D thermal panels, and cast ground shadows.",
-        math_logic: "Sun Altitude: sin(alpha_s) = sin(phi)*sin(delta) + cos(phi)*cos(delta)*cos(omega_h)\nCast Shadow Length: L_s = H / tan(alpha_s)  projected along -sun_xy\nSNI 6389 OTTV_i = alpha*U_w*(1 - WWR)*TD_eq + U_f*WWR*dT + SC*SF_i*ESF*WWR\nEnvelope Weighted OTTV = sum(A_i * OTTV_i) / sum(A_i) <= 35.0 W/m^2  (+ RTTV & kWh/m^2/yr)",
+        title: "3D Solar OTTV, Cast Shadows, Interior Daylight Autonomy & Finishes",
+        modules_and_codes: "core/solar_envelope.rs, core/daylight_interior.rs • SNI 6389, ASHRAE 90.1, EN 17037, LEED v4.1, SNI 6197",
+        capabilities: "Computes astronomical sun vectors, N/E/S/W/Roof Solar Factors & SNI 6389 OTTV/RTTV (<= 35 W/m^2), alongside BRE Split-Flux work-plane lux grids, sDA 300/50%, ASE 1000,250h, DGP glare, LEED v4.1 credits, SNI 6197 dimming savings, and Room Finish/FF&E schedules.",
+        math_logic: "Sun Altitude & OTTV: sin(alpha_s) = sin(phi)*sin(delta) + cos(phi)*cos(delta)*cos(omega_h) ;  L_s = H / tan(alpha_s)\nOTTV_i = alpha*U_w*(1 - WWR)*TD_eq + U_f*WWR*dT + SC*SF_i*ESF*WWR  (Weighted OTTV <= 35.0 W/m^2)\nBRE Split-Flux DF% = (T_vlt*T_shade*A_win*theta / (A_surf*(1 - R_avg))) * f(d_perim) * 100\nsDA 300/50% & Glare DGP: E >= 300 lx fraction;  DGP = 5.87e-5*E_v + 0.16 + c_ase  (LEED v4.1 0-3 pt + Finish/FFE BOQ)",
     },
     AboutFeatureMathSpec {
         category_idx: 6,

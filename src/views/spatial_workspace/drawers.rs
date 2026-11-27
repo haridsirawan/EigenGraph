@@ -7064,4 +7064,298 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.6.4` (`4/10` -> `v0.8.7`): Interior Daylight Autonomy (`sDA/ASE/DGP`), LEED v4.1 & Finishes Studio.
+    pub(super) fn render_daylight_interior_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::daylight_interior::{InteriorFinishPalette, InteriorSpaceTypology};
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Sun,
+                13.0,
+                theme.accent_green,
+                "Daylight Autonomy, Glare & Interior Finishes Studio",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [(0usize, "Daylight & LEED"), (1usize, "Lux Grid & Finishes")] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.daylight_drawer_tab == idx,
+                    theme.accent_green,
+                    "",
+                )
+                .clicked()
+                {
+                    self.daylight_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Interior Daylight & Finishes Studio",
+            )
+            .clicked()
+            {
+                self.daylight_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for pal in InteriorFinishPalette::ALL {
+                    let active = universal_canvas.daylight_config.finish_palette == pal;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        pal.short_label(),
+                        active,
+                        theme.accent_blue,
+                        pal.label(),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.daylight_config.finish_palette = pal;
+                        universal_canvas.daylight_overlay_visible = true;
+                        actions.run_daylight_interior = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Recycle),
+                    "Evaluate",
+                    false,
+                    theme.accent_green,
+                    "Compute floor-plate sDA 300/50%, ASE, DGP, LEED v4.1 credits & Room Finishes",
+                )
+                .clicked()
+                {
+                    universal_canvas.daylight_overlay_visible = true;
+                    actions.run_daylight_interior = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    if universal_canvas.daylight_overlay_visible {
+                        "3D Lux: ON"
+                    } else {
+                        "3D Lux: OFF"
+                    },
+                    universal_canvas.daylight_overlay_visible,
+                    theme.accent_green,
+                    "Toggle 3D Pure WebGPU Interior Work-Plane Lux Heatmap",
+                )
+                .clicked()
+                {
+                    actions.toggle_daylight_3d = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "IFCX",
+                    false,
+                    theme.accent_blue,
+                    "Export non-destructive eigengraph::design::daylight_interior IFCX (.ifcx)",
+                )
+                .clicked()
+                {
+                    actions.export_daylight_ifcx = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.daylight_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    if is_left {
+                        ui.label(
+                            RichText::new("Space Typology, Optical VLT & Work-Plane")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ui.add_space(2.0);
+                        let cfg = &mut universal_canvas.daylight_config;
+                        let mut changed = false;
+                        ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
+                            for typ in InteriorSpaceTypology::ALL {
+                                let active = cfg.space_typology == typ;
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    None,
+                                    typ.short_label(),
+                                    active,
+                                    theme.accent_green,
+                                    typ.label(),
+                                )
+                                .clicked()
+                                {
+                                    cfg.space_typology = typ;
+                                    changed = true;
+                                }
+                            }
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("VLT:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.visible_transmittance_vlt).range(0.20..=0.88).speed(0.01)).changed();
+                            ui.label(RichText::new("Shade T:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.shading_transmittance).range(0.30..=1.0).speed(0.01)).changed();
+                            ui.label(RichText::new("WWR:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.wwr_pct).range(10.0..=85.0).speed(1.0).suffix("%")).changed();
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Story:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.active_story_index).range(0..=30).speed(1.0)).changed();
+                            ui.label(RichText::new("Plane:").size(8.6).color(theme.text_muted));
+                            changed |= ui.add(egui::DragValue::new(&mut cfg.work_plane_height_m).range(0.60..=1.10).speed(0.05).suffix("m")).changed();
+                        });
+                        if changed {
+                            universal_canvas.daylight_overlay_visible = true;
+                            actions.run_daylight_interior = true;
+                        }
+                    } else if let Some(ref rep) = universal_canvas.last_daylight_report {
+                        if tab == 0 {
+                            let status_col = if rep.en_17037_compliant {
+                                theme.accent_green
+                            } else {
+                                theme.accent_orange
+                            };
+                            let status_txt = if rep.en_17037_compliant { "PASS" } else { "REVIEW" };
+                            ui.label(
+                                RichText::new("EN 17037 / LEED v4.1 / SNI 6197 Scorecard")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "sDA 300/50%: {:.0}%  •  ASE 1000,250h: {:.0}%  •  LEED +{} pt [{status_txt}]",
+                                    rep.sda_300_50_pct, rep.ase_1000_250_pct, rep.leed_v41_credits,
+                                ))
+                                .size(9.2)
+                                .strong()
+                                .monospace()
+                                .color(status_col),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Mean Lux: {:.0} lx  •  DF: {:.1}%  •  UDI: {:.0}%  •  Peak DGP: {:.2}\nSNI 6197 Dimming Savings: {:.0}%  •  Finish+FFE: ${:.0}k",
+                                    rep.mean_lux,
+                                    rep.mean_daylight_factor_pct,
+                                    rep.udi_300_3000_pct,
+                                    rep.peak_dgp_glare,
+                                    rep.lighting_energy_savings_pct,
+                                    (rep.total_finish_usd + rep.total_ffe_usd) / 1000.0,
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(theme.text_muted),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new("2D Work-Plane Lux Heatmap & Room Finishes BOQ")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            let plot_h = 84.0_f32;
+                            let (plot_rect, _) = ui.allocate_exact_size(
+                                Vec2::new(inner_w, plot_h),
+                                egui::Sense::hover(),
+                            );
+                            let painter = ui.painter_at(plot_rect);
+                            painter.rect_filled(plot_rect, CornerRadius::same(6), theme.bg_card);
+                            let nx = rep.config.grid_nx.max(1) as f32;
+                            let ny = rep.config.grid_ny.max(1) as f32;
+                            let pad_r = plot_rect.shrink(6.0);
+                            let cw = pad_r.width() / nx;
+                            let ch = pad_r.height() / ny;
+                            for cell in &rep.cells_3d {
+                                let rx = pad_r.left() + (cell.ix as f32) * cw;
+                                let ry = pad_r.bottom() - ((cell.iy as f32) + 1.0) * ch;
+                                let c = cell.color_rgba;
+                                let col = Color32::from_rgba_unmultiplied(
+                                    (c[0].clamp(0.0, 1.0) * 255.0) as u8,
+                                    (c[1].clamp(0.0, 1.0) * 255.0) as u8,
+                                    (c[2].clamp(0.0, 1.0) * 255.0) as u8,
+                                    215,
+                                );
+                                painter.rect_filled(
+                                    Rect::from_min_size(
+                                        egui::Pos2::new(rx + 0.5, ry + 0.5),
+                                        Vec2::new((cw - 1.0).max(2.0), (ch - 1.0).max(2.0)),
+                                    ),
+                                    CornerRadius::same(2),
+                                    col,
+                                );
+                            }
+                            ui.add_space(3.0);
+                            for rm in &rep.rooms {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{}: {:.0}m² • {:.0} lx (target {:.0}) • Finish+FFE ${:.0}k",
+                                        rm.zone_name,
+                                        rm.floor_area_m2,
+                                        rm.achieved_lux,
+                                        rm.target_lux,
+                                        (rm.finish_cost_usd + rm.ffe_cost_usd) / 1000.0,
+                                    ))
+                                    .size(8.1)
+                                    .monospace()
+                                    .color(theme.text_muted),
+                                );
+                            }
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new("Click 'Evaluate' or pick a finish palette to compute floor-plate sDA/ASE, DGP glare, and finish BOQ.")
+                                .size(8.8)
+                                .color(theme.text_muted),
+                        );
+                    }
+                });
+            });
+        });
+    }
 }

@@ -4283,3 +4283,88 @@ pub fn build_rtc_solar_envelope_mesh(input: &SolarEnvelopeGpuInput<'_>) -> GpuMe
     }
 }
 
+/// GPU input payload for Update `v0.8.6.4` Interior Daylight Autonomy & Work-Plane Lux Grid (`material_kind = 27.0`).
+pub struct DaylightInteriorGpuInput<'a> {
+    pub report: &'a crate::core::daylight_interior::DaylightInteriorReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU interior work-plane lux heatmap cells, perimeter rails,
+/// and a LEED v4.1 daylight credit status beacon (`material_kind = 27.0`, 0% raster).
+pub fn build_rtc_daylight_interior_mesh(input: &DaylightInteriorGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rep = input.report;
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_xy = |x: f64, y: f64| -> [f64; 2] { [x * cr - y * sr, x * sr + y * cr] };
+
+    let mut verts = Vec::with_capacity(rep.cells_3d.len() * 4 + 48);
+    let mut idxs = Vec::with_capacity(rep.cells_3d.len() * 6 + 64);
+
+    for cell in &rep.cells_3d {
+        let base = verts.len() as u32;
+        let norm_lux = (cell.mean_lux / 1200.0).clamp(0.05, 1.0) as f32;
+        let phase = (cell.ix as f32) * 0.22 + (cell.iy as f32) * 0.17;
+        for c in cell.corners_enu_m {
+            let rxy = rot_xy(c[0], c[1]);
+            verts.push(GpuEarthVertex {
+                pos: [rxy[0] as f32, rxy[1] as f32, c[2] as f32],
+                normal: [0.0, 0.0, 1.0],
+                color: cell.color_rgba,
+                meta: [27.0, norm_lux, 1.0, phase],
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    let wz = rep.story_elev_m + rep.config.work_plane_height_m + 0.04;
+    let corners = [
+        [rep.min_enu_xy_m[0], rep.min_enu_xy_m[1]],
+        [rep.max_enu_xy_m[0], rep.min_enu_xy_m[1]],
+        [rep.max_enu_xy_m[0], rep.max_enu_xy_m[1]],
+        [rep.min_enu_xy_m[0], rep.max_enu_xy_m[1]],
+    ];
+    let rim_col = if rep.en_17037_compliant {
+        [0.16, 0.88, 0.56, 0.90]
+    } else {
+        [0.98, 0.68, 0.18, 0.90]
+    };
+    for i in 0..4 {
+        let p0 = rot_xy(corners[i][0], corners[i][1]);
+        let p1 = rot_xy(corners[(i + 1) % 4][0], corners[(i + 1) % 4][1]);
+        push_animated_flow_strut_enu(
+            &mut verts,
+            &mut idxs,
+            [p0[0], p0[1], wz],
+            [p1[0], p1[1], wz],
+            0.12,
+            0.12,
+            rim_col,
+            0.4,
+            27.0,
+        );
+    }
+
+    let mid = rot_xy(
+        0.5 * (rep.min_enu_xy_m[0] + rep.max_enu_xy_m[0]),
+        0.5 * (rep.min_enu_xy_m[1] + rep.max_enu_xy_m[1]),
+    );
+    push_octahedron_beacon_enu(
+        &mut verts,
+        &mut idxs,
+        [mid[0] as f32, mid[1] as f32, (wz + 1.45) as f32],
+        0.95,
+        rim_col,
+        0.65,
+        27.0,
+    );
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+

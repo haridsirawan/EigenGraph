@@ -183,6 +183,9 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.6.1 (1/10 -> v0.8.7): 3D Solar Irradiation, Cast Shadow & SNI 6389 OTTV Drawer
     pub solar_drawer_open: bool,
     pub solar_drawer_tab: usize,
+    // Update v0.8.6.4 (4/10 -> v0.8.7): Interior Daylight Autonomy (sDA/ASE/DGP) & Finishes Drawer
+    pub daylight_drawer_open: bool,
+    pub daylight_drawer_tab: usize,
     // Update v0.8.6.2 (2/10 -> v0.8.7): Smart Layered 10-Category AEC Ribbon Dynamic Island
     pub active_ribbon_tab: RibbonCategoryTab,
 }
@@ -319,6 +322,8 @@ impl Default for SpatialWorkspaceState {
             design_agent_brief_draft: "Design a 10-story mixed-use tower on 54x42m urban lot, KDB 60%, KLB 5.0, 7.2m bay".to_string(),
             solar_drawer_open: false,
             solar_drawer_tab: 0,
+            daylight_drawer_open: false,
+            daylight_drawer_tab: 0,
             active_ribbon_tab: RibbonCategoryTab::Modeling,
         }
     }
@@ -364,6 +369,7 @@ impl SpatialWorkspaceState {
             || self.massing_drawer_open
             || self.design_agent_drawer_open
             || self.solar_drawer_open
+            || self.daylight_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -402,6 +408,7 @@ impl SpatialWorkspaceState {
         self.massing_drawer_open = false;
         self.design_agent_drawer_open = false;
         self.solar_drawer_open = false;
+        self.daylight_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -550,6 +557,11 @@ impl SpatialWorkspaceState {
             self.solar_drawer_open = false;
         } else {
             self.solar_drawer_open = !self.solar_drawer_open;
+        }
+        if drawer != "daylight" {
+            self.daylight_drawer_open = false;
+        } else {
+            self.daylight_drawer_open = !self.daylight_drawer_open;
         }
     }
 
@@ -712,6 +724,15 @@ impl SpatialWorkspaceState {
         self.solar_drawer_open = true;
     }
 
+    /// Idempotently opens the Update `v0.8.6.4` (`4/10` -> `v0.8.7`) Interior Daylight Autonomy,
+    /// Glare (`DGP`), LEED v4.1 & Architectural Room Finishes Studio drawer
+    /// (`0` = Daylight & LEED Scorecard, `1` = Floor-Plate Lux Grid & Finish BOQ).
+    pub fn open_daylight_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.daylight_drawer_tab = tab.min(1);
+        self.daylight_drawer_open = true;
+    }
+
     /// Returns the active Layer 2 exclusive focus overlay `(title, icon)` when a drawer,
     /// Project Browser, AI chat, Smart Inspector, or Slash Palette is open inside the Dynamic Island.
     pub fn active_focus_layer_info(&self, slash_mode: bool) -> Option<(&'static str, crate::icons::AppIcon)> {
@@ -732,6 +753,8 @@ impl SpatialWorkspaceState {
             Some(("EigenAI Spatial Agent", AppIcon::Bot))
         } else if self.solar_drawer_open {
             Some(("Solar & OTTV Studio", AppIcon::Sun))
+        } else if self.daylight_drawer_open {
+            Some(("Daylight & Interior Studio", AppIcon::Sun))
         } else if self.design_agent_drawer_open {
             Some(("AI Design Agent", AppIcon::Sparkles))
         } else if self.massing_drawer_open {

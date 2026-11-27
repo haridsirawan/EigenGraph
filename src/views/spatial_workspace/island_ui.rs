@@ -1874,7 +1874,8 @@ impl SpatialWorkspaceState {
                 || self.program_drawer_open
                 || self.massing_drawer_open
                 || self.design_agent_drawer_open
-                || self.solar_drawer_open,
+                || self.solar_drawer_open
+                || self.daylight_drawer_open,
         );
 
         let compact_w = if is_mobile {
@@ -3086,6 +3087,18 @@ impl SpatialWorkspaceState {
 
                     if self.solar_drawer_open {
                         self.render_solar_envelope_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
+                    if self.daylight_drawer_open {
+                        self.render_daylight_interior_drawer(
                             ui,
                             theme,
                             universal_canvas,

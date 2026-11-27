@@ -924,6 +924,32 @@ impl SpatialWorkspaceState {
                     self.open_solar_drawer(0);
                     out.export_solar_ifcx = true;
                 }
+                PlannedProposalAction::RunDaylightInterior {
+                    palette,
+                    typology,
+                    vlt,
+                } => {
+                    if let Some(p) = palette {
+                        universal_canvas.daylight_config.finish_palette = *p;
+                    }
+                    if let Some(t) = typology {
+                        universal_canvas.daylight_config.space_typology = *t;
+                    }
+                    if let Some(v) = vlt {
+                        universal_canvas.daylight_config.visible_transmittance_vlt = *v;
+                    }
+                    universal_canvas.daylight_overlay_visible = true;
+                    self.open_daylight_drawer(0);
+                    out.run_daylight_interior = true;
+                }
+                PlannedProposalAction::ToggleDaylight3d => {
+                    self.open_daylight_drawer(0);
+                    out.toggle_daylight_3d = true;
+                }
+                PlannedProposalAction::ExportDaylightIfcx => {
+                    self.open_daylight_drawer(0);
+                    out.export_daylight_ifcx = true;
+                }
                 PlannedProposalAction::InjectShmFault {
                     scenario,
                     severity_pct,
@@ -1405,6 +1431,21 @@ impl SpatialWorkspaceState {
                             GeminiDirective::ExportSolarIfcx => {
                                 PlannedProposalAction::ExportSolarIfcx
                             }
+                            GeminiDirective::RunDaylightInterior {
+                                palette,
+                                typology,
+                                vlt,
+                            } => PlannedProposalAction::RunDaylightInterior {
+                                palette: *palette,
+                                typology: *typology,
+                                vlt: *vlt,
+                            },
+                            GeminiDirective::ToggleDaylight3d => {
+                                PlannedProposalAction::ToggleDaylight3d
+                            }
+                            GeminiDirective::ExportDaylightIfcx => {
+                                PlannedProposalAction::ExportDaylightIfcx
+                            }
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -1648,6 +1689,13 @@ impl SpatialWorkspaceState {
                             ),
                             GeminiDirective::ToggleSolar3d => "ToggleSolar3d".to_string(),
                             GeminiDirective::ExportSolarIfcx => "ExportSolarIfcx".to_string(),
+                            GeminiDirective::RunDaylightInterior {
+                                palette,
+                                typology,
+                                vlt,
+                            } => format!("RunDaylight({palette:?}/{typology:?}/VLT:{vlt:?})"),
+                            GeminiDirective::ToggleDaylight3d => "ToggleDaylight3d".to_string(),
+                            GeminiDirective::ExportDaylightIfcx => "ExportDaylightIfcx".to_string(),
                             GeminiDirective::InjectShmFault {
                                 scenario,
                                 severity_pct,
@@ -3873,6 +3921,45 @@ impl SpatialWorkspaceState {
                 "/solar-ifcx" => {
                     actions.export_solar_ifcx = true;
                 }
+                "/daylight" | "/lux" | "/sda" => {
+                    let lo = arg.to_ascii_lowercase();
+                    if lo.contains("timber") || lo.contains("exec") {
+                        universal_canvas.daylight_config.finish_palette =
+                            crate::core::daylight_interior::InteriorFinishPalette::ExecutiveWarmTimber;
+                    } else if lo.contains("concrete") || lo.contains("loft") {
+                        universal_canvas.daylight_config.finish_palette =
+                            crate::core::daylight_interior::InteriorFinishPalette::IndustrialExposedConcrete;
+                    } else if lo.contains("clean") || lo.contains("health") {
+                        universal_canvas.daylight_config.finish_palette =
+                            crate::core::daylight_interior::InteriorFinishPalette::HealthcareCleanroom;
+                    } else if lo.contains("minimal") {
+                        universal_canvas.daylight_config.finish_palette =
+                            crate::core::daylight_interior::InteriorFinishPalette::MinimalistDaylight;
+                    }
+                    if lo.contains("class") {
+                        universal_canvas.daylight_config.space_typology =
+                            crate::core::daylight_interior::InteriorSpaceTypology::Classroom;
+                    } else if lo.contains("ward") || lo.contains("hosp") {
+                        universal_canvas.daylight_config.space_typology =
+                            crate::core::daylight_interior::InteriorSpaceTypology::HealthcareWard;
+                    } else if lo.contains("retail") {
+                        universal_canvas.daylight_config.space_typology =
+                            crate::core::daylight_interior::InteriorSpaceTypology::RetailShowroom;
+                    } else if lo.contains("res") {
+                        universal_canvas.daylight_config.space_typology =
+                            crate::core::daylight_interior::InteriorSpaceTypology::ResidentialSuite;
+                    }
+                    universal_canvas.daylight_overlay_visible = true;
+                    self.open_daylight_drawer(if cmd == "/lux" { 1 } else { 0 });
+                    actions.run_daylight_interior = true;
+                }
+                "/daylight-3d" => {
+                    self.open_daylight_drawer(0);
+                    actions.toggle_daylight_3d = true;
+                }
+                "/daylight-ifcx" => {
+                    actions.export_daylight_ifcx = true;
+                }
                 "/undo" => {
                     if let Some(msg) = build_view.bim_bus.undo() {
                         actions.sync_fem_and_earth = true;
@@ -4282,7 +4369,7 @@ impl SpatialWorkspaceState {
                  Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s. \
                  Active BIM elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}. \
                  To propose workspace actions, you may append bracket directives: \
-                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[ADD_STORY]], [[ADD_SLAB]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[EIGENGATE_AUDIT]], [[RUN_DESIGN_PIPELINE:brief]], [[EXPORT_FEASIBILITY_S115]], [[EXPORT_DESIGN_IFCX]], [[RUN_SOLAR_OTTV:LOWE,OVERHANG,WWR40,H14]], [[TOGGLE_SOLAR_3D]], [[EXPORT_SOLAR_IFCX]], [[BATCH_PIN_CITY:keyword,city]], [[PIN_ACTIVE:lat,lon,heading]], [[AUDIT_NEIGHBORHOOD]], [[TOGGLE_TOPO]], [[TOGGLE_VECTOR]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
+                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[ADD_STORY]], [[ADD_SLAB]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[EIGENGATE_AUDIT]], [[RUN_DESIGN_PIPELINE:brief]], [[EXPORT_FEASIBILITY_S115]], [[EXPORT_DESIGN_IFCX]], [[RUN_SOLAR_OTTV:LOWE,OVERHANG,WWR40,H14]], [[TOGGLE_SOLAR_3D]], [[EXPORT_SOLAR_IFCX]], [[RUN_DAYLIGHT:MINIMALIST,OFFICE,VLT65]], [[TOGGLE_DAYLIGHT_3D]], [[EXPORT_DAYLIGHT_IFCX]], [[BATCH_PIN_CITY:keyword,city]], [[PIN_ACTIVE:lat,lon,heading]], [[AUDIT_NEIGHBORHOOD]], [[TOGGLE_TOPO]], [[TOGGLE_VECTOR]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
                 site.elevation_m,
                 site.seismic_pga_ss_g,
                 site.design_wind_ms,

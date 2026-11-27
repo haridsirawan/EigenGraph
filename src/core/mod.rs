@@ -54,6 +54,7 @@ pub mod program_agent;
 pub mod massing_agent;
 pub mod design_agent;
 pub mod solar_envelope;
+pub mod daylight_interior;
 pub mod blast;
 pub mod fire;
 pub mod ifcx;
@@ -368,6 +369,11 @@ pub use solar_envelope::{
     evaluate_solar_envelope, FacadeOrientationMetric, GlazingPerformancePreset, SolarEnvelopeConfig,
     SolarEnvelopeReport, SolarHeatmapPanel3D, SolarOttvIfcxOverlay, SolarShadingStrategy,
     SolarShadowQuad3D, NS_EG_SOLAR_OTTV,
+};
+pub use daylight_interior::{
+    evaluate_daylight_interior, DaylightCell3D, DaylightInteriorConfig,
+    DaylightInteriorIfcxOverlay, DaylightInteriorReport, InteriorFinishPalette,
+    InteriorSpaceTypology, RoomFinishScheduleItem, NS_EG_DAYLIGHT_INTERIOR,
 };
 
 

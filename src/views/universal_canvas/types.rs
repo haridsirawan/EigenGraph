@@ -302,6 +302,8 @@ pub struct UnifiedWorkspaceArchive {
     pub massing_config: crate::core::massing_agent::MassingStudyConfig,
     #[serde(default)]
     pub solar_envelope_config: crate::core::solar_envelope::SolarEnvelopeConfig,
+    #[serde(default)]
+    pub daylight_config: crate::core::daylight_interior::DaylightInteriorConfig,
     pub sha256_seal: String,
 }
 

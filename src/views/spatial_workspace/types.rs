@@ -649,6 +649,14 @@ pub enum PlannedProposalAction {
     },
     ToggleSolar3d,
     ExportSolarIfcx,
+    // Update v0.8.6.4 (4/10 -> v0.8.7): Interior Daylight Autonomy (sDA/ASE/DGP) & Finishes
+    RunDaylightInterior {
+        palette: Option<crate::core::daylight_interior::InteriorFinishPalette>,
+        typology: Option<crate::core::daylight_interior::InteriorSpaceTypology>,
+        vlt: Option<f64>,
+    },
+    ToggleDaylight3d,
+    ExportDaylightIfcx,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -864,6 +872,14 @@ pub enum GeminiDirective {
     },
     ToggleSolar3d,
     ExportSolarIfcx,
+    // Update v0.8.6.4 (4/10 -> v0.8.7): Interior Daylight Autonomy (sDA/ASE/DGP) & Finishes
+    RunDaylightInterior {
+        palette: Option<crate::core::daylight_interior::InteriorFinishPalette>,
+        typology: Option<crate::core::daylight_interior::InteriorSpaceTypology>,
+        vlt: Option<f64>,
+    },
+    ToggleDaylight3d,
+    ExportDaylightIfcx,
 }
 
 /// Strips structured `[[...]]` action tags from a Gemini response and returns parsed directives.
@@ -1611,6 +1627,42 @@ pub fn parse_gemini_action_directives(raw: &str) -> (String, Vec<GeminiDirective
                 directives.push(GeminiDirective::ToggleSolar3d);
             } else if upper == "EXPORT_SOLAR_IFCX" {
                 directives.push(GeminiDirective::ExportSolarIfcx);
+            } else if let Some(rest) = upper.strip_prefix("RUN_DAYLIGHT") {
+                let tail = rest.trim_start_matches(':').trim();
+                let mut palette = None;
+                let mut typology = None;
+                let mut vlt = None;
+                for tok in tail.split(|c| c == ',' || c == ';').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                    if tok.contains("MINIMAL") {
+                        palette = Some(crate::core::daylight_interior::InteriorFinishPalette::MinimalistDaylight);
+                    } else if tok.contains("TIMB") || tok.contains("EXEC") {
+                        palette = Some(crate::core::daylight_interior::InteriorFinishPalette::ExecutiveWarmTimber);
+                    } else if tok.contains("CONC") || tok.contains("LOFT") {
+                        palette = Some(crate::core::daylight_interior::InteriorFinishPalette::IndustrialExposedConcrete);
+                    } else if tok.contains("CLEAN") || tok.contains("HEALTH") {
+                        palette = Some(crate::core::daylight_interior::InteriorFinishPalette::HealthcareCleanroom);
+                    } else if tok.contains("OFF") {
+                        typology = Some(crate::core::daylight_interior::InteriorSpaceTypology::OpenOffice);
+                    } else if tok.contains("CLASS") {
+                        typology = Some(crate::core::daylight_interior::InteriorSpaceTypology::Classroom);
+                    } else if tok.contains("WARD") || tok.contains("HOSP") {
+                        typology = Some(crate::core::daylight_interior::InteriorSpaceTypology::HealthcareWard);
+                    } else if tok.contains("RETAIL") || tok.contains("SHOW") {
+                        typology = Some(crate::core::daylight_interior::InteriorSpaceTypology::RetailShowroom);
+                    } else if tok.contains("RES") || tok.contains("SUITE") {
+                        typology = Some(crate::core::daylight_interior::InteriorSpaceTypology::ResidentialSuite);
+                    } else if let Some(val) = tok.strip_prefix("VLT") {
+                        if let Ok(v) = val.parse::<f64>() {
+                            let scaled = if v > 1.0 { v / 100.0 } else { v };
+                            vlt = Some(scaled.clamp(0.20, 0.88));
+                        }
+                    }
+                }
+                directives.push(GeminiDirective::RunDaylightInterior { palette, typology, vlt });
+            } else if upper == "TOGGLE_DAYLIGHT_3D" {
+                directives.push(GeminiDirective::ToggleDaylight3d);
+            } else if upper == "EXPORT_DAYLIGHT_IFCX" {
+                directives.push(GeminiDirective::ExportDaylightIfcx);
             } else if let Some(rest) = upper.strip_prefix("INJECT_SHM_FAULT:") {
                 let mut sp = rest.split(':').map(|s| s.trim());
                 let scenario = sp.next().unwrap_or("soft_story").to_ascii_lowercase();
@@ -3009,6 +3061,36 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Document,
     },
     SlashCommandSpec {
+        cmd: "/daylight",
+        category: "Design",
+        description: "Run 3D Interior Daylight Autonomy (sDA 300/50%, ASE, DGP) & Room Finishes",
+        icon: AppIcon::Sun,
+    },
+    SlashCommandSpec {
+        cmd: "/lux",
+        category: "Design",
+        description: "Inspect floor-plate work-plane Lux Heatmap & SNI 6197 lighting savings",
+        icon: AppIcon::Sun,
+    },
+    SlashCommandSpec {
+        cmd: "/sda",
+        category: "Design",
+        description: "Evaluate LEED v4.1 EQ Daylight Credits & EN 17037 compliance",
+        icon: AppIcon::Sun,
+    },
+    SlashCommandSpec {
+        cmd: "/daylight-3d",
+        category: "Design",
+        description: "Toggle 3D Pure WebGPU interior work-plane lux heatmap overlay",
+        icon: AppIcon::Cube3D,
+    },
+    SlashCommandSpec {
+        cmd: "/daylight-ifcx",
+        category: "Export",
+        description: "Export non-destructive eigengraph::design::daylight_interior IFCX (.ifcx)",
+        icon: AppIcon::Document,
+    },
+    SlashCommandSpec {
         cmd: "/bbs",
         category: "Field",
         description: "Run 1D Rebar BBS Cutting-Stock Optimization (/bbs 12 | 6 m stock bars)",
@@ -3204,6 +3286,10 @@ pub struct SpatialHudActions {
     pub run_solar_envelope: bool,
     pub toggle_solar_3d: bool,
     pub export_solar_ifcx: bool,
+    // Update v0.8.6.4 (4/10 -> v0.8.7): Interior Daylight Autonomy (sDA/ASE/DGP) & Finishes
+    pub run_daylight_interior: bool,
+    pub toggle_daylight_3d: bool,
+    pub export_daylight_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3672,5 +3758,8 @@ impl SpatialHudActions {
         self.run_solar_envelope |= other.run_solar_envelope;
         self.toggle_solar_3d |= other.toggle_solar_3d;
         self.export_solar_ifcx |= other.export_solar_ifcx;
+        self.run_daylight_interior |= other.run_daylight_interior;
+        self.toggle_daylight_3d |= other.toggle_daylight_3d;
+        self.export_daylight_ifcx |= other.export_daylight_ifcx;
     }
 }
