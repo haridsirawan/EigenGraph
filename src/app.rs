@@ -183,6 +183,7 @@ impl EigenGraphApp {
     /// Initializes `EigenGraphApp` with 100% Pure WebGPU (`egui_wgpu` / WGSL) 3D Vector Earth pipelines.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = Self::default();
+        app.spatial_workspace.mobile_deck_pinned = true;
         if let Some(render_state) = &cc.wgpu_render_state {
             app.universal_canvas.init_webgpu_earth(render_state);
         }

@@ -7,7 +7,15 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.8 (1/10)]
+## [Unreleased — Next: v0.8.8 (2/10)]
+
+### Update 2/10 (`v0.8.7.2` -> `v0.8.8`) — Revit-Style Categorized Ribbon Polish, Startup Visibility, Width-First CI Fix & PWA Cache Bust
+- **Revit-Style Categorized Ribbon Visual Polish & Default Startup Visibility (`src/views/spatial_workspace/ribbon_ui.rs`, `src/app.rs`)**:
+  - Upgraded [`SpatialWorkspaceState::ribbon_tool_tile`](src/views/spatial_workspace/ribbon_ui.rs) (`52..96 × 50 px`, `19 px` vector icon above crisp `9.8 px` label) and [`SpatialWorkspaceState::ribbon_group`](src/views/spatial_workspace/ribbon_ui.rs) (`15.5 px` bottom pill footer, `64 px` vertical divider), added Row A quick-access separators & centered truncated project/level title, and enlarged Row B/Row C `ScrollArea::horizontal()` caps (`30 px` tab bar, `84 px` ribbon tool tray) for the 10 AEC categories (`Planning`, `Drafting`, `Modeling`, `Scheduling`, `Budgeting`, `Sustainability`, `Facility`, `Safety`, `Construction`, `Industrialization`).
+  - Enabled `app.spatial_workspace.mobile_deck_pinned = true` inside [`EigenGraphApp::new`](src/app.rs) so the Categorized Ribbon opens immediately on app launch while leaving [`SpatialWorkspaceState::default`](src/views/spatial_workspace/mod.rs) collapsed for hover tests.
+- **Width-First Desktop Cap & PWA Cache Bust (`src/views/spatial_workspace/island_ui.rs`, `sw.js`, `src/views/spatial_workspace/tests.rs`)**:
+  - Updated desktop `expanded_w` (`(vp.x * 0.78).clamp(540.0, 1260.0)`) and `wide_w` (`(vp.x * 0.80).clamp(600.0, 1280.0)`) so wide `1600 px` displays expand cleanly past `1200 px` (`test_phase78_watchdog_slash_commands_and_width_first_dynamic_island`) without stretching edge-to-edge.
+  - Bumped [`sw.js`](sw.js) cache namespace to `eigengraph-pwa-v0.8.7-2` and switched static `.wasm`/`.js`/`.css` fetches to network-first with cache fallback so web deployments refresh immediately.
 
 ### Update 1/10 (`v0.8.7.1` -> `v0.8.8`) — Dynamic Island Strict Dimension Clamping & Ribbon ScrollArea Fix
 - **Root-Cause Fix for Uncontrolled Dynamic Island Expansion (`src/views/spatial_workspace/ribbon_ui.rs`, `src/views/spatial_workspace/island_ui.rs`, `src/views/spatial_workspace/mod.rs`)**:

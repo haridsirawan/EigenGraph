@@ -1888,12 +1888,12 @@ impl SpatialWorkspaceState {
         let expanded_w = if is_mobile {
             max_allowed_w.min(420.0)
         } else {
-            (vp.x * 0.68).clamp(540.0, 920.0).min(max_desktop_w)
+            (vp.x * 0.78).clamp(540.0, 1260.0).min(max_desktop_w)
         };
         let wide_w = if is_mobile {
             max_allowed_w.min(420.0)
         } else {
-            (vp.x * 0.74).clamp(600.0, 1060.0).min(max_desktop_w)
+            (vp.x * 0.80).clamp(600.0, 1280.0).min(max_desktop_w)
         };
         let base_w = egui::lerp(compact_w..=expanded_w, expand_t);
         let dock_w = egui::lerp(base_w..=wide_w, wide_t).min(max_allowed_w);

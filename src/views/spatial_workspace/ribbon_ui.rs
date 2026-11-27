@@ -33,14 +33,14 @@ impl SpatialWorkspaceState {
         accent: Color32,
         tooltip: &str,
     ) -> Response {
-        let font = FontId::proportional(9.0);
+        let font = FontId::proportional(9.8);
         let text_w = ui.fonts_mut(|f| {
             f.layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE)
                 .size()
                 .x
         });
-        let w = (text_w + 12.0).clamp(48.0, 82.0);
-        let size = Vec2::new(w, 46.0);
+        let w = (text_w + 16.0).clamp(52.0, 96.0);
+        let size = Vec2::new(w, 50.0);
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
 
         let hovered = resp.hovered();
@@ -70,13 +70,13 @@ impl SpatialWorkspaceState {
 
         let fg = if active { accent } else { theme.text_primary };
         let icon_rect = Rect::from_center_size(
-            Pos2::new(rect.center().x, rect.top() + 16.5),
-            Vec2::splat(17.5),
+            Pos2::new(rect.center().x, rect.top() + 17.5),
+            Vec2::splat(19.0),
         );
         icons::paint_icon(painter, icon_rect, icon, fg);
 
         painter.text(
-            Pos2::new(rect.center().x, rect.bottom() - 9.5),
+            Pos2::new(rect.center().x, rect.bottom() - 10.0),
             Align2::CENTER_CENTER,
             label,
             font,
@@ -109,14 +109,14 @@ impl SpatialWorkspaceState {
                 ui.spacing_mut().item_spacing.x = 3.0;
                 add_tiles(ui);
             });
-            let footer_font = FontId::proportional(8.2);
+            let footer_font = FontId::proportional(8.8);
             let label_w = ui.fonts_mut(|f| {
                 f.layout_no_wrap(group_label.to_string(), footer_font.clone(), Color32::WHITE)
                     .size()
                     .x
             });
             let footer_w = tiles_resp.response.rect.width().max(label_w + 16.0);
-            let (footer_rect, _) = ui.allocate_exact_size(Vec2::new(footer_w, 15.0), Sense::hover());
+            let (footer_rect, _) = ui.allocate_exact_size(Vec2::new(footer_w, 15.5), Sense::hover());
             ui.painter().rect_filled(footer_rect, CornerRadius::same(4), footer_bg);
             ui.painter().text(
                 footer_rect.center(),
@@ -127,7 +127,7 @@ impl SpatialWorkspaceState {
             );
         });
 
-        let (sep_rect, _) = ui.allocate_exact_size(Vec2::new(6.0, 58.0), Sense::hover());
+        let (sep_rect, _) = ui.allocate_exact_size(Vec2::new(6.0, 64.0), Sense::hover());
         let x = sep_rect.center().x;
         ui.painter().line_segment(
             [
@@ -286,6 +286,7 @@ impl SpatialWorkspaceState {
             {
                 actions.export_archive = true;
             }
+            ui.separator();
             if Self::glass_icon_button(
                 ui,
                 theme,
@@ -312,6 +313,7 @@ impl SpatialWorkspaceState {
             {
                 actions.redo = true;
             }
+            ui.separator();
             if Self::glass_icon_button(
                 ui,
                 theme,
@@ -330,10 +332,10 @@ impl SpatialWorkspaceState {
 
             if !is_mobile && deck_w >= 540.0 {
                 ui.add_space(6.0);
-                let title_max_w = (deck_w - 320.0).max(60.0);
+                let title_max_w = (deck_w - 340.0).max(60.0);
                 ui.allocate_ui_with_layout(
                     Vec2::new(title_max_w, 22.0),
-                    Layout::left_to_right(Align::Center),
+                    Layout::top_down(Align::Center),
                     |ui| {
                         ui.add(
                             egui::Label::new(
@@ -441,7 +443,7 @@ impl SpatialWorkspaceState {
         ScrollArea::horizontal()
             .id_salt("smart_ribbon_category_tabs")
             .max_width(deck_w)
-            .max_height(28.0)
+            .max_height(30.0)
             .auto_shrink([false, true])
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(ui, |ui| {
@@ -452,11 +454,11 @@ impl SpatialWorkspaceState {
                         .add(
                             egui::Button::new(
                                 RichText::new("File")
-                                    .size(10.0)
+                                    .size(10.5)
                                     .strong()
                                     .color(Color32::WHITE),
                             )
-                            .min_size(Vec2::new(40.0, 22.0))
+                            .min_size(Vec2::new(42.0, 24.0))
                             .fill(theme.accent_blue)
                             .stroke(Stroke::NONE)
                             .corner_radius(CornerRadius::same(6)),
@@ -488,14 +490,14 @@ impl SpatialWorkspaceState {
                         } else {
                             theme.text_muted
                         };
-                        let mut rt = RichText::new(tab.label()).size(10.0).color(fg);
+                        let mut rt = RichText::new(tab.label()).size(10.5).color(fg);
                         if active {
                             rt = rt.strong();
                         }
                         if ui
                             .add(
                                 egui::Button::new(rt)
-                                    .min_size(Vec2::new(0.0, 22.0))
+                                    .min_size(Vec2::new(0.0, 24.0))
                                     .fill(fill)
                                     .stroke(stroke)
                                     .corner_radius(CornerRadius::same(6)),
@@ -533,7 +535,7 @@ impl SpatialWorkspaceState {
                 ScrollArea::horizontal()
                     .id_salt(("smart_ribbon_tools", self.active_ribbon_tab as usize))
                     .max_width(inner_w)
-                    .max_height(78.0)
+                    .max_height(84.0)
                     .auto_shrink([false, true])
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                     .show(ui, |ui| {

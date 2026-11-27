@@ -6118,7 +6118,7 @@ use crate::theme::MacTheme;
                     tab.label()
                 );
                 assert!(
-                    r.height() <= 260.0,
+                    r.height() <= 270.0,
                     "Ribbon tab {} expanded excessively in height ({}): {r:?}",
                     tab.label(),
                     r.height()
@@ -6288,14 +6288,14 @@ use crate::theme::MacTheme;
                     );
                     if is_desktop {
                         assert!(
-                            r.width() <= 935.0,
+                            r.width() <= 1140.0,
                             "Desktop Ribbon {} too wide ({}): {r:?}",
                             tab.label(),
                             r.width()
                         );
                     }
                     assert!(
-                        r.height() <= 260.0,
+                        r.height() <= 270.0,
                         "Ribbon {} blew up vertically ({}) at {win_w}x{win_h}: {r:?}",
                         tab.label(),
                         r.height()
@@ -6359,7 +6359,7 @@ use crate::theme::MacTheme;
                 }
                 if is_desktop {
                     assert!(
-                        r.width() <= 1075.0,
+                        r.width() <= 1170.0,
                         "Desktop Layer 2 overlay too wide ({}): {r:?}",
                         r.width()
                     );
