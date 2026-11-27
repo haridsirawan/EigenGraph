@@ -1909,4 +1909,69 @@ mod tests {
             .any(|(a, b)| (a.pos_enu_m[0] - b.pos_enu_m[0]).hypot(a.pos_enu_m[1] - b.pos_enu_m[1]) > 1.0);
         assert!(moved, "Animated traffic vehicles must move forward over time");
     }
+
+    #[test]
+    fn test_v087_full_living_city_ifcx_bundle_roundtrip() {
+        let mut tin = TinSurfaceMesh::generate_from_dem_preset(
+            DemTerrainPreset::ArchipelagoBayAndVolcano,
+            680.0,
+            680.0,
+            46,
+            46,
+            1.0,
+        );
+        let _ = tin.apply_sculpt_brush(0.0, 0.0, crate::core::gis::TerrainSculptBrush::Raise, 45.0, 3.0, 0.0, 0.0);
+
+        let mut city = IfcxCityScene::default();
+        city.active_zone_density = ZoneDensityTier::HighDensity;
+        city.add_curved_road_with_auto_bridge(
+            [-190.0, -180.0],
+            Some([15.0, -145.0]),
+            [45.0, 25.0],
+            IfcxRoadKind::Arterial,
+            false,
+            0.0,
+            Some(&tin),
+            0.0,
+        )
+        .expect("coastal bay bridge");
+        city.add_curved_road_with_auto_bridge(
+            [65.0, -5.0],
+            Some([20.0, 55.0]),
+            [-45.0, 95.0],
+            IfcxRoadKind::Collector,
+            false,
+            0.0,
+            Some(&tin),
+            0.0,
+        )
+        .expect("harbor avenue");
+        let spawned = city.auto_zone_parcels_along_roads(Some(&tin), 0.0, 28.0, 24.0);
+        assert!(spawned >= 2);
+
+        let proj = BimProject::empty();
+        let base = IfcxDocument::from_bim_project(
+            &proj,
+            Some((-6.2088, 106.8456, 0.0)),
+            0.0,
+            None,
+            None,
+            None,
+        );
+        let overlay = tin.export_ifcx_site_terraform_overlay(0.0, 0.0, 120.0, 1);
+        let mut bundle = crate::core::ifcx::IfcxStage::compose_with_site_terraform_overlay(&base, &overlay);
+        for n in city.to_ifcx_nodes("/earth/sites/living_city") {
+            bundle.add_node(n);
+        }
+
+        assert!(bundle.data.iter().any(|n| n.ifc_class() == Some("IfcSite")));
+        assert!(bundle.data.iter().any(|n| n.ifc_class() == Some("IfcRoad")));
+        assert!(bundle.data.iter().any(|n| n.ifc_class() == Some("IfcBridge")));
+        assert!(bundle.data.iter().any(|n| n.ifc_class() == Some("IfcSpatialZone")));
+        assert!(bundle.data.iter().any(|n| n.ifc_class() == Some("IfcBuilding")));
+
+        let restored = IfcxCityScene::from_ifcx_document(&bundle);
+        assert_eq!(restored.roads.len(), city.roads.len());
+        assert_eq!(restored.zones.len(), city.zones.len());
+    }
 }

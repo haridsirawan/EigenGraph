@@ -1873,6 +1873,12 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Clock,
     },
     SlashCommandSpec {
+        cmd: "/export-city",
+        category: "Ambience",
+        description: "Export unified Living City IFCX bundle (roads, bridges, zones, buildings & terrain)",
+        icon: AppIcon::SaveDisk,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",

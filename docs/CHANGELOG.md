@@ -7,7 +7,13 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.7 (9/10)]
+## [0.8.7] — 2026-11-27
+
+### Update 10/10 (`v0.8.7` Milestone Release) — Unified Living City IFCX Export, Full Native + WASM Verification & Release Cut
+- **Unified Living City IFCX Bundle Export (`src/core/gis/city_builder.rs`, `src/views/universal_canvas/mod.rs`, `src/views/spatial_workspace/`)**:
+  - Added [`UniversalCanvasState::export_living_city_ifcx_bundle`](src/views/universal_canvas/mod.rs) composing the active `BimProject`, sculpted `IfcSite` terraform overlay (`eigengraph::gis::site_terraform`), curved `IfcRoad` alignments, coastal cable-stayed `IfcBridge` spans, road-snapped `IfcSpatialZone` lots, and procedural `IfcBuilding` towers into one SHA-256 sealed `EigenGraph_Living_City_v087.ifcx` document, alongside Ribbon `Export City`, `/export-city`, and [`test_v087_full_living_city_ifcx_bundle_roundtrip`](src/core/gis/city_builder.rs).
+- **Release Finalization & Cross-Target Verification (`Cargo.toml`, `src/views/settings.rs`, `docs/IFCX Earth.md`, `docs/CHANGELOG.md`)**:
+  - Bumped crate version `0.8.6` -> `0.8.7`, updated `Settings -> About EigenGraph` Entry #18 and `docs/IFCX Earth.md` Phase 87 documentation, and verified full native `cargo test --lib` + `wasm32-unknown-unknown` build targets.
 
 ### Update 9/10 (`v0.8.6.9` -> `v0.8.7`) — Living City Ambience (Procedural Forests, Dynamic Sun Shadows & Animated Road Traffic)
 - **Living City Ambience Kernel (`src/core/gis/city_builder.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`)**:

@@ -2251,6 +2251,21 @@ impl SpatialWorkspaceState {
                     let lbl = universal_canvas.cycle_living_earth_time_of_day();
                     self.push_trace(format!("Solar Lighting -> {lbl}"), true);
                 }
+                "/export-city" => {
+                    match universal_canvas
+                        .export_living_city_ifcx_bundle(&build_view.bim_bus.project)
+                    {
+                        Ok(dest) => {
+                            self.push_trace(
+                                format!("Exported Living City IFCX Bundle -> {dest}"),
+                                true,
+                            );
+                        }
+                        Err(err) => {
+                            self.push_trace(format!("City IFCX export failed: {err}"), false);
+                        }
+                    }
+                }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");
                     actions.fit_camera = true;

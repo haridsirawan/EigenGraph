@@ -1024,11 +1024,11 @@ impl UniversalCanvasState {
             tin_clone.as_ref(),
             sea,
         );
-        // 2. Curved harbor boulevard & inland scenic collector avenue
+        // 2. Curved harbor boulevard & inland scenic collector avenue on buildable terrace
         let _ = self.city_scene.add_curved_road_with_auto_bridge(
-            [45.0, 25.0],
-            Some([90.0, 35.0]),
-            [115.0, -45.0],
+            [65.0, -5.0],
+            Some([20.0, 55.0]),
+            [-45.0, 95.0],
             crate::core::gis::IfcxRoadKind::Arterial,
             false,
             0.0,
@@ -1037,8 +1037,8 @@ impl UniversalCanvasState {
         );
         let _ = self.city_scene.add_curved_road_with_auto_bridge(
             [45.0, 25.0],
-            Some([-10.0, 82.0]),
-            [-68.0, 108.0],
+            Some([90.0, 35.0]),
+            [115.0, -45.0],
             crate::core::gis::IfcxRoadKind::Collector,
             false,
             0.0,
@@ -1080,6 +1080,50 @@ impl UniversalCanvasState {
         self.world_map.tile_provider = theme;
         self.status_message = Some(format!("Solar Lighting: {label}"));
         label
+    }
+
+    /// Exports the unified Living Earth City IFCX bundle (`IfcSite` terraform + curved `IfcRoad` +
+    /// coastal `IfcBridge` + road-snapped `IfcSpatialZone` + procedural `IfcBuilding` + active BIM)
+    /// sealed with a NIST FIPS 180-4 SHA-256 digest.
+    pub fn export_living_city_ifcx_bundle(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> Result<String, String> {
+        self.ensure_site_tin_generated();
+        let base = crate::core::ifcx::IfcxDocument::from_bim_project(
+            bim_project,
+            Some((self.ground_origin_lat_lon.0, self.ground_origin_lat_lon.1, 0.0)),
+            0.0,
+            None,
+            None,
+            None,
+        );
+        let mut doc = if let Some(ref tin) = self.active_site_tin {
+            let overlay = tin.export_ifcx_site_terraform_overlay(
+                self.sea_level_m,
+                self.terrain_sculpt.total_cut_m3,
+                self.terrain_sculpt.total_fill_m3,
+                self.terrain_sculpt.stroke_count,
+            );
+            crate::core::ifcx::IfcxStage::compose_with_site_terraform_overlay(&base, &overlay)
+        } else {
+            base
+        };
+        for n in self.city_scene.to_ifcx_nodes("/earth/sites/living_city") {
+            doc.add_node(n);
+        }
+        let json = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+        let sha = crate::core::Sha256Hasher::digest_hex(json.as_bytes());
+        let short_sha = &sha[..sha.len().min(12)];
+        let dest = DiskExporter::write_export_file("EigenGraph_Living_City_v087.ifcx", &json)?;
+        let m = self.city_scene.district_metrics();
+        self.status_message = Some(format!(
+            "Exported Living City IFCX ({} nodes, {} Roads/Bridges, {} IfcBuildings, SHA256:{short_sha}) -> {dest}",
+            doc.data.len(),
+            self.city_scene.roads.len(),
+            m.building_count
+        ));
+        Ok(dest)
     }
 
     /// Evaluates seismic pounding gaps, urban wind exposure & Venturi channeling, and debris zones

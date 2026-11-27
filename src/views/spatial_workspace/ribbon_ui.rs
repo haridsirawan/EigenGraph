@@ -1314,6 +1314,20 @@ impl SpatialWorkspaceState {
                         universal_canvas.synthesize_full_living_coastal_city();
                         actions.fit_camera = true;
                     }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::SaveDisk,
+                        "Export City",
+                        false,
+                        theme.accent_blue,
+                        "Export unified Living City IFCX bundle (IfcSite + IfcRoad + IfcBridge + IfcSpatialZone + IfcBuilding + SHA-256)",
+                    )
+                    .clicked()
+                    {
+                        let _ = universal_canvas
+                            .export_living_city_ifcx_bundle(&build_view.bim_bus.project);
+                    }
                 });
                 Self::ribbon_group(ui, theme, "Zoning & Brief", |ui| {
                     if Self::ribbon_tool_tile(

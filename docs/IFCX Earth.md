@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.6` Delivered**  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.7` Delivered**  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% External Raster**  
-> **Current Platform**: EigenGraph `v0.8.6` (AI Building Design Agent `Concept -> BIM` + 9-Studio Engineering Suite `S-106`–`S-115` & Master Dossier Drawing Index `S-000` on Pure WebGPU/WGSL)  
+> **Current Platform**: EigenGraph `v0.8.7` (*Cities: Skylines II × IFCX* Living Earth World-Building + 3D Solar OTTV & Interior Daylight Studios + Smart Layered 10-Category AEC Ribbon on Pure WebGPU/WGSL)  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -266,3 +266,12 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
   - **Spatial Program (`v0.8.5.7`, `material_kind = 24.0`)**: 5 building typologies, vertical stacking, deterministic binary slicing-tree 2D floor-plate packing & AEC adjacency matrix (`eigengraph::design::spatial_program`).
   - **Massing Explorer & 1-Click Mass-to-BIM (`v0.8.5.8`, `material_kind = 25.0`)**: 4 massing archetypes (`PodiumTower`, `CourtyardBlock`, `LinearSlabBar`, `SteppedTerrace`) with EigenGate ARI, DCR%, 5D Cost, 6D Carbon & instant parametric `BimProject` synthesis (`eigengraph::design::massing_study`).
   - **Chained 6-Stage AI Design Agent & Sheet `S-115` (`v0.8.5.9`–`v0.8.6`)**: Natural-language RFP brief -> 6-stage pipeline + live EigenGate 6-DOF audit (`eigengraph::design::concept_pipeline`), archival A3 Sheet `S-115` integrated into Master Index `S-000` (`S-100`–`S-115`), and Minimalist 100% Icon-Only Liquid Glass Dynamic Island chrome.
+
+### Phase 87 (`v0.8.7`) — *Cities: Skylines II × IFCX* Living Earth World-Building, Solar/Daylight Studios & Smart Layered Ribbon *(Implemented)*
+- **Building Physics Studios & Smart Layered Ribbon (`v0.8.6.1`–`v0.8.6.4`)**:
+  - **Solar OTTV & Cast Shadows (`material_kind = 26.0`, `eigengraph::design::solar_ottv`)** and **Interior Daylight Autonomy `sDA/ASE/DGP` & LEED v4.1 Finishes (`material_kind = 27.0`, `eigengraph::design::daylight_interior`)**.
+  - **Smart Layered 10-Category AEC Lifecycle Ribbon Dynamic Island** (`ribbon_ui.rs`) and full **Feature & Mathematical Logic Reference Catalog** inside `Settings -> About EigenGraph` (`ENGINEERING_MATH_CATALOG`).
+- ***Cities: Skylines II × IFCX* Procedural Earth & Living City Suite (`v0.8.6.5`–`v0.8.7`)**:
+  - **Realistic Biome Mountains & Coastal Ocean WGSL (`material_kind = 28.0 / 29.0`)**: Multi-octave Gerstner waves, Beer-Lambert optical depth absorption, animated shoreline surf foam, stratified rock cliffs, snow peaks, `ArchipelagoBayAndVolcano`, `FjordRiverValley`, and `CoastalIslandMetropolis`.
+  - **Live 3D `IfcSite` Terrain & Water Sculpting (`eigengraph::gis::site_terraform`)**: Interactive `Raise`, `Lower`, `Flatten`, `Smooth`, and `CarveWater` brushes with real-time prismoidal cut/fill telemetry and undo history.
+  - **Curved Bézier `IfcRoad` & Cable-Stayed Auto-Bridge Splines + Road-Snapped `IfcSpatialZone` -> `IfcBuilding` Spawner (`NS_EG_CITY_BUILDING`) + Living City Ambience (`material_kind = 30.0`)**: Procedural hillside forests, sun-azimuth cast shadows, bidirectional animated traffic with dusk/night headlights, and unified SHA-256 sealed Living City IFCX bundle export (`/export-city`).
