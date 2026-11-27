@@ -107,6 +107,10 @@ pub struct UniversalCanvasState {
     pub realistic_landscape_enabled: bool,
     pub sea_level_m: f32,
     pub show_water_surface: bool,
+    // Update v0.8.6.6 (6/10 -> v0.8.7): Interactive 3D Terrain & Water Sculpting (`IfcSite` Live Terraform)
+    pub terrain_sculpt: crate::core::gis::TerrainSculptConfig,
+    pub terrain_sculpt_undo_stack: Vec<Vec<f32>>,
+    pub terrain_sculpt_hover_enu: Option<[f32; 2]>,
     pub hovered_world_building_rel_path: Option<String>,
     // Phase 59 & 64: Offline Pure-Vector Site Layer, OpenBIM IFC Site TIN & Neighborhood Physics
     pub urban_vectors: crate::core::gis::UrbanVectorLayerCache,
@@ -334,6 +338,9 @@ impl Default for UniversalCanvasState {
             realistic_landscape_enabled: true,
             sea_level_m: 0.0,
             show_water_surface: true,
+            terrain_sculpt: crate::core::gis::TerrainSculptConfig::default(),
+            terrain_sculpt_undo_stack: Vec::new(),
+            terrain_sculpt_hover_enu: None,
             hovered_world_building_rel_path: None,
             urban_vectors: crate::core::gis::UrbanVectorLayerCache::default(),
             site_tin_from_ifc: false,
@@ -511,8 +518,164 @@ impl UniversalCanvasState {
         self.show_terrain_contours = true;
         self.realistic_landscape_enabled = true;
         self.show_water_surface = preset.has_coastal_water();
+        self.terrain_sculpt_undo_stack.clear();
+        self.terrain_sculpt.total_cut_m3 = 0.0;
+        self.terrain_sculpt.total_fill_m3 = 0.0;
+        self.terrain_sculpt.stroke_count = 0;
         self.active_site_tin = None;
         self.ensure_site_tin_generated();
+    }
+
+    /// Equips or clears an interactive 3D terrain sculpting brush (`IfcSite` Live Terraform).
+    pub fn set_terrain_sculpt_brush(
+        &mut self,
+        brush: Option<crate::core::gis::TerrainSculptBrush>,
+    ) {
+        self.terrain_sculpt.active_brush = brush;
+        if let Some(b) = brush {
+            self.globe_mode = true;
+            self.show_terrain_contours = true;
+            self.realistic_landscape_enabled = true;
+            self.ensure_site_tin_generated();
+            if b == crate::core::gis::TerrainSculptBrush::CarveWater {
+                self.show_water_surface = true;
+            }
+            self.status_message = Some(format!(
+                "Terraform Brush: {} (R={:.0}m • Left-drag sculpts terrain, Right-drag orbits)",
+                b.label(),
+                self.terrain_sculpt.brush_radius_m
+            ));
+        } else {
+            self.terrain_sculpt_hover_enu = None;
+        }
+    }
+
+    /// Reverts the most recent terrain sculpt stroke using stored elevation snapshots.
+    pub fn undo_terrain_sculpt(&mut self) -> bool {
+        let Some(prev) = self.terrain_sculpt_undo_stack.pop() else {
+            self.status_message = Some("No terrain sculpt steps left to undo".to_string());
+            return false;
+        };
+        if let Some(ref mut tin) = self.active_site_tin {
+            if tin.restore_elevations_snapshot(&prev) {
+                self.status_message = Some(format!(
+                    "Reverted terrain sculpt stroke (TIN rev {}, {} undo steps remaining)",
+                    tin.revision,
+                    self.terrain_sculpt_undo_stack.len()
+                ));
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Exports non-destructive `IfcSite` sculpted topography + cut/fill quantities into an `.ifcx` file.
+    pub fn export_site_terraform_ifcx(&mut self, bim_project: &BimProject) -> Result<String, String> {
+        self.ensure_site_tin_generated();
+        let tin = self
+            .active_site_tin
+            .as_ref()
+            .ok_or_else(|| "No active IfcSite TIN mesh".to_string())?;
+        let overlay = tin.export_ifcx_site_terraform_overlay(
+            self.sea_level_m,
+            self.terrain_sculpt.total_cut_m3,
+            self.terrain_sculpt.total_fill_m3,
+            self.terrain_sculpt.stroke_count,
+        );
+        let base = crate::core::ifcx::IfcxDocument::from_bim_project(
+            bim_project,
+            Some((self.ground_origin_lat_lon.0, self.ground_origin_lat_lon.1, 0.0)),
+            0.0,
+            None,
+            None,
+            None,
+        );
+        let composed =
+            crate::core::ifcx::IfcxStage::compose_with_site_terraform_overlay(&base, &overlay);
+        let json = serde_json::to_string_pretty(&composed).map_err(|e| e.to_string())?;
+        let dest = DiskExporter::write_export_file("EigenGraph_Site_Terraform.ifcx", &json)?;
+        self.status_message = Some(format!(
+            "Exported IfcSite Terraform IFCX (Cut {:.0} m³ / Fill {:.0} m³, rev {}) -> {dest}",
+            overlay.total_cut_m3, overlay.total_fill_m3, overlay.revision
+        ));
+        Ok(dest)
+    }
+
+    fn paint_terrain_sculpt_brush_ring(
+        &self,
+        painter: &egui::Painter,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        let Some(brush) = self.terrain_sculpt.active_brush else {
+            return;
+        };
+        let Some([cx_m, cy_m]) = self.terrain_sculpt_hover_enu else {
+            return;
+        };
+        let (center_z, ref_z) = if let Some(ref tin) = self.active_site_tin {
+            (
+                tin.sample_elevation_and_slope(cx_m, cy_m).0,
+                tin.sample_elevation_and_slope(0.0, 0.0).0,
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        let accent = match brush {
+            crate::core::gis::TerrainSculptBrush::Raise => Color32::from_rgb(245, 165, 62),
+            crate::core::gis::TerrainSculptBrush::Lower => Color32::from_rgb(235, 92, 82),
+            crate::core::gis::TerrainSculptBrush::Flatten => Color32::from_rgb(92, 206, 134),
+            crate::core::gis::TerrainSculptBrush::Smooth => Color32::from_rgb(172, 136, 245),
+            crate::core::gis::TerrainSculptBrush::CarveWater => Color32::from_rgb(56, 198, 245),
+        };
+        for (rad_scale, alpha) in [(1.0_f32, 220_u8), (0.50, 120)] {
+            let rad = self.terrain_sculpt.brush_radius_m.clamp(8.0, 240.0) * rad_scale;
+            let mut pts = Vec::with_capacity(33);
+            for i in 0..=32 {
+                let ang = (i as f32 / 32.0) * std::f32::consts::TAU;
+                let px = cx_m + rad * ang.cos();
+                let py = cy_m + rad * ang.sin();
+                let pz = if let Some(ref tin) = self.active_site_tin {
+                    tin.sample_elevation_and_slope(px, py).0 - ref_z + 0.35
+                } else {
+                    0.35
+                };
+                let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                    self.ground_origin_lat_lon,
+                    [px as f64 * 1000.0, py as f64 * 1000.0],
+                );
+                if let Some((sp, _, true)) = xform.project_lat_lon_elev(ll.0, ll.1, pz as f64) {
+                    pts.push(sp);
+                }
+            }
+            if pts.len() >= 3 {
+                painter.add(egui::Shape::line(
+                    pts,
+                    Stroke::new(if rad_scale > 0.7 { 2.2 } else { 1.3 }, accent.gamma_multiply(alpha as f32 / 255.0)),
+                ));
+            }
+        }
+        let center_ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+            self.ground_origin_lat_lon,
+            [cx_m as f64 * 1000.0, cy_m as f64 * 1000.0],
+        );
+        if let Some((cp, _, true)) =
+            xform.project_lat_lon_elev(center_ll.0, center_ll.1, (center_z - ref_z + 0.5) as f64)
+        {
+            painter.circle_filled(cp, 3.5, accent);
+            let tag = format!(
+                "{} • R={:.0}m • Z={:+.1}m",
+                brush.short_label(),
+                self.terrain_sculpt.brush_radius_m,
+                center_z
+            );
+            painter.text(
+                cp + egui::vec2(10.0, -14.0),
+                egui::Align2::LEFT_BOTTOM,
+                tag,
+                egui::FontId::proportional(11.0),
+                Color32::WHITE,
+            );
+        }
     }
 
     /// Evaluates seismic pounding gaps, urban wind exposure & Venturi channeling, and debris zones
@@ -1662,6 +1825,7 @@ impl UniversalCanvasState {
             realistic_landscape_enabled: self.realistic_landscape_enabled,
             sea_level_m: self.sea_level_m,
             show_water_surface: self.show_water_surface,
+            terrain_sculpt: self.terrain_sculpt.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -1816,6 +1980,8 @@ impl UniversalCanvasState {
         self.realistic_landscape_enabled = archive.realistic_landscape_enabled;
         self.sea_level_m = archive.sea_level_m;
         self.show_water_surface = archive.show_water_surface;
+        self.terrain_sculpt = archive.terrain_sculpt;
+        self.terrain_sculpt_undo_stack.clear();
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -2770,6 +2936,9 @@ impl UniversalCanvasState {
                         tin,
                     );
                 }
+            }
+            if let Some(ref xform) = active_globe_xform {
+                self.paint_terrain_sculpt_brush_ring(&painter, xform);
             }
             self.paint_planetary_world_buildings(&painter, rect, theme);
             if self.show_neighborhood_hazards {

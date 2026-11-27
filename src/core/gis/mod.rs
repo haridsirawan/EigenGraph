@@ -68,5 +68,7 @@ pub use crs_projection::{
 };
 
 pub use tin_surface::{
-    ContourPolyline, CutFillVolumeReport, DemTerrainPreset, TinPoint, TinSurfaceMesh, TinTriangle,
+    ContourPolyline, CutFillVolumeReport, DemTerrainPreset, SiteTerraformIfcxOverlay,
+    TerrainSculptBrush, TerrainSculptConfig, TerrainSculptStrokeResult, TinPoint, TinSurfaceMesh,
+    TinTriangle,
 };

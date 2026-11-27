@@ -1741,6 +1741,48 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Globe,
     },
     SlashCommandSpec {
+        cmd: "/raise",
+        category: "Terraform",
+        description: "Activate 3D Terrain Raise sculpting brush (/sculpt)",
+        icon: AppIcon::Mountain,
+    },
+    SlashCommandSpec {
+        cmd: "/lower",
+        category: "Terraform",
+        description: "Activate 3D Terrain Excavate Lower sculpting brush",
+        icon: AppIcon::ArrowDown,
+    },
+    SlashCommandSpec {
+        cmd: "/flatten",
+        category: "Terraform",
+        description: "Activate 3D Pad Flatten brush (optional target elevation in m)",
+        icon: AppIcon::Slab,
+    },
+    SlashCommandSpec {
+        cmd: "/smooth",
+        category: "Terraform",
+        description: "Activate 3D Slope Smooth sculpting brush",
+        icon: AppIcon::Sparkles,
+    },
+    SlashCommandSpec {
+        cmd: "/carve",
+        category: "Terraform",
+        description: "Activate Carve Sea / River Channel brush below water datum",
+        icon: AppIcon::Waves,
+    },
+    SlashCommandSpec {
+        cmd: "/sealevel",
+        category: "Terraform",
+        description: "Adjust coastal sea level elevation datum (e.g. /sealevel 1.5)",
+        icon: AppIcon::Waves,
+    },
+    SlashCommandSpec {
+        cmd: "/sculpt-ifcx",
+        category: "Terraform",
+        description: "Export sculpted IfcSite topography & cut/fill balance to .ifcx",
+        icon: AppIcon::SaveDisk,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",

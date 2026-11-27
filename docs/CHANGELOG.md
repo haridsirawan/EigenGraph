@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.7 (5/10)]
+## [Unreleased — Next: v0.8.7 (6/10)]
+
+### Update 6/10 (`v0.8.6.6` -> `v0.8.7`) — Interactive 3D Terrain & Water Sculpting (`IfcSite` Live Terraform)
+- **Live 3D TIN Sculpting Engine (`src/core/gis/tin_surface.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`)**:
+  - Added [`TerrainSculptBrush`](src/core/gis/tin_surface.rs) (`Raise`, `Lower`, `Flatten`, `Smooth`, `CarveWater`), [`TerrainSculptConfig`](src/core/gis/tin_surface.rs), [`TerrainSculptStrokeResult`](src/core/gis/tin_surface.rs), and [`SiteTerraformIfcxOverlay`](src/core/gis/tin_surface.rs).
+  - Added `revision` tracking, [`TinSurfaceMesh::apply_sculpt_brush`](src/core/gis/tin_surface.rs) with quadratic falloff, selective triangle slope recomputation, cut/fill earthwork volume accumulation (`m³`), [`TinSurfaceMesh::restore_elevations_snapshot`](src/core/gis/tin_surface.rs) undo support, and [`test_v0866_interactive_terrain_sculpt_raise_flatten_smooth_and_carve_water`](src/core/gis/tin_surface.rs).
+- **`IfcSite` IFCX Sync & Real-Time WebGPU Mesh Rebuild (`src/core/ifcx.rs`, `src/views/webgpu_earth/mod.rs`)**:
+  - Registered namespace `eigengraph::gis::site_terraform` via [`IfcxStage::compose_with_site_terraform_overlay`](src/core/ifcx.rs) and coupled `TinSurfaceMesh::revision` into WebGPU site & coastal water cache hashes so sculpt strokes immediately update biome cliffs, seabed depth, and shoreline foam.
+- **3D Raycast Sculpting, Brush Ring HUD, Persistence & Ribbon UX (`src/views/universal_canvas/`, `src/views/spatial_workspace/`)**:
+  - Wired live raycast sculpting (`interaction.rs`), projected 3D falloff brush ring overlay (`paint_terrain_sculpt_brush_ring`), undo stack, `.eigen.json` `terrain_sculpt` persistence, horizontal `"Terraform"` ribbon group + live Radius/Power/Sea/Cut-Fill bar (`ribbon_ui.rs`), and `/raise`, `/lower`, `/flatten`, `/smooth`, `/carve`, `/sealevel`, `/sculpt-ifcx` commands.
 
 ### Update 5/10 (`v0.8.6.5` -> `v0.8.7`) — Realistic Living Earth Landscape Engine (`Cities: Skylines II × IFCX`: Mountains, Biomes, Ocean Waves & Shoreline Foam)
 - **Coastal & Mountain Morphology Presets (`src/core/gis/tin_surface.rs`)**:

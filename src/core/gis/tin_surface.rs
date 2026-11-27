@@ -146,6 +146,118 @@ pub struct CutFillVolumeReport {
     pub mean_slope_deg: f32,
 }
 
+/// Interactive 3D terrain & water sculpting brush mode for live `IfcSite` terraforming.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TerrainSculptBrush {
+    /// Uplifts terrain ridges, embankments, and mountain peaks
+    Raise,
+    /// Excavates terrain cuts, valleys, and basins
+    Lower,
+    /// Grades surrounding terrain smoothly to the sampled/target building pad elevation
+    Flatten,
+    /// Relaxes jagged triangle slopes into smooth natural contours
+    Smooth,
+    /// Excavates river channels, harbors, and coastal sea basins below sea level
+    CarveWater,
+}
+
+impl TerrainSculptBrush {
+    pub const ALL: [Self; 5] = [
+        Self::Raise,
+        Self::Lower,
+        Self::Flatten,
+        Self::Smooth,
+        Self::CarveWater,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Raise => "Raise Peak",
+            Self::Lower => "Excavate Lower",
+            Self::Flatten => "Flatten Pad",
+            Self::Smooth => "Smooth Slopes",
+            Self::CarveWater => "Carve Sea / River",
+        }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Raise => "Raise",
+            Self::Lower => "Lower",
+            Self::Flatten => "Flatten",
+            Self::Smooth => "Smooth",
+            Self::CarveWater => "Carve Sea",
+        }
+    }
+
+    pub fn tooltip(self) -> &'static str {
+        match self {
+            Self::Raise => "Click/drag on 3D terrain to raise hills and mountain ridges",
+            Self::Lower => "Click/drag on 3D terrain to excavate valleys and cuts",
+            Self::Flatten => "Click/drag to level buildable harbor/building pads cleanly",
+            Self::Smooth => "Click/drag to soften steep cliff slopes toward local mean grade",
+            Self::CarveWater => {
+                "Click/drag to carve navigable riverbeds or coastal harbors below sea level"
+            }
+        }
+    }
+}
+
+/// Persisted interactive terrain sculpting brush configuration and cumulative earthwork ledger.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TerrainSculptConfig {
+    pub active_brush: Option<TerrainSculptBrush>,
+    pub brush_radius_m: f32,
+    pub brush_strength_m: f32,
+    pub target_flatten_z_m: f32,
+    pub auto_sample_flatten: bool,
+    pub total_cut_m3: f64,
+    pub total_fill_m3: f64,
+    pub stroke_count: u64,
+}
+
+impl Default for TerrainSculptConfig {
+    fn default() -> Self {
+        Self {
+            active_brush: None,
+            brush_radius_m: 48.0,
+            brush_strength_m: 3.0,
+            target_flatten_z_m: 3.2,
+            auto_sample_flatten: true,
+            total_cut_m3: 0.0,
+            total_fill_m3: 0.0,
+            stroke_count: 0,
+        }
+    }
+}
+
+/// Telemetry returned by a single interactive terrain sculpting stroke.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TerrainSculptStrokeResult {
+    pub modified_vertices: usize,
+    pub delta_cut_m3: f64,
+    pub delta_fill_m3: f64,
+    pub center_elev_after_m: f32,
+    pub max_slope_deg_after: f32,
+}
+
+/// Non-destructive IFC 5 / IFCX overlay summary for sculpted `IfcSite` topography.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SiteTerraformIfcxOverlay {
+    pub sea_level_m: f32,
+    pub min_elevation_m: f32,
+    pub max_elevation_m: f32,
+    pub vertex_count: usize,
+    pub triangle_count: usize,
+    pub total_cut_m3: f64,
+    pub total_fill_m3: f64,
+    pub net_earthwork_m3: f64,
+    pub max_slope_deg: f32,
+    pub steep_hazard_ratio_pct: f32,
+    pub sculpt_strokes: u64,
+    pub revision: u64,
+}
+
 /// Phase 25 Topographic TIN Surface Mesh (`src/core/gis/tin_surface.rs`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TinSurfaceMesh {
@@ -167,6 +279,9 @@ pub struct TinSurfaceMesh {
     pub grid_cols: usize,
     /// Number of raster rows if generated from a structured DEM grid
     pub grid_rows: usize,
+    /// Monotonic revision counter incremented on every live terrain sculpt or restore
+    #[serde(default)]
+    pub revision: u64,
 }
 
 impl Default for TinSurfaceMesh {
@@ -268,6 +383,7 @@ impl TinSurfaceMesh {
             extent_y_m,
             grid_cols: cols,
             grid_rows: rows,
+            revision: 0,
         }
     }
 
@@ -311,6 +427,7 @@ impl TinSurfaceMesh {
             extent_y_m: (max_y - min_y).max(10.0),
             grid_cols: 0,
             grid_rows: 0,
+            revision: 0,
         }
     }
 
@@ -328,6 +445,7 @@ impl TinSurfaceMesh {
                 extent_y_m: 500.0,
                 grid_cols: 0,
                 grid_rows: 0,
+                revision: 0,
             };
         }
 
@@ -448,6 +566,7 @@ impl TinSurfaceMesh {
             extent_y_m: dy,
             grid_cols: 0,
             grid_rows: 0,
+            revision: 0,
         }
     }
 
@@ -828,6 +947,180 @@ impl TinSurfaceMesh {
         }
         (0.5 * (self.min_elevation + self.max_elevation), 0.0)
     }
+
+    /// Applies an interactive radial sculpting stroke to the TIN surface mesh at site ENU `(cx_m, cy_m)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_sculpt_brush(
+        &mut self,
+        cx_m: f32,
+        cy_m: f32,
+        brush: TerrainSculptBrush,
+        radius_m: f32,
+        strength_m: f32,
+        target_z_m: f32,
+        sea_level_m: f32,
+    ) -> TerrainSculptStrokeResult {
+        if self.points.is_empty() {
+            return TerrainSculptStrokeResult {
+                modified_vertices: 0,
+                delta_cut_m3: 0.0,
+                delta_fill_m3: 0.0,
+                center_elev_after_m: 0.0,
+                max_slope_deg_after: 0.0,
+            };
+        }
+        let r = radius_m.clamp(8.0, 240.0);
+        let r_sq = r * r;
+        let strength = strength_m.clamp(0.1, 25.0);
+        let cell_area_m2 =
+            ((self.extent_x_m * self.extent_y_m) / self.points.len().max(1) as f32).max(1.0)
+                as f64;
+
+        let mean_in_brush = if brush == TerrainSculptBrush::Smooth {
+            let mut sum_w = 0.0_f32;
+            let mut sum_wz = 0.0_f32;
+            for p in &self.points {
+                let d2 = (p.x - cx_m).powi(2) + (p.y - cy_m).powi(2);
+                if d2 <= r_sq {
+                    let t = 1.0 - (d2 / r_sq);
+                    let w = t * t + 0.05;
+                    sum_w += w;
+                    sum_wz += w * p.z;
+                }
+            }
+            if sum_w > 1e-6 {
+                sum_wz / sum_w
+            } else {
+                self.sample_elevation_and_slope(cx_m, cy_m).0
+            }
+        } else {
+            0.0
+        };
+
+        let mut modified_mask = vec![false; self.points.len()];
+        let mut modified_vertices = 0usize;
+        let mut delta_cut_m3 = 0.0_f64;
+        let mut delta_fill_m3 = 0.0_f64;
+        let bed_target = (sea_level_m - 6.5).min(target_z_m);
+
+        for (idx, p) in self.points.iter_mut().enumerate() {
+            let d2 = (p.x - cx_m).powi(2) + (p.y - cy_m).powi(2);
+            if d2 > r_sq {
+                continue;
+            }
+            let t = (1.0 - (d2 / r_sq)).clamp(0.0, 1.0);
+            let w = t * t;
+            if w <= 1e-4 {
+                continue;
+            }
+            let old_z = p.z;
+            let dz = match brush {
+                TerrainSculptBrush::Raise => strength * w,
+                TerrainSculptBrush::Lower => -strength * w,
+                TerrainSculptBrush::Flatten => (target_z_m - old_z) * (0.48 * w).clamp(0.0, 1.0),
+                TerrainSculptBrush::Smooth => {
+                    (mean_in_brush - old_z) * (0.55 * w).clamp(0.0, 1.0)
+                }
+                TerrainSculptBrush::CarveWater => {
+                    let pull_down = (bed_target - old_z).min(0.0) * (0.45 * w) - 0.35 * strength * w;
+                    let floor_lim = (sea_level_m - 15.0) - old_z;
+                    pull_down.max(floor_lim)
+                }
+            };
+            let new_z = (old_z + dz).clamp(-40.0, 320.0);
+            let actual_dz = new_z - old_z;
+            if actual_dz.abs() > 1e-5 {
+                p.z = new_z;
+                modified_mask[idx] = true;
+                modified_vertices += 1;
+                if actual_dz > 0.0 {
+                    delta_fill_m3 += actual_dz as f64 * cell_area_m2;
+                } else {
+                    delta_cut_m3 += (-actual_dz) as f64 * cell_area_m2;
+                }
+            }
+        }
+
+        if modified_vertices > 0 {
+            self.recompute_metrics_for_mask(&modified_mask);
+            self.revision = self.revision.saturating_add(1);
+        }
+
+        let (center_elev_after_m, _) = self.sample_elevation_and_slope(cx_m, cy_m);
+        let max_slope_deg_after = self
+            .triangle_metrics
+            .iter()
+            .fold(0.0_f32, |m, tm| m.max(tm.slope_deg));
+
+        TerrainSculptStrokeResult {
+            modified_vertices,
+            delta_cut_m3,
+            delta_fill_m3,
+            center_elev_after_m,
+            max_slope_deg_after,
+        }
+    }
+
+    fn recompute_metrics_for_mask(&mut self, modified_mask: &[bool]) {
+        let mut min_z = f32::INFINITY;
+        let mut max_z = f32::NEG_INFINITY;
+        for p in &self.points {
+            min_z = min_z.min(p.z);
+            max_z = max_z.max(p.z);
+        }
+        self.min_elevation = if min_z.is_finite() { min_z } else { 0.0 };
+        self.max_elevation = if max_z.is_finite() { max_z } else { 0.0 };
+
+        for (ti, tri) in self.triangles.iter().enumerate() {
+            if modified_mask.is_empty()
+                || modified_mask[tri[0]]
+                || modified_mask[tri[1]]
+                || modified_mask[tri[2]]
+            {
+                if let Some(slot) = self.triangle_metrics.get_mut(ti) {
+                    *slot = Self::compute_triangle_metrics(&self.points, *tri);
+                }
+            }
+        }
+    }
+
+    /// Restores vertex elevations from an undo snapshot and updates triangle slope metrics.
+    pub fn restore_elevations_snapshot(&mut self, elevations: &[f32]) -> bool {
+        if elevations.len() != self.points.len() {
+            return false;
+        }
+        for (p, &z) in self.points.iter_mut().zip(elevations.iter()) {
+            p.z = z;
+        }
+        self.recompute_metrics_for_mask(&[]);
+        self.revision = self.revision.saturating_add(1);
+        true
+    }
+
+    /// Summarizes sculpted `IfcSite` topography into a non-destructive IFCX overlay struct.
+    pub fn export_ifcx_site_terraform_overlay(
+        &self,
+        sea_level_m: f32,
+        total_cut_m3: f64,
+        total_fill_m3: f64,
+        sculpt_strokes: u64,
+    ) -> SiteTerraformIfcxOverlay {
+        let cut_fill = self.compute_cut_fill_report(sea_level_m, 30.0);
+        SiteTerraformIfcxOverlay {
+            sea_level_m,
+            min_elevation_m: self.min_elevation,
+            max_elevation_m: self.max_elevation,
+            vertex_count: self.points.len(),
+            triangle_count: self.triangles.len(),
+            total_cut_m3,
+            total_fill_m3,
+            net_earthwork_m3: total_fill_m3 - total_cut_m3,
+            max_slope_deg: cut_fill.max_slope_deg,
+            steep_hazard_ratio_pct: cut_fill.steep_hazard_ratio_pct,
+            sculpt_strokes,
+            revision: self.revision,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -908,5 +1201,68 @@ mod tests {
                 "{preset:?} must maintain a buildable harbor terrace at (0,0), got z={origin_z}"
             );
         }
+    }
+
+    #[test]
+    fn test_v0866_interactive_terrain_sculpt_raise_flatten_smooth_and_carve_water() {
+        let mut tin = TinSurfaceMesh::generate_from_dem_preset(
+            DemTerrainPreset::ArchipelagoBayAndVolcano,
+            400.0,
+            400.0,
+            28,
+            28,
+            1.0,
+        );
+        let snap_orig: Vec<f32> = tin.points.iter().map(|p| p.z).collect();
+        let (orig_center, _) = tin.sample_elevation_and_slope(0.0, 0.0);
+
+        // 1. Raise mound at origin
+        let raise_res =
+            tin.apply_sculpt_brush(0.0, 0.0, TerrainSculptBrush::Raise, 60.0, 5.0, 0.0, 0.0);
+        assert!(raise_res.modified_vertices > 5);
+        assert!(raise_res.delta_fill_m3 > 100.0);
+        assert!(raise_res.center_elev_after_m > orig_center + 1.0);
+        assert_eq!(tin.revision, 1);
+
+        // 2. Smooth reduces sharpness
+        let smooth_res =
+            tin.apply_sculpt_brush(0.0, 0.0, TerrainSculptBrush::Smooth, 60.0, 3.0, 0.0, 0.0);
+        assert!(smooth_res.modified_vertices > 0);
+        assert_eq!(tin.revision, 2);
+
+        // 3. Lower reduces elevation
+        let lower_res =
+            tin.apply_sculpt_brush(0.0, 0.0, TerrainSculptBrush::Lower, 60.0, 4.0, 0.0, 0.0);
+        assert!(lower_res.delta_cut_m3 > 50.0);
+        assert!(lower_res.center_elev_after_m < raise_res.center_elev_after_m);
+
+        // 4. Flatten toward +6.0m pad
+        let _ = tin.apply_sculpt_brush(0.0, 0.0, TerrainSculptBrush::Flatten, 55.0, 3.0, 6.0, 0.0);
+        let (z_flat, _) = tin.sample_elevation_and_slope(0.0, 0.0);
+        assert!((z_flat - 6.0).abs() < 4.5);
+
+        // 5. CarveWater digs inland ground below sea level (0.0m)
+        for _ in 0..4 {
+            tin.apply_sculpt_brush(0.0, 0.0, TerrainSculptBrush::CarveWater, 65.0, 4.5, 0.0, 0.0);
+        }
+        let (z_canal, _) = tin.sample_elevation_and_slope(0.0, 0.0);
+        assert!(
+            z_canal < -0.5,
+            "CarveWater must dig below 0.0m sea level so coastal water fills in, got {z_canal}"
+        );
+
+        let overlay = tin.export_ifcx_site_terraform_overlay(
+            0.0,
+            lower_res.delta_cut_m3,
+            raise_res.delta_fill_m3,
+            5,
+        );
+        assert_eq!(overlay.sculpt_strokes, 5);
+        assert_eq!(overlay.revision, tin.revision);
+
+        // 6. Snapshot restore cleanly resets elevations
+        assert!(tin.restore_elevations_snapshot(&snap_orig));
+        let (z_restored, _) = tin.sample_elevation_and_slope(0.0, 0.0);
+        assert!((z_restored - orig_center).abs() < 1e-4);
     }
 }

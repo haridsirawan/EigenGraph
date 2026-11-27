@@ -1794,6 +1794,7 @@ impl WebGpuEarthState {
             mix(&mut h, t.min_elevation.to_bits() as u64);
             mix(&mut h, (t.max_elevation * 100.0) as i32 as u64);
             mix(&mut h, t.extent_x_m.to_bits() as u64);
+            mix(&mut h, t.revision.wrapping_mul(0x9E37_79B9_7F4A_7C15));
         }
         mix(&mut h, world_index.buildings.len() as u64);
         for b in world_index.buildings.iter().take(64) {
@@ -2837,7 +2838,8 @@ impl WebGpuEarthState {
                     ^ ws.sea_level_m.to_bits() as u64
                     ^ t.min_elevation.to_bits().rotate_left(13) as u64
                     ^ t.max_elevation.to_bits().rotate_left(23) as u64
-                    ^ u64::from(ws.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                    ^ t.revision.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    ^ u64::from(ws.visible).wrapping_mul(0x517C_C1B7_2722_0A95);
                 if rev != self.cached_water_surface_hash {
                     let mesh = build_rtc_coastal_water_mesh(ws);
                     self.last_water_surface_tris = mesh.indices.len() / 3;

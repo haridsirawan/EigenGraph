@@ -2083,6 +2083,67 @@ impl SpatialWorkspaceState {
                         true,
                     );
                 }
+                "/sculpt" | "/raise" => {
+                    universal_canvas.set_terrain_sculpt_brush(Some(
+                        crate::core::gis::TerrainSculptBrush::Raise,
+                    ));
+                    self.push_trace("Activated 3D Terrain Raise Brush", true);
+                }
+                "/lower" => {
+                    universal_canvas.set_terrain_sculpt_brush(Some(
+                        crate::core::gis::TerrainSculptBrush::Lower,
+                    ));
+                    self.push_trace("Activated 3D Terrain Lower Brush", true);
+                }
+                "/flatten" => {
+                    if let Ok(z) = arg.parse::<f32>() {
+                        universal_canvas.terrain_sculpt.target_flatten_z_m = z.clamp(-20.0, 200.0);
+                        universal_canvas.terrain_sculpt.auto_sample_flatten = false;
+                    } else {
+                        universal_canvas.terrain_sculpt.auto_sample_flatten = true;
+                    }
+                    universal_canvas.set_terrain_sculpt_brush(Some(
+                        crate::core::gis::TerrainSculptBrush::Flatten,
+                    ));
+                    self.push_trace("Activated 3D Terrain Flatten Pad Brush", true);
+                }
+                "/smooth" => {
+                    universal_canvas.set_terrain_sculpt_brush(Some(
+                        crate::core::gis::TerrainSculptBrush::Smooth,
+                    ));
+                    self.push_trace("Activated 3D Terrain Smooth Brush", true);
+                }
+                "/carve" => {
+                    universal_canvas.set_terrain_sculpt_brush(Some(
+                        crate::core::gis::TerrainSculptBrush::CarveWater,
+                    ));
+                    self.push_trace("Activated 3D Carve Sea / River Channel Brush", true);
+                }
+                "/sealevel" => {
+                    if let Ok(sl) = arg.parse::<f32>() {
+                        universal_canvas.sea_level_m = sl.clamp(-10.0, 20.0);
+                        universal_canvas.show_terrain_contours = true;
+                        universal_canvas.realistic_landscape_enabled = true;
+                        universal_canvas.show_water_surface = true;
+                        universal_canvas.ensure_site_tin_generated();
+                        self.push_trace(
+                            format!("Adjusted Sea Level datum to {:+.2} m MSL", universal_canvas.sea_level_m),
+                            true,
+                        );
+                    } else {
+                        self.push_trace("Usage: /sealevel <elevation_m>", false);
+                    }
+                }
+                "/sculpt-ifcx" => {
+                    match universal_canvas.export_site_terraform_ifcx(&build_view.bim_bus.project) {
+                        Ok(dest) => {
+                            self.push_trace(format!("Exported IfcSite Terraform IFCX -> {dest}"), true);
+                        }
+                        Err(err) => {
+                            self.push_trace(format!("IfcSite IFCX export failed: {err}"), false);
+                        }
+                    }
+                }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");
                     actions.fit_camera = true;

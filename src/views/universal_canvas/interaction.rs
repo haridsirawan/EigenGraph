@@ -233,6 +233,100 @@ impl UniversalCanvasState {
             return;
         }
 
+        // Update v0.8.6.6 (6/10 -> v0.8.7): Live Interactive 3D Terrain & Water Sculpting (`IfcSite` Terraform)
+        if let Some(sculpt_brush) = self.terrain_sculpt.active_brush {
+            if let Some(hover) = response.hover_pos().or_else(|| response.interact_pointer_pos()) {
+                let (lat, lon, hit) = self.screen_to_lat_lon_with_hit(hover, rect);
+                if hit {
+                    let mm = crate::core::gis::SlippyMapState::lat_lon_to_world_mm(
+                        self.ground_origin_lat_lon,
+                        lat,
+                        lon,
+                    );
+                    self.terrain_sculpt_hover_enu =
+                        Some([(mm[0] * 0.001) as f32, (mm[1] * 0.001) as f32]);
+                } else {
+                    self.terrain_sculpt_hover_enu = None;
+                }
+            } else {
+                self.terrain_sculpt_hover_enu = None;
+            }
+
+            let stroke_start = response.drag_started_by(egui::PointerButton::Primary)
+                || response.clicked_by(egui::PointerButton::Primary);
+            let dragging = response.dragged_by(egui::PointerButton::Primary);
+            if stroke_start || dragging {
+                if let Some(pos) = response
+                    .hover_pos()
+                    .or_else(|| response.interact_pointer_pos())
+                {
+                    let (lat, lon, hit) = self.screen_to_lat_lon_with_hit(pos, rect);
+                    if hit {
+                        self.show_terrain_contours = true;
+                        self.realistic_landscape_enabled = true;
+                        self.ensure_site_tin_generated();
+                        let mm = crate::core::gis::SlippyMapState::lat_lon_to_world_mm(
+                            self.ground_origin_lat_lon,
+                            lat,
+                            lon,
+                        );
+                        let cx_m = (mm[0] * 0.001) as f32;
+                        let cy_m = (mm[1] * 0.001) as f32;
+                        self.terrain_sculpt_hover_enu = Some([cx_m, cy_m]);
+
+                        if let Some(ref mut tin) = self.active_site_tin {
+                            if stroke_start {
+                                let snap: Vec<f32> = tin.points.iter().map(|p| p.z).collect();
+                                self.terrain_sculpt_undo_stack.push(snap);
+                                if self.terrain_sculpt_undo_stack.len() > 24 {
+                                    self.terrain_sculpt_undo_stack.remove(0);
+                                }
+                                if sculpt_brush == crate::core::gis::TerrainSculptBrush::Flatten
+                                    && self.terrain_sculpt.auto_sample_flatten
+                                {
+                                    self.terrain_sculpt.target_flatten_z_m =
+                                        tin.sample_elevation_and_slope(cx_m, cy_m).0;
+                                }
+                            }
+                            let eff_strength = if dragging && !stroke_start {
+                                self.terrain_sculpt.brush_strength_m * 0.35
+                            } else {
+                                self.terrain_sculpt.brush_strength_m
+                            };
+                            let res = tin.apply_sculpt_brush(
+                                cx_m,
+                                cy_m,
+                                sculpt_brush,
+                                self.terrain_sculpt.brush_radius_m,
+                                eff_strength,
+                                self.terrain_sculpt.target_flatten_z_m,
+                                self.sea_level_m,
+                            );
+                            if sculpt_brush == crate::core::gis::TerrainSculptBrush::CarveWater {
+                                self.show_water_surface = true;
+                            }
+                            self.terrain_sculpt.total_cut_m3 += res.delta_cut_m3;
+                            self.terrain_sculpt.total_fill_m3 += res.delta_fill_m3;
+                            self.terrain_sculpt.stroke_count =
+                                self.terrain_sculpt.stroke_count.saturating_add(1);
+                            self.status_message = Some(format!(
+                                "Sculpt {} @ (E{:+.0}m, N{:+.0}m) • Z={:+.1}m • Cut {:.0} m³ / Fill {:.0} m³ • Max Slope {:.1}°",
+                                sculpt_brush.short_label(),
+                                cx_m,
+                                cy_m,
+                                res.center_elev_after_m,
+                                self.terrain_sculpt.total_cut_m3,
+                                self.terrain_sculpt.total_fill_m3,
+                                res.max_slope_deg_after
+                            ));
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        self.terrain_sculpt_hover_enu = None;
+
         // Phase 43: Earth Terraforming Brushes & Planetary Megaproject Tools
         if let Some(brush) = self.active_tool.earth_brush_action() {
             let stroke_start = response.drag_started_by(egui::PointerButton::Primary)

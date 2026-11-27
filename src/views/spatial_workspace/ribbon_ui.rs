@@ -531,6 +531,92 @@ impl SpatialWorkspaceState {
                     });
             });
 
+        if let Some(active_brush) = universal_canvas.terrain_sculpt.active_brush {
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(deck_w);
+                ui.spacing_mut().item_spacing.x = 6.0;
+                icons::icon_label(
+                    ui,
+                    AppIcon::Mountain,
+                    12.0,
+                    theme.accent_orange,
+                    &format!("Terraform: {}", active_brush.label()),
+                    10.5,
+                    theme.text_primary,
+                    true,
+                );
+                ui.label(
+                    egui::RichText::new("R:")
+                        .size(10.0)
+                        .color(theme.text_secondary),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut universal_canvas.terrain_sculpt.brush_radius_m)
+                        .range(10.0..=180.0)
+                        .speed(1.5)
+                        .suffix(" m"),
+                );
+                ui.label(
+                    egui::RichText::new("Pow:")
+                        .size(10.0)
+                        .color(theme.text_secondary),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut universal_canvas.terrain_sculpt.brush_strength_m)
+                        .range(0.5..=12.0)
+                        .speed(0.2)
+                        .suffix(" m"),
+                );
+                ui.label(
+                    egui::RichText::new("Sea:")
+                        .size(10.0)
+                        .color(theme.text_secondary),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut universal_canvas.sea_level_m)
+                        .range(-8.0..=12.0)
+                        .speed(0.25)
+                        .suffix(" m"),
+                );
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Cut {:.0} / Fill {:.0} m³",
+                        universal_canvas.terrain_sculpt.total_cut_m3,
+                        universal_canvas.terrain_sculpt.total_fill_m3
+                    ))
+                    .size(10.0)
+                    .color(theme.text_secondary),
+                );
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::SaveDisk),
+                    "IFCX",
+                    false,
+                    theme.accent_green,
+                    "Export sculpted IfcSite topography & cut/fill balance to .ifcx",
+                )
+                .clicked()
+                {
+                    let _ = universal_canvas.export_site_terraform_ifcx(&build_view.bim_bus.project);
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Close),
+                    "Done",
+                    false,
+                    theme.text_secondary,
+                    "Exit live terrain sculpt brush",
+                )
+                .clicked()
+                {
+                    universal_canvas.set_terrain_sculpt_brush(None);
+                }
+            });
+        }
+
         if self.active_lens != SpatialLens::Clean {
             ui.add_space(3.0);
             self.render_active_lens_colorbar_strip(
@@ -715,6 +801,66 @@ impl SpatialWorkspaceState {
                             universal_canvas.show_terrain_contours = true;
                             universal_canvas.ensure_site_tin_generated();
                         }
+                    }
+                });
+                Self::ribbon_group(ui, theme, "Terraform", |ui| {
+                    let cur_b = universal_canvas.terrain_sculpt.active_brush;
+                    let sculpt_btns = [
+                        (
+                            crate::core::gis::TerrainSculptBrush::Raise,
+                            AppIcon::Mountain,
+                            theme.accent_orange,
+                        ),
+                        (
+                            crate::core::gis::TerrainSculptBrush::Lower,
+                            AppIcon::ArrowDown,
+                            theme.accent_red,
+                        ),
+                        (
+                            crate::core::gis::TerrainSculptBrush::Flatten,
+                            AppIcon::Slab,
+                            theme.accent_green,
+                        ),
+                        (
+                            crate::core::gis::TerrainSculptBrush::Smooth,
+                            AppIcon::Sparkles,
+                            theme.accent_blue,
+                        ),
+                        (
+                            crate::core::gis::TerrainSculptBrush::CarveWater,
+                            AppIcon::Waves,
+                            theme.accent_blue,
+                        ),
+                    ];
+                    for (brush, ic, col) in sculpt_btns {
+                        let active = cur_b == Some(brush);
+                        if Self::ribbon_tool_tile(
+                            ui,
+                            theme,
+                            ic,
+                            brush.short_label(),
+                            active,
+                            col,
+                            brush.tooltip(),
+                        )
+                        .clicked()
+                        {
+                            let next = if active { None } else { Some(brush) };
+                            universal_canvas.set_terrain_sculpt_brush(next);
+                        }
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Undo,
+                        "Undo TIN",
+                        false,
+                        theme.text_secondary,
+                        "Revert the last 3D terrain sculpt stroke",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.undo_terrain_sculpt();
                     }
                 });
                 Self::ribbon_group(ui, theme, "Zoning & Brief", |ui| {

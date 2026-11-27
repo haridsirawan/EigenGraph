@@ -310,6 +310,8 @@ pub struct UnifiedWorkspaceArchive {
     pub sea_level_m: f32,
     #[serde(default = "default_globe_true")]
     pub show_water_surface: bool,
+    #[serde(default)]
+    pub terrain_sculpt: crate::core::gis::TerrainSculptConfig,
     pub sha256_seal: String,
 }
 

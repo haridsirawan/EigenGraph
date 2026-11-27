@@ -82,6 +82,7 @@ pub mod ns {
     pub const EG_DESIGN_PIPELINE: &str = "eigengraph::design::concept_pipeline";
     pub const EG_SOLAR_OTTV: &str = "eigengraph::design::solar_ottv";
     pub const EG_DAYLIGHT_INTERIOR: &str = "eigengraph::design::daylight_interior";
+    pub const EG_SITE_TERRAFORM: &str = "eigengraph::gis::site_terraform";
     pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
@@ -2136,6 +2137,45 @@ impl IfcxStage {
         });
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_daylight_interior", base_doc.header.id))
+    }
+
+    /// Composes a base `.ifcx` document with a non-destructive sculpted `IfcSite` terraform layer.
+    pub fn compose_with_site_terraform_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::gis::SiteTerraformIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_site_terraform", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcSite", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Interactive 3D Site Topography & Coastal Water Sculpting",
+                "seaLevelM": overlay.sea_level_m,
+                "minElevationM": overlay.min_elevation_m,
+                "maxElevationM": overlay.max_elevation_m,
+                "totalCutM3": overlay.total_cut_m3,
+                "totalFillM3": overlay.total_fill_m3,
+                "netEarthworkM3": overlay.net_earthwork_m3,
+                "maxSlopeDeg": overlay.max_slope_deg,
+                "sculptStrokes": overlay.sculpt_strokes,
+                "revision": overlay.revision,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_SITE_TERRAFORM.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/site/terraform".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_site_terraform", base_doc.header.id))
     }
 
     /// Composes a base `.ifcx` document with the `v0.8.5` Master Engineering Dossier Index (`S-000`).
