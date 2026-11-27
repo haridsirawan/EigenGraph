@@ -3213,7 +3213,7 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         cmd: "/master-dossier",
         category: "Export",
-        description: "Export Sheet S-000 Master Engineering Dossier Index (S-100..S-115) .svg",
+        description: "Export Sheet S-000 Master Engineering Dossier Index (S-100..S-118) .svg",
         icon: AppIcon::Book,
     },
     SlashCommandSpec {

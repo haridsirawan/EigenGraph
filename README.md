@@ -13,7 +13,7 @@
 ### Rust + WebGPU + IFCX
 
 [![Live Web App](https://img.shields.io/badge/web%20app-eigengraph.net-0A84FF?style=for-the-badge&logo=cloudflare&logoColor=white)](https://eigengraph.net/)
-[![Version](https://img.shields.io/badge/version-v0.8.6-5B92A5?style=for-the-badge)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.8.8-5B92A5?style=for-the-badge)](docs/CHANGELOG.md)
 [![Engine](https://img.shields.io/badge/engine-Rust%20%2B%20Pure%20WebGPU%20(WGSL)-orange?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/haridsirawan/EigenGraph)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue?style=for-the-badge)](LICENSE)
 
@@ -52,9 +52,11 @@ Rather than relying on purely topological graph metrics, **ARI** combines stiffn
 
 ---
 
-## EigenGraph Computational Platform (`v0.8.6`)
+## EigenGraph Computational Platform (`v0.8.8`)
 
 **EigenGraph** operationalizes the dissertation's **EigenGate** (Linear Pre-Analysis & Gatekeeper, [haridsirawan/EigenGate](https://github.com/haridsirawan/EigenGate)), **EigenFlow** (Non-Linear Woodbury Post-Yield & Pushover, [haridsirawan/EigenFlow](https://github.com/haridsirawan/EigenFlow)), and Spectral Kinematic Guard engines inside a **100% Pure-Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL + `@compute`) • 100% IFCX (IFC 5 JSON ECS) • 0% WebGL • 0% External Raster** WebAssembly spatial engineering platform deployed to [eigengraph.net](https://eigengraph.net/) (requiring a WebGPU-enabled browser such as Chrome/Edge 113+, Safari 26+, or Firefox 141+ over HTTPS):
+
+- **Hardware WebGPU Section Box, Underground X-Ray, 15-Tool Native Gemini AI Copilot, Building MEP (`S-116`), 3D Clash/BCF (`S-117`), Urban Utilities & City-to-BIM (`S-118`) + Master Index `S-000`** ([src/core/agent_tools.rs](src/core/agent_tools.rs), [src/core/mep_engine.rs](src/core/mep_engine.rs), [src/core/clash_engine.rs](src/core/clash_engine.rs), [src/core/gis/urban_utilities.rs](src/core/gis/urban_utilities.rs), [src/core/gis/city_promotion.rs](src/core/gis/city_promotion.rs)): Provides closed-loop Gemini native `functionDeclarations` / `functionResponse` across 15 deterministic headless tools, analytical WGSL 3D Section Box & Active Level Cut planes, `ASHRAE`/`IPC`/`IEC`/`NFPA 13` Building MEP conduits (`material_kind = 31.0`), Structure × MEP × Openings 3D Clash/BCF coordination (`material_kind = 32.0`), road-following buried water/sewer/20 kV networks rendered via dedicated `CompareFunction::Always` X-Ray pass (`material_kind = 33.0`), `Cities: Skylines II × IFCX` smart intersections (`T-Junction` / `4-Way` / `Roundabout`, `HCM LOS`) + live City-to-BIM promotion into editable 6-DOF `BimProject`, and 19 SHA-256 sealed A3 pure-vector sheets (`S-100`–`S-118`) indexed in `S-000`.
 
 - **AI Building Design Agent (`Zoning -> Program -> Massing -> 1-Click Mass-to-Engineered-BIM -> Sheet S-115`) & Minimalist Icon-Only Dynamic Island** ([src/core/zoning_agent.rs](src/core/zoning_agent.rs), [src/core/program_agent.rs](src/core/program_agent.rs), [src/core/massing_agent.rs](src/core/massing_agent.rs), [src/core/design_agent.rs](src/core/design_agent.rs)): Chains natural-language RFP / architectural design briefs through urban zoning (`KDB/KLB/GSB` + Sun Path, `material_kind = 23.0`), spatial stacking & deterministic binary slicing-tree 2D floor-plate packing (`material_kind = 24.0`), 4-option comparative massing (`PodiumTower`, `CourtyardBlock`, `LinearSlabBar`, `SteppedTerrace`, `material_kind = 25.0`), 1-click parametric `BimProject` synthesis, live `EigenGate` 6-DOF redundancy auditing, and archival A3 Sheet `S-115` (indexed in `S-000`) inside a streamlined 100% icon-only Liquid Glass Dynamic Island.
 
@@ -84,7 +86,7 @@ trunk build --release --public-url /
 
 ## Documentation & Citation
 
-- [Changelog (`v0.0.1` – `v0.8.6`)](docs/CHANGELOG.md)
+- [Changelog (`v0.0.1` – `v0.8.8`)](docs/CHANGELOG.md)
 - [IFCX Earth Architecture Roadmap](docs/IFCX%20Earth.md)
 - [Spatial UI Architecture Contract](docs/UI_ARCHITECTURE.md)
 - [Repository Guidelines](AGENTS.md)

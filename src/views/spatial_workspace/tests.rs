@@ -940,7 +940,7 @@ use crate::theme::MacTheme;
             &history,
             "gemini-2.5-pro",
         );
-        assert_eq!(pro_payload["generationConfig"]["maxOutputTokens"], 2400);
+        assert_eq!(pro_payload["generationConfig"]["maxOutputTokens"], 4096);
 
         let flash_payload =
             crate::core::web_bridge::build_gemini_generate_content_payload_for_model(
@@ -948,7 +948,7 @@ use crate::theme::MacTheme;
                 &history,
                 "gemini-2.5-flash",
             );
-        assert_eq!(flash_payload["generationConfig"]["maxOutputTokens"], 1400);
+        assert_eq!(flash_payload["generationConfig"]["maxOutputTokens"], 2048);
 
         let mut spatial = SpatialWorkspaceState::default();
         let mut build = BuildView::default();

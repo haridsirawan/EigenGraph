@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.7` Delivered**  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.8` Delivered**  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% External Raster**  
-> **Current Platform**: EigenGraph `v0.8.7` (*Cities: Skylines II × IFCX* Living Earth World-Building + 3D Solar OTTV & Interior Daylight Studios + Smart Layered 10-Category AEC Ribbon on Pure WebGPU/WGSL)  
+> **Current Platform**: EigenGraph `v0.8.8` (*Cities: Skylines II × IFCX* Living Earth World-Building + Hardware WebGPU Section Box & Underground X-Ray + Building MEP / 3D Clash BCF / Subsurface Urban Utilities / Smart Intersections + Native 15-Tool Gemini Agent + Master Dossier `S-000` [`S-100`–`S-118`])  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -275,3 +275,14 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
   - **Realistic Biome Mountains & Coastal Ocean WGSL (`material_kind = 28.0 / 29.0`)**: Multi-octave Gerstner waves, Beer-Lambert optical depth absorption, animated shoreline surf foam, stratified rock cliffs, snow peaks, `ArchipelagoBayAndVolcano`, `FjordRiverValley`, and `CoastalIslandMetropolis`.
   - **Live 3D `IfcSite` Terrain & Water Sculpting (`eigengraph::gis::site_terraform`)**: Interactive `Raise`, `Lower`, `Flatten`, `Smooth`, and `CarveWater` brushes with real-time prismoidal cut/fill telemetry and undo history.
   - **Curved Bézier `IfcRoad` & Cable-Stayed Auto-Bridge Splines + Road-Snapped `IfcSpatialZone` -> `IfcBuilding` Spawner (`NS_EG_CITY_BUILDING`) + Living City Ambience (`material_kind = 30.0`)**: Procedural hillside forests, sun-azimuth cast shadows, bidirectional animated traffic with dusk/night headlights, and unified SHA-256 sealed Living City IFCX bundle export (`/export-city`).
+
+### Phase 88 (`v0.8.8`) — WebGPU Section Box & Underground X-Ray, Native 15-Tool Gemini Agent, MEP, 3D Clash/BCF, Urban Utilities, City-to-BIM & Master Index `S-000` (`S-100`–`S-118`) *(Implemented)*
+- **Hardware WebGPU 3D Section Box & Native Gemini Function Calling (`v0.8.7.1`–`v0.8.7.4`)**:
+  - Strict Dynamic Island width/height clamping across Desktop/Tablet/Mobile + Revit-style Categorized Ribbon polish with dedicated Row C scrollbar track.
+  - Analytical WGSL 3D Section Box clipping (`EarthPassUniforms::{clip_min_and_mode, clip_max_and_band}` with `site_unclipped_bind_group` and Active Level Cut Plane) + closed-loop native Gemini `functionDeclarations` / `functionResponse` verification (`src/core/agent_tools.rs`, up to 5 autonomous physics steps).
+- **Building MEP (`S-116`) & Unified 3D Clash / BCF 2.1 Coordination (`S-117`) (`v0.8.7.5`–`v0.8.7.6`)**:
+  - `mep_engine` (`eigengraph::mep::systems`, `material_kind = 31.0`): ASHRAE HVAC cooling/ducts coupled with Solar OTTV, IPC plumbing risers, IEC 3-phase feeders, and NFPA 13 fire sprinklers.
+  - `clash_engine` (`eigengraph::coordination::clash_bcf`, `material_kind = 32.0`): 3D ENU Structure × MEP × Openings AABB clash audit, 1-click ceiling plenum drop resolution, and BCF 2.1 JSON topic export.
+- **Subsurface Urban Utilities (`wgpu::CompareFunction::Always` X-Ray), City-to-BIM & Smart Road Intersections (`S-118`) + Master Index `S-000` (`v0.8.7.7`–`v0.8.8`)**:
+  - `urban_utilities` (`eigengraph::gis::urban_utilities`, `material_kind = 33.0`): Road-following buried water, sewer/storm, and 20 kV power networks rendered through terrain via dedicated `xray_pipeline`.
+  - `city_promotion` (`eigengraph::gis::city_intersections`): `TJunction` / `FourWayCross` / `Roundabout` detection with HCM 6th Ed. LOS grading, 3D WebGPU crosswalks & roundabouts, live City-to-BIM promotion into editable 6-DOF `BimProject`, 15 registered Gemini engineering tools, and Master Dossier Index `S-000` spanning all 19 archival sheets `S-100`–`S-118`.

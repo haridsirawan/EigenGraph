@@ -226,8 +226,24 @@ pub const ENGINEERING_MATH_CATALOG: &[AboutFeatureMathSpec] = &[
         category_badge: "Geometry & IFCX",
         title: "Half-Edge Geometry, BSP Solid CSG, Living Earth WebGPU & IFCX SHA-256",
         modules_and_codes: "core/geom.rs, core/csg.rs, core/gis.rs, core/ifcx.rs, vector_dossier.rs • IFC 5 ECS, FIPS 180-4, S-000",
-        capabilities: "Provides planar half-edge arrangement, straight-skeleton roofs, non-recursive BSP CSG wall openings, WGS-84/ECEF/RTC-ENU Pure WebGPU WGSL shaders (material_kind 0..30: biome mountains, Beer-Lambert ocean waves, traffic headlights, curved auto-bridges, road-snapped IfcBuildings), 3-way IFCX merging, and SHA-256 vector sheets.",
-        math_logic: "Geodesic Transform: Geodetic(lat, lon, h) -> ECEF(X,Y,Z) -> RTC ENU(e,n,u) - cam_origin\nOcean & Biomes: C = mix(C_deep, C_shallow, exp(-depth * k_rgb)), Gerstner waves, FBM rock/forest strata\nCurved Infrastructure: Quadratic Bezier splines B(t) + auto water-span IfcBridge + podium/tower spawning\nIFCX & SHA-256 Seal: Non-destructive ECS composition (IfcSite/IfcRoad/IfcBridge/IfcBuilding) + FIPS 180-4",
+        capabilities: "Provides planar half-edge arrangement, straight-skeleton roofs, non-recursive BSP CSG wall openings, WGS-84/ECEF/RTC-ENU Pure WebGPU WGSL shaders (material_kind 0..33: biome mountains, Beer-Lambert ocean waves, traffic headlights, curved auto-bridges, road-snapped IfcBuildings, hardware 3D Section Box & Underground X-Ray), 3-way IFCX merging, and S-000 / S-100..S-118 SHA-256 vector sheets.",
+        math_logic: "Geodesic Transform: Geodetic(lat, lon, h) -> ECEF(X,Y,Z) -> RTC ENU(e,n,u) - cam_origin\nOcean & Biomes: C = mix(C_deep, C_shallow, exp(-depth * k_rgb)), Gerstner waves, FBM rock/forest strata\nSection Box Clipping: if p_enu notin [clip_min, clip_max] { discard; } + Underground X-Ray CompareFunction::Always\nIFCX & SHA-256 Seal: Non-destructive ECS composition (IfcSite/IfcRoad/IfcBridge/IfcBuilding) + FIPS 180-4",
+    },
+    AboutFeatureMathSpec {
+        category_idx: 6,
+        category_badge: "4D-6D & Digital Twin",
+        title: "Building MEP Systems (HVAC, Plumbing, Elec, Fire) & Unified 3D Clash / BCF 2.1",
+        modules_and_codes: "core/mep_engine.rs, core/clash_engine.rs • ASHRAE, IPC, IEC, NFPA 13, BCF 2.1, S-116..S-117",
+        capabilities: "Synthesizes BIM-coupled HVAC ducting, Hunter plumbing risers, 3-phase electrical feeders & NFPA 13 sprinkler networks in 3D ENU space (material_kind = 31.0), and runs 3D Structure x MEP x Openings interference audits with BCF 2.1 pins (material_kind = 32.0) and 1-click ceiling plenum auto-resolution.",
+        math_logic: "HVAC Cooling & Duct: Q_tr = (A_gfa*q_base + Q_OTTV) / 3.517 ;  D_eq = 1.30*(a*b)^0.625 / (a+b)^0.25\nIPC & IEC Sizing: Q_plumb = C_H * WSFU^0.48 ;  %Vd = sqrt(3)*I*L*(R*cos(phi) + X*sin(phi)) / V_LL * 100\n3D Clash & Plenum Guardrail: overlap_enu = max(0, min(b_max) - max(a_min)) -> delta_z = pen_z + clearance_tol",
+    },
+    AboutFeatureMathSpec {
+        category_idx: 7,
+        category_badge: "Geometry & IFCX",
+        title: "Subsurface Urban Utilities, Smart Road Intersections (HCM LOS) & Native 15-Tool Agent",
+        modules_and_codes: "core/gis/urban_utilities.rs, city_promotion.rs, core/agent_tools.rs • Hazen-Williams, Manning, HCM 6th Ed., S-118",
+        capabilities: "Routes buried water, sewer/storm & 20 kV feeders under authored IfcRoad/IfcBridge corridors with X-Ray depth bypass (material_kind = 33.0), detects T-Junction / 4-Way / Roundabout hubs with HCM LOS grading & live City-to-BIM promotion, and exposes 15 deterministic headless tools via native Gemini function calling.",
+        math_logic: "Hazen-Williams Headloss: S_f = 10.67 * Q^1.852 / (C^1.852 * D^4.87)\nManning Sewer & Storm: Q = (1/n) * A * R_h^(2/3) * S^(1/2) + Rational Q = C_r * i * A_catchment\nHCM Intersection LOS: d = d_1(C, v/c) + d_2(c, T) -> LOS A..F ;  Loop: Gemini functionCall -> execute_headless_tool -> functionResponse",
     },
 ];
 
@@ -875,7 +891,7 @@ impl SettingsView {
                 ui.label(RichText::new(runtime).size(11.5).color(theme.text_secondary));
                 ui.label(RichText::new("•  Standards:").strong().size(11.5).color(theme.text_primary));
                 ui.label(
-                    RichText::new("AISC 360/358 • ACI 318-19 • ASCE 7-22 / 41-17 • SNI 1726/1729/2847/6389/8460 • UFC 3-340-02 / 4-023-03 • ISO 834 / 10137")
+                    RichText::new("AISC 360/358 • ACI 318-19 • ASCE 7-22 / 41-17 • SNI 1726/1729/2847/6389/8460 • ASHRAE / IPC / NFPA 13 • HCM 6th Ed. • BCF 2.1 • ISO 834 / 10137")
                         .size(11.0)
                         .color(theme.text_secondary),
                 );
@@ -1085,7 +1101,7 @@ mod tests {
 
     #[test]
     fn test_v0863_about_feature_catalog_and_math_logic_filters() {
-        assert_eq!(ENGINEERING_MATH_CATALOG.len(), 18);
+        assert_eq!(ENGINEERING_MATH_CATALOG.len(), 20);
         for spec in ENGINEERING_MATH_CATALOG {
             assert!(!spec.title.is_empty());
             assert!(!spec.modules_and_codes.is_empty());
@@ -1145,5 +1161,17 @@ mod tests {
                 out.textures_delta.clear();
             }
         }
+    }
+
+    #[test]
+    fn test_v088_milestone_release_version_and_about_catalog() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), "0.8.8");
+        assert!(ENGINEERING_MATH_CATALOG.len() >= 20);
+        assert!(ENGINEERING_MATH_CATALOG
+            .iter()
+            .any(|s| s.title.contains("Building MEP Systems") && s.modules_and_codes.contains("S-116..S-117")));
+        assert!(ENGINEERING_MATH_CATALOG
+            .iter()
+            .any(|s| s.title.contains("Subsurface Urban Utilities") && s.modules_and_codes.contains("S-118")));
     }
 }

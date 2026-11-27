@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.8 (9/10)]
+## [v0.8.8] — 2026-11-27
+
+### Update 10/10 (`v0.8.8` Milestone Release) — Master Index `S-000` (`S-100`–`S-118`), Full Native + WASM Verification & Production Release
+- **Master Engineering Dossier Index `S-000` Expanded (`S-100`–`S-118`, `src/core/vector_dossier.rs`, `src/core/ifcx.rs`, `src/app.rs`, `src/views/spatial_workspace/types.rs`)**:
+  - Extended [`evaluate_master_dossier_entries`](src/core/vector_dossier.rs) and [`build_master_dossier_index_svg`](src/core/vector_dossier.rs) to register and summarize **19 pure-vector deliverable sheets** (`S-100`–`S-118`) including `S-116` (Building MEP Systems), `S-117` (Unified 3D Clash & BCF 2.1 Coordination), and `S-118` (Subsurface Urban Utilities & Smart Road Intersections) with SHA-256 governance sealing and non-destructive `eigengraph::governance::master_dossier_index` IFCX metadata (`S-100..S-118`).
+  - Wired cached `last_mep_report`, `last_clash_report`, `last_urban_utilities_report`, and `last_intersection_report` telemetry into `S-000` export in [`EigenGraphApp`](src/app.rs).
+- **Release Finalization, Feature Catalog & Cross-Target Verification (`Cargo.toml`, `src/views/settings.rs`, `sw.js`, `docs/IFCX Earth.md`, `README.md`, `docs/CHANGELOG.md`)**:
+  - Bumped semantic crate version `0.8.7` -> `0.8.8` and PWA cache namespace `sw.js` -> `eigengraph-pwa-v0.8.8`.
+  - Expanded [`ENGINEERING_MATH_CATALOG`](src/views/settings.rs) in `Settings -> About EigenGraph` from `18` -> `20` documented engineering engines covering Section Box/Underground X-Ray, Building MEP, Unified 3D Clash/BCF, Subsurface Urban Utilities, Smart Road Intersections (HCM LOS), and 15-Tool Native Gemini Function Calling, alongside [`test_v088_milestone_release_version_and_about_catalog`](src/views/settings.rs).
+  - Updated `docs/IFCX Earth.md` (Phase 88) and `README.md`, and verified full native `cargo test --lib` plus `wasm32-unknown-unknown` debug check & release build prior to deployment to `eigengraph.net`.
 
 ### Update 9/10 (`v0.8.7.9` -> `v0.8.8`) — Archival Pure-Vector Engineering Sheets `S-116`–`S-118` & Dynamic 15-Tool Gemini Copilot Prompt
 - **Archival Pure-Vector Engineering Sheets `S-116`, `S-117` & `S-118` (`src/core/vector_dossier.rs`, `src/core/mod.rs`)**:

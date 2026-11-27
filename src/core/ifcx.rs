@@ -620,7 +620,7 @@ impl IfcxDocument {
         );
         schemas.insert(
             ns::EG_MASTER_DOSSIER_INDEX.to_string(),
-            json!({ "value": { "dataType": "Object", "spec": "EigenGraph v0.8.5 Master Engineering Dossier Drawing Index (S-000 / S-100..S-114)" } }),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph v0.8.8 Master Engineering Dossier Drawing Index (S-000 / S-100..S-118)" } }),
         );
         Self {
             header: IfcxHeader {
@@ -2341,7 +2341,7 @@ impl IfcxStage {
         stage.to_composed_document(&format!("{}_site_terraform", base_doc.header.id))
     }
 
-    /// Composes a base `.ifcx` document with the `v0.8.5` Master Engineering Dossier Index (`S-000`).
+    /// Composes a base `.ifcx` document with the `v0.8.8` Master Engineering Dossier Index (`S-000`, `S-100`–`S-118`).
     pub fn compose_with_master_dossier_overlay(
         base_doc: &IfcxDocument,
         entries: &[crate::core::vector_dossier::MasterDossierSheetEntry],
@@ -2356,8 +2356,8 @@ impl IfcxStage {
         attrs.insert(
             ns::BSI_PROP.to_string(),
             json!({
-                "name": "EigenGraph v0.8.5 Master Engineering Dossier Index (S-000)",
-                "sheetRange": "S-100..S-114",
+                "name": "EigenGraph v0.8.8 Master Engineering Dossier Index (S-000)",
+                "sheetRange": "S-100..S-118",
                 "totalSheets": entries.len(),
                 "compliantSheets": compliant_count,
             }),

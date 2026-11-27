@@ -4226,6 +4226,10 @@ impl EigenGraphApp {
                 self.universal_canvas.last_zoning_report.as_ref(),
                 self.universal_canvas.last_program_report.as_ref(),
                 self.universal_canvas.last_massing_report.as_ref(),
+                self.universal_canvas.last_mep_report.as_ref(),
+                self.universal_canvas.last_clash_report.as_ref(),
+                self.universal_canvas.last_urban_utilities_report.as_ref(),
+                self.universal_canvas.last_intersection_report.as_ref(),
             );
             let cp_hash = self
                 .universal_canvas

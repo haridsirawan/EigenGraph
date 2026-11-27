@@ -6265,7 +6265,7 @@ pub fn build_urban_utilities_intersections_annex_svg(
     }
 }
 
-/// Canonical row entry in Sheet `S-000` Master Engineering Dossier Drawing Index (`S-100`–`S-114`).
+/// Canonical row entry in Sheet `S-000` Master Engineering Dossier Drawing Index (`S-100`–`S-118`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MasterDossierSheetEntry {
     pub sheet_code: String,
@@ -6275,8 +6275,9 @@ pub struct MasterDossierSheetEntry {
     pub is_compliant: bool,
 }
 
-/// Evaluates all 16 engineering deliverable sheets (`S-100`–`S-115`) across BIM, Nonlinear/Extreme Hazards,
-/// the 9 `v0.8.5` Specialized Studios, and the `v0.8.6` AI Building Design Agent using cached or live-coupled reports.
+/// Evaluates all 19 engineering deliverable sheets (`S-100`–`S-118`) across BIM, Nonlinear/Extreme Hazards,
+/// the 9 `v0.8.5` Specialized Studios, the `v0.8.6` AI Building Design Agent, and the `v0.8.8` MEP,
+/// Clash/BCF, Urban Utilities & Smart Road Intersections engines using cached or live-coupled reports.
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_master_dossier_entries(
     bim: &crate::core::bim::BimProject,
@@ -6293,6 +6294,10 @@ pub fn evaluate_master_dossier_entries(
     zoning_opt: Option<&crate::core::zoning_agent::SiteZoningReport>,
     program_opt: Option<&crate::core::program_agent::SpatialProgramReport>,
     massing_opt: Option<&crate::core::massing_agent::MassingStudyReport>,
+    mep_opt: Option<&crate::core::mep_engine::MepSystemsReport>,
+    clash_opt: Option<&crate::core::clash_engine::SpatialClashReport>,
+    utilities_opt: Option<&crate::core::gis::UrbanUtilitiesReport>,
+    intersections_opt: Option<&crate::core::gis::CityIntersectionNetworkReport>,
 ) -> Vec<MasterDossierSheetEntry> {
     let iso_own;
     let iso = match iso_opt {
@@ -6609,16 +6614,181 @@ pub fn evaluate_master_dossier_entries(
                 is_compliant: zon.overall_compliant && prg.fits_zoning_envelope,
             }
         },
+        {
+            let mep_own;
+            let mep = match mep_opt {
+                Some(m) => m,
+                None => {
+                    mep_own = crate::core::mep_engine::evaluate_mep_systems(
+                        bim,
+                        site,
+                        None,
+                        &crate::core::mep_engine::MepSystemsConfig::default(),
+                    );
+                    &mep_own
+                }
+            };
+            let clash_own;
+            let clash = match clash_opt {
+                Some(c) => c,
+                None => {
+                    clash_own = crate::core::clash_engine::evaluate_spatial_clashes(
+                        bim,
+                        mep,
+                        &crate::core::clash_engine::SpatialClashConfig::default(),
+                    );
+                    &clash_own
+                }
+            };
+            let city_fallback;
+            let util_own;
+            let util = match utilities_opt {
+                Some(u) => u,
+                None => {
+                    city_fallback = crate::core::gis::IfcxCityScene::default();
+                    util_own = crate::core::gis::evaluate_urban_utilities(
+                        &city_fallback,
+                        bim,
+                        None,
+                        0.0,
+                        site,
+                        &crate::core::gis::UrbanUtilitiesConfig::default(),
+                    );
+                    &util_own
+                }
+            };
+            let inter_own;
+            let inter = match intersections_opt {
+                Some(i) => i,
+                None => {
+                    let empty_city = crate::core::gis::IfcxCityScene::default();
+                    inter_own = crate::core::gis::detect_and_evaluate_road_intersections(
+                        &empty_city,
+                        None,
+                        0.0,
+                        &crate::core::gis::CityIntersectionConfig::default(),
+                    );
+                    &inter_own
+                }
+            };
+            let util_ok = util.balance.water_adequate
+                && util.balance.sewer_adequate
+                && util.balance.power_adequate;
+            // Temporarily collect S-116..S-118 metrics then emit S-116 here
+            let _ = (&clash, util_ok, &inter);
+            MasterDossierSheetEntry {
+                sheet_code: "S-116".to_string(),
+                title: "Building MEP Systems (HVAC, Plumbing, Elec, Fire)".to_string(),
+                standard: "ASHRAE / IPC / IEC / NFPA 13".to_string(),
+                key_metric: format!(
+                    "{:.1}TR | {:.0}kVA | {} Sprinklers | {} Segs",
+                    mep.cooling_tr,
+                    mep.elec_demand_kva,
+                    mep.fire.total_sprinkler_heads,
+                    mep.segments_3d.len()
+                ),
+                is_compliant: mep.all_codes_compliant,
+            }
+        },
+        {
+            let mep_own;
+            let mep = match mep_opt {
+                Some(m) => m,
+                None => {
+                    mep_own = crate::core::mep_engine::evaluate_mep_systems(
+                        bim,
+                        site,
+                        None,
+                        &crate::core::mep_engine::MepSystemsConfig::default(),
+                    );
+                    &mep_own
+                }
+            };
+            let clash_own;
+            let clash = match clash_opt {
+                Some(c) => c,
+                None => {
+                    clash_own = crate::core::clash_engine::evaluate_spatial_clashes(
+                        bim,
+                        mep,
+                        &crate::core::clash_engine::SpatialClashConfig::default(),
+                    );
+                    &clash_own
+                }
+            };
+            MasterDossierSheetEntry {
+                sheet_code: "S-117".to_string(),
+                title: "Unified 3D Clash Detection & BCF 2.1 Coordination".to_string(),
+                standard: "Structure x MEP / BCF 2.1".to_string(),
+                key_metric: format!(
+                    "Hard={} | Warn={} | Sleeve={} | Drop={:.2}m",
+                    clash.hard_clashes,
+                    clash.clearance_warnings,
+                    clash.sleeve_advisories,
+                    clash.recommended_plenum_drop_m
+                ),
+                is_compliant: clash.coordination_pass,
+            }
+        },
+        {
+            let util_own;
+            let util = match utilities_opt {
+                Some(u) => u,
+                None => {
+                    let empty_city = crate::core::gis::IfcxCityScene::default();
+                    util_own = crate::core::gis::evaluate_urban_utilities(
+                        &empty_city,
+                        bim,
+                        None,
+                        0.0,
+                        site,
+                        &crate::core::gis::UrbanUtilitiesConfig::default(),
+                    );
+                    &util_own
+                }
+            };
+            let inter_own;
+            let inter = match intersections_opt {
+                Some(i) => i,
+                None => {
+                    let empty_city = crate::core::gis::IfcxCityScene::default();
+                    inter_own = crate::core::gis::detect_and_evaluate_road_intersections(
+                        &empty_city,
+                        None,
+                        0.0,
+                        &crate::core::gis::CityIntersectionConfig::default(),
+                    );
+                    &inter_own
+                }
+            };
+            MasterDossierSheetEntry {
+                sheet_code: "S-118".to_string(),
+                title: "Subsurface Urban Utilities & Smart Road Intersections".to_string(),
+                standard: "Hazen-Williams / Manning / HCM".to_string(),
+                key_metric: format!(
+                    "W {:.0}% S {:.0}% P {:.0}% | {} Jct (LOS {})",
+                    util.balance.water_utilization_pct,
+                    util.balance.sewer_utilization_pct,
+                    util.balance.power_utilization_pct,
+                    inter.total_intersections,
+                    inter.worst_los.short_label()
+                ),
+                is_compliant: util.balance.water_adequate
+                    && util.balance.sewer_adequate
+                    && util.balance.power_adequate
+                    && inter.all_los_acceptable,
+            }
+        },
     ]
 }
 
-/// Generates Archival A3 Landscape Sheet `S-000` — Master Engineering Dossier Drawing Index (`S-100`–`S-115`).
+/// Generates Archival A3 Landscape Sheet `S-000` — Master Engineering Dossier Drawing Index (`S-100`–`S-118`).
 pub fn build_master_dossier_index_svg(
     project_name: &str,
     entries: &[MasterDossierSheetEntry],
     checkpoint_hash: Option<&str>,
 ) -> VectorDossierExport {
-    let mut svg = String::with_capacity(34_000);
+    let mut svg = String::with_capacity(38_000);
     let seal_token = "__EIGENGRAPH_MASTER_INDEX_S000_SHA256__";
     let passed = entries.iter().filter(|e| e.is_compliant).count();
     let total = entries.len().max(1);
@@ -6627,15 +6797,15 @@ pub fn build_master_dossier_index_svg(
         r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1131" width="1600" height="1131" style="background:#ffffff;font-family:'Segoe UI',Arial,sans-serif;">
 <rect x="14" y="14" width="1572" height="1103" fill="#ffffff" stroke="#0b1427" stroke-width="2.6"/>
 <rect x="19" y="19" width="1562" height="1093" fill="none" stroke="#0284c7" stroke-width="1.0"/>
-<text x="32" y="42" font-size="16" font-weight="bold" fill="#0b1427">EIGENGRAPH v0.8.6 MASTER ENGINEERING DOSSIER DRAWING INDEX (SHEET S-000) — {}</text>
-<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET S-000 • S-100 TO S-115 REGISTER • 100% PURE VECTOR</text>
+<text x="32" y="42" font-size="16" font-weight="bold" fill="#0b1427">EIGENGRAPH v0.8.8 MASTER ENGINEERING DOSSIER DRAWING INDEX (SHEET S-000) — {}</text>
+<text x="1568" y="42" font-size="11" font-weight="bold" text-anchor="end" fill="#0369a1">SHEET S-000 • S-100 TO S-118 REGISTER • 100% PURE VECTOR</text>
 <rect x="32" y="56" width="1536" height="36" rx="4" fill="#0f172a"/>
 <text x="48" y="79" font-size="10.2" font-weight="bold" font-family="monospace" fill="#ffffff">SHEET    ENGINEERING DELIVERABLE / STUDIO                     GOVERNING CODE                KEY TELEMETRY                              STATUS</text>"##,
         escape_xml(project_name),
     );
 
-    for (idx, row) in entries.iter().take(16).enumerate() {
-        let ry = 96.0 + (idx as f64) * 54.0;
+    for (idx, row) in entries.iter().take(19).enumerate() {
+        let ry = 96.0 + (idx as f64) * 45.5;
         let bg = if idx % 2 == 0 { "#ffffff" } else { "#f8fafc" };
         let (st_col, st_lbl) = if row.is_compliant {
             ("#059669", "PASS")
@@ -6644,30 +6814,30 @@ pub fn build_master_dossier_index_svg(
         };
         let _ = writeln!(
             svg,
-            r##"<rect x="32" y="{ry:.1}" width="1536" height="48" rx="4" fill="{bg}" stroke="#cbd5e1" stroke-width="0.9"/>
-<text x="48" y="{:.1}" font-size="10.0" font-weight="bold" font-family="monospace" fill="#0369a1">{:<8} </text>
-<text x="128" y="{:.1}" font-size="10.0" font-weight="bold" fill="#0f172a">{}</text>
-<text x="640" y="{:.1}" font-size="9.2" font-family="monospace" fill="#334155">{}</text>
-<text x="950" y="{:.1}" font-size="9.0" font-family="monospace" fill="#0f172a">{}</text>
-<rect x="1474" y="{:.1}" width="76" height="24" rx="4" fill="{st_col}"/>
-<text x="1512" y="{:.1}" font-size="9.0" font-weight="bold" text-anchor="middle" fill="#ffffff">{st_lbl}</text>"##,
-            ry + 29.0,
+            r##"<rect x="32" y="{ry:.1}" width="1536" height="40" rx="4" fill="{bg}" stroke="#cbd5e1" stroke-width="0.9"/>
+<text x="48" y="{:.1}" font-size="9.6" font-weight="bold" font-family="monospace" fill="#0369a1">{:<8} </text>
+<text x="128" y="{:.1}" font-size="9.6" font-weight="bold" fill="#0f172a">{}</text>
+<text x="640" y="{:.1}" font-size="8.9" font-family="monospace" fill="#334155">{}</text>
+<text x="950" y="{:.1}" font-size="8.7" font-family="monospace" fill="#0f172a">{}</text>
+<rect x="1474" y="{:.1}" width="76" height="22" rx="4" fill="{st_col}"/>
+<text x="1512" y="{:.1}" font-size="8.8" font-weight="bold" text-anchor="middle" fill="#ffffff">{st_lbl}</text>"##,
+            ry + 24.5,
             escape_xml(&row.sheet_code),
-            ry + 29.0,
-            escape_xml(&truncate_clean(&row.title, 48)),
-            ry + 29.0,
-            escape_xml(&truncate_clean(&row.standard, 28)),
-            ry + 29.0,
-            escape_xml(&truncate_clean(&row.key_metric, 48)),
-            ry + 12.0,
-            ry + 28.0,
+            ry + 24.5,
+            escape_xml(&truncate_clean(&row.title, 52)),
+            ry + 24.5,
+            escape_xml(&truncate_clean(&row.standard, 30)),
+            ry + 24.5,
+            escape_xml(&truncate_clean(&row.key_metric, 50)),
+            ry + 9.0,
+            ry + 23.5,
         );
     }
 
     let _ = writeln!(
         svg,
         r##"<rect x="32" y="974" width="1536" height="122" rx="6" fill="#f0f9ff" stroke="#38bdf8" stroke-width="1.2"/>
-<text x="48" y="1004" font-size="12" font-weight="bold" fill="#0c4a6e">EIGENGRAPH v0.8.6 UNIFIED DELIVERABLE COMPLIANCE: {passed}/{total} SHEETS COMPLIANT (S-100 THROUGH S-115)</text>
+<text x="48" y="1004" font-size="12" font-weight="bold" fill="#0c4a6e">EIGENGRAPH v0.8.8 UNIFIED DELIVERABLE COMPLIANCE: {passed}/{total} SHEETS COMPLIANT (S-100 THROUGH S-118)</text>
 <text x="48" y="1032" font-size="9.6" font-family="monospace" fill="#334155">SHA-256 SEAL: {seal_token}</text>
 <text x="48" y="1058" font-size="9.4" font-family="monospace" fill="#475569">{}</text>
 <text x="48" y="1082" font-size="9.0" font-family="monospace" fill="#0369a1">100% Pure Rust • Pure WebGPU WGSL • OpenBIM IFCX (IFC 5) • Zero Legacy STEP IFC • Zero Raster Pixels</text>
@@ -6675,7 +6845,7 @@ pub fn build_master_dossier_index_svg(
         escape_xml(
             &checkpoint_hash
                 .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
-                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: EigenGraph v0.8.6 Master Dossier Release".to_string()),
+                .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: EigenGraph v0.8.8 Master Dossier Release".to_string()),
         ),
     );
 
@@ -7178,19 +7348,27 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
+            None,
+            None,
         );
-        assert_eq!(master_entries.len(), 16);
+        assert_eq!(master_entries.len(), 19);
         let s000 = build_master_dossier_index_svg(
             &field_proj.project_name,
             &master_entries,
-            Some("v086masterseal"),
+            Some("v088masterseal"),
         );
         assert!(s000.svg_content.starts_with("<svg"));
         assert!(s000.svg_content.contains(r#"viewBox="0 0 1600 1131""#));
         assert!(s000.svg_content.contains("SHEET S-000"));
+        assert!(s000.svg_content.contains("v0.8.8"));
         assert!(s000.svg_content.contains("S-100"));
         assert!(s000.svg_content.contains("S-114"));
         assert!(s000.svg_content.contains("S-115"));
+        assert!(s000.svg_content.contains("S-116"));
+        assert!(s000.svg_content.contains("S-117"));
+        assert!(s000.svg_content.contains("S-118"));
         assert!(!s000.svg_content.contains("<image"));
         assert!(!s000.svg_content.contains("ARI"));
         assert_eq!(s000.sha256_seal.len(), 64);
