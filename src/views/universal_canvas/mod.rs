@@ -871,6 +871,133 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Equips Cities: Skylines II road-snapped parcel zoning brush with chosen kind & density.
+    pub fn set_zone_author_mode(
+        &mut self,
+        kind: crate::core::gis::IfcxZoneKind,
+        density: crate::core::gis::ZoneDensityTier,
+    ) {
+        self.terrain_sculpt.active_brush = None;
+        self.terrain_sculpt_hover_enu = None;
+        self.globe_mode = true;
+        self.earth_bim_author.active_tool = EarthBimTool::Zone;
+        self.earth_bim_author.pending_start_mm = None;
+        self.earth_bim_author.pending_road_control_mm = None;
+        self.city_scene.active_zone_kind = kind;
+        self.city_scene.active_zone_density = density;
+        self.status_message = Some(format!(
+            "Zoning Brush: {} ({}) • Hover near a road to snap parcel & spawn IfcBuilding",
+            kind.label(),
+            density.label()
+        ));
+    }
+
+    /// Automatically populates road-snapped parcels and procedural `IfcBuilding` towers along
+    /// authored streets (synthesizing the coastal demo boulevard first if no roads exist yet).
+    pub fn auto_populate_road_parcels(&mut self) -> usize {
+        if self.city_scene.roads.is_empty() {
+            self.synthesize_demo_coastal_highway();
+        }
+        let spawned = self.city_scene.auto_zone_parcels_along_roads(
+            self.active_site_tin.as_ref(),
+            self.sea_level_m,
+            28.0,
+            24.0,
+        );
+        let m = self.city_scene.district_metrics();
+        self.status_message = Some(format!(
+            "Auto-Zoned +{spawned} lots -> {} IfcBuildings • Pop {} • Jobs {} • GFA {:.0} m²",
+            m.building_count, m.total_residents, m.total_jobs, m.total_gfa_m2
+        ));
+        spawned
+    }
+
+    fn paint_zone_parcel_preview(
+        &self,
+        painter: &egui::Painter,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if self.earth_bim_author.active_tool != EarthBimTool::Zone {
+            return;
+        }
+        let Some(hover_mm) = self.earth_bim_author.hover_snap_mm else {
+            return;
+        };
+        let raw_m = [hover_mm[0] * 0.001, hover_mm[1] * 0.001];
+        let snap_hit = self.city_scene.snap_point_to_road_or_parcel(raw_m, 22.0);
+        let center_m = snap_hit.map(|h| h.snapped_enu_m).unwrap_or(raw_m);
+        let bearing_deg = snap_hit.map(|h| h.bearing_deg).unwrap_or(0.0);
+        let ref_z = self
+            .active_site_tin
+            .as_ref()
+            .map(|t| t.sample_elevation_and_slope(0.0, 0.0).0)
+            .unwrap_or(0.0);
+        let ground_msl = self
+            .active_site_tin
+            .as_ref()
+            .map(|t| t.sample_elevation_and_slope(center_m[0] as f32, center_m[1] as f32).0)
+            .unwrap_or(ref_z);
+        let z_rel = (ground_msl - ref_z + 0.35) as f64;
+        let submerged = self.active_site_tin.is_some() && ground_msl < self.sea_level_m + 0.3;
+
+        let rgba = if submerged {
+            [0.94, 0.28, 0.28, 1.0]
+        } else {
+            self.city_scene.active_zone_kind.fill_rgba()
+        };
+        let stroke_col = Color32::from_rgb(
+            (rgba[0] * 255.0) as u8,
+            (rgba[1] * 255.0) as u8,
+            (rgba[2] * 255.0) as u8,
+        );
+        let hw = 14.0_f64;
+        let hd = 12.0_f64;
+        let rad = bearing_deg.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let mut pts = Vec::with_capacity(5);
+        for [lx, ly] in [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd], [-hw, -hd]] {
+            let px = center_m[0] + lx * cr - ly * sr;
+            let py = center_m[1] + lx * sr + ly * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                self.ground_origin_lat_lon,
+                [px * 1000.0, py * 1000.0],
+            );
+            if let Some((sp, _, true)) = xform.project_lat_lon_elev(ll.0, ll.1, z_rel) {
+                pts.push(sp);
+            }
+        }
+        if pts.len() >= 3 {
+            painter.add(egui::Shape::line(pts, Stroke::new(2.4, stroke_col)));
+        }
+        let cll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+            self.ground_origin_lat_lon,
+            [center_m[0] * 1000.0, center_m[1] * 1000.0],
+        );
+        if let Some((cp, _, true)) = xform.project_lat_lon_elev(cll.0, cll.1, z_rel + 0.2) {
+            let tag = if submerged {
+                "SUBMERGED (No Build)".to_string()
+            } else {
+                format!(
+                    "{} ({}) {}",
+                    self.city_scene.active_zone_kind.short_label(),
+                    self.city_scene.active_zone_density.short_label(),
+                    if snap_hit.is_some_and(|h| h.is_road) {
+                        "• SNAP"
+                    } else {
+                        ""
+                    }
+                )
+            };
+            painter.text(
+                cp + egui::vec2(0.0, -14.0),
+                egui::Align2::CENTER_BOTTOM,
+                tag,
+                egui::FontId::proportional(11.0),
+                Color32::WHITE,
+            );
+        }
+    }
+
     /// Evaluates seismic pounding gaps, urban wind exposure & Venturi channeling, and debris zones
     /// between the active BIM structure and all surrounding neighbors inside `world_index`.
     pub fn refresh_neighborhood_coupling(&mut self, bim_project: &BimProject) {
@@ -3133,6 +3260,7 @@ impl UniversalCanvasState {
             if let Some(ref xform) = active_globe_xform {
                 self.paint_terrain_sculpt_brush_ring(&painter, xform);
                 self.paint_road_spline_preview(&painter, xform);
+                self.paint_zone_parcel_preview(&painter, xform);
             }
             self.paint_planetary_world_buildings(&painter, rect, theme);
             if self.show_neighborhood_hazards {

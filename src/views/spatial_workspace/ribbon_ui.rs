@@ -733,6 +733,106 @@ impl SpatialWorkspaceState {
             });
         }
 
+        if universal_canvas.earth_bim_author.active_tool
+            == crate::views::universal_canvas::EarthBimTool::Zone
+        {
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(deck_w);
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let metrics = universal_canvas.city_scene.district_metrics();
+                icons::icon_label(
+                    ui,
+                    AppIcon::Building,
+                    12.0,
+                    theme.accent_blue,
+                    &format!("Zoning: {}", universal_canvas.city_scene.active_zone_kind.label()),
+                    10.5,
+                    theme.text_primary,
+                    true,
+                );
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    universal_canvas.city_scene.active_zone_density.label(),
+                    false,
+                    theme.accent_blue,
+                    "Cycle density tier (Low -> Medium -> High-Rise Towers)",
+                )
+                .clicked()
+                {
+                    universal_canvas.city_scene.active_zone_density =
+                        universal_canvas.city_scene.active_zone_density.cycle_next();
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "Auto-Towers",
+                    universal_canvas.city_scene.synthesize_zone_towers,
+                    theme.accent_green,
+                    "Automatically spawn procedural IfcBuildings inside newly zoned parcels",
+                )
+                .clicked()
+                {
+                    universal_canvas.city_scene.synthesize_zone_towers =
+                        !universal_canvas.city_scene.synthesize_zone_towers;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Sparkles),
+                    "Auto-Zone",
+                    false,
+                    theme.accent_orange,
+                    "Generate road-snapped zoning parcels & procedural IfcBuildings along all roads",
+                )
+                .clicked()
+                {
+                    universal_canvas.auto_populate_road_parcels();
+                }
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} Bldgs • Pop {} • Jobs {} • {:.0} m²",
+                        metrics.building_count,
+                        metrics.total_residents,
+                        metrics.total_jobs,
+                        metrics.total_gfa_m2
+                    ))
+                    .size(10.0)
+                    .color(theme.text_secondary),
+                );
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Undo),
+                    "Undo",
+                    false,
+                    theme.text_secondary,
+                    "Remove last authored zone parcel",
+                )
+                .clicked()
+                {
+                    universal_canvas.city_scene.zones.pop();
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Close),
+                    "Done",
+                    false,
+                    theme.text_secondary,
+                    "Exit parcel zoning brush",
+                )
+                .clicked()
+                {
+                    universal_canvas.earth_bim_author.active_tool =
+                        crate::views::universal_canvas::EarthBimTool::None;
+                }
+            });
+        }
+
         if self.active_lens != SpatialLens::Clean {
             ui.add_space(3.0);
             self.render_active_lens_colorbar_strip(
@@ -1079,6 +1179,66 @@ impl SpatialWorkspaceState {
                     .clicked()
                     {
                         universal_canvas.city_scene.roads.pop();
+                    }
+                });
+                Self::ribbon_group(ui, theme, "City Zoning", |ui| {
+                    let zone_active = universal_canvas.earth_bim_author.active_tool
+                        == crate::views::universal_canvas::EarthBimTool::Zone;
+                    let cur_zk = universal_canvas.city_scene.active_zone_kind;
+                    let cur_dn = universal_canvas.city_scene.active_zone_density;
+                    let zone_btns = [
+                        (
+                            crate::core::gis::IfcxZoneKind::Residential,
+                            AppIcon::Building,
+                            "Res",
+                            theme.accent_green,
+                            "Zone Residential Housing Parcels (snaps to roads)",
+                        ),
+                        (
+                            crate::core::gis::IfcxZoneKind::Commercial,
+                            AppIcon::BoxPackage,
+                            "Com",
+                            theme.accent_blue,
+                            "Zone Commercial Office & Retail Towers (snaps to roads)",
+                        ),
+                        (
+                            crate::core::gis::IfcxZoneKind::Industrial,
+                            AppIcon::Wrench,
+                            "Ind",
+                            theme.accent_orange,
+                            "Zone Industrial & Logistics Halls (snaps to roads)",
+                        ),
+                        (
+                            crate::core::gis::IfcxZoneKind::Park,
+                            AppIcon::Trees,
+                            "Park",
+                            theme.accent_green,
+                            "Zone Urban Parks & Pocket Greenery",
+                        ),
+                    ];
+                    for (zk, ic, lbl, col, tip) in zone_btns {
+                        let active = zone_active && cur_zk == zk;
+                        if Self::ribbon_tool_tile(ui, theme, ic, lbl, active, col, tip).clicked() {
+                            if active {
+                                universal_canvas.earth_bim_author.active_tool =
+                                    crate::views::universal_canvas::EarthBimTool::None;
+                            } else {
+                                universal_canvas.set_zone_author_mode(zk, cur_dn);
+                            }
+                        }
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Sparkles,
+                        "Auto-Zone",
+                        false,
+                        theme.accent_blue,
+                        "Automatically lay road-snapped zoning parcels & spawn procedural IfcBuildings",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.auto_populate_road_parcels();
                     }
                 });
                 Self::ribbon_group(ui, theme, "Zoning & Brief", |ui| {

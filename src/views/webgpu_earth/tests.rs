@@ -3036,3 +3036,62 @@ use crate::core::ifcx::IfcxDocument;
             .iter()
             .all(|v| v.pos.iter().all(|f| f.is_finite()) && v.normal.iter().all(|f| f.is_finite())));
     }
+
+    #[test]
+    fn test_v0868_road_snapped_zoning_and_procedural_towers_webgpu_mesh() {
+        let tin = TinSurfaceMesh::generate_from_dem_preset(
+            DemTerrainPreset::CoastalIslandMetropolis,
+            680.0,
+            680.0,
+            46,
+            46,
+            1.0,
+        );
+        let mut city = IfcxCityScene::default();
+        city.active_zone_density = crate::core::gis::ZoneDensityTier::HighDensity;
+        city.active_zone_kind = crate::core::gis::IfcxZoneKind::Commercial;
+        city.add_curved_road_with_auto_bridge(
+            [-110.0, -40.0],
+            Some([0.0, -20.0]),
+            [110.0, -40.0],
+            crate::core::gis::IfcxRoadKind::Arterial,
+            false,
+            0.0,
+            Some(&tin),
+            0.0,
+        )
+        .expect("arterial road");
+        let spawned = city.auto_zone_parcels_along_roads(Some(&tin), 0.0, 28.0, 24.0);
+        assert!(spawned >= 4, "Should auto-zone multiple lots along arterial");
+
+        let mesh = build_rtc_site_scene_mesh_with_landscape(
+            VectorEarthTheme::CityDaylight,
+            (-6.2088, 106.8456),
+            17.0,
+            true,
+            Some(&tin),
+            &WorldSpatialIndex::default(),
+            None,
+            &UrbanVectorLayerCache::default(),
+            Some(&city),
+            true,
+            0.0,
+        );
+        let bldg_verts: Vec<&GpuEarthVertex> = mesh
+            .vertices
+            .iter()
+            .filter(|v| (v.meta[0] - 2.0).abs() < 0.05)
+            .collect();
+        assert!(
+            bldg_verts.len() > 250,
+            "Road-snapped HighDensity lots must emit multi-massing podium+tower GPU meshes"
+        );
+        assert!(
+            bldg_verts.iter().any(|v| v.pos[2] > 35.0),
+            "HighDensity commercial tower shafts + penthouses must rise above +35m"
+        );
+        assert!(mesh
+            .vertices
+            .iter()
+            .all(|v| v.pos.iter().all(|f| f.is_finite()) && v.normal.iter().all(|f| f.is_finite())));
+    }

@@ -1807,6 +1807,42 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Sparkles,
     },
     SlashCommandSpec {
+        cmd: "/zone-res",
+        category: "Zoning",
+        description: "Equip Road-Snapped Residential Parcel Zoning Brush",
+        icon: AppIcon::Building,
+    },
+    SlashCommandSpec {
+        cmd: "/zone-com",
+        category: "Zoning",
+        description: "Equip Road-Snapped Commercial Tower Zoning Brush",
+        icon: AppIcon::BoxPackage,
+    },
+    SlashCommandSpec {
+        cmd: "/zone-ind",
+        category: "Zoning",
+        description: "Equip Road-Snapped Industrial Facility Zoning Brush",
+        icon: AppIcon::Wrench,
+    },
+    SlashCommandSpec {
+        cmd: "/zone-park",
+        category: "Zoning",
+        description: "Equip Urban Park & Pocket Greenery Zoning Brush",
+        icon: AppIcon::Trees,
+    },
+    SlashCommandSpec {
+        cmd: "/auto-zone",
+        category: "Zoning",
+        description: "Auto-populate road-snapped parcels & procedural IfcBuildings along streets",
+        icon: AppIcon::Sparkles,
+    },
+    SlashCommandSpec {
+        cmd: "/density",
+        category: "Zoning",
+        description: "Cycle or set zone density (low, med, high)",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",

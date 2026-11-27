@@ -857,19 +857,46 @@ impl UniversalCanvasState {
                             }
                         }
                         EarthBimTool::Zone => {
-                            let center_m = [pt[0] * 0.001, pt[1] * 0.001];
-                            let kind = self.city_scene.active_zone_kind;
-                            let bearing = self
-                                .city_scene
-                                .snap_point_to_road_or_parcel(center_m, 14.0)
-                                .map(|h| h.bearing_deg)
-                                .unwrap_or(0.0);
-                            let z = self.city_scene.add_zone(center_m, 30.0, 24.0, bearing, kind);
-                            self.status_message = Some(format!(
-                                "Zoned '{}' ({}, 30x24 m) as IFCX IfcSpatialZone",
-                                z.name,
-                                z.kind.label()
-                            ));
+                            let raw_m = [pt[0] * 0.001, pt[1] * 0.001];
+                            let snap_hit = self.city_scene.snap_point_to_road_or_parcel(raw_m, 22.0);
+                            let center_m = snap_hit.map(|h| h.snapped_enu_m).unwrap_or(raw_m);
+                            let bearing = snap_hit.map(|h| h.bearing_deg).unwrap_or(0.0);
+                            let submerged = self.active_site_tin.as_ref().is_some_and(|t| {
+                                t.sample_elevation_and_slope(center_m[0] as f32, center_m[1] as f32).0
+                                    < self.sea_level_m + 0.3
+                            });
+                            if submerged {
+                                self.status_message = Some(
+                                    "Cannot zone submerged water — sculpt land or reclaim seabed first"
+                                        .to_string(),
+                                );
+                            } else {
+                                let kind = self.city_scene.active_zone_kind;
+                                let (z_name, z_kind_lbl, floors_opt) = {
+                                    let z = self.city_scene.add_zone(
+                                        center_m,
+                                        28.0,
+                                        24.0,
+                                        bearing,
+                                        kind,
+                                    );
+                                    let fl = z.synthesize_procedural_building().map(|b| b.floors);
+                                    (z.name.clone(), z.kind.label(), fl)
+                                };
+                                let metrics = self.city_scene.district_metrics();
+                                let bldg_note = floors_opt
+                                    .map(|fl| format!(" -> Spawned {fl}-story IfcBuilding"))
+                                    .unwrap_or_else(|| " -> Greenery Park".to_string());
+                                self.status_message = Some(format!(
+                                    "Zoned '{}' ({}, 28x24 m @ {:.0}°){} | District: {} Bldgs • {:.0} m² GFA",
+                                    z_name,
+                                    z_kind_lbl,
+                                    bearing,
+                                    bldg_note,
+                                    metrics.building_count,
+                                    metrics.total_gfa_m2
+                                ));
+                            }
                         }
                         EarthBimTool::None => {}
                     }

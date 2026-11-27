@@ -14,6 +14,7 @@ use crate::core::ifcx::{ns, IfcxDocument, IfcxNode, UsdGeomMesh};
 
 pub const NS_EG_CITY_ROAD: &str = "eigengraph::city::road";
 pub const NS_EG_CITY_ZONE: &str = "eigengraph::city::zone";
+pub const NS_EG_CITY_BUILDING: &str = "eigengraph::city::proceduralBuilding";
 pub const NS_EG_CITY_PAD: &str = "eigengraph::city::gradedPad";
 
 /// Functional roadway class authored on IFCX Earth (`IfcRoad` / `IfcBridge`).
@@ -313,6 +314,76 @@ impl IfcxZoneKind {
     }
 }
 
+/// Urban parcel development density tier (`Low`, `Medium`, `High`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ZoneDensityTier {
+    LowDensity,
+    #[default]
+    MediumDensity,
+    HighDensity,
+}
+
+impl ZoneDensityTier {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::LowDensity => "Low Density",
+            Self::MediumDensity => "Medium Density",
+            Self::HighDensity => "High-Rise Density",
+        }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::LowDensity => "Low",
+            Self::MediumDensity => "Med",
+            Self::HighDensity => "High",
+        }
+    }
+
+    pub fn cycle_next(self) -> Self {
+        match self {
+            Self::LowDensity => Self::MediumDensity,
+            Self::MediumDensity => Self::HighDensity,
+            Self::HighDensity => Self::LowDensity,
+        }
+    }
+}
+
+/// Deterministic architectural building massing spawned onto a zoned parcel (`IfcBuilding`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProceduralCityBuilding {
+    pub name: String,
+    pub zone_id: usize,
+    pub zone_kind: IfcxZoneKind,
+    pub density: ZoneDensityTier,
+    pub center_enu_m: [f64; 2],
+    pub rotation_deg: f64,
+    pub podium_width_m: f64,
+    pub podium_depth_m: f64,
+    pub podium_height_m: f32,
+    pub tower_width_m: f64,
+    pub tower_depth_m: f64,
+    pub tower_height_m: f32,
+    pub has_penthouse: bool,
+    pub floors: usize,
+    pub gfa_m2: f64,
+    pub residents: usize,
+    pub jobs: usize,
+    pub wall_tint_rgba: [f32; 4],
+}
+
+/// Aggregated Cities: Skylines II style district population, employment & built-area telemetry.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CityDistrictMetrics {
+    pub parcel_count: usize,
+    pub building_count: usize,
+    pub total_residents: usize,
+    pub total_jobs: usize,
+    pub total_gfa_m2: f64,
+    pub park_parcel_count: usize,
+    pub green_ratio_pct: f32,
+}
+
 /// Authored urban parcel zone (`IfcSpatialZone`) supporting context towers and instanced trees.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IfcxSpatialZone {
@@ -325,6 +396,8 @@ pub struct IfcxSpatialZone {
     pub rotation_deg: f64,
     pub synthesize_context_towers: bool,
     pub tree_density: u8,
+    #[serde(default)]
+    pub density: ZoneDensityTier,
 }
 
 impl IfcxSpatialZone {
@@ -384,6 +457,103 @@ impl IfcxSpatialZone {
         }
         trees
     }
+
+    /// Synthesizes deterministic podium + stepped tower architectural massing for this parcel.
+    pub fn synthesize_procedural_building(&self) -> Option<ProceduralCityBuilding> {
+        if !self.synthesize_context_towers || self.kind == IfcxZoneKind::Park {
+            return None;
+        }
+        let hash = (self.id as u64).wrapping_mul(2654435761) ^ 0x9E37_79B9_7F4A_7C15;
+        let u0 = ((hash & 0xFFFF) as f64) / 65535.0;
+        let u1 = (((hash >> 16) & 0xFFFF) as f64) / 65535.0;
+        let u2 = (((hash >> 32) & 0xFFFF) as f64) / 65535.0;
+
+        let (floors, story_h_m, has_penthouse, tower_scale) = match (self.kind, self.density) {
+            (_, ZoneDensityTier::LowDensity) => {
+                let fl = match self.kind {
+                    IfcxZoneKind::Industrial => 1 + (hash as usize % 2),
+                    _ => 2 + (hash as usize % 2),
+                };
+                (fl, 3.35_f32, false, 0.88)
+            }
+            (IfcxZoneKind::Industrial, _) => (2 + (hash as usize % 3), 4.2, false, 0.90),
+            (IfcxZoneKind::Commercial, ZoneDensityTier::HighDensity) => {
+                (14 + (hash as usize % 11), 3.6, true, 0.64)
+            }
+            (IfcxZoneKind::Residential, ZoneDensityTier::HighDensity) => {
+                (11 + (hash as usize % 9), 3.3, true, 0.66)
+            }
+            (IfcxZoneKind::Civic, ZoneDensityTier::HighDensity) => {
+                (10 + (hash as usize % 6), 3.8, true, 0.68)
+            }
+            (IfcxZoneKind::Commercial, ZoneDensityTier::MediumDensity) => {
+                (6 + (hash as usize % 5), 3.55, true, 0.74)
+            }
+            (IfcxZoneKind::Civic, ZoneDensityTier::MediumDensity) => {
+                (4 + (hash as usize % 4), 3.8, true, 0.76)
+            }
+            (IfcxZoneKind::Residential, ZoneDensityTier::MediumDensity) => {
+                (4 + (hash as usize % 5), 3.25, u2 > 0.45, 0.78)
+            }
+            (IfcxZoneKind::Park, _) => return None,
+        };
+
+        let podium_floors = match self.density {
+            ZoneDensityTier::LowDensity => floors,
+            ZoneDensityTier::MediumDensity => 2.min(floors),
+            ZoneDensityTier::HighDensity => 3.min(floors),
+        };
+        let podium_width_m = (self.width_m * (0.58 + 0.14 * u0)).clamp(8.0, self.width_m - 2.5);
+        let podium_depth_m = (self.depth_m * (0.56 + 0.14 * u1)).clamp(8.0, self.depth_m - 2.5);
+        let podium_height_m = podium_floors as f32 * story_h_m;
+        let tower_width_m = (podium_width_m * tower_scale).max(6.5);
+        let tower_depth_m = (podium_depth_m * tower_scale).max(6.5);
+        let tower_height_m = floors as f32 * story_h_m;
+
+        let upper_floors = floors.saturating_sub(podium_floors);
+        let gfa_m2 = podium_floors as f64 * (podium_width_m * podium_depth_m)
+            + upper_floors as f64 * (tower_width_m * tower_depth_m);
+        let (residents, jobs) = match self.kind {
+            IfcxZoneKind::Residential => (((gfa_m2 / 36.0).round() as usize).max(4), 0),
+            IfcxZoneKind::Commercial => (0, ((gfa_m2 / 26.0).round() as usize).max(6)),
+            IfcxZoneKind::Industrial => (0, ((gfa_m2 / 44.0).round() as usize).max(4)),
+            IfcxZoneKind::Civic => (0, ((gfa_m2 / 34.0).round() as usize).max(5)),
+            IfcxZoneKind::Park => (0, 0),
+        };
+        let wall_tint_rgba = match self.kind {
+            IfcxZoneKind::Residential => [
+                0.76 + 0.12 * u0 as f32,
+                0.74 + 0.10 * u1 as f32,
+                0.68,
+                1.0,
+            ],
+            IfcxZoneKind::Commercial => [0.36, 0.56 + 0.14 * u1 as f32, 0.78 + 0.10 * u2 as f32, 1.0],
+            IfcxZoneKind::Industrial => [0.68, 0.58, 0.42, 1.0],
+            IfcxZoneKind::Civic => [0.70, 0.66, 0.84, 1.0],
+            IfcxZoneKind::Park => [0.24, 0.68, 0.42, 1.0],
+        };
+
+        Some(ProceduralCityBuilding {
+            name: format!("Bldg_{}_{}", self.kind.short_label(), self.id),
+            zone_id: self.id,
+            zone_kind: self.kind,
+            density: self.density,
+            center_enu_m: self.center_enu_m,
+            rotation_deg: self.rotation_deg,
+            podium_width_m,
+            podium_depth_m,
+            podium_height_m,
+            tower_width_m,
+            tower_depth_m,
+            tower_height_m,
+            has_penthouse,
+            floors,
+            gfa_m2,
+            residents,
+            jobs,
+            wall_tint_rgba,
+        })
+    }
 }
 
 /// Graded foundation pad cut/fill record authored onto `IfcSite` TIN terrain.
@@ -423,6 +593,8 @@ pub struct IfcxCityScene {
     pub road_draw_mode: RoadDrawMode,
     #[serde(default = "default_auto_bridge_true")]
     pub auto_bridge_enabled: bool,
+    #[serde(default)]
+    pub active_zone_density: ZoneDensityTier,
 }
 
 impl Default for IfcxCityScene {
@@ -438,6 +610,7 @@ impl Default for IfcxCityScene {
             synthesize_zone_towers: true,
             road_draw_mode: RoadDrawMode::CurvedSpline,
             auto_bridge_enabled: true,
+            active_zone_density: ZoneDensityTier::MediumDensity,
         }
     }
 }
@@ -584,8 +757,137 @@ impl IfcxCityScene {
             rotation_deg: rotation_deg.rem_euclid(360.0),
             synthesize_context_towers: self.synthesize_zone_towers && kind != IfcxZoneKind::Park,
             tree_density,
+            density: self.active_zone_density,
         });
         self.zones.last().expect("pushed zone")
+    }
+
+    /// Aggregates live district population, job capacity, built GFA, and green space telemetry.
+    pub fn district_metrics(&self) -> CityDistrictMetrics {
+        let mut m = CityDistrictMetrics {
+            parcel_count: self.zones.len(),
+            ..Default::default()
+        };
+        for z in &self.zones {
+            if z.kind == IfcxZoneKind::Park {
+                m.park_parcel_count += 1;
+            }
+            if let Some(b) = z.synthesize_procedural_building() {
+                m.building_count += 1;
+                m.total_residents += b.residents;
+                m.total_jobs += b.jobs;
+                m.total_gfa_m2 += b.gfa_m2;
+            }
+        }
+        if m.parcel_count > 0 {
+            m.green_ratio_pct = (m.park_parcel_count as f32 / m.parcel_count as f32) * 100.0;
+        }
+        m
+    }
+
+    /// Generates road-snapped `IfcSpatialZone` parcel lots along both sides of ground roads,
+    /// skipping submerged coastal water, steep hazard cliffs (>26°), road overlaps, and the origin BIM lot.
+    pub fn auto_zone_parcels_along_roads(
+        &mut self,
+        tin: Option<&TinSurfaceMesh>,
+        sea_level_m: f32,
+        lot_width_m: f64,
+        lot_depth_m: f64,
+    ) -> usize {
+        let lot_w = lot_width_m.clamp(16.0, 48.0);
+        let lot_d = lot_depth_m.clamp(14.0, 40.0);
+        let step_spacing = lot_w + 4.0;
+        let min_zone_sep = (lot_w.min(lot_d) * 0.85).max(16.0);
+        let roads_snapshot = self.roads.clone();
+        let mut spawned = 0usize;
+
+        for road in &roads_snapshot {
+            if road.is_bridge {
+                continue;
+            }
+            let total_len = road.length_m();
+            if total_len < lot_w + 6.0 {
+                continue;
+            }
+            let pts = road.sample_centerline(((total_len / 6.0).ceil() as usize).clamp(8, 36));
+            let mut s_arc = 0.0_f64;
+            let mut dist_since_prev = step_spacing;
+
+            for seg in pts.windows(2) {
+                let ax = seg[0][0];
+                let ay = seg[0][1];
+                let dx = seg[1][0] - ax;
+                let dy = seg[1][1] - ay;
+                let slen = dx.hypot(dy);
+                if slen < 0.5 {
+                    continue;
+                }
+                s_arc += slen;
+                dist_since_prev += slen;
+                if s_arc < lot_w * 0.45 || s_arc > total_len - lot_w * 0.35 {
+                    continue;
+                }
+                if dist_since_prev < step_spacing {
+                    continue;
+                }
+                dist_since_prev = 0.0;
+
+                let mid = [ax + dx * 0.5, ay + dy * 0.5];
+                let nx = -dy / slen;
+                let ny = dx / slen;
+                let bearing = dy.atan2(dx).to_degrees().rem_euclid(360.0);
+                let setback_center = road.width_m * 0.5 + 3.0 + lot_d * 0.5;
+
+                for side in [-1.0_f64, 1.0] {
+                    let cx = mid[0] + nx * side * setback_center;
+                    let cy = mid[1] + ny * side * setback_center;
+                    if cx.hypot(cy) < 20.0 {
+                        continue;
+                    }
+                    if let Some(t) = tin {
+                        let (gz, slope_deg) = t.sample_elevation_and_slope(cx as f32, cy as f32);
+                        if gz < sea_level_m + 0.65 || slope_deg > 26.0 {
+                            continue;
+                        }
+                    }
+                    let overlaps_zone = self.zones.iter().any(|z| {
+                        (z.center_enu_m[0] - cx).hypot(z.center_enu_m[1] - cy) < min_zone_sep
+                    });
+                    if overlaps_zone {
+                        continue;
+                    }
+                    let overlaps_road = roads_snapshot.iter().any(|r| {
+                        r.sample_centerline(12).windows(2).any(|w| {
+                            let rx = w[0][0];
+                            let ry = w[0][1];
+                            let rdx = w[1][0] - rx;
+                            let rdy = w[1][1] - ry;
+                            let l2 = rdx * rdx + rdy * rdy;
+                            if l2 < 1.0 {
+                                return false;
+                            }
+                            let u = (((cx - rx) * rdx + (cy - ry) * rdy) / l2).clamp(0.0, 1.0);
+                            let px = rx + rdx * u;
+                            let py = ry + rdy * u;
+                            (cx - px).hypot(cy - py) < (r.width_m * 0.5 + lot_d * 0.32)
+                        })
+                    });
+                    if overlaps_road {
+                        continue;
+                    }
+
+                    // Mix occasional neighborhood pocket parks every 6th lot along arterials/collectors
+                    let kind = if (self.zones.len() + 1).is_multiple_of(6) {
+                        IfcxZoneKind::Park
+                    } else {
+                        self.active_zone_kind
+                    };
+                    self.add_zone([cx, cy], lot_w, lot_d, bearing, kind);
+                    spawned += 1;
+                }
+            }
+        }
+        spawned
     }
 
     /// Snaps a point in local ENU meters to the nearest authored road setback or parcel grid edge,
@@ -810,6 +1112,7 @@ impl IfcxCityScene {
         for z in &self.zones {
             mix(&mut h, z.id as u64);
             mix(&mut h, z.kind as u64);
+            mix(&mut h, z.density as u64);
             mix(&mut h, z.synthesize_context_towers as u64);
             mix(&mut h, (z.center_enu_m[0] * 100.0) as i64 as u64);
             mix(&mut h, (z.center_enu_m[1] * 100.0) as i64 as u64);
@@ -971,6 +1274,53 @@ impl IfcxCityScene {
                 node.attributes.insert(NS_EG_CITY_ZONE.to_string(), v);
             }
             nodes.push(node);
+
+            if let Some(bldg) = zone.synthesize_procedural_building() {
+                let hw = bldg.tower_width_m * 0.5;
+                let hd = bldg.tower_depth_m * 0.5;
+                let rad = bldg.rotation_deg.to_radians();
+                let (sr, cr) = (rad.sin(), rad.cos());
+                let corners = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]];
+                let mut b_pts = Vec::with_capacity(8);
+                for z_h in [0.18_f64, bldg.tower_height_m as f64] {
+                    for &[lx, ly] in &corners {
+                        b_pts.push([
+                            bldg.center_enu_m[0] + lx * cr - ly * sr,
+                            bldg.center_enu_m[1] + lx * sr + ly * cr,
+                            z_h,
+                        ]);
+                    }
+                }
+                let b_mesh = UsdGeomMesh {
+                    points: b_pts,
+                    face_vertex_counts: vec![3; 12],
+                    face_vertex_indices: vec![
+                        0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6,
+                        1, 2, 6, 1, 6, 5, 3, 0, 4, 3, 4, 7,
+                    ],
+                    normals: Vec::new(),
+                    display_color: Some(bldg.wall_tint_rgba),
+                    vertex_colors: Vec::new(),
+                    vertex_meta: Vec::new(),
+                    material_kind: 2.0,
+                };
+                let b_path = format!("{site_path}/buildings/{}", bldg.name.to_lowercase());
+                let mut b_node = IfcxNode::new(b_path)
+                    .with_class("IfcBuilding")
+                    .with_prop(
+                        &bldg.name,
+                        bldg.density.label(),
+                        &format!(
+                            "{} Floors | GFA {:.0} m² | Pop {} | Jobs {}",
+                            bldg.floors, bldg.gfa_m2, bldg.residents, bldg.jobs
+                        ),
+                    )
+                    .with_mesh(&b_mesh);
+                if let Ok(v) = serde_json::to_value(&bldg) {
+                    b_node.attributes.insert(NS_EG_CITY_BUILDING.to_string(), v);
+                }
+                nodes.push(b_node);
+            }
         }
 
         for pad in &self.graded_pads {
@@ -1156,5 +1506,55 @@ mod tests {
             .find(|n| n.ifc_class() == Some("IfcBridge"))
             .expect("bridge IFCX node");
         assert!(bridge_node.mesh().unwrap().points.len() > 24);
+    }
+
+    #[test]
+    fn test_v0868_road_snapped_parcel_zoning_and_procedural_ifcx_buildings() {
+        let tin = TinSurfaceMesh::generate_from_dem_preset(
+            DemTerrainPreset::ArchipelagoBayAndVolcano,
+            680.0,
+            680.0,
+            46,
+            46,
+            1.0,
+        );
+        let mut city = IfcxCityScene::default();
+        city.active_zone_kind = IfcxZoneKind::Commercial;
+        city.active_zone_density = ZoneDensityTier::HighDensity;
+        city.add_curved_road_with_auto_bridge(
+            [65.0, -5.0],
+            Some([20.0, 55.0]),
+            [-45.0, 95.0],
+            IfcxRoadKind::Arterial,
+            false,
+            0.0,
+            Some(&tin),
+            0.0,
+        )
+        .expect("on-shore collector");
+
+        let spawned = city.auto_zone_parcels_along_roads(Some(&tin), 0.0, 28.0, 24.0);
+        assert!(spawned >= 3, "Expected >=3 road-snapped lots along collector, got {spawned}");
+
+        let metrics = city.district_metrics();
+        assert!(metrics.building_count >= 2);
+        assert!(metrics.total_gfa_m2 > 5_000.0);
+        assert!(metrics.total_residents + metrics.total_jobs > 100);
+
+        let bldgs: Vec<ProceduralCityBuilding> = city
+            .zones
+            .iter()
+            .filter_map(|z| z.synthesize_procedural_building())
+            .collect();
+        assert!(
+            bldgs.iter().any(|b| b.floors >= 10 && b.tower_height_m > 32.0 && b.has_penthouse),
+            "HighDensity zones must spawn stepped high-rise buildings"
+        );
+
+        let nodes = city.to_ifcx_nodes("/earth/sites/district");
+        assert!(
+            nodes.iter().any(|n| n.ifc_class() == Some("IfcBuilding")),
+            "Procedural city buildings must export native IfcBuilding IFCX nodes"
+        );
     }
 }

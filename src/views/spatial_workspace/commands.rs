@@ -2173,6 +2173,48 @@ impl SpatialWorkspaceState {
                         true,
                     );
                 }
+                "/zone-res" => {
+                    let d = universal_canvas.city_scene.active_zone_density;
+                    universal_canvas
+                        .set_zone_author_mode(crate::core::gis::IfcxZoneKind::Residential, d);
+                    self.push_trace("Equipped Road-Snapped Residential Zoning Brush", true);
+                }
+                "/zone-com" => {
+                    let d = universal_canvas.city_scene.active_zone_density;
+                    universal_canvas
+                        .set_zone_author_mode(crate::core::gis::IfcxZoneKind::Commercial, d);
+                    self.push_trace("Equipped Road-Snapped Commercial Zoning Brush", true);
+                }
+                "/zone-ind" => {
+                    let d = universal_canvas.city_scene.active_zone_density;
+                    universal_canvas
+                        .set_zone_author_mode(crate::core::gis::IfcxZoneKind::Industrial, d);
+                    self.push_trace("Equipped Road-Snapped Industrial Zoning Brush", true);
+                }
+                "/zone-park" => {
+                    let d = universal_canvas.city_scene.active_zone_density;
+                    universal_canvas
+                        .set_zone_author_mode(crate::core::gis::IfcxZoneKind::Park, d);
+                    self.push_trace("Equipped Urban Park Zoning Brush", true);
+                }
+                "/auto-zone" => {
+                    let cnt = universal_canvas.auto_populate_road_parcels();
+                    actions.fit_camera = true;
+                    self.push_trace(
+                        format!("Auto-Zoned +{cnt} road-snapped parcels & procedural IfcBuildings"),
+                        true,
+                    );
+                }
+                "/density" => {
+                    let next = match arg.to_ascii_lowercase().as_str() {
+                        "low" | "l" => crate::core::gis::ZoneDensityTier::LowDensity,
+                        "med" | "medium" | "m" => crate::core::gis::ZoneDensityTier::MediumDensity,
+                        "high" | "h" => crate::core::gis::ZoneDensityTier::HighDensity,
+                        _ => universal_canvas.city_scene.active_zone_density.cycle_next(),
+                    };
+                    universal_canvas.city_scene.active_zone_density = next;
+                    self.push_trace(format!("Zone Density set to {}", next.label()), true);
+                }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");
                     actions.fit_camera = true;

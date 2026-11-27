@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.7 (7/10)]
+## [Unreleased — Next: v0.8.7 (8/10)]
+
+### Update 8/10 (`v0.8.6.8` -> `v0.8.7`) — Road-Snapped Parcel Zoning Grid & Procedural IFCX Building Spawner (`IfcSpatialZone` -> `IfcBuilding`)
+- **Density Tiers, Auto-Zoning & Procedural `IfcBuilding` Spawner (`src/core/gis/city_builder.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`)**:
+  - Added [`ZoneDensityTier`](src/core/gis/city_builder.rs) (`LowDensity`, `MediumDensity`, `HighDensity`), [`ProceduralCityBuilding`](src/core/gis/city_builder.rs), and [`CityDistrictMetrics`](src/core/gis/city_builder.rs) with backward-compatible `density` / `active_zone_density` fields.
+  - Implemented [`IfcxSpatialZone::synthesize_procedural_building`](src/core/gis/city_builder.rs), [`IfcxCityScene::district_metrics`](src/core/gis/city_builder.rs), [`IfcxCityScene::auto_zone_parcels_along_roads`](src/core/gis/city_builder.rs) (skipping bridges, coastal water, cliffs `> 26°`, and origin BIM setbacks), native `IfcBuilding` node emission (`NS_EG_CITY_BUILDING`), and [`test_v0868_road_snapped_parcel_zoning_and_procedural_ifcx_buildings`](src/core/gis/city_builder.rs).
+- **Multi-Massing Podium + Tower + Penthouse WebGPU Extrusion (`src/views/webgpu_earth/mesh_builders.rs`, `src/views/webgpu_earth/tests.rs`)**:
+  - Upgraded `push_city_builder_scene_enu` to extrude tiered podium bases, setback glazed tower shafts (`material_kind = 2.0`), and mechanical penthouses/crowns seated flush on sculpted TIN elevations, plus [`test_v0868_road_snapped_zoning_and_procedural_towers_webgpu_mesh`](src/views/webgpu_earth/tests.rs).
+- **Road-Snapped Zoning Brush, Parcel Preview, Ribbon `"City Zoning"` & Slash Commands (`src/views/universal_canvas/`, `src/views/spatial_workspace/`)**:
+  - Upgraded `EarthBimTool::Zone` with `22 m` road setback & tangent snapping + submerged water guard, live rotated 3D parcel preview [`paint_zone_parcel_preview`](src/views/universal_canvas/mod.rs), [`auto_populate_road_parcels`](src/views/universal_canvas/mod.rs), Smart Ribbon `"City Zoning"` group + live Pop/Jobs/GFA demand strip, and `/zone-res`, `/zone-com`, `/zone-ind`, `/zone-park`, `/auto-zone`, `/density` commands.
 
 ### Update 7/10 (`v0.8.6.7` -> `v0.8.7`) — Cities: Skylines II Curved Road & Auto-Bridge Spline Authoring (`IfcRoad` / `IfcBridge`)
 - **Curved Quadratic Bézier Road & Auto-Bridge Kernel (`src/core/gis/city_builder.rs`, `src/core/evacuation_routing.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`)**:

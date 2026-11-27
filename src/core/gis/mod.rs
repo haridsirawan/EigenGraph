@@ -23,8 +23,10 @@ pub use district_hazard::{
 };
 
 pub use city_builder::{
-    IfcxCityScene, IfcxGradedPad, IfcxRoadKind, IfcxRoadSegment, IfcxSpatialZone, IfcxZoneKind,
-    RoadDrawMode, RoadParcelSnapHit, RoadProfileSample,
+    CityDistrictMetrics, IfcxCityScene, IfcxGradedPad, IfcxRoadKind, IfcxRoadSegment,
+    IfcxSpatialZone, IfcxZoneKind, ProceduralCityBuilding, RoadDrawMode, RoadParcelSnapHit,
+    RoadProfileSample, ZoneDensityTier, NS_EG_CITY_BUILDING, NS_EG_CITY_PAD, NS_EG_CITY_ROAD,
+    NS_EG_CITY_ZONE,
 };
 
 pub use world_vectors::{

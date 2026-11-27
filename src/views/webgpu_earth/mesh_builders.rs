@@ -6,7 +6,7 @@ use crate::core::bim::{BimElementKind, BimProject};
 use crate::core::geotech::{
     GeotechEngine, SubsurfaceSsiAnalysisReport, SubsurfaceSsiConfig,
 };
-use crate::core::gis::city_builder::{IfcxCityScene, IfcxZoneKind};
+use crate::core::gis::city_builder::IfcxCityScene;
 use crate::core::gis::district_hazard::{
     evaluate_seismic_wave_displacement_m, DistrictHazardConfig, DistrictMultiHazardReport,
 };
@@ -814,27 +814,66 @@ pub(super) fn push_city_builder_scene_enu(
         let zcol = mix_rgb(zone.kind.fill_rgba(), [0.9, 0.94, 0.96, 1.0], 0.12);
         push_box_prism_enu(verts, idxs, &fp, ground_z, ground_z + 0.22, zcol, 1.0);
 
-        if zone.synthesize_context_towers && zone.kind != IfcxZoneKind::Park {
-            let rad = zone.rotation_deg.to_radians();
+        if let Some(bldg) = zone.synthesize_procedural_building() {
+            let rad = bldg.rotation_deg.to_radians();
             let (sr, cr) = (rad.sin(), rad.cos());
-            let bw = (zone.width_m * 0.56).max(8.0);
-            let bd = (zone.depth_m * 0.56).max(8.0);
-            let hw = bw * 0.5;
-            let hd = bd * 0.5;
-            let tfp: Vec<[f64; 2]> = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]]
-                .iter()
-                .map(|[lx, ly]| [zone.center_enu_m[0] + lx * cr - ly * sr, zone.center_enu_m[1] + lx * sr + ly * cr])
-                .collect();
-            let h_m = match zone.kind {
-                IfcxZoneKind::Commercial => 28.0 + ((zone.id * 7) % 18) as f32,
-                IfcxZoneKind::Civic => 18.0,
-                IfcxZoneKind::Residential => 14.0 + ((zone.id * 5) % 10) as f32,
-                IfcxZoneKind::Industrial => 10.5,
-                IfcxZoneKind::Park => 0.0,
+            let rot_rect = |w: f64, d: f64| -> Vec<[f64; 2]> {
+                let hw = w * 0.5;
+                let hd = d * 0.5;
+                [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]]
+                    .iter()
+                    .map(|[lx, ly]| {
+                        [
+                            bldg.center_enu_m[0] + lx * cr - ly * sr,
+                            bldg.center_enu_m[1] + lx * sr + ly * cr,
+                        ]
+                    })
+                    .collect()
             };
-            let twall = mix_rgb(wall_base, zone.kind.fill_rgba(), 0.22);
-            let troof = mix_rgb(roof_base, zone.kind.fill_rgba(), 0.15);
-            push_extruded_building_prism_enu(verts, idxs, &tfp, ground_z + 0.22, h_m, twall, troof);
+
+            let podium_fp = rot_rect(bldg.podium_width_m, bldg.podium_depth_m);
+            let pwall = mix_rgb(wall_base, bldg.wall_tint_rgba, 0.26);
+            let proof = mix_rgb(roof_base, bldg.wall_tint_rgba, 0.16);
+            let base_z = ground_z + 0.22;
+            push_extruded_building_prism_enu(
+                verts,
+                idxs,
+                &podium_fp,
+                base_z,
+                bldg.podium_height_m,
+                pwall,
+                proof,
+            );
+
+            let shaft_h = bldg.tower_height_m - bldg.podium_height_m;
+            if shaft_h > 1.5 {
+                let tower_fp = rot_rect(bldg.tower_width_m, bldg.tower_depth_m);
+                let twall = mix_rgb(wall_base, bldg.wall_tint_rgba, 0.38);
+                let troof = mix_rgb(roof_base, bldg.wall_tint_rgba, 0.20);
+                push_extruded_building_prism_enu(
+                    verts,
+                    idxs,
+                    &tower_fp,
+                    base_z + bldg.podium_height_m,
+                    shaft_h,
+                    twall,
+                    troof,
+                );
+            }
+
+            if bldg.has_penthouse {
+                let pent_fp = rot_rect(bldg.tower_width_m * 0.44, bldg.tower_depth_m * 0.44);
+                let pent_wall = mix_rgb(proof, [0.32, 0.36, 0.42, 1.0], 0.35);
+                push_extruded_building_prism_enu(
+                    verts,
+                    idxs,
+                    &pent_fp,
+                    base_z + bldg.tower_height_m,
+                    3.0,
+                    pent_wall,
+                    proof,
+                );
+            }
         }
 
         for [tx, ty, th] in zone.instanced_trees_enu_m() {
