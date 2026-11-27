@@ -1241,6 +1241,80 @@ impl SpatialWorkspaceState {
                         universal_canvas.auto_populate_road_parcels();
                     }
                 });
+                Self::ribbon_group(ui, theme, "Ambience", |ui| {
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Trees,
+                        "Forests",
+                        universal_canvas.city_scene.ambience.show_procedural_forests,
+                        theme.accent_green,
+                        "Toggle procedural biome hillside & coastal forests",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.city_scene.ambience.show_procedural_forests =
+                            !universal_canvas.city_scene.ambience.show_procedural_forests;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Bolt,
+                        "Traffic",
+                        universal_canvas.city_scene.ambience.show_animated_traffic,
+                        theme.accent_orange,
+                        "Toggle animated bidirectional 3D road traffic with night headlights",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.city_scene.ambience.show_animated_traffic =
+                            !universal_canvas.city_scene.ambience.show_animated_traffic;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Sun,
+                        "Shadows",
+                        universal_canvas.city_scene.ambience.show_dynamic_shadows,
+                        theme.accent_blue,
+                        "Toggle dynamic astronomical sun-azimuth cast building shadows",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.city_scene.ambience.show_dynamic_shadows =
+                            !universal_canvas.city_scene.ambience.show_dynamic_shadows;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Clock,
+                        "Day/Dusk",
+                        false,
+                        theme.accent_orange,
+                        &format!(
+                            "Cycle Solar Lighting ({})",
+                            universal_canvas.earth_world.camera.lighting_preset_label()
+                        ),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.cycle_living_earth_time_of_day();
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Sparkles,
+                        "Live City",
+                        false,
+                        theme.accent_green,
+                        "Generate full Cities: Skylines II coastal bay, auto-bridge, high-rises, forests & traffic",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.synthesize_full_living_coastal_city();
+                        actions.fit_camera = true;
+                    }
+                });
                 Self::ribbon_group(ui, theme, "Zoning & Brief", |ui| {
                     if Self::ribbon_tool_tile(
                         ui,

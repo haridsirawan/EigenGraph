@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.7 (8/10)]
+## [Unreleased — Next: v0.8.7 (9/10)]
+
+### Update 9/10 (`v0.8.6.9` -> `v0.8.7`) — Living City Ambience (Procedural Forests, Dynamic Sun Shadows & Animated Road Traffic)
+- **Living City Ambience Kernel (`src/core/gis/city_builder.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`)**:
+  - Added [`CityAmbienceConfig`](src/core/gis/city_builder.rs), [`ForestTreeInstance`](src/core/gis/city_builder.rs), [`BuildingShadowQuad`](src/core/gis/city_builder.rs), and [`TrafficVehicleSample`](src/core/gis/city_builder.rs).
+  - Implemented [`IfcxCityScene::synthesize_biome_forest_trees`](src/core/gis/city_builder.rs) (biome elevation band `4.2..52 m` above sea level, gentle `<= 28°` hillsides outside roads & zones), astronomical shadow projection [`IfcxCityScene::compute_dynamic_building_shadows`](src/core/gis/city_builder.rs), bidirectional curved road traffic sampler [`IfcxCityScene::sample_animated_traffic`](src/core/gis/city_builder.rs), and [`test_v0869_living_city_forests_shadows_and_animated_traffic`](src/core/gis/city_builder.rs).
+- **Animated Traffic, Emissive Headlights (`material_kind = 30.0`) & WebGPU Ambience Pass (`src/views/webgpu_earth/`)**:
+  - Added [`CityAmbienceGpuInput`](src/views/webgpu_earth/mesh_builders.rs), [`build_rtc_city_ambience_mesh`](src/views/webgpu_earth/mesh_builders.rs), analytical WGSL headlight/taillight emission (`kind >= 29.5`), `city_ambience` GPU mesh slot, and live headless `wgpu` validation test [`test_v0869_living_city_ambience_traffic_and_shadows_webgpu_mesh`](src/views/webgpu_earth/tests.rs).
+- **One-Click `Live City` Showcase, Solar Time Cycle, Ribbon `"Ambience"` & Slash Commands (`src/views/universal_canvas/mod.rs`, `src/views/spatial_workspace/`)**:
+  - Added [`synthesize_full_living_coastal_city`](src/views/universal_canvas/mod.rs), [`cycle_living_earth_time_of_day`](src/views/universal_canvas/mod.rs) (`Morning -> Noon -> Golden Dusk -> Night Twin`), Smart Ribbon `"Ambience"` group (`Forests`, `Traffic`, `Shadows`, `Day/Dusk`, `Live City`), and `/living-city`, `/forests`, `/traffic`, `/shadows`, `/time` commands.
 
 ### Update 8/10 (`v0.8.6.8` -> `v0.8.7`) — Road-Snapped Parcel Zoning Grid & Procedural IFCX Building Spawner (`IfcSpatialZone` -> `IfcBuilding`)
 - **Density Tiers, Auto-Zoning & Procedural `IfcBuilding` Spawner (`src/core/gis/city_builder.rs`, `src/core/gis/mod.rs`, `src/core/mod.rs`)**:

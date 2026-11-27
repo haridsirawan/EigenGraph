@@ -998,6 +998,90 @@ impl UniversalCanvasState {
         }
     }
 
+    /// One-click Cities: Skylines II coastal metropolis showcase: tropical bay + volcano biome,
+    /// cable-stayed coastal bridge + arterial avenues, High-Rise & Residential parcels, hillside forests & traffic.
+    pub fn synthesize_full_living_coastal_city(&mut self) {
+        self.globe_mode = true;
+        self.terrain_sculpt.active_brush = None;
+        self.earth_bim_author.active_tool = EarthBimTool::None;
+        self.apply_landscape_preset(crate::core::gis::DemTerrainPreset::ArchipelagoBayAndVolcano);
+        self.city_scene.roads.clear();
+        self.city_scene.zones.clear();
+        self.city_scene.ambience.show_procedural_forests = true;
+        self.city_scene.ambience.show_dynamic_shadows = true;
+        self.city_scene.ambience.show_animated_traffic = true;
+
+        let tin_clone = self.active_site_tin.clone();
+        let sea = self.sea_level_m;
+        // 1. Coastal bay auto-bridge crossing SW bay into downtown harbor terrace
+        let _ = self.city_scene.add_curved_road_with_auto_bridge(
+            [-195.0, -185.0],
+            Some([15.0, -145.0]),
+            [45.0, 25.0],
+            crate::core::gis::IfcxRoadKind::Arterial,
+            false,
+            0.0,
+            tin_clone.as_ref(),
+            sea,
+        );
+        // 2. Curved harbor boulevard & inland scenic collector avenue
+        let _ = self.city_scene.add_curved_road_with_auto_bridge(
+            [45.0, 25.0],
+            Some([90.0, 35.0]),
+            [115.0, -45.0],
+            crate::core::gis::IfcxRoadKind::Arterial,
+            false,
+            0.0,
+            tin_clone.as_ref(),
+            sea,
+        );
+        let _ = self.city_scene.add_curved_road_with_auto_bridge(
+            [45.0, 25.0],
+            Some([-10.0, 82.0]),
+            [-68.0, 108.0],
+            crate::core::gis::IfcxRoadKind::Collector,
+            false,
+            0.0,
+            tin_clone.as_ref(),
+            sea,
+        );
+
+        self.city_scene.active_zone_kind = crate::core::gis::IfcxZoneKind::Commercial;
+        self.city_scene.active_zone_density = crate::core::gis::ZoneDensityTier::HighDensity;
+        let _ = self
+            .city_scene
+            .auto_zone_parcels_along_roads(tin_clone.as_ref(), sea, 28.0, 24.0);
+        let m = self.city_scene.district_metrics();
+        self.status_message = Some(format!(
+            "Live Coastal City ready: {} Roads/Bridges • {} IfcBuildings • Pop {} • Jobs {} • Traffic & Forests Active",
+            self.city_scene.roads.len(),
+            m.building_count,
+            m.total_residents,
+            m.total_jobs
+        ));
+    }
+
+    /// Cycles solar time of day (`09:30 Morning -> 13:30 Noon -> 17:30 Golden Dusk -> 21:30 Night Twin`)
+    /// so building windows, dynamic shadows & animated vehicle headlights respond vividly.
+    pub fn cycle_living_earth_time_of_day(&mut self) -> &'static str {
+        let h = self.earth_world.camera.sun_time_of_day.rem_euclid(24.0);
+        let (next_h, label, theme) = if h < 11.5 {
+            (13.5_f32, "13:30 Noon Day", crate::core::gis::VectorEarthTheme::CityDaylight)
+        } else if h < 16.0 {
+            (17.6_f32, "17:36 Golden Dusk", crate::core::gis::VectorEarthTheme::Topographic)
+        } else if h < 20.0 {
+            (21.5_f32, "21:30 Night Twin", crate::core::gis::VectorEarthTheme::NightTwin)
+        } else {
+            (9.5_f32, "09:30 Coastal Morning", crate::core::gis::VectorEarthTheme::CityDaylight)
+        };
+        self.earth_world
+            .camera
+            .set_local_sun_hour(next_h, self.world_map.center_lat_lon.1);
+        self.world_map.tile_provider = theme;
+        self.status_message = Some(format!("Solar Lighting: {label}"));
+        label
+    }
+
     /// Evaluates seismic pounding gaps, urban wind exposure & Venturi channeling, and debris zones
     /// between the active BIM structure and all surrounding neighbors inside `world_index`.
     pub fn refresh_neighborhood_coupling(&mut self, bim_project: &BimProject) {

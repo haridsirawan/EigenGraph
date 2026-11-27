@@ -884,6 +884,21 @@ pub(super) fn push_city_builder_scene_enu(
         }
     }
 
+    // 2b. Procedural Biome Hillside & Coastal Forests (outside zoned lots & road clearances)
+    if let Some(tin) = active_site_tin {
+        for tr in city.synthesize_biome_forest_trees(tin, sea_level_m) {
+            push_stylized_tree_enu(
+                verts,
+                idxs,
+                tr.east_m,
+                tr.north_m,
+                tr.base_z_rel_m,
+                tr.height_m,
+                theme,
+            );
+        }
+    }
+
     // 3. Authored `IfcGradedPad` foundation aprons
     for pad in &city.graded_pads {
         let pad_z = if active_site_tin.is_some() {
@@ -4825,6 +4840,183 @@ pub fn build_rtc_coastal_water_mesh(input: &CoastalWaterGpuInput<'_>) -> GpuMesh
             if depths[i10] > 0.01 || depths[i11] > 0.01 || depths[i01] > 0.01 {
                 idxs.extend_from_slice(&[i10 as u32, i11 as u32, i01 as u32]);
             }
+        }
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
+/// GPU input parameters for Cities: Skylines II dynamic building sun shadows & animated traffic.
+#[derive(Clone, Copy)]
+pub struct CityAmbienceGpuInput<'a> {
+    pub city: &'a IfcxCityScene,
+    pub tin: Option<&'a TinSurfaceMesh>,
+    pub sea_level_m: f32,
+    pub sun_dir_site: [f32; 3],
+    pub time_secs: f32,
+    pub visible: bool,
+}
+
+/// Builds translucent dynamic ground cast shadows and animated 3D traffic vehicles with emissive
+/// headlights & taillights (`material_kind = 30.0`) along straight/curved roads and bridges.
+pub fn build_rtc_city_ambience_mesh(input: &CityAmbienceGpuInput<'_>) -> GpuMeshPayload {
+    if !input.visible || input.city.is_empty() {
+        return GpuMeshPayload::default();
+    }
+    let shadows = input
+        .city
+        .compute_dynamic_building_shadows(input.tin, input.sun_dir_site);
+    let vehicles = input
+        .city
+        .sample_animated_traffic(input.tin, input.sea_level_m, input.time_secs);
+    if shadows.is_empty() && vehicles.is_empty() {
+        return GpuMeshPayload::default();
+    }
+
+    let mut verts = Vec::with_capacity(shadows.len() * 4 + vehicles.len() * 48);
+    let mut idxs = Vec::with_capacity(shadows.len() * 6 + vehicles.len() * 72);
+
+    // 1. Dynamic sun-azimuth cast shadows beneath zoned towers
+    let sh_col = [0.04_f32, 0.07, 0.14, 0.36];
+    for sh in &shadows {
+        let base = verts.len() as u32;
+        for &c in &sh.corners_enu_m {
+            verts.push(GpuEarthVertex {
+                pos: c,
+                normal: [0.0, 0.0, 1.0],
+                color: sh_col,
+                meta: [3.0, 0.0, 1.0, 0.0],
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    // 2. Animated 3D cars/buses/trucks with warm headlights & crimson taillights (`material_kind = 30.0`)
+    let push_oriented_box = |v: &mut Vec<GpuEarthVertex>,
+                             idx_out: &mut Vec<u32>,
+                             center: [f64; 2],
+                             fwd: [f64; 2],
+                             left: [f64; 2],
+                             hl: f64,
+                             hw: f64,
+                             z0: f32,
+                             z1: f32,
+                             col: [f32; 4],
+                             kind: f32,
+                             meta_y: f32| {
+        let pts2 = [
+            [
+                center[0] - fwd[0] * hl - left[0] * hw,
+                center[1] - fwd[1] * hl - left[1] * hw,
+            ],
+            [
+                center[0] + fwd[0] * hl - left[0] * hw,
+                center[1] + fwd[1] * hl - left[1] * hw,
+            ],
+            [
+                center[0] + fwd[0] * hl + left[0] * hw,
+                center[1] + fwd[1] * hl + left[1] * hw,
+            ],
+            [
+                center[0] - fwd[0] * hl + left[0] * hw,
+                center[1] - fwd[1] * hl + left[1] * hw,
+            ],
+        ];
+        let base = v.len() as u32;
+        for &p in &pts2 {
+            v.push(GpuEarthVertex {
+                pos: [p[0] as f32, p[1] as f32, z0],
+                normal: [0.0, 0.0, 1.0],
+                color: col,
+                meta: [kind, meta_y, 0.88, 0.0],
+            });
+        }
+        for &p in &pts2 {
+            v.push(GpuEarthVertex {
+                pos: [p[0] as f32, p[1] as f32, z1],
+                normal: [0.0, 0.0, 1.0],
+                color: col,
+                meta: [kind, meta_y, 1.0, 0.0],
+            });
+        }
+        for &tri in &[
+            [0_u32, 2, 1],
+            [0, 3, 2],
+            [4, 5, 6],
+            [4, 6, 7],
+            [0, 1, 5],
+            [0, 5, 4],
+            [2, 3, 7],
+            [2, 7, 6],
+            [1, 2, 6],
+            [1, 6, 5],
+            [3, 0, 4],
+            [3, 4, 7],
+        ] {
+            idx_out.extend_from_slice(&[base + tri[0], base + tri[1], base + tri[2]]);
+        }
+    };
+
+    for veh in &vehicles {
+        let cx = veh.pos_enu_m[0] as f64;
+        let cy = veh.pos_enu_m[1] as f64;
+        let z0 = veh.pos_enu_m[2];
+        let hl = veh.length_m * 0.5;
+        let hw = veh.width_m * 0.5;
+        push_oriented_box(
+            &mut verts,
+            &mut idxs,
+            [cx, cy],
+            veh.tangent,
+            veh.normal,
+            hl,
+            hw,
+            z0,
+            z0 + veh.height_m,
+            veh.body_rgba,
+            3.0,
+            veh.height_m,
+        );
+        // Front headlights (meta.y = 1.0)
+        for side in [-0.62_f64, 0.62] {
+            let hx = cx + veh.tangent[0] * (hl + 0.14) + veh.normal[0] * hw * side;
+            let hy = cy + veh.tangent[1] * (hl + 0.14) + veh.normal[1] * hw * side;
+            push_oriented_box(
+                &mut verts,
+                &mut idxs,
+                [hx, hy],
+                veh.tangent,
+                veh.normal,
+                0.24,
+                0.20,
+                z0 + 0.35,
+                z0 + 0.72,
+                [1.0, 0.96, 0.78, 0.96],
+                30.0,
+                1.0,
+            );
+        }
+        // Rear taillights (meta.y = 0.0)
+        for side in [-0.62_f64, 0.62] {
+            let rx = cx - veh.tangent[0] * (hl + 0.12) + veh.normal[0] * hw * side;
+            let ry = cy - veh.tangent[1] * (hl + 0.12) + veh.normal[1] * hw * side;
+            push_oriented_box(
+                &mut verts,
+                &mut idxs,
+                [rx, ry],
+                veh.tangent,
+                veh.normal,
+                0.20,
+                0.18,
+                z0 + 0.38,
+                z0 + 0.70,
+                [0.98, 0.18, 0.16, 0.96],
+                30.0,
+                0.0,
+            );
         }
     }
 

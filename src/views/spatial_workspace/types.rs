@@ -1843,6 +1843,36 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Layers,
     },
     SlashCommandSpec {
+        cmd: "/living-city",
+        category: "Ambience",
+        description: "Synthesize full living coastal bay city + cable-stayed bridge + traffic + forests",
+        icon: AppIcon::Sparkles,
+    },
+    SlashCommandSpec {
+        cmd: "/forests",
+        category: "Ambience",
+        description: "Toggle procedural biome hillside forests",
+        icon: AppIcon::Trees,
+    },
+    SlashCommandSpec {
+        cmd: "/traffic",
+        category: "Ambience",
+        description: "Toggle animated bidirectional 3D vehicle traffic & headlights",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/shadows",
+        category: "Ambience",
+        description: "Toggle dynamic astronomical sun-azimuth cast shadows",
+        icon: AppIcon::Sun,
+    },
+    SlashCommandSpec {
+        cmd: "/time",
+        category: "Ambience",
+        description: "Cycle solar time of day (Morning -> Noon -> Golden Dusk -> Night Twin)",
+        icon: AppIcon::Clock,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",

@@ -384,6 +384,69 @@ pub struct CityDistrictMetrics {
     pub green_ratio_pct: f32,
 }
 
+fn default_ambience_true() -> bool {
+    true
+}
+
+/// Controls for Cities: Skylines II living city ambience (procedural forests, sun shadows & traffic).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CityAmbienceConfig {
+    #[serde(default = "default_ambience_true")]
+    pub show_procedural_forests: bool,
+    #[serde(default)]
+    pub forest_density: u8,
+    #[serde(default = "default_ambience_true")]
+    pub show_dynamic_shadows: bool,
+    #[serde(default = "default_ambience_true")]
+    pub show_animated_traffic: bool,
+    #[serde(default)]
+    pub traffic_density: u8,
+    #[serde(default)]
+    pub traffic_speed_mps: f32,
+}
+
+impl Default for CityAmbienceConfig {
+    fn default() -> Self {
+        Self {
+            show_procedural_forests: true,
+            forest_density: 3,
+            show_dynamic_shadows: true,
+            show_animated_traffic: true,
+            traffic_density: 3,
+            traffic_speed_mps: 11.0,
+        }
+    }
+}
+
+/// Deterministic hillside / coastal forest tree instance placed outside zones & road clearances.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ForestTreeInstance {
+    pub east_m: f32,
+    pub north_m: f32,
+    pub base_z_rel_m: f32,
+    pub height_m: f32,
+    pub canopy_tint: f32,
+}
+
+/// Projected 3D ground shadow footprint cast opposite the solar vector from a procedural tower.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuildingShadowQuad {
+    pub corners_enu_m: [[f32; 3]; 4],
+}
+
+/// Animated 3D commuter vehicle sample traveling along an authored `IfcRoad` or `IfcBridge`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrafficVehicleSample {
+    pub pos_enu_m: [f32; 3],
+    pub tangent: [f64; 2],
+    pub normal: [f64; 2],
+    pub length_m: f64,
+    pub width_m: f64,
+    pub height_m: f32,
+    pub body_rgba: [f32; 4],
+    pub is_bus_or_truck: bool,
+}
+
 /// Authored urban parcel zone (`IfcSpatialZone`) supporting context towers and instanced trees.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IfcxSpatialZone {
@@ -595,6 +658,8 @@ pub struct IfcxCityScene {
     pub auto_bridge_enabled: bool,
     #[serde(default)]
     pub active_zone_density: ZoneDensityTier,
+    #[serde(default)]
+    pub ambience: CityAmbienceConfig,
 }
 
 impl Default for IfcxCityScene {
@@ -611,6 +676,7 @@ impl Default for IfcxCityScene {
             road_draw_mode: RoadDrawMode::CurvedSpline,
             auto_bridge_enabled: true,
             active_zone_density: ZoneDensityTier::MediumDensity,
+            ambience: CityAmbienceConfig::default(),
         }
     }
 }
@@ -890,6 +956,238 @@ impl IfcxCityScene {
         spawned
     }
 
+    /// Synthesizes biome-filtered hillside & coastal woodland trees across gentle, elevated ground
+    /// (`sea_level + 4.2m .. sea_level + 52m`, `slope <= 28°`), avoiding roads, zones, and BIM origin.
+    pub fn synthesize_biome_forest_trees(
+        &self,
+        tin: &TinSurfaceMesh,
+        sea_level_m: f32,
+    ) -> Vec<ForestTreeInstance> {
+        if !self.ambience.show_procedural_forests || tin.points.is_empty() {
+            return Vec::new();
+        }
+        let (ref_z, _) = tin.sample_elevation_and_slope(0.0, 0.0);
+        let attempts = (self.ambience.forest_density.max(1) as usize * 90).clamp(40, 320);
+        let span_x = (tin.extent_x_m * 0.86).max(40.0);
+        let span_y = (tin.extent_y_m * 0.86).max(40.0);
+        let mut out = Vec::with_capacity(220);
+
+        for i in 0..attempts {
+            if out.len() >= 220 {
+                break;
+            }
+            let h = ((i as u64 + 1).wrapping_mul(2_654_435_761)) ^ 0xA5A5_5A5A_1234_5678;
+            let u = ((h & 0xFFFF) as f32) / 65535.0 - 0.5;
+            let v = (((h >> 16) & 0xFFFF) as f32) / 65535.0 - 0.5;
+            let east_m = u * span_x;
+            let north_m = v * span_y;
+            if east_m.hypot(north_m) < 24.0 {
+                continue;
+            }
+            let (elev_msl, slope_deg) = tin.sample_elevation_and_slope(east_m, north_m);
+            if elev_msl < sea_level_m + 4.2 || elev_msl > sea_level_m + 52.0 || slope_deg > 28.0 {
+                continue;
+            }
+            let inside_zone = self.zones.iter().any(|z| {
+                let rad = z.rotation_deg.to_radians();
+                let (sr, cr) = (rad.sin(), rad.cos());
+                let dx = east_m as f64 - z.center_enu_m[0];
+                let dy = north_m as f64 - z.center_enu_m[1];
+                let lx = dx * cr + dy * sr;
+                let ly = -dx * sr + dy * cr;
+                lx.abs() < z.width_m * 0.58 && ly.abs() < z.depth_m * 0.58
+            });
+            if inside_zone {
+                continue;
+            }
+            let on_road = self.roads.iter().any(|r| {
+                let clr = r.width_m * 0.5 + 4.0;
+                r.sample_centerline(10).windows(2).any(|w| {
+                    let rx = w[0][0];
+                    let ry = w[0][1];
+                    let rdx = w[1][0] - rx;
+                    let rdy = w[1][1] - ry;
+                    let l2 = rdx * rdx + rdy * rdy;
+                    if l2 < 1.0 {
+                        return false;
+                    }
+                    let u_p = (((east_m as f64 - rx) * rdx + (north_m as f64 - ry) * rdy) / l2)
+                        .clamp(0.0, 1.0);
+                    let px = rx + rdx * u_p;
+                    let py = ry + rdy * u_p;
+                    (east_m as f64 - px).hypot(north_m as f64 - py) < clr
+                })
+            });
+            if on_road {
+                continue;
+            }
+            let h_m = 6.5 + ((((h >> 32) & 0xFF) as f32) / 255.0) * 7.0;
+            let canopy_tint = (((h >> 40) & 0xFF) as f32) / 255.0;
+            out.push(ForestTreeInstance {
+                east_m,
+                north_m,
+                base_z_rel_m: elev_msl - ref_z,
+                height_m: h_m,
+                canopy_tint,
+            });
+        }
+        out
+    }
+
+    /// Computes dynamic ground cast shadow quads opposite the active solar direction vector.
+    pub fn compute_dynamic_building_shadows(
+        &self,
+        tin: Option<&TinSurfaceMesh>,
+        sun_dir_site: [f32; 3],
+    ) -> Vec<BuildingShadowQuad> {
+        if !self.ambience.show_dynamic_shadows || sun_dir_site[2] <= 0.04 {
+            return Vec::new();
+        }
+        let ref_z = tin
+            .map(|t| t.sample_elevation_and_slope(0.0, 0.0).0)
+            .unwrap_or(0.0);
+        let inv_sz = (1.0 / sun_dir_site[2].max(0.22)).min(2.6);
+        let horiz_len = sun_dir_site[0].hypot(sun_dir_site[1]).max(1e-4);
+        let dir_x = -sun_dir_site[0] / horiz_len;
+        let dir_y = -sun_dir_site[1] / horiz_len;
+        let perp_x = -dir_y;
+        let perp_y = dir_x;
+
+        let mut shadows = Vec::with_capacity(self.zones.len());
+        for zone in &self.zones {
+            let Some(bldg) = zone.synthesize_procedural_building() else {
+                continue;
+            };
+            let cx = bldg.center_enu_m[0] as f32;
+            let cy = bldg.center_enu_m[1] as f32;
+            let proj_len = (bldg.tower_height_m * (1.0 - sun_dir_site[2].powi(2)).sqrt() * inv_sz)
+                .clamp(3.0, 95.0);
+            let half_w = (0.48 * bldg.tower_width_m.max(bldg.tower_depth_m)) as f32;
+            let gz_base = tin
+                .map(|t| t.sample_elevation_and_slope(cx, cy).0 - ref_z)
+                .unwrap_or(0.0)
+                + 0.24;
+            let tx = cx + dir_x * proj_len;
+            let ty = cy + dir_y * proj_len;
+            let gz_tip = tin
+                .map(|t| t.sample_elevation_and_slope(tx, ty).0 - ref_z)
+                .unwrap_or(0.0)
+                + 0.24;
+
+            shadows.push(BuildingShadowQuad {
+                corners_enu_m: [
+                    [cx - perp_x * half_w, cy - perp_y * half_w, gz_base],
+                    [cx + perp_x * half_w, cy + perp_y * half_w, gz_base],
+                    [tx + perp_x * half_w * 0.85, ty + perp_y * half_w * 0.85, gz_tip],
+                    [tx - perp_x * half_w * 0.85, ty - perp_y * half_w * 0.85, gz_tip],
+                ],
+            });
+        }
+        shadows
+    }
+
+    /// Evaluates continuous bidirectional commuter, transit & freight vehicles along all authored roads.
+    pub fn sample_animated_traffic(
+        &self,
+        tin: Option<&TinSurfaceMesh>,
+        sea_level_m: f32,
+        time_secs: f32,
+    ) -> Vec<TrafficVehicleSample> {
+        if !self.ambience.show_animated_traffic || self.roads.is_empty() {
+            return Vec::new();
+        }
+        let palette = [
+            [0.92_f32, 0.94, 0.96, 1.0],
+            [0.22, 0.56, 0.90, 1.0],
+            [0.92, 0.34, 0.28, 1.0],
+            [0.96, 0.74, 0.24, 1.0],
+            [0.24, 0.76, 0.56, 1.0],
+        ];
+        let speed = self.ambience.traffic_speed_mps.clamp(2.0, 28.0) as f64;
+        let density_scale = (self.ambience.traffic_density.max(1) as f64) * 0.65;
+        let mut vehicles = Vec::with_capacity(64);
+
+        for road in &self.roads {
+            if vehicles.len() >= 160 {
+                break;
+            }
+            let profile = road.sample_3d_profile(tin, sea_level_m);
+            if profile.len() < 2 {
+                continue;
+            }
+            let mut cum_s = Vec::with_capacity(profile.len());
+            cum_s.push(0.0_f64);
+            for w in profile.windows(2) {
+                let seg_len = (w[1].east_m - w[0].east_m).hypot(w[1].north_m - w[0].north_m);
+                cum_s.push(cum_s.last().copied().unwrap_or(0.0) + seg_len);
+            }
+            let total_len = cum_s.last().copied().unwrap_or(0.0);
+            if total_len < 8.0 {
+                continue;
+            }
+            let n_per_dir = ((total_len / 55.0) * density_scale).ceil() as usize;
+            let n_per_dir = n_per_dir.clamp(1, 10);
+            let lane_off_mag = (road.width_m * 0.23).max(1.25);
+
+            for dir_idx in 0..2 {
+                let dir_sign = if dir_idx == 0 { 1.0_f64 } else { -1.0_f64 };
+                for v_i in 0..n_per_dir {
+                    if vehicles.len() >= 160 {
+                        break;
+                    }
+                    let seed = (road.id as u64).wrapping_mul(1_000_003)
+                        ^ ((dir_idx as u64 + 1) * 97)
+                        ^ ((v_i as u64 + 1) * 131);
+                    let base_s = (v_i as f64 / n_per_dir as f64) * total_len;
+                    let phase_s =
+                        (base_s + (time_secs as f64) * speed * dir_sign).rem_euclid(total_len);
+
+                    let seg_i = cum_s
+                        .windows(2)
+                        .position(|w| phase_s >= w[0] && phase_s <= w[1])
+                        .unwrap_or(profile.len() - 2);
+                    let s0 = cum_s[seg_i];
+                    let s1 = cum_s[seg_i + 1];
+                    let f = if (s1 - s0) > 1e-5 {
+                        ((phase_s - s0) / (s1 - s0)).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let a = &profile[seg_i];
+                    let b = &profile[seg_i + 1];
+                    let tx = a.tangent[0] * (1.0 - f) + b.tangent[0] * f;
+                    let ty = a.tangent[1] * (1.0 - f) + b.tangent[1] * f;
+                    let tlen = tx.hypot(ty).max(1e-6);
+                    let fwd = [(tx / tlen) * dir_sign, (ty / tlen) * dir_sign];
+                    let left_n = [-fwd[1], fwd[0]];
+
+                    let cx = (a.east_m * (1.0 - f) + b.east_m * f) + left_n[0] * lane_off_mag;
+                    let cy = (a.north_m * (1.0 - f) + b.north_m * f) + left_n[1] * lane_off_mag;
+                    let cz = a.deck_z_rel_m * (1.0 - f as f32) + b.deck_z_rel_m * (f as f32) + 0.10;
+                    let is_bus_or_truck = seed.is_multiple_of(5);
+                    let (length_m, width_m, height_m) = if is_bus_or_truck {
+                        (7.8, 2.2, 2.55)
+                    } else {
+                        (4.4, 1.85, 1.48)
+                    };
+                    let body_rgba = palette[(seed as usize) % palette.len()];
+
+                    vehicles.push(TrafficVehicleSample {
+                        pos_enu_m: [cx as f32, cy as f32, cz],
+                        tangent: fwd,
+                        normal: left_n,
+                        length_m,
+                        width_m,
+                        height_m,
+                        body_rgba,
+                        is_bus_or_truck,
+                    });
+                }
+            }
+        }
+        vehicles
+    }
+
     /// Snaps a point in local ENU meters to the nearest authored road setback or parcel grid edge,
     /// returning the snapped position and road/parcel alignment bearing in degrees.
     pub fn snap_point_to_road_or_parcel(
@@ -1097,6 +1395,8 @@ impl IfcxCityScene {
         mix(&mut h, self.roads.len() as u64);
         mix(&mut h, self.zones.len() as u64);
         mix(&mut h, self.graded_pads.len() as u64);
+        mix(&mut h, u64::from(self.ambience.show_procedural_forests));
+        mix(&mut h, self.ambience.forest_density as u64);
         for r in &self.roads {
             mix(&mut h, r.id as u64);
             mix(&mut h, r.is_bridge as u64);
@@ -1556,5 +1856,57 @@ mod tests {
             nodes.iter().any(|n| n.ifc_class() == Some("IfcBuilding")),
             "Procedural city buildings must export native IfcBuilding IFCX nodes"
         );
+    }
+
+    #[test]
+    fn test_v0869_living_city_forests_shadows_and_animated_traffic() {
+        let tin = TinSurfaceMesh::generate_from_dem_preset(
+            DemTerrainPreset::ArchipelagoBayAndVolcano,
+            680.0,
+            680.0,
+            46,
+            46,
+            1.0,
+        );
+        let mut city = IfcxCityScene::default();
+        city.active_zone_density = ZoneDensityTier::HighDensity;
+        city.add_curved_road_with_auto_bridge(
+            [65.0, -5.0],
+            Some([20.0, 55.0]),
+            [-45.0, 95.0],
+            IfcxRoadKind::Arterial,
+            false,
+            0.0,
+            Some(&tin),
+            0.0,
+        )
+        .expect("arterial road");
+        let _ = city.auto_zone_parcels_along_roads(Some(&tin), 0.0, 28.0, 24.0);
+
+        let trees = city.synthesize_biome_forest_trees(&tin, 0.0);
+        assert!(
+            trees.len() >= 10,
+            "Volcano hillside biome must spawn procedural trees, got {}",
+            trees.len()
+        );
+        for tr in &trees {
+            assert!(tr.east_m.hypot(tr.north_m) >= 24.0);
+            assert!(tr.height_m >= 6.0);
+        }
+
+        let shadows = city.compute_dynamic_building_shadows(Some(&tin), [0.5, 0.35, 0.65]);
+        assert_eq!(shadows.len(), city.district_metrics().building_count);
+        let night_shadows = city.compute_dynamic_building_shadows(Some(&tin), [0.5, 0.35, -0.1]);
+        assert!(night_shadows.is_empty());
+
+        let v_t0 = city.sample_animated_traffic(Some(&tin), 0.0, 0.0);
+        let v_t2 = city.sample_animated_traffic(Some(&tin), 0.0, 2.0);
+        assert!(v_t0.len() >= 4, "Should populate bidirectional traffic");
+        assert_eq!(v_t0.len(), v_t2.len());
+        let moved = v_t0
+            .iter()
+            .zip(v_t2.iter())
+            .any(|(a, b)| (a.pos_enu_m[0] - b.pos_enu_m[0]).hypot(a.pos_enu_m[1] - b.pos_enu_m[1]) > 1.0);
+        assert!(moved, "Animated traffic vehicles must move forward over time");
     }
 }

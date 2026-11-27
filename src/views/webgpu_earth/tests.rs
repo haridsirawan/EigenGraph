@@ -3095,3 +3095,125 @@ use crate::core::ifcx::IfcxDocument;
             .iter()
             .all(|v| v.pos.iter().all(|f| f.is_finite()) && v.normal.iter().all(|f| f.is_finite())));
     }
+
+    #[test]
+    fn test_v0869_living_city_ambience_traffic_and_shadows_webgpu_mesh() {
+        let tin = TinSurfaceMesh::generate_from_dem_preset(
+            DemTerrainPreset::ArchipelagoBayAndVolcano,
+            680.0,
+            680.0,
+            46,
+            46,
+            1.0,
+        );
+        let mut city = IfcxCityScene::default();
+        city.active_zone_density = crate::core::gis::ZoneDensityTier::HighDensity;
+        city.add_curved_road_with_auto_bridge(
+            [65.0, -5.0],
+            Some([20.0, 55.0]),
+            [-45.0, 95.0],
+            crate::core::gis::IfcxRoadKind::Arterial,
+            false,
+            0.0,
+            Some(&tin),
+            0.0,
+        )
+        .expect("arterial road");
+        let _ = city.auto_zone_parcels_along_roads(Some(&tin), 0.0, 28.0, 24.0);
+
+        let amb_mesh = build_rtc_city_ambience_mesh(&CityAmbienceGpuInput {
+            city: &city,
+            tin: Some(&tin),
+            sea_level_m: 0.0,
+            sun_dir_site: [0.45, 0.35, 0.72],
+            time_secs: 2.5,
+            visible: true,
+        });
+        assert!(
+            amb_mesh.indices.len() / 3 > 100,
+            "City ambience mesh must emit dynamic shadows, vehicles & headlights"
+        );
+        assert!(
+            amb_mesh
+                .vertices
+                .iter()
+                .any(|v| (v.meta[0] - 30.0).abs() < 0.05 && v.meta[1] > 0.5),
+            "Traffic vehicles must emit material_kind=30.0 headlights"
+        );
+        assert!(
+            amb_mesh
+                .vertices
+                .iter()
+                .any(|v| (v.meta[0] - 30.0).abs() < 0.05 && v.meta[1] < 0.5),
+            "Traffic vehicles must emit material_kind=30.0 taillights"
+        );
+
+        // Live headless WGPU pipeline validation when GPU adapter is present
+        fn poll_fut<F: std::future::Future>(fut: F) -> F::Output {
+            let mut fut = std::pin::pin!(fut);
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(&waker);
+            loop {
+                if let std::task::Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
+                    return out;
+                }
+                std::thread::yield_now();
+            }
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = poll_fut(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let Ok((device, queue)) =
+            poll_fut(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        res.city_ambience
+            .upload(&device, &queue, "city_ambience_v0869", 1, &amb_mesh);
+
+        let mut cam = GlobeCamera::default();
+        cam.tilt_deg = 45.0;
+        let xf = GlobeScreenTransform::from_view(
+            Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(64.0, 64.0)),
+            -6.2088,
+            106.8456,
+            17.0,
+            &cam,
+        );
+        let uniforms = RtcCameraUniforms::from_globe_xform(
+            &xf,
+            VectorEarthTheme::NightTwin,
+            &cam,
+            (-6.2088, 106.8456),
+            2.5,
+            true,
+        );
+        queue.write_buffer(
+            &res.planet_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_planet_pass_uniforms()),
+        );
+        queue.write_buffer(
+            &res.site_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_site_pass_uniforms()),
+        );
+        res.ensure_targets(&device, 64, 64);
+
+        let mut encoder = device.create_command_encoder(&Default::default());
+        res.render_offscreen_passes(&mut encoder, true);
+        queue.submit([encoder.finish()]);
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let val_err = poll_fut(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "Living City ambience WGSL pass triggered WebGPU validation error: {val_err:?}"
+        );
+    }

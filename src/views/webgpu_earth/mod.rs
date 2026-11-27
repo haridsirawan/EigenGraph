@@ -493,6 +493,12 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 29.5) {
+        // Update v0.8.6.9 (9/10 -> v0.8.7): Emissive City Traffic Headlights (height_m > 0.5) & Taillights
+        let boost = 1.0 + max(u_night, u_gold * 0.65) * 0.85;
+        let beam = select(vec3<f32>(1.0, 0.22, 0.18), vec3<f32>(1.0, 0.96, 0.80), height_m > 0.5);
+        col = beam * boost;
+        out_alpha = 0.96;
     } else if (kind >= 28.5) {
         // Update v0.8.6.5 (5/10 -> v0.8.7): Realistic Coastal Ocean & River Water Surface (0% raster)
         let depth_m = max(height_m, 0.0);
@@ -893,6 +899,7 @@ pub struct WebGpuEarthResources {
     solar_envelope: GpuMeshSlot,
     daylight_interior: GpuMeshSlot,
     water_surface: GpuMeshSlot,
+    city_ambience: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
 }
 
@@ -1096,6 +1103,7 @@ impl WebGpuEarthResources {
             planet: GpuMeshSlot::default(),
             site: GpuMeshSlot::default(),
             water_surface: GpuMeshSlot::default(),
+            city_ambience: GpuMeshSlot::default(),
             bim: GpuMeshSlot::default(),
             hinges: GpuMeshSlot::default(),
             subsurface: GpuMeshSlot::default(),
@@ -1234,6 +1242,7 @@ impl WebGpuEarthResources {
         // Pass 2: Floating-Origin RTC Local Site Scene with fresh [0.0, 1.0] 24-bit depth
         let has_site = self.site.index_count > 0
             || self.water_surface.index_count > 0
+            || self.city_ambience.index_count > 0
             || self.bim.index_count > 0
             || self.hinges.index_count > 0
             || self.subsurface.index_count > 0
@@ -1296,6 +1305,7 @@ impl WebGpuEarthResources {
             pass.set_pipeline(&self.translucent_pipeline);
             pass.set_bind_group(0, &self.site_bind_group, &[]);
             self.water_surface.draw(&mut pass);
+            self.city_ambience.draw(&mut pass);
             self.hinges.draw(&mut pass);
             self.subsurface.draw(&mut pass);
             self.risk_heatmap.draw(&mut pass);
@@ -1358,6 +1368,7 @@ struct WebGpuEarthPaintCallback {
     pending_solar_envelope: Option<(u64, GpuMeshPayload)>,
     pending_daylight_interior: Option<(u64, GpuMeshPayload)>,
     pending_water_surface: Option<(u64, GpuMeshPayload)>,
+    pending_city_ambience: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
 }
 
@@ -1541,6 +1552,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
                     .upload(device, queue, "water_surface_mesh", ws_in.0, &ws_in.1);
             }
         }
+        if let Some(ref ca_in) = self.pending_city_ambience {
+            if res.city_ambience.revision_uploaded != ca_in.0 {
+                res.city_ambience
+                    .upload(device, queue, "city_ambience_mesh", ca_in.0, &ca_in.1);
+            }
+        }
         if let Some(ref h_cmp) = self.pending_hazard_compute {
             res.hazard_compute.dispatch(queue, egui_encoder, h_cmp);
         } else {
@@ -1645,6 +1662,7 @@ pub struct WebGpuEarthState {
     cached_solar_envelope_hash: u64,
     cached_daylight_interior_hash: u64,
     cached_water_surface_hash: u64,
+    cached_city_ambience_hash: u64,
     pub last_planet_tris: usize,
     pub last_site_tris: usize,
     pub last_bim_tris: usize,
@@ -1674,6 +1692,7 @@ pub struct WebGpuEarthState {
     pub last_solar_envelope_tris: usize,
     pub last_daylight_interior_tris: usize,
     pub last_water_surface_tris: usize,
+    pub last_city_ambience_tris: usize,
     pub last_compute_particles: u32,
     #[cfg(not(target_arch = "wasm32"))]
     wgpu_device: Option<wgpu::Device>,
@@ -2859,6 +2878,53 @@ impl WebGpuEarthState {
             None
         };
 
+        let ambience_active = render_site_pass
+            && city_scene.is_some_and(|c| {
+                !c.is_empty() && (c.ambience.show_animated_traffic || c.ambience.show_dynamic_shadows)
+            });
+        let pending_city_ambience = if ambience_active {
+            if let Some(city) = city_scene {
+                let anim_bucket = if city.ambience.show_animated_traffic && !city.roads.is_empty() {
+                    (time_secs * 24.0).floor() as u64
+                } else {
+                    0
+                };
+                let sun_q = ((uniforms.sun_dir_site[0] * 100.0).round() as i64 as u64)
+                    ^ ((uniforms.sun_dir_site[1] * 100.0).round() as i64 as u64).rotate_left(13)
+                    ^ ((uniforms.sun_dir_site[2] * 100.0).round() as i64 as u64).rotate_left(27);
+                let rev: u64 = city.content_revision_hash()
+                    ^ (anim_bucket.wrapping_mul(1_000_003))
+                    ^ sun_q
+                    ^ sea_level_m.to_bits() as u64
+                    ^ active_site_tin.map(|t| t.revision).unwrap_or(0)
+                    ^ u64::from(city.ambience.show_animated_traffic).wrapping_mul(73)
+                    ^ u64::from(city.ambience.show_dynamic_shadows).wrapping_mul(131);
+                if rev != self.cached_city_ambience_hash {
+                    let mesh = build_rtc_city_ambience_mesh(&CityAmbienceGpuInput {
+                        city,
+                        tin: active_site_tin,
+                        sea_level_m,
+                        sun_dir_site: uniforms.sun_dir_site,
+                        time_secs,
+                        visible: true,
+                    });
+                    self.last_city_ambience_tris = mesh.indices.len() / 3;
+                    self.cached_city_ambience_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else if self.cached_city_ambience_hash != 0 {
+            self.cached_city_ambience_hash = 0;
+            self.last_city_ambience_tris = 0;
+            Some((0, GpuMeshPayload::default()))
+        } else {
+            None
+        };
+
         let pending_hazard_compute = if render_site_pass {
             if let Some(hc) = hazard_compute_input {
                 if hc.enabled {
@@ -2913,6 +2979,7 @@ impl WebGpuEarthState {
                 pending_solar_envelope,
                 pending_daylight_interior,
                 pending_water_surface,
+                pending_city_ambience,
                 pending_hazard_compute,
             },
         ));
@@ -2952,6 +3019,8 @@ impl WebGpuEarthState {
         let solar_animated = solar_envelope_input.as_ref().is_some_and(|s| s.visible);
         let daylight_animated = daylight_interior_input.as_ref().is_some_and(|d| d.visible);
         let water_animated = water_surface_input.as_ref().is_some_and(|w| w.visible);
+        let ambience_animated = render_site_pass
+            && city_scene.is_some_and(|c| c.ambience.show_animated_traffic && !c.roads.is_empty());
         let frame_ms = if hazard_animated
             || compute_animated
             || subsurface_animated
@@ -2977,6 +3046,7 @@ impl WebGpuEarthState {
             || solar_animated
             || daylight_animated
             || water_animated
+            || ambience_animated
             || active_bim
                 .as_ref()
                 .is_some_and(|b| b.lens == EarthBimLens::ModalVibration)

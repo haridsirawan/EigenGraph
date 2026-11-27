@@ -2215,6 +2215,42 @@ impl SpatialWorkspaceState {
                     universal_canvas.city_scene.active_zone_density = next;
                     self.push_trace(format!("Zone Density set to {}", next.label()), true);
                 }
+                "/living-city" => {
+                    universal_canvas.synthesize_full_living_coastal_city();
+                    actions.fit_camera = true;
+                    self.push_trace("Synthesized Full Living Coastal Metropolis", true);
+                }
+                "/forests" => {
+                    let next = !universal_canvas.city_scene.ambience.show_procedural_forests;
+                    universal_canvas.city_scene.ambience.show_procedural_forests = next;
+                    self.push_trace(
+                        format!(
+                            "Procedural Biome Forests {}",
+                            if next { "enabled" } else { "hidden" }
+                        ),
+                        true,
+                    );
+                }
+                "/traffic" => {
+                    let next = !universal_canvas.city_scene.ambience.show_animated_traffic;
+                    universal_canvas.city_scene.ambience.show_animated_traffic = next;
+                    self.push_trace(
+                        format!("Animated Road Traffic {}", if next { "enabled" } else { "paused" }),
+                        true,
+                    );
+                }
+                "/shadows" => {
+                    let next = !universal_canvas.city_scene.ambience.show_dynamic_shadows;
+                    universal_canvas.city_scene.ambience.show_dynamic_shadows = next;
+                    self.push_trace(
+                        format!("Dynamic Cast Shadows {}", if next { "enabled" } else { "hidden" }),
+                        true,
+                    );
+                }
+                "/time" => {
+                    let lbl = universal_canvas.cycle_living_earth_time_of_day();
+                    self.push_trace(format!("Solar Lighting -> {lbl}"), true);
+                }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");
                     actions.fit_camera = true;
