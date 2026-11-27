@@ -1909,6 +1909,42 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::Wrench,
     },
     SlashCommandSpec {
+        cmd: "/mep",
+        category: "MEP",
+        description: "Open Building MEP Systems Studio & evaluate HVAC, Plumbing, Electrical & Fire",
+        icon: AppIcon::Wrench,
+    },
+    SlashCommandSpec {
+        cmd: "/hvac",
+        category: "MEP",
+        description: "Evaluate ASHRAE HVAC cooling load & 3D supply duct trunks",
+        icon: AppIcon::Wind,
+    },
+    SlashCommandSpec {
+        cmd: "/plumbing",
+        category: "MEP",
+        description: "Evaluate IPC/Hunter domestic water & sanitary pipe sizing",
+        icon: AppIcon::Waves,
+    },
+    SlashCommandSpec {
+        cmd: "/sprinkler",
+        category: "MEP",
+        description: "Evaluate NFPA 13 fire sprinkler heads, pump & reserve tank",
+        icon: AppIcon::Flame,
+    },
+    SlashCommandSpec {
+        cmd: "/mep-3d",
+        category: "MEP",
+        description: "Toggle 3D Pure WebGPU Building MEP ducts, pipes, cable trays & risers",
+        icon: AppIcon::Cube3D,
+    },
+    SlashCommandSpec {
+        cmd: "/mep-ifcx",
+        category: "MEP",
+        description: "Export non-destructive eigengraph::mep::systems IFCX overlay",
+        icon: AppIcon::SaveDisk,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",
@@ -3476,6 +3512,10 @@ pub struct SpatialHudActions {
     pub run_daylight_interior: bool,
     pub toggle_daylight_3d: bool,
     pub export_daylight_ifcx: bool,
+    // Update v0.8.7.5 (5/10 -> v0.8.8): Building MEP Systems (HVAC, Plumbing, Electrical, Fire)
+    pub run_mep_systems: bool,
+    pub toggle_mep_3d: bool,
+    pub export_mep_ifcx: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -3947,5 +3987,8 @@ impl SpatialHudActions {
         self.run_daylight_interior |= other.run_daylight_interior;
         self.toggle_daylight_3d |= other.toggle_daylight_3d;
         self.export_daylight_ifcx |= other.export_daylight_ifcx;
+        self.run_mep_systems |= other.run_mep_systems;
+        self.toggle_mep_3d |= other.toggle_mep_3d;
+        self.export_mep_ifcx |= other.export_mep_ifcx;
     }
 }

@@ -4632,6 +4632,58 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if hud_actions.run_mep_systems {
+            let rep = self
+                .universal_canvas
+                .run_mep_systems(&self.build_view.bim_bus.project);
+            self.universal_canvas.mep_overlay_visible = true;
+            self.spatial_workspace
+                .push_trace(rep.summary_verdict, rep.all_codes_compliant);
+        }
+        if hud_actions.toggle_mep_3d {
+            self.universal_canvas.mep_overlay_visible =
+                !self.universal_canvas.mep_overlay_visible;
+            if self.universal_canvas.mep_overlay_visible
+                && self.universal_canvas.last_mep_report.is_none()
+            {
+                let _ = self
+                    .universal_canvas
+                    .run_mep_systems(&self.build_view.bim_bus.project);
+            }
+            let st = if self.universal_canvas.mep_overlay_visible {
+                "ON"
+            } else {
+                "OFF"
+            };
+            self.spatial_workspace
+                .push_trace(format!("3D Building MEP Conduits & Risers: {st}"), true);
+        }
+        if hud_actions.export_mep_ifcx {
+            let rep = self
+                .universal_canvas
+                .run_mep_systems(&self.build_view.bim_bus.project);
+            let layered = self
+                .universal_canvas
+                .build_active_layered_ifcx(&self.build_view.bim_bus.project, &self.members);
+            let doc = crate::core::IfcxStage::compose_with_mep_systems_overlay(
+                &layered,
+                &rep.to_ifcx_overlay(),
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_mep_systems.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &doc.to_json_pretty(),
+                "application/json;charset=utf-8",
+            ) {
+                Ok(_) => self.spatial_workspace.push_trace(
+                    format!("Exported Building MEP IFCX ({fname})"),
+                    true,
+                ),
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
     }
 
     fn safe_ifcx_project_stem(project_name: &str) -> String {

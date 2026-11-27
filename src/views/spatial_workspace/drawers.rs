@@ -7358,4 +7358,324 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.7.5` (`5/10` -> `v0.8.8`): Building MEP Systems Studio (`HVAC`, `Plumbing`, `Electrical`, `Fire Sprinkler`).
+    pub(super) fn render_mep_systems_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        use crate::core::mep_engine::{FireHazardClass, HvacSystemPreset};
+
+        let deck_w = (cap_w - 8.0).max(180.0);
+        let two_col = !is_mobile && deck_w >= 540.0;
+        ui.set_width(deck_w);
+        ui.set_max_width(deck_w);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(deck_w);
+            icons::icon_label(
+                ui,
+                AppIcon::Wrench,
+                13.0,
+                theme.accent_blue,
+                "Building MEP Systems Studio (HVAC • Plumbing • Electrical • Fire)",
+                11.0,
+                theme.text_primary,
+                true,
+            );
+            for (idx, lbl) in [(0usize, "HVAC, Plumbing & Power"), (1usize, "Fire Sprinkler & 3D Risers")] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.mep_drawer_tab == idx,
+                    theme.accent_blue,
+                    "",
+                )
+                .clicked()
+                {
+                    self.mep_drawer_tab = idx;
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::Close),
+                "Close",
+                false,
+                theme.accent_red,
+                "Close Building MEP Systems Studio",
+            )
+            .clicked()
+            {
+                self.mep_drawer_open = false;
+            }
+        });
+
+        ui.add_space(4.0);
+        theme.glass_subpill_frame(8, Margin::symmetric(8, 5)).show(ui, |ui| {
+            let strip_w = (deck_w - 18.0).max(150.0);
+            ui.set_max_width(strip_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(strip_w);
+                for preset in HvacSystemPreset::ALL {
+                    let active = universal_canvas.mep_config.hvac_preset == preset;
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        preset.short_label(),
+                        active,
+                        theme.accent_blue,
+                        preset.label(),
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.mep_config.hvac_preset = preset;
+                        universal_canvas.mep_overlay_visible = true;
+                        actions.run_mep_systems = true;
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Recycle),
+                    "Run MEP",
+                    false,
+                    theme.accent_green,
+                    "Compute HVAC ducts, Plumbing DN risers, 3-Phase Electrical feeder & NFPA 13 Fire Sprinkler",
+                )
+                .clicked()
+                {
+                    universal_canvas.mep_overlay_visible = true;
+                    actions.run_mep_systems = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Cube3D),
+                    if universal_canvas.mep_overlay_visible {
+                        "3D MEP: ON"
+                    } else {
+                        "3D MEP: OFF"
+                    },
+                    universal_canvas.mep_overlay_visible,
+                    theme.accent_green,
+                    "Toggle 3D Pure WebGPU MEP ducts, pipes, cable trays & risers",
+                )
+                .clicked()
+                {
+                    actions.toggle_mep_3d = true;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "MEP .ifcx",
+                    false,
+                    theme.accent_blue,
+                    "Export non-destructive eigengraph::mep::systems IFCX (.ifcx)",
+                )
+                .clicked()
+                {
+                    actions.export_mep_ifcx = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        let tab = self.mep_drawer_tab;
+        Self::width_first_pair(ui, deck_w, two_col, |ui, is_left, col_w| {
+            theme.glass_subpill_frame(8, Margin::symmetric(8, 6)).show(ui, |ui| {
+                let inner_w = (col_w - 20.0).max(150.0);
+                ui.set_width(inner_w);
+                ui.set_max_width(inner_w);
+                ui.vertical(|ui| {
+                    ui.set_max_width(inner_w);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    if is_left {
+                        ui.label(
+                            RichText::new("MEP Design Parameters & 3D Discipline Filters")
+                                .size(9.8)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ui.add_space(2.0);
+                        let cfg = &mut universal_canvas.mep_config;
+                        let mut changed = false;
+                        ui.horizontal_wrapped(|ui| {
+                            ui.set_max_width(inner_w);
+                            for hz in FireHazardClass::ALL {
+                                let active = cfg.fire_hazard == hz;
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    None,
+                                    hz.short_label(),
+                                    active,
+                                    theme.accent_red,
+                                    hz.label(),
+                                )
+                                .clicked()
+                                {
+                                    cfg.fire_hazard = hz;
+                                    changed = true;
+                                }
+                            }
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Occ m²/p:").size(8.6).color(theme.text_muted));
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut cfg.occupant_density_m2_per_person)
+                                        .range(4.0..=35.0)
+                                        .speed(0.5),
+                                )
+                                .changed();
+                            ui.label(RichText::new("Plenum:").size(8.6).color(theme.text_muted));
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut cfg.plenum_drop_below_slab_m)
+                                        .range(0.25..=1.10)
+                                        .speed(0.05)
+                                        .suffix("m"),
+                                )
+                                .changed();
+                        });
+                        changed |= ui
+                            .checkbox(&mut cfg.couple_solar_ottv, "Couple Solar OTTV Envelope Load")
+                            .changed();
+                        ui.horizontal_wrapped(|ui| {
+                            ui.checkbox(&mut cfg.show_hvac, "HVAC");
+                            ui.checkbox(&mut cfg.show_plumbing, "Plumb");
+                            ui.checkbox(&mut cfg.show_electrical, "Elec");
+                            ui.checkbox(&mut cfg.show_fire, "Fire");
+                        });
+                        if changed {
+                            universal_canvas.mep_overlay_visible = true;
+                            actions.run_mep_systems = true;
+                        }
+                    } else if let Some(ref rep) = universal_canvas.last_mep_report {
+                        if tab == 0 {
+                            let status_col = if rep.all_codes_compliant {
+                                theme.accent_green
+                            } else {
+                                theme.accent_orange
+                            };
+                            ui.label(
+                                RichText::new("ASHRAE HVAC • IPC Plumbing • IEC 3-Phase Power")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "GFA {:.0} m² ({} stories, {} occ) • MEP Est. ${:.0}k [{}]",
+                                    rep.total_gfa_m2,
+                                    rep.stories,
+                                    rep.occupants,
+                                    rep.estimated_mep_cost_usd / 1000.0,
+                                    if rep.all_codes_compliant { "PASS" } else { "REVIEW" },
+                                ))
+                                .size(9.0)
+                                .strong()
+                                .color(status_col),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "HVAC: {:.1} TR ({:.0} kW, COP {:.1}) • Duct {:.0}×{:.0} mm @ {:.1} m/s ({:.1} Pa/m)",
+                                    rep.cooling_tr,
+                                    rep.cooling_kw,
+                                    rep.config.hvac_preset.cop(),
+                                    rep.duct_width_mm,
+                                    rep.duct_height_mm,
+                                    rep.duct_velocity_ms,
+                                    rep.duct_friction_pa_m,
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Plumbing: {:.2} L/s • DN{:.0} @ {:.2} m/s • Head {:.1} kPa • Drain {:.1}%",
+                                    rep.plumbing_peak_flow_ls,
+                                    rep.plumbing_pipe_dn_mm,
+                                    rep.plumbing_velocity_ms,
+                                    rep.plumbing_head_loss_kpa,
+                                    rep.drain_slope_pct,
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "Electrical: {:.1} kVA ({:.0} A) • MCCB {} AT • {} mm² • ΔV {:.2}% ({})",
+                                    rep.elec_demand_kva,
+                                    rep.elec_design_current_a,
+                                    rep.elec_breaker_at,
+                                    rep.elec_cable_mm2,
+                                    rep.elec_voltage_drop_pct,
+                                    if rep.elec_voltage_drop_ok { "OK" } else { ">3%" },
+                                ))
+                                .size(8.4)
+                                .monospace()
+                                .color(theme.text_secondary),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new("NFPA 13 Fire Sprinkler & 3D Conduit Ledger")
+                                    .size(9.8)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} • {} Heads • Main DN{:.0} • Pump {:.0} L/m @ {:.0} kPa • Tank {:.0} m³",
+                                    rep.fire.hazard_class.short_label(),
+                                    rep.fire.total_sprinkler_heads,
+                                    rep.fire.sprinkler_main_dn_mm,
+                                    rep.fire.fire_pump_flow_lpm,
+                                    rep.fire.fire_pump_head_kpa,
+                                    rep.fire.water_tank_m3,
+                                ))
+                                .size(8.6)
+                                .strong()
+                                .color(theme.accent_red),
+                            );
+                            ui.add_space(2.0);
+                            for seg in rep.segments_3d.iter().take(6) {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} [{}] — {}",
+                                        seg.tag,
+                                        if seg.is_riser { "Riser" } else { "Branch" },
+                                        seg.flow_label
+                                    ))
+                                    .size(8.1)
+                                    .monospace()
+                                    .color(theme.text_muted),
+                                );
+                            }
+                        }
+                    } else {
+                        ui.label(
+                            RichText::new("Click 'Run MEP' or choose an HVAC preset to size ducts, pipes, feeders, sprinklers & 3D risers.")
+                                .size(8.8)
+                                .color(theme.text_muted),
+                        );
+                    }
+                });
+            });
+        });
+    }
 }

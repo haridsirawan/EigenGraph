@@ -2034,6 +2034,64 @@ impl SpatialWorkspaceState {
                         }
                     }
                 });
+
+                Self::ribbon_group(ui, theme, "MEP Systems", |ui| {
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Wrench,
+                        "MEP Studio",
+                        self.mep_drawer_open,
+                        theme.accent_blue,
+                        "Open Building MEP Systems Studio (HVAC, Plumbing, Electrical & Fire)",
+                    )
+                    .clicked()
+                    {
+                        self.open_mep_drawer(0);
+                        actions.run_mep_systems = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Layers,
+                        "MEP 3D",
+                        universal_canvas.mep_overlay_visible,
+                        theme.accent_green,
+                        "Toggle 3D Pure WebGPU MEP ducts, pipes, cable trays & core risers",
+                    )
+                    .clicked()
+                    {
+                        actions.toggle_mep_3d = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Wind,
+                        "HVAC",
+                        self.mep_drawer_open && self.mep_drawer_tab == 0,
+                        theme.accent_blue,
+                        "Evaluate ASHRAE HVAC cooling & supply duct sizing",
+                    )
+                    .clicked()
+                    {
+                        self.open_mep_drawer(0);
+                        actions.run_mep_systems = true;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Flame,
+                        "Fire",
+                        self.mep_drawer_open && self.mep_drawer_tab == 1,
+                        theme.accent_red,
+                        "Inspect NFPA 13 Fire Sprinkler heads, pump & 3D risers",
+                    )
+                    .clicked()
+                    {
+                        self.open_mep_drawer(1);
+                        actions.run_mep_systems = true;
+                    }
+                });
             }
 
             RibbonCategoryTab::Scheduling => {

@@ -70,6 +70,7 @@ pub mod evacuation_routing;
 pub mod web_bridge;
 pub mod vector_dossier;
 pub mod agent_tools;
+pub mod mep_engine;
 
 pub use linalg::{CsrMatrix, Matrix};
 pub use model::{
@@ -383,6 +384,11 @@ pub use daylight_interior::{
 pub use agent_tools::{
     execute_headless_tool, gemini_function_declarations, registered_tool_names, GeminiToolCall,
     ToolExecutionOutcome, ToolSectionBoxCommand,
+};
+pub use mep_engine::{
+    evaluate_mep_systems, FireHazardClass, FireSprinklerSummary, HvacSystemPreset,
+    MepConduitSegment3D, MepDiscipline, MepEquipmentNode3D, MepSystemsConfig,
+    MepSystemsIfcxOverlay, MepSystemsReport, NS_EG_MEP_SYSTEMS,
 };
 
 

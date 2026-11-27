@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.8 (4/10)]
+## [Unreleased — Next: v0.8.8 (5/10)]
+
+### Update 5/10 (`v0.8.7.5` -> `v0.8.8`) — Building MEP Engine (`HVAC`, `Plumbing`, `Electrical`, `Fire Sprinkler`), 3D WebGPU Conduits, IFCX Overlay & Gemini Tool
+- **Building MEP Core Engine & Non-Destructive IFCX Overlay (`src/core/mep_engine.rs`, `src/core/mod.rs`, `src/core/ifcx.rs`)**:
+  - Added `mep_engine` (`NS_EG_MEP_SYSTEMS = "eigengraph::mep::systems"`) evaluating ASHRAE HVAC cooling & supply duct sizing (optionally coupled with SNI 6389 Solar OTTV load), IPC/Hunter plumbing DN pipe sizing, IEC 3-phase feeder/breaker/voltage drop, and NFPA 13 fire sprinkler head count, hydraulic main DN, pump flow/head, and 60-min reserve water tank.
+  - Synthesizes coordinated 3D ENU core risers, ceiling-plenum trunks/branches, and rooftop/ground plant equipment (`MepConduitSegment3D`, `MepEquipmentNode3D`), persisted in `.eigen.json` (`UnifiedWorkspaceArchive::mep_config`) and composed via [`IfcxStage::compose_with_mep_systems_overlay`](src/core/ifcx.rs).
+- **Pure WebGPU 3D MEP Conduits (`material_kind = 31.0`), CPU Fallback & Studio UX (`src/views/webgpu_earth/`, `src/views/universal_canvas/`, `src/views/spatial_workspace/`, `src/core/agent_tools.rs`, `src/app.rs`)**:
+  - Added [`build_rtc_mep_systems_mesh`](src/views/webgpu_earth/mesh_builders.rs), `kind >= 30.5` animated flow WGSL shader branch, `mep_systems` GPU mesh slot (section-box clippable), CPU fallback [`paint_cpu_mep_systems_fallback`](src/views/universal_canvas/render_layers.rs), width-first 2-tab [`render_mep_systems_drawer`](src/views/spatial_workspace/drawers.rs), `"MEP Systems"` group in `RibbonCategoryTab::Modeling`, `/mep`, `/hvac`, `/plumbing`, `/sprinkler`, `/mep-3d`, `/mep-ifcx` commands, and Tool #11 (`run_mep_systems`) inside [`agent_tools.rs`](src/core/agent_tools.rs).
+- **Verification (`src/core/mep_engine.rs`, `src/views/webgpu_earth/tests.rs`, `src/views/spatial_workspace/tests.rs`)**:
+  - Added [`test_v0875_mep_systems_hvac_plumbing_electrical_fire_and_ifcx_overlay`](src/core/mep_engine.rs), [`test_v0875_mep_systems_3d_webgpu_mesh_and_section_box_clipping`](src/views/webgpu_earth/tests.rs), and [`test_v0875_mep_studio_ribbon_slash_commands_and_headless_tool`](src/views/spatial_workspace/tests.rs).
 
 ### Update 4/10 (`v0.8.7.4` -> `v0.8.8`) — Native Gemini Function Calling Loop, Headless Engineering Tool Registry, Custom Model ID & Ribbon Scrollbar Clearance
 - **Headless Deterministic Engineering Tool Registry (`src/core/agent_tools.rs`, `src/core/mod.rs`)**:

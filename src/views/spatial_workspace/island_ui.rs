@@ -1875,7 +1875,8 @@ impl SpatialWorkspaceState {
                 || self.massing_drawer_open
                 || self.design_agent_drawer_open
                 || self.solar_drawer_open
-                || self.daylight_drawer_open,
+                || self.daylight_drawer_open
+                || self.mep_drawer_open,
         );
 
         let max_allowed_w = (vp.x - 16.0).max(200.0);
@@ -3126,6 +3127,18 @@ impl SpatialWorkspaceState {
 
                     if self.daylight_drawer_open {
                         self.render_daylight_interior_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
+                    if self.mep_drawer_open {
+                        self.render_mep_systems_drawer(
                             ui,
                             theme,
                             universal_canvas,

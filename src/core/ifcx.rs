@@ -82,6 +82,7 @@ pub mod ns {
     pub const EG_DESIGN_PIPELINE: &str = "eigengraph::design::concept_pipeline";
     pub const EG_SOLAR_OTTV: &str = "eigengraph::design::solar_ottv";
     pub const EG_DAYLIGHT_INTERIOR: &str = "eigengraph::design::daylight_interior";
+    pub const EG_MEP_SYSTEMS: &str = "eigengraph::mep::systems";
     pub const EG_SITE_TERRAFORM: &str = "eigengraph::gis::site_terraform";
     pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
@@ -2137,6 +2138,48 @@ impl IfcxStage {
         });
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_daylight_interior", base_doc.header.id))
+    }
+
+    /// Composes a base `.ifcx` document with a non-destructive Building MEP Systems overlay.
+    pub fn compose_with_mep_systems_overlay(
+        base_doc: &IfcxDocument,
+        overlay: &crate::core::mep_engine::MepSystemsIfcxOverlay,
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_mep_systems", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcBuilding", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "Building MEP Systems (HVAC, Plumbing, Electrical & NFPA 13 Fire Sprinkler)",
+                "hvacCoolingTr": overlay.hvac_cooling_tr,
+                "hvacDuctWidthMm": overlay.hvac_duct_w_mm,
+                "hvacDuctHeightMm": overlay.hvac_duct_h_mm,
+                "plumbingRiserDnMm": overlay.plumbing_riser_dn_mm,
+                "elecDemandKva": overlay.elec_demand_kva,
+                "elecMainBreakerAt": overlay.elec_main_breaker_at,
+                "elecVoltageDropPct": overlay.elec_vdrop_pct,
+                "firePumpFlowLpm": overlay.fire_pump_flow_lpm,
+                "sprinklerHeads": overlay.sprinkler_heads,
+                "segmentCount": overlay.segment_count,
+                "estimatedMepCostUsd": overlay.estimated_mep_cost_usd,
+                "allCodesCompliant": overlay.all_codes_compliant,
+            }),
+        );
+        if let Ok(v) = serde_json::to_value(overlay) {
+            attrs.insert(ns::EG_MEP_SYSTEMS.to_string(), v);
+        }
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/mep/systems".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_mep_systems", base_doc.header.id))
     }
 
     /// Composes a base `.ifcx` document with a non-destructive sculpted `IfcSite` terraform layer.

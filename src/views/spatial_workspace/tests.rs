@@ -6693,3 +6693,111 @@ use crate::theme::MacTheme;
             assert!(sp_key.hud_rects[0].right() <= win_w + 1.0);
         }
     }
+
+    #[test]
+    fn test_v0875_mep_studio_ribbon_slash_commands_and_headless_tool() {
+        for cmd in ["/mep", "/hvac", "/plumbing", "/sprinkler", "/mep-3d", "/mep-ifcx"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|c| c.cmd == cmd),
+                "Missing v0.8.7.5 MEP slash command {cmd} in SLASH_COMMANDS"
+            );
+        }
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let act_mep = spatial.execute_spatial_input(
+            "/mep",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_mep.run_mep_systems);
+        assert!(spatial.mep_drawer_open && spatial.mep_drawer_tab == 0);
+
+        let act_sprinkler = spatial.execute_spatial_input(
+            "/sprinkler",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_sprinkler.run_mep_systems);
+        assert!(spatial.mep_drawer_open && spatial.mep_drawer_tab == 1);
+
+        let act_3d = spatial.execute_spatial_input(
+            "/mep-3d",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act_3d.toggle_mep_3d);
+
+        let _ = canvas.run_mep_systems(&build.bim_bus.project);
+        assert!(canvas.last_mep_report.is_some());
+        assert!(canvas.mep_overlay_visible);
+
+        // Gemini native tool loop executing `run_mep_systems`
+        let sim_reply = crate::core::web_bridge::GeminiApiReply {
+            request_id: 105,
+            model: "gemini-3.5-pro".to_string(),
+            ok: true,
+            text: String::new(),
+            error: None,
+            function_calls: vec![crate::core::agent_tools::GeminiToolCall {
+                name: "run_mep_systems".to_string(),
+                args: serde_json::json!({ "hvac_preset": "vrf", "fire_hazard": "light" }),
+            }],
+            raw_model_content: None,
+        };
+        let _ = spatial.handle_gemini_reply(sim_reply, &mut canvas, &mut build, &mut ai);
+        assert!(spatial.gemini_tool_loop_contents.len() >= 2);
+
+        // Render Modeling Ribbon + MEP Studio Drawer cleanly across Desktop / Tablet / Mobile
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            let ctx = egui::Context::default();
+            spatial.mobile_deck_pinned = true;
+            spatial.open_mep_drawer(0);
+            for _ in 0..4 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            assert!(
+                spatial.hud_rects[0].right() <= win_w + 1.0,
+                "MEP Studio Drawer overflowed {win_w}: {:?}",
+                spatial.hud_rects[0]
+            );
+        }
+    }

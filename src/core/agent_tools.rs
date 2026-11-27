@@ -74,11 +74,12 @@ impl ToolExecutionOutcome {
     }
 }
 
-const TOOL_NAMES: [&str; 10] = [
+const TOOL_NAMES: [&str; 11] = [
     "inspect_model",
     "run_structural_audit",
     "run_solar_ottv",
     "run_daylight_analysis",
+    "run_mep_systems",
     "resize_column",
     "resize_beam",
     "add_story",
@@ -160,6 +161,27 @@ pub fn gemini_function_declarations() -> Value {
                             "vlt": {
                                 "type": "NUMBER",
                                 "description": "Glazing visible light transmittance (0.20..0.88)."
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "run_mep_systems",
+                    "description": "Evaluate Building MEP Systems (ASHRAE HVAC ducts/cooling TR, IPC plumbing DN pipe, 3-phase electrical feeder/breaker, and NFPA 13 fire sprinkler hydraulics).",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "hvac_preset": {
+                                "type": "STRING",
+                                "description": "HVAC system archetype: vrf, chilled_ahu, or packaged_dx."
+                            },
+                            "fire_hazard": {
+                                "type": "STRING",
+                                "description": "NFPA 13 occupancy hazard class: light, ord_1, or ord_2."
+                            },
+                            "occupant_density_m2": {
+                                "type": "NUMBER",
+                                "description": "Floor area per person in m^2/person (4..35)."
                             }
                         }
                     }
@@ -583,6 +605,59 @@ pub fn execute_headless_tool(
                 fly_target: None,
             }
         }
+        "run_mep_systems" => {
+            use crate::core::mep_engine::{
+                evaluate_mep_systems, FireHazardClass, HvacSystemPreset, MepSystemsConfig,
+            };
+            let solar_rep =
+                evaluate_solar_envelope(&bim_bus.project, Some(site), None, &SolarEnvelopeConfig::default());
+            let mut cfg = MepSystemsConfig::default();
+            if let Some(hp) = call.args.get("hvac_preset").and_then(|v| v.as_str()) {
+                cfg.hvac_preset = match hp.trim().to_ascii_lowercase().as_str() {
+                    "chilled_ahu" | "ahu" | "chiller" => HvacSystemPreset::ChilledWaterAhu,
+                    "packaged_dx" | "dx" => HvacSystemPreset::PackagedDxDucted,
+                    _ => HvacSystemPreset::VrfInverter,
+                };
+            }
+            if let Some(fh) = call.args.get("fire_hazard").and_then(|v| v.as_str()) {
+                cfg.fire_hazard = match fh.trim().to_ascii_lowercase().as_str() {
+                    "ord_1" | "ordinary_1" | "ord1" => FireHazardClass::OrdinaryHazardGroup1,
+                    "ord_2" | "ordinary_2" | "ord2" => FireHazardClass::OrdinaryHazardGroup2,
+                    _ => FireHazardClass::LightHazard,
+                };
+            }
+            if let Some(occ) = arg_f64(&call.args, "occupant_density_m2") {
+                cfg.occupant_density_m2_per_person = occ.clamp(4.0, 35.0);
+            }
+            let rep = evaluate_mep_systems(&bim_bus.project, Some(site), Some(&solar_rep), &cfg);
+            ToolExecutionOutcome {
+                name: name.to_string(),
+                ok: true,
+                summary: rep.summary_verdict.clone(),
+                result_json: json!({
+                    "ok": true,
+                    "stories": rep.stories,
+                    "total_gfa_m2": rep.total_gfa_m2,
+                    "hvac_cooling_tr": rep.cooling_tr,
+                    "hvac_duct_w_mm": rep.duct_width_mm,
+                    "hvac_duct_h_mm": rep.duct_height_mm,
+                    "plumbing_pipe_dn_mm": rep.plumbing_pipe_dn_mm,
+                    "elec_demand_kva": rep.elec_demand_kva,
+                    "elec_breaker_at": rep.elec_breaker_at,
+                    "elec_voltage_drop_pct": rep.elec_voltage_drop_pct,
+                    "fire_pump_flow_lpm": rep.fire.fire_pump_flow_lpm,
+                    "sprinkler_heads": rep.fire.total_sprinkler_heads,
+                    "segment_count": rep.segments_3d.len(),
+                    "estimated_mep_cost_usd": rep.estimated_mep_cost_usd,
+                    "all_codes_compliant": rep.all_codes_compliant,
+                }),
+                mutated_bim: false,
+                sync_fem_and_earth: false,
+                fit_camera: false,
+                section_box_update: None,
+                fly_target: None,
+            }
+        }
         "resize_column" => {
             let Some(column_id) = arg_usize(&call.args, "column_id") else {
                 return ToolExecutionOutcome::err(name, "Missing integer argument 'column_id'.");
@@ -842,7 +917,7 @@ mod tests {
         let fn_decls = decls[0]["functionDeclarations"]
             .as_array()
             .expect("functionDeclarations array");
-        assert_eq!(fn_decls.len(), 10);
+        assert_eq!(fn_decls.len(), 11);
         for expected in registered_tool_names() {
             assert!(
                 fn_decls.iter().any(|d| d["name"].as_str() == Some(*expected)),
@@ -908,6 +983,21 @@ mod tests {
         );
         assert!(daylight.ok);
         assert!(daylight.result_json["sda_300_50_pct"].as_f64().is_some());
+
+        let mep = execute_headless_tool(
+            &GeminiToolCall {
+                name: "run_mep_systems".to_string(),
+                args: json!({ "hvac_preset": "chilled_ahu", "fire_hazard": "ord_1" }),
+            },
+            &mut bus,
+            &site,
+            (-6.2088, 106.8456),
+            0,
+            false,
+        );
+        assert!(mep.ok);
+        assert!(mep.result_json["hvac_cooling_tr"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(mep.result_json["segment_count"].as_u64().unwrap_or(0) >= 8);
 
         let col_id = bus.project.columns[0].id;
         let resize = execute_headless_tool(

@@ -3429,3 +3429,99 @@ use crate::core::ifcx::IfcxDocument;
             "Section Box WGSL clipping pass triggered WebGPU validation error: {val_err:?}"
         );
     }
+
+    #[test]
+    fn test_v0875_mep_systems_3d_webgpu_mesh_and_section_box_clipping() {
+        use crate::core::lifecycle_ops::SiteEnvironmentalCoupling;
+        use crate::core::mep_engine::{evaluate_mep_systems, MepSystemsConfig};
+        use crate::views::universal_canvas::SectionBoxConfig;
+
+        let proj = BimProject::sample_bimcraft_building();
+        let site = SiteEnvironmentalCoupling::default();
+        let mep_rep = evaluate_mep_systems(&proj, Some(&site), None, &MepSystemsConfig::default());
+        let mep_mesh = build_rtc_mep_systems_mesh(&MepSystemsGpuInput {
+            report: &mep_rep,
+            heading_deg: 0.0,
+            visible: true,
+        });
+        assert!(
+            mep_mesh.indices.len() / 3 > 40,
+            "Expected 3D MEP conduit & plant triangles"
+        );
+        assert!(
+            mep_mesh.vertices.iter().all(|v| (v.meta[0] - 31.0).abs() < 1e-3),
+            "All Building MEP vertices must carry material_kind = 31.0"
+        );
+
+        fn poll_fut<F: std::future::Future>(fut: F) -> F::Output {
+            let mut fut = std::pin::pin!(fut);
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(&waker);
+            loop {
+                if let std::task::Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
+                    return out;
+                }
+                std::thread::yield_now();
+            }
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = poll_fut(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let Ok((device, queue)) =
+            poll_fut(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        res.mep_systems
+            .upload(&device, &queue, "mep_v0875", 1, &mep_mesh);
+
+        let mut cam = GlobeCamera::default();
+        cam.tilt_deg = 42.0;
+        let xf = GlobeScreenTransform::from_view(
+            Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(64.0, 64.0)),
+            -6.2088,
+            106.8456,
+            17.5,
+            &cam,
+        );
+        let mut sb = SectionBoxConfig::default();
+        sb.apply_level_cut(&proj, 0);
+        let uniforms = RtcCameraUniforms::from_globe_xform(
+            &xf,
+            VectorEarthTheme::CoastalBlueprint,
+            &cam,
+            (-6.2088, 106.8456),
+            1.25,
+            true,
+        )
+        .with_section_box(&sb);
+        queue.write_buffer(
+            &res.planet_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_planet_pass_uniforms()),
+        );
+        queue.write_buffer(
+            &res.site_uniform_buf,
+            0,
+            struct_as_u8_slice(&uniforms.to_site_pass_uniforms()),
+        );
+        res.ensure_targets(&device, 64, 64);
+
+        let mut encoder = device.create_command_encoder(&Default::default());
+        res.render_offscreen_passes(&mut encoder, true);
+        queue.submit([encoder.finish()]);
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let val_err = poll_fut(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "Building MEP WGSL pass triggered WebGPU validation error: {val_err:?}"
+        );
+    }

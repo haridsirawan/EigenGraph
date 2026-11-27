@@ -4752,6 +4752,86 @@ pub fn build_rtc_daylight_interior_mesh(input: &DaylightInteriorGpuInput<'_>) ->
     }
 }
 
+/// GPU input payload for Update `v0.8.7.5` (`5/10` -> `v0.8.8`) 3D Building MEP Conduits, Risers & Plant (`material_kind = 31.0`).
+#[derive(Clone, Copy)]
+pub struct MepSystemsGpuInput<'a> {
+    pub report: &'a crate::core::mep_engine::MepSystemsReport,
+    pub heading_deg: f64,
+    pub visible: bool,
+}
+
+/// Builds 3D Pure WebGPU MEP ducts, plumbing headers, cable trays, NFPA 13 sprinkler mains,
+/// vertical core risers, and rooftop/ground plant equipment (`material_kind = 31.0`, 0% raster).
+pub fn build_rtc_mep_systems_mesh(input: &MepSystemsGpuInput<'_>) -> GpuMeshPayload {
+    use crate::core::mep_engine::MepDiscipline;
+
+    if !input.visible {
+        return GpuMeshPayload::default();
+    }
+    let rep = input.report;
+    let cfg = &rep.config;
+    let is_disc_visible = |disc: MepDiscipline| match disc {
+        MepDiscipline::Hvac => cfg.show_hvac,
+        MepDiscipline::Plumbing => cfg.show_plumbing,
+        MepDiscipline::Electrical => cfg.show_electrical,
+        MepDiscipline::FireSprinkler => cfg.show_fire,
+    };
+
+    let rad = input.heading_deg.to_radians();
+    let (sr, cr) = (rad.sin(), rad.cos());
+    let rot_enu = |p: [f64; 3]| -> [f64; 3] {
+        [p[0] * cr - p[1] * sr, p[0] * sr + p[1] * cr, p[2]]
+    };
+
+    let mut verts = Vec::with_capacity(2_048);
+    let mut idxs = Vec::with_capacity(3_072);
+
+    for seg in &rep.segments_3d {
+        if !is_disc_visible(seg.discipline) {
+            continue;
+        }
+        let col = seg.discipline.rgba();
+        let p0 = rot_enu(seg.start_enu_m);
+        let p1 = rot_enu(seg.end_enu_m);
+        push_animated_flow_strut_enu(
+            &mut verts,
+            &mut idxs,
+            p0,
+            p1,
+            seg.width_m,
+            seg.height_m,
+            col,
+            seg.discipline.discipline_code(),
+            31.0,
+        );
+    }
+
+    for eq in &rep.equipment_3d {
+        if !is_disc_visible(eq.discipline) {
+            continue;
+        }
+        let col = eq.discipline.rgba();
+        let c = rot_enu(eq.center_enu_m);
+        let hx = eq.size_enu_m[0] * 0.5;
+        let hy = eq.size_enu_m[1] * 0.5;
+        let rot_pt = |[lx, ly]: [f64; 2]| [c[0] + lx * cr - ly * sr, c[1] + lx * sr + ly * cr];
+        let fp: [[f64; 2]; 4] = [
+            rot_pt([-hx, -hy]),
+            rot_pt([hx, -hy]),
+            rot_pt([hx, hy]),
+            rot_pt([-hx, hy]),
+        ];
+        let z0 = (c[2] - eq.size_enu_m[2] * 0.5) as f32;
+        let z1 = (c[2] + eq.size_enu_m[2] * 0.5) as f32;
+        push_box_prism_enu(&mut verts, &mut idxs, &fp, z0, z1, col, 31.0);
+    }
+
+    GpuMeshPayload {
+        vertices: verts,
+        indices: idxs,
+    }
+}
+
 /// GPU input parameters for realistic coastal ocean & river water surface rendering (`material_kind = 29.0`).
 #[derive(Clone, Copy)]
 pub struct CoastalWaterGpuInput<'a> {

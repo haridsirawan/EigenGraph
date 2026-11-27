@@ -314,6 +314,8 @@ pub struct UnifiedWorkspaceArchive {
     pub terrain_sculpt: crate::core::gis::TerrainSculptConfig,
     #[serde(default)]
     pub section_box: SectionBoxConfig,
+    #[serde(default)]
+    pub mep_config: crate::core::mep_engine::MepSystemsConfig,
     pub sha256_seal: String,
 }
 

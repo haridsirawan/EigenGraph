@@ -4608,4 +4608,57 @@ impl UniversalCanvasState {
             }
         }
     }
+
+    /// Pure-vector CPU fallback rendering Building MEP 3D ducts, pipes, cable trays & risers
+    /// when WebGPU is inactive (headless unit tests).
+    pub(super) fn paint_cpu_mep_systems_fallback(
+        &self,
+        painter: &egui::Painter,
+        _rect: Rect,
+        xform: &GlobeScreenTransform,
+    ) {
+        use crate::core::mep_engine::MepDiscipline;
+        let Some(ref rep) = self.last_mep_report else {
+            return;
+        };
+        let heading = self
+            .active_world_project_rel_path
+            .as_deref()
+            .and_then(|r| self.world_index.get(r))
+            .map(|b| b.heading_deg)
+            .unwrap_or(0.0);
+        let rad = heading.to_radians();
+        let (sr, cr) = (rad.sin(), rad.cos());
+        let proj = |enu: [f64; 3]| -> Option<Pos2> {
+            let rx = enu[0] * cr - enu[1] * sr;
+            let ry = enu[0] * sr + enu[1] * cr;
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                self.ground_origin_lat_lon,
+                [rx * 1000.0, ry * 1000.0],
+            );
+            xform
+                .project_lat_lon_elev(ll.0, ll.1, enu[2])
+                .and_then(|(sp, _, vis)| vis.then_some(sp))
+        };
+        for seg in &rep.segments_3d {
+            let show = match seg.discipline {
+                MepDiscipline::Hvac => rep.config.show_hvac,
+                MepDiscipline::Plumbing => rep.config.show_plumbing,
+                MepDiscipline::Electrical => rep.config.show_electrical,
+                MepDiscipline::FireSprinkler => rep.config.show_fire,
+            };
+            if !show {
+                continue;
+            }
+            if let (Some(p0), Some(p1)) = (proj(seg.start_enu_m), proj(seg.end_enu_m)) {
+                let rgba = seg.discipline.rgba();
+                let col = Color32::from_rgb(
+                    (rgba[0] * 255.0) as u8,
+                    (rgba[1] * 255.0) as u8,
+                    (rgba[2] * 255.0) as u8,
+                );
+                painter.line_segment([p0, p1], Stroke::new(if seg.is_riser { 3.2 } else { 2.1 }, col));
+            }
+        }
+    }
 }

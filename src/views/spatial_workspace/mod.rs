@@ -194,6 +194,9 @@ pub struct SpatialWorkspaceState {
     pub gemini_tool_loop_contents: Vec<serde_json::Value>,
     pub gemini_tool_loop_system_prompt: String,
     pub gemini_tool_loop_depth: u8,
+    // Update v0.8.7.5 (5/10 -> v0.8.8): Building MEP Systems Studio Drawer
+    pub mep_drawer_open: bool,
+    pub mep_drawer_tab: usize,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -336,6 +339,8 @@ impl Default for SpatialWorkspaceState {
             gemini_tool_loop_contents: Vec::new(),
             gemini_tool_loop_system_prompt: String::new(),
             gemini_tool_loop_depth: 0,
+            mep_drawer_open: false,
+            mep_drawer_tab: 0,
         }
     }
 }
@@ -407,6 +412,7 @@ impl SpatialWorkspaceState {
             || self.design_agent_drawer_open
             || self.solar_drawer_open
             || self.daylight_drawer_open
+            || self.mep_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -446,6 +452,7 @@ impl SpatialWorkspaceState {
         self.design_agent_drawer_open = false;
         self.solar_drawer_open = false;
         self.daylight_drawer_open = false;
+        self.mep_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -599,6 +606,11 @@ impl SpatialWorkspaceState {
             self.daylight_drawer_open = false;
         } else {
             self.daylight_drawer_open = !self.daylight_drawer_open;
+        }
+        if drawer != "mep" {
+            self.mep_drawer_open = false;
+        } else {
+            self.mep_drawer_open = !self.mep_drawer_open;
         }
     }
 
@@ -770,6 +782,14 @@ impl SpatialWorkspaceState {
         self.daylight_drawer_open = true;
     }
 
+    /// Idempotently opens the Update `v0.8.7.5` (`5/10` -> `v0.8.8`) Building MEP Systems Studio drawer
+    /// (`0` = HVAC, Plumbing & Electrical, `1` = Fire Sprinkler & 3D Risers).
+    pub fn open_mep_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.mep_drawer_tab = tab.min(1);
+        self.mep_drawer_open = true;
+    }
+
     /// Returns the active Layer 2 exclusive focus overlay `(title, icon)` when a drawer,
     /// Project Browser, AI chat, Smart Inspector, or Slash Palette is open inside the Dynamic Island.
     pub fn active_focus_layer_info(&self, slash_mode: bool) -> Option<(&'static str, crate::icons::AppIcon)> {
@@ -792,6 +812,8 @@ impl SpatialWorkspaceState {
             Some(("Solar & OTTV Studio", AppIcon::Sun))
         } else if self.daylight_drawer_open {
             Some(("Daylight & Interior Studio", AppIcon::Sun))
+        } else if self.mep_drawer_open {
+            Some(("Building MEP Systems Studio", AppIcon::Wrench))
         } else if self.design_agent_drawer_open {
             Some(("AI Design Agent", AppIcon::Sparkles))
         } else if self.massing_drawer_open {

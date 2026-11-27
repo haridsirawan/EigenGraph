@@ -253,6 +253,10 @@ pub struct UniversalCanvasState {
     pub last_daylight_report: Option<crate::core::daylight_interior::DaylightInteriorReport>,
     // Update v0.8.7.3 (3/10 -> v0.8.8): Real-Time WebGPU 3D Section Box & Active Level Cut Plane
     pub section_box: SectionBoxConfig,
+    // Update v0.8.7.5 (5/10 -> v0.8.8): Building MEP Systems Engine (HVAC, Plumbing, Electrical, Fire)
+    pub mep_overlay_visible: bool,
+    pub mep_config: crate::core::mep_engine::MepSystemsConfig,
+    pub last_mep_report: Option<crate::core::mep_engine::MepSystemsReport>,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -448,6 +452,9 @@ impl Default for UniversalCanvasState {
             daylight_config: crate::core::daylight_interior::DaylightInteriorConfig::default(),
             last_daylight_report: None,
             section_box: SectionBoxConfig::default(),
+            mep_overlay_visible: false,
+            mep_config: crate::core::mep_engine::MepSystemsConfig::default(),
+            last_mep_report: None,
         }
     }
 }
@@ -2043,6 +2050,25 @@ impl UniversalCanvasState {
         rep
     }
 
+    /// Evaluates Building MEP Systems (`HVAC`, `Plumbing`, `Electrical`, `Fire Sprinkler`),
+    /// coupling active BIM geometry, site climate & Solar OTTV load into 3D ENU conduits & risers.
+    pub fn run_mep_systems(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> crate::core::mep_engine::MepSystemsReport {
+        let site = self.active_site_coupling();
+        let rep = crate::core::mep_engine::evaluate_mep_systems(
+            bim_project,
+            Some(&site),
+            self.last_solar_envelope_report.as_ref(),
+            &self.mep_config,
+        );
+        self.last_mep_report = Some(rep.clone());
+        self.mep_overlay_visible = true;
+        self.status_message = Some(rep.summary_verdict.clone());
+        rep
+    }
+
     /// Synchronizes an incoming peer `.ifcx` delta through the collaborative sync relay buffer
     /// (auto-synthesizing a discipline peer delta if the inbound relay queue is empty).
     pub fn simulate_peer_relay_sync(
@@ -2390,6 +2416,7 @@ impl UniversalCanvasState {
             show_water_surface: self.show_water_surface,
             terrain_sculpt: self.terrain_sculpt.clone(),
             section_box: self.section_box.clone(),
+            mep_config: self.mep_config.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -2547,6 +2574,8 @@ impl UniversalCanvasState {
         self.terrain_sculpt = archive.terrain_sculpt;
         self.terrain_sculpt_undo_stack.clear();
         self.section_box = archive.section_box;
+        self.mep_config = archive.mep_config;
+        self.last_mep_report = None;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -3291,6 +3320,17 @@ impl UniversalCanvasState {
             } else {
                 None
             };
+            let mep_systems_gpu_input = if self.mep_overlay_visible {
+                self.last_mep_report.as_ref().map(|rep| {
+                    crate::views::webgpu_earth::MepSystemsGpuInput {
+                        report: rep,
+                        heading_deg: active_heading_deg,
+                        visible: true,
+                    }
+                })
+            } else {
+                None
+            };
             let compute_time_secs = (ui.ctx().input(|i| i.time) % 3600.0) as f32;
             let hazard_compute_input =
                 self.build_hazard_compute_input(bim_project, compute_time_secs);
@@ -3355,6 +3395,7 @@ impl UniversalCanvasState {
                 massing_study_gpu_input,
                 solar_envelope_gpu_input,
                 daylight_interior_gpu_input,
+                mep_systems_gpu_input,
                 hazard_compute_opt,
                 &self.section_box,
             );
@@ -3461,6 +3502,9 @@ impl UniversalCanvasState {
             }
             if !gpu_globe_active && self.daylight_overlay_visible {
                 self.paint_cpu_daylight_interior_fallback(&painter, rect, &xform);
+            }
+            if !gpu_globe_active && self.mep_overlay_visible {
+                self.paint_cpu_mep_systems_fallback(&painter, rect, &xform);
             }
             self.last_globe_xform = Some(xform.clone());
             Some(xform)

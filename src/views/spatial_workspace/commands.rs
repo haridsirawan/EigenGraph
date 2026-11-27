@@ -2583,6 +2583,22 @@ impl SpatialWorkspaceState {
                         }
                     }
                 }
+                "/mep" | "/hvac" | "/plumbing" => {
+                    self.open_mep_drawer(0);
+                    actions.run_mep_systems = true;
+                    self.push_trace("Evaluating Building MEP Systems (HVAC/Plumbing/Power/Fire)", true);
+                }
+                "/sprinkler" | "/fire-mep" => {
+                    self.open_mep_drawer(1);
+                    actions.run_mep_systems = true;
+                    self.push_trace("Evaluating NFPA 13 Fire Sprinkler & 3D Risers", true);
+                }
+                "/mep-3d" => {
+                    actions.toggle_mep_3d = true;
+                }
+                "/mep-ifcx" => {
+                    actions.export_mep_ifcx = true;
+                }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");
                     actions.fit_camera = true;

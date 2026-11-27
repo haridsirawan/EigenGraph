@@ -557,6 +557,13 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         let win_glow = mix(vec3<f32>(1.0, 0.84, 0.52), vec3<f32>(0.52, 0.88, 1.0), step(0.78, lit_hash));
         let night_strength = max(u_night, u_gold * 0.45);
         col += win_glow * (glass_mask * lit_on * night_strength * 0.82);
+    } else if (kind >= 30.5) {
+        // Update v0.8.7.5 (5/10 -> v0.8.8): Pure Analytical WGSL 3D Building MEP Ducts, Pipes & Risers (0% raster)
+        let flow_wave = 0.84 + 0.16 * sin(phase * 2.4 - u_time * 3.0);
+        let ndotv = max(abs(dot(n, v)), 0.14);
+        let rim = pow(1.0 - ndotv, 1.65) * 0.36;
+        col = f_in.color.rgb * (0.76 + 0.24 * flow_wave + rim) * mix(0.65, 1.0, lit);
+        out_alpha = f_in.color.a;
     } else if (kind >= 29.5) {
         // Update v0.8.6.9 (9/10 -> v0.8.7): Emissive City Traffic Headlights (height_m > 0.5) & Taillights
         let boost = 1.0 + max(u_night, u_gold * 0.65) * 0.85;
@@ -970,6 +977,7 @@ pub struct WebGpuEarthResources {
     massing_study: GpuMeshSlot,
     solar_envelope: GpuMeshSlot,
     daylight_interior: GpuMeshSlot,
+    mep_systems: GpuMeshSlot,
     water_surface: GpuMeshSlot,
     city_ambience: GpuMeshSlot,
     hazard_compute: GpuHazardParticlePipeline,
@@ -1213,6 +1221,7 @@ impl WebGpuEarthResources {
             massing_study: GpuMeshSlot::default(),
             solar_envelope: GpuMeshSlot::default(),
             daylight_interior: GpuMeshSlot::default(),
+            mep_systems: GpuMeshSlot::default(),
             hazard_compute: GpuHazardParticlePipeline::new(device),
         }
     }
@@ -1352,6 +1361,7 @@ impl WebGpuEarthResources {
             || self.massing_study.index_count > 0
             || self.solar_envelope.index_count > 0
             || self.daylight_interior.index_count > 0
+            || self.mep_systems.index_count > 0
             || self.hazard_compute.active_vertex_count > 0;
         if render_site_pass && has_site {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1416,6 +1426,7 @@ impl WebGpuEarthResources {
             self.massing_study.draw(&mut pass);
             self.solar_envelope.draw(&mut pass);
             self.daylight_interior.draw(&mut pass);
+            self.mep_systems.draw(&mut pass);
             self.portfolio.draw(&mut pass);
             self.hazard.draw(&mut pass);
             self.hazard_compute.draw(&mut pass);
@@ -1457,6 +1468,7 @@ struct WebGpuEarthPaintCallback {
     pending_massing_study: Option<(u64, GpuMeshPayload)>,
     pending_solar_envelope: Option<(u64, GpuMeshPayload)>,
     pending_daylight_interior: Option<(u64, GpuMeshPayload)>,
+    pending_mep_systems: Option<(u64, GpuMeshPayload)>,
     pending_water_surface: Option<(u64, GpuMeshPayload)>,
     pending_city_ambience: Option<(u64, GpuMeshPayload)>,
     pending_hazard_compute: Option<HazardComputeInput>,
@@ -1636,6 +1648,12 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
                     .upload(device, queue, "daylight_interior_mesh", dl_in.0, &dl_in.1);
             }
         }
+        if let Some(ref mep_in) = self.pending_mep_systems {
+            if res.mep_systems.revision_uploaded != mep_in.0 {
+                res.mep_systems
+                    .upload(device, queue, "mep_systems_mesh", mep_in.0, &mep_in.1);
+            }
+        }
         if let Some(ref ws_in) = self.pending_water_surface {
             if res.water_surface.revision_uploaded != ws_in.0 {
                 res.water_surface
@@ -1759,6 +1777,7 @@ pub struct WebGpuEarthState {
     cached_massing_study_hash: u64,
     cached_solar_envelope_hash: u64,
     cached_daylight_interior_hash: u64,
+    cached_mep_systems_hash: u64,
     cached_water_surface_hash: u64,
     cached_city_ambience_hash: u64,
     pub last_planet_tris: usize,
@@ -1789,6 +1808,7 @@ pub struct WebGpuEarthState {
     pub last_massing_study_tris: usize,
     pub last_solar_envelope_tris: usize,
     pub last_daylight_interior_tris: usize,
+    pub last_mep_systems_tris: usize,
     pub last_water_surface_tris: usize,
     pub last_city_ambience_tris: usize,
     pub last_compute_particles: u32,
@@ -2088,6 +2108,7 @@ impl WebGpuEarthState {
         massing_study_input: Option<MassingStudyGpuInput<'_>>,
         solar_envelope_input: Option<SolarEnvelopeGpuInput<'_>>,
         daylight_interior_input: Option<DaylightInteriorGpuInput<'_>>,
+        mep_systems_input: Option<MepSystemsGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
         section_box: &crate::views::universal_canvas::SectionBoxConfig,
     ) -> bool {
@@ -3045,6 +3066,41 @@ impl WebGpuEarthState {
         };
         let compute_animated = pending_hazard_compute.is_some();
 
+        let pending_mep_systems = if render_site_pass {
+            if let Some(ref mp) = mep_systems_input.as_ref().filter(|m| m.visible) {
+                let c = &mp.report.config;
+                let vis_mask = u64::from(c.show_hvac)
+                    | (u64::from(c.show_plumbing) << 1)
+                    | (u64::from(c.show_electrical) << 2)
+                    | (u64::from(c.show_fire) << 3);
+                let rev: u64 = ((c.hvac_preset as u64 + 1) << 2)
+                    ^ ((c.fire_hazard as u64 + 1) << 6)
+                    ^ (vis_mask << 10)
+                    ^ ((mp.report.segments_3d.len() as u64) << 16)
+                    ^ mp.report.cooling_tr.to_bits().rotate_left(23)
+                    ^ mp.report.elec_demand_kva.to_bits().rotate_left(31)
+                    ^ c.plenum_drop_below_slab_m.to_bits().rotate_left(39)
+                    ^ ((mp.heading_deg.round() as u64) << 51)
+                    ^ u64::from(mp.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                if rev != self.cached_mep_systems_hash {
+                    let mesh = build_rtc_mep_systems_mesh(mp);
+                    self.last_mep_systems_tris = mesh.indices.len() / 3;
+                    self.cached_mep_systems_hash = rev;
+                    Some((rev, mesh))
+                } else {
+                    None
+                }
+            } else if self.cached_mep_systems_hash != 0 {
+                self.cached_mep_systems_hash = 0;
+                self.last_mep_systems_tris = 0;
+                Some((0, GpuMeshPayload::default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         painter.add(egui_wgpu::Callback::new_paint_callback(
             rect,
             WebGpuEarthPaintCallback {
@@ -3078,6 +3134,7 @@ impl WebGpuEarthState {
                 pending_massing_study,
                 pending_solar_envelope,
                 pending_daylight_interior,
+                pending_mep_systems,
                 pending_water_surface,
                 pending_city_ambience,
                 pending_hazard_compute,
@@ -3118,6 +3175,7 @@ impl WebGpuEarthState {
         let massing_animated = massing_study_input.as_ref().is_some_and(|m| m.visible);
         let solar_animated = solar_envelope_input.as_ref().is_some_and(|s| s.visible);
         let daylight_animated = daylight_interior_input.as_ref().is_some_and(|d| d.visible);
+        let mep_animated = mep_systems_input.as_ref().is_some_and(|m| m.visible);
         let water_animated = water_surface_input.as_ref().is_some_and(|w| w.visible);
         let ambience_animated = render_site_pass
             && city_scene.is_some_and(|c| c.ambience.show_animated_traffic && !c.roads.is_empty());
@@ -3145,6 +3203,7 @@ impl WebGpuEarthState {
             || massing_animated
             || solar_animated
             || daylight_animated
+            || mep_animated
             || water_animated
             || ambience_animated
             || active_bim
