@@ -7,7 +7,18 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.8 (3/10)]
+## [Unreleased — Next: v0.8.8 (4/10)]
+
+### Update 4/10 (`v0.8.7.4` -> `v0.8.8`) — Native Gemini Function Calling Loop, Headless Engineering Tool Registry, Custom Model ID & Ribbon Scrollbar Clearance
+- **Headless Deterministic Engineering Tool Registry (`src/core/agent_tools.rs`, `src/core/mod.rs`)**:
+  - Added `agent_tools` (`wasm32`-safe, zero `egui` dependency) exposing 10 structured `functionDeclarations` schemas (`inspect_model`, `run_structural_audit`, `run_solar_ottv`, `run_daylight_analysis`, `resize_column`, `resize_beam`, `add_story`, `auto_repair_model`, `set_section_box`, `fly_to_location`) via [`gemini_function_declarations`](src/core/agent_tools.rs) and deterministic execution via [`execute_headless_tool`](src/core/agent_tools.rs).
+- **Native Gemini Function Calling Client & Multi-Step Autonomous Loop (`src/core/web_bridge.rs`, `src/views/spatial_workspace/`)**:
+  - Upgraded [`parse_gemini_turn_response`](src/core/web_bridge.rs), [`build_gemini_tool_contents_payload`](src/core/web_bridge.rs), and [`gemini_send_raw_contents`](src/core/web_bridge.rs) to preserve candidate `content` (`thoughtSignature`) and dispatch multi-turn `functionCall` / `functionResponse` payloads cleanly across native `curl` and browser `wasm32` `fetch`.
+  - Wired closed-loop tool verification inside [`SpatialWorkspaceState::handle_gemini_reply`](src/views/spatial_workspace/commands.rs) (up to 5 autonomous physics-check iterations), added `custom_gemini_model_id` & `gemini_native_tools_enabled` toggles inside the Gemini API Key Quick Setup popover (`island_ui.rs`), and added `/model` and `/tools` slash commands.
+- **Ribbon Toolbox Horizontal Scrollbar Clearance (`src/views/spatial_workspace/ribbon_ui.rs`)**:
+  - Upgraded Row C `smart_ribbon_tools` in [`SpatialWorkspaceState::render_categorized_ribbon_deck`](src/views/spatial_workspace/ribbon_ui.rs) with `egui::style::ScrollStyle::solid()`, `bar_width = 5.0`, `bar_inner_margin = 5.0`, `ScrollBarVisibility::AlwaysVisible`, and `max_height(98.0)` so the horizontal scrollbar reserves a dedicated track below group footer pills without overlapping captions or drifting across frames.
+- **Verification (`src/core/agent_tools.rs`, `src/views/spatial_workspace/tests.rs`)**:
+  - Added [`test_v0874_headless_tool_registry_and_execution`](src/core/agent_tools.rs) and [`test_v0874_gemini_function_calling_loop_custom_model_and_ribbon_scrollbar_clearance`](src/views/spatial_workspace/tests.rs).
 
 ### Update 3/10 (`v0.8.7.3` -> `v0.8.8`) — Hardware WebGPU 3D Section Box, Active Level Cut Plane & Ribbon Row B Cleanup
 - **Hardware WGSL 3D Section Box & Active Level Cut Plane (`src/views/webgpu_earth/mod.rs`, `src/views/universal_canvas/types.rs`, `src/views/universal_canvas/mod.rs`)**:

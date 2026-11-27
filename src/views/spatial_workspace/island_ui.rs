@@ -2270,6 +2270,29 @@ impl SpatialWorkspaceState {
                                         &self.gemini_api_key_draft,
                                     );
                                 }
+                                ui.add_space(2.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(
+                                        RichText::new("Model ID:")
+                                            .size(10.0)
+                                            .color(theme.text_secondary),
+                                    );
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.custom_gemini_model_id)
+                                            .hint_text("Optional custom ID (e.g. gemini-3.0-pro)")
+                                            .desired_width((kw - 140.0).max(110.0)),
+                                    );
+                                    if !self.custom_gemini_model_id.trim().is_empty()
+                                        && ui.small_button("Reset").clicked()
+                                    {
+                                        self.custom_gemini_model_id.clear();
+                                        self.push_trace("Cleared custom Gemini model ID", true);
+                                    }
+                                });
+                                ui.checkbox(
+                                    &mut self.gemini_native_tools_enabled,
+                                    "Enable Native Gemini Function Calling (Auto-Verify Physics Tools)",
+                                );
                                 ui.label(
                                     RichText::new("Used only for live Google Gemini REST calls from Dynamic Island. Empty key automatically falls back to offline EigenAI Pro.")
                                         .size(9.5)

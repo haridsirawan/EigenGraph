@@ -1183,6 +1183,16 @@ pub fn shm_connection_snapshot() -> (bool, String) {
     }
 }
 
+/// Parsed Gemini `generateContent` turn supporting text and native `functionCall` parts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GeminiParsedTurn {
+    pub text: String,
+    #[serde(default)]
+    pub function_calls: Vec<crate::core::agent_tools::GeminiToolCall>,
+    #[serde(default)]
+    pub raw_model_content: Option<serde_json::Value>,
+}
+
 /// Asynchronous response delivered by the Gemini REST `generateContent` client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeminiApiReply {
@@ -1191,6 +1201,10 @@ pub struct GeminiApiReply {
     pub ok: bool,
     pub text: String,
     pub error: Option<String>,
+    #[serde(default)]
+    pub function_calls: Vec<crate::core::agent_tools::GeminiToolCall>,
+    #[serde(default)]
+    pub raw_model_content: Option<serde_json::Value>,
 }
 
 static PENDING_GEMINI_REPLIES: std::sync::Mutex<Vec<GeminiApiReply>> =
@@ -1204,8 +1218,9 @@ fn push_gemini_reply(reply: GeminiApiReply) {
     }
 }
 
-/// Parses a Google Gemini `generateContent` JSON payload and extracts concatenated candidate text.
-pub fn parse_gemini_generate_content_response(raw_json: &str) -> Result<String, String> {
+/// Parses a Google Gemini `generateContent` JSON payload, preserving candidate `content`
+/// (`thoughtSignature` etc.) and extracting both text and `functionCall` parts.
+pub fn parse_gemini_turn_response(raw_json: &str) -> Result<GeminiParsedTurn, String> {
     let val: serde_json::Value = serde_json::from_str(raw_json)
         .map_err(|e| format!("Invalid Gemini API JSON response: {e}"))?;
     if let Some(err_obj) = val.get("error") {
@@ -1215,27 +1230,50 @@ pub fn parse_gemini_generate_content_response(raw_json: &str) -> Result<String, 
             .unwrap_or("Gemini API returned an unspecified error.");
         return Err(msg.to_string());
     }
-    let mut out = String::new();
-    if let Some(parts) = val
+    let mut turn = GeminiParsedTurn::default();
+    if let Some(content) = val
         .get("candidates")
         .and_then(|c| c.get(0))
         .and_then(|c| c.get("content"))
-        .and_then(|c| c.get("parts"))
-        .and_then(|p| p.as_array())
     {
-        for p in parts {
-            if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
-                if !out.is_empty() && !t.is_empty() {
-                    out.push('\n');
+        turn.raw_model_content = Some(content.clone());
+        if let Some(parts) = content.get("parts").and_then(|p| p.as_array()) {
+            for p in parts {
+                if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
+                    if !turn.text.is_empty() && !t.is_empty() {
+                        turn.text.push('\n');
+                    }
+                    turn.text.push_str(t);
                 }
-                out.push_str(t);
+                if let Some(fc) = p.get("functionCall") {
+                    if let Some(name) = fc.get("name").and_then(|v| v.as_str()) {
+                        let args = fc
+                            .get("args")
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!({}));
+                        turn.function_calls.push(crate::core::agent_tools::GeminiToolCall {
+                            name: name.to_string(),
+                            args,
+                        });
+                    }
+                }
             }
         }
     }
-    if out.trim().is_empty() {
+    if turn.text.trim().is_empty() && turn.function_calls.is_empty() {
         Err("Gemini API returned an empty response candidate.".to_string())
     } else {
-        Ok(out)
+        Ok(turn)
+    }
+}
+
+/// Parses a Google Gemini `generateContent` JSON payload and extracts concatenated candidate text.
+pub fn parse_gemini_generate_content_response(raw_json: &str) -> Result<String, String> {
+    let turn = parse_gemini_turn_response(raw_json)?;
+    if turn.text.trim().is_empty() {
+        Err("Gemini API returned an empty response candidate.".to_string())
+    } else {
+        Ok(turn.text)
     }
 }
 
@@ -1247,8 +1285,49 @@ pub fn build_gemini_generate_content_payload(
     build_gemini_generate_content_payload_for_model(system_prompt, history_turns, "gemini-2.5-flash")
 }
 
+/// Builds a structured Gemini `generateContent` payload from raw `contents` turns and optional `tools` declarations.
+pub fn build_gemini_tool_contents_payload(
+    system_prompt: &str,
+    contents: &[serde_json::Value],
+    tools_json: Option<&serde_json::Value>,
+    model_id: &str,
+) -> serde_json::Value {
+    let safe_contents: Vec<serde_json::Value> = if contents.is_empty() {
+        vec![serde_json::json!({
+            "role": "user",
+            "parts": [{ "text": "Analyze the active EigenGraph workspace." }]
+        })]
+    } else {
+        contents.to_vec()
+    };
+    let lower = model_id.to_ascii_lowercase();
+    let max_output_tokens = if lower.contains("pro")
+        || lower.contains("gemini-3")
+        || lower.contains("gemini-4")
+        || lower.contains("thinking")
+    {
+        4096
+    } else {
+        2048
+    };
+    let mut body = serde_json::json!({
+        "system_instruction": {
+            "parts": [{ "text": system_prompt }]
+        },
+        "contents": safe_contents,
+        "generationConfig": {
+            "temperature": 0.25,
+            "maxOutputTokens": max_output_tokens
+        }
+    });
+    if let Some(tools) = tools_json {
+        body["tools"] = tools.clone();
+    }
+    body
+}
+
 /// Builds a multi-turn Google Gemini `generateContent` payload tuned per model family
-/// (allocating extra output token budget for `gemini-2.5-pro` reasoning overhead).
+/// (allocating extra output token budget for reasoning overhead).
 pub fn build_gemini_generate_content_payload_for_model(
     system_prompt: &str,
     history_turns: &[(bool, String)],
@@ -1266,35 +1345,16 @@ pub fn build_gemini_generate_content_payload_for_model(
             "parts": [{ "text": trimmed }]
         }));
     }
-    if contents.is_empty() {
-        contents.push(serde_json::json!({
-            "role": "user",
-            "parts": [{ "text": "Analyze the active EigenGraph workspace." }]
-        }));
-    }
-    let max_output_tokens = if model_id.to_ascii_lowercase().contains("pro") {
-        2400
-    } else {
-        1400
-    };
-    serde_json::json!({
-        "system_instruction": {
-            "parts": [{ "text": system_prompt }]
-        },
-        "contents": contents,
-        "generationConfig": {
-            "temperature": 0.25,
-            "maxOutputTokens": max_output_tokens
-        }
-    })
+    build_gemini_tool_contents_payload(system_prompt, &contents, None, model_id)
 }
 
-/// Dispatches a non-blocking Gemini `generateContent` request with multi-turn context (`history_turns`).
-pub fn gemini_send_conversation(
+/// Dispatches a non-blocking Gemini `generateContent` request with raw `contents` (supporting `functionCall` / `functionResponse`).
+pub fn gemini_send_raw_contents(
     api_key: &str,
     model_id: &str,
     system_prompt: &str,
-    history_turns: &[(bool, String)],
+    contents: &[serde_json::Value],
+    tools_json: Option<&serde_json::Value>,
 ) -> Result<u64, String> {
     let key_trimmed = api_key.trim().to_string();
     if key_trimmed.is_empty() {
@@ -1306,11 +1366,7 @@ pub fn gemini_send_conversation(
         model_id.trim().to_string()
     };
     let req_id = NEXT_GEMINI_REQ_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let body = build_gemini_generate_content_payload_for_model(
-        system_prompt,
-        history_turns,
-        &clean_model,
-    );
+    let body = build_gemini_tool_contents_payload(system_prompt, contents, tools_json, &clean_model);
     let payload_str = body.to_string();
 
     #[cfg(target_arch = "wasm32")]
@@ -1350,16 +1406,18 @@ pub fn gemini_send_conversation(
                     .await
                     .map_err(|e| format!("Response read error: {e:?}"))?;
                 let raw = text_js.as_string().unwrap_or_default();
-                parse_gemini_generate_content_response(&raw)
+                parse_gemini_turn_response(&raw)
             }
             .await;
             match result {
-                Ok(text) => push_gemini_reply(GeminiApiReply {
+                Ok(turn) => push_gemini_reply(GeminiApiReply {
                     request_id: req_id,
                     model: model_for_reply,
                     ok: true,
-                    text,
+                    text: turn.text,
                     error: None,
+                    function_calls: turn.function_calls,
+                    raw_model_content: turn.raw_model_content,
                 }),
                 Err(err) => push_gemini_reply(GeminiApiReply {
                     request_id: req_id,
@@ -1367,6 +1425,8 @@ pub fn gemini_send_conversation(
                     ok: false,
                     text: String::new(),
                     error: Some(err),
+                    function_calls: Vec::new(),
+                    raw_model_content: None,
                 }),
             }
         });
@@ -1383,7 +1443,7 @@ pub fn gemini_send_conversation(
         );
         let model_for_reply = clean_model;
         std::thread::spawn(move || {
-            let outcome: Result<String, String> = (|| {
+            let outcome: Result<GeminiParsedTurn, String> = (|| {
                 let mut child = Command::new("curl")
                     .arg("-sS")
                     .arg("--max-time")
@@ -1415,15 +1475,17 @@ pub fn gemini_send_conversation(
                     return Err(format!("curl exited with {}: {}", output.status, stderr.trim()));
                 }
                 let raw = String::from_utf8_lossy(&output.stdout).to_string();
-                parse_gemini_generate_content_response(&raw)
+                parse_gemini_turn_response(&raw)
             })();
             match outcome {
-                Ok(text) => push_gemini_reply(GeminiApiReply {
+                Ok(turn) => push_gemini_reply(GeminiApiReply {
                     request_id: req_id,
                     model: model_for_reply,
                     ok: true,
-                    text,
+                    text: turn.text,
                     error: None,
+                    function_calls: turn.function_calls,
+                    raw_model_content: turn.raw_model_content,
                 }),
                 Err(err) => push_gemini_reply(GeminiApiReply {
                     request_id: req_id,
@@ -1431,11 +1493,35 @@ pub fn gemini_send_conversation(
                     ok: false,
                     text: String::new(),
                     error: Some(err),
+                    function_calls: Vec::new(),
+                    raw_model_content: None,
                 }),
             }
         });
         Ok(req_id)
     }
+}
+
+/// Dispatches a non-blocking Gemini `generateContent` request with multi-turn context (`history_turns`).
+pub fn gemini_send_conversation(
+    api_key: &str,
+    model_id: &str,
+    system_prompt: &str,
+    history_turns: &[(bool, String)],
+) -> Result<u64, String> {
+    let mut contents = Vec::new();
+    let tail_start = history_turns.len().saturating_sub(10);
+    for (is_user, text) in &history_turns[tail_start..] {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        contents.push(serde_json::json!({
+            "role": if *is_user { "user" } else { "model" },
+            "parts": [{ "text": trimmed }]
+        }));
+    }
+    gemini_send_raw_contents(api_key, model_id, system_prompt, &contents, None)
 }
 
 /// Dispatches a single-turn Gemini prompt (thin wrapper over [`gemini_send_conversation`]).

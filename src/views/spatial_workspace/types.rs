@@ -1897,6 +1897,18 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::ZoomFit,
     },
     SlashCommandSpec {
+        cmd: "/model",
+        category: "AI",
+        description: "Show or set a custom Gemini model ID (e.g. `/model gemini-3.0-pro` or `/model reset`)",
+        icon: AppIcon::Bot,
+    },
+    SlashCommandSpec {
+        cmd: "/tools",
+        category: "AI",
+        description: "List registered headless tools or toggle native Gemini function calling (`on`/`off`)",
+        icon: AppIcon::Wrench,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",

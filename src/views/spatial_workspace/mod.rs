@@ -188,6 +188,12 @@ pub struct SpatialWorkspaceState {
     pub daylight_drawer_tab: usize,
     // Update v0.8.6.2 (2/10 -> v0.8.7): Smart Layered 10-Category AEC Ribbon Dynamic Island
     pub active_ribbon_tab: RibbonCategoryTab,
+    // Update v0.8.7.4 (4/10 -> v0.8.8): Native Gemini Function Calling Loop & Custom Model ID
+    pub custom_gemini_model_id: String,
+    pub gemini_native_tools_enabled: bool,
+    pub gemini_tool_loop_contents: Vec<serde_json::Value>,
+    pub gemini_tool_loop_system_prompt: String,
+    pub gemini_tool_loop_depth: u8,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -325,11 +331,42 @@ impl Default for SpatialWorkspaceState {
             daylight_drawer_open: false,
             daylight_drawer_tab: 0,
             active_ribbon_tab: RibbonCategoryTab::Modeling,
+            custom_gemini_model_id: String::new(),
+            gemini_native_tools_enabled: true,
+            gemini_tool_loop_contents: Vec::new(),
+            gemini_tool_loop_system_prompt: String::new(),
+            gemini_tool_loop_depth: 0,
         }
     }
 }
 
 impl SpatialWorkspaceState {
+    /// Returns the effective Gemini REST model ID (custom override if non-empty, else active preset).
+    pub fn active_gemini_model_id(&self) -> String {
+        let custom = self.custom_gemini_model_id.trim();
+        if !custom.is_empty() {
+            custom.to_string()
+        } else {
+            self.agent_model.gemini_model_id().to_string()
+        }
+    }
+
+    /// Returns a human-readable label for the currently selected AI reasoning model.
+    pub fn active_model_display_label(&self) -> String {
+        let custom = self.custom_gemini_model_id.trim();
+        if !custom.is_empty() {
+            format!("Gemini ({custom})")
+        } else {
+            self.agent_model.short_label().to_string()
+        }
+    }
+
+    /// Returns true when a Gemini API key is configured alongside a Gemini preset or custom model ID.
+    pub fn is_live_gemini_armed(&self) -> bool {
+        !self.gemini_api_key_draft.trim().is_empty()
+            && (self.agent_model != AgentModelChoice::EigenAiProFem
+                || !self.custom_gemini_model_id.trim().is_empty())
+    }
     /// Returns true when the Floating Dynamic Island is hovered, has an active composer/popover,
     /// or displays the active Earth Site Location card.
     pub fn is_dynamic_island_expanded(&self, ctx: &egui::Context) -> bool {

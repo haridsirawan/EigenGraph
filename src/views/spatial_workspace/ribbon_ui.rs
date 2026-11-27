@@ -232,10 +232,11 @@ impl SpatialWorkspaceState {
         let can_redo =
             !build_view.bim_bus.redo_stack.is_empty() || !universal_canvas.redo_stack.is_empty();
         let has_key = !self.gemini_api_key_draft.trim().is_empty();
-        let needs_key = matches!(
+        let needs_key = (matches!(
             self.agent_model,
             AgentModelChoice::Gemini25Flash | AgentModelChoice::Gemini25Pro
-        ) && !has_key;
+        ) || !self.custom_gemini_model_id.trim().is_empty())
+            && !has_key;
         let (_, _, story_lbl, _) = self.active_base_and_top_levels(&build_view.bim_bus.project);
         let lvl_cnt = build_view.bim_bus.project.levels.len().max(1);
         let proj_name = if build_view.bim_bus.project.project_name.trim().is_empty() {
@@ -422,13 +423,14 @@ impl SpatialWorkspaceState {
                 {
                     self.agent_mode = self.agent_mode.next();
                 }
+                let model_lbl = self.active_model_display_label();
                 if Self::glass_icon_button(
                     ui,
                     theme,
                     AppIcon::Bot,
                     false,
                     theme.accent_blue,
-                    &format!("AI Model: {} (click to cycle)", self.agent_model.label()),
+                    &format!("AI Model: {model_lbl} (click to cycle preset)"),
                 )
                 .clicked()
                 {
@@ -508,17 +510,27 @@ impl SpatialWorkspaceState {
             .fill(tray_bg)
             .corner_radius(CornerRadius::same(10))
             .stroke(Stroke::new(0.8, theme.border_subtle.gamma_multiply(0.7)))
-            .inner_margin(Margin::symmetric(8, 5))
+            .inner_margin(Margin {
+                left: 8,
+                right: 8,
+                top: 5,
+                bottom: 4,
+            })
             .show(ui, |ui| {
                 let inner_w = (deck_w - 18.0).max(145.0);
                 ui.set_width(inner_w);
                 ui.set_max_width(inner_w);
+                let mut scroll_style = egui::style::ScrollStyle::solid();
+                scroll_style.bar_width = 5.0;
+                scroll_style.bar_inner_margin = 5.0;
+                scroll_style.bar_outer_margin = 1.5;
+                ui.style_mut().spacing.scroll = scroll_style;
                 ScrollArea::horizontal()
                     .id_salt(("smart_ribbon_tools", self.active_ribbon_tab as usize))
                     .max_width(inner_w)
-                    .max_height(84.0)
+                    .max_height(98.0)
                     .auto_shrink([false, true])
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                     .show(ui, |ui| {
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                         ui.horizontal_top(|ui| {

@@ -1040,7 +1040,7 @@ impl SpatialWorkspaceState {
         }
     }
 
-    /// Polls asynchronous Gemini REST API replies and routes any structured `[[...]]` directives.
+    /// Polls asynchronous Gemini REST API replies and routes native `functionCall` loops or `[[...]]` directives.
     pub fn poll_gemini_replies(
         &mut self,
         universal_canvas: &mut UniversalCanvasState,
@@ -1050,30 +1050,210 @@ impl SpatialWorkspaceState {
         let replies = crate::core::web_bridge::gemini_poll_responses();
         let mut out = SpatialHudActions::default();
         for reply in replies {
-            if self.gemini_inflight_req_id == Some(reply.request_id) {
-                self.gemini_inflight_req_id = None;
+            let sub = self.handle_gemini_reply(reply, universal_canvas, build_view, ai_assistant);
+            out.merge(sub);
+        }
+        out
+    }
+
+    /// Processes a single Gemini REST reply: executes native `functionCall` parts in a closed
+    /// physics-verification loop, or renders text + legacy `[[...]]` directives.
+    pub fn handle_gemini_reply(
+        &mut self,
+        reply: crate::core::web_bridge::GeminiApiReply,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        ai_assistant: &mut AiAssistantView,
+    ) -> SpatialHudActions {
+        let mut out = SpatialHudActions::default();
+        if self.gemini_inflight_req_id == Some(reply.request_id) {
+            self.gemini_inflight_req_id = None;
+        }
+        if !reply.ok {
+            let err = reply
+                .error
+                .unwrap_or_else(|| "Unknown Gemini API error".to_string());
+            ai_assistant.chat_history.push(crate::models::ChatMessage {
+                is_user: false,
+                message: format!(
+                    "[Gemini API Notice]: {err}\nClick the Key icon in Dynamic Island to verify your Gemini API Key or switch model to EigenAI Pro (offline FEM engine)."
+                ),
+                time: crate::core::web_bridge::unix_timestamp_label(),
+            });
+            self.push_trace("Gemini API request failed (check Key)", false);
+            self.sessions_dirty = true;
+            return out;
+        }
+
+        if !reply.function_calls.is_empty() {
+            let (lat, lon) = universal_canvas.ground_origin_lat_lon;
+            let site =
+                compute_site_environmental_coupling(lat, lon, &universal_canvas.earth_world);
+            let mut response_parts = Vec::with_capacity(reply.function_calls.len());
+            let mut summaries = Vec::with_capacity(reply.function_calls.len());
+
+            for call in &reply.function_calls {
+                let outcome = crate::core::agent_tools::execute_headless_tool(
+                    call,
+                    &mut build_view.bim_bus,
+                    &site,
+                    (lat, lon),
+                    self.active_story_idx,
+                    universal_canvas.section_box.enabled,
+                );
+                if outcome.sync_fem_and_earth {
+                    out.sync_fem_and_earth = true;
+                }
+                if outcome.fit_camera {
+                    out.fit_camera = true;
+                }
+                if let Some((t_lat, t_lon, t_zoom)) = outcome.fly_target {
+                    universal_canvas.active_tool =
+                        crate::views::universal_canvas::UniversalCanvasTool::SelectPan;
+                    universal_canvas.world_map.set_center(t_lat, t_lon);
+                    universal_canvas.world_map.zoom_level = t_zoom;
+                    universal_canvas.ground_origin_lat_lon = (t_lat, t_lon);
+                    universal_canvas.ground_origin_anchored = true;
+                }
+                if let Some(sb_cmd) = outcome.section_box_update.clone() {
+                    match sb_cmd {
+                        crate::core::agent_tools::ToolSectionBoxCommand::Fit => {
+                            universal_canvas
+                                .section_box
+                                .fit_to_bim_project(&build_view.bim_bus.project, 2.5);
+                            universal_canvas.section_box.enabled = true;
+                            universal_canvas.section_box.level_cut_mode = false;
+                        }
+                        crate::core::agent_tools::ToolSectionBoxCommand::Disable => {
+                            universal_canvas.section_box.enabled = false;
+                            universal_canvas.section_box.level_cut_mode = false;
+                        }
+                        crate::core::agent_tools::ToolSectionBoxCommand::LevelCut {
+                            z_m,
+                            story_idx,
+                        } => {
+                            if let Some(z) = z_m {
+                                universal_canvas
+                                    .section_box
+                                    .fit_to_bim_project(&build_view.bim_bus.project, 6.0);
+                                universal_canvas.section_box.min_enu_m[2] =
+                                    universal_canvas.section_box.min_enu_m[2].min(z - 1.5);
+                                universal_canvas.section_box.max_enu_m[2] = z;
+                                universal_canvas.section_box.enabled = true;
+                                universal_canvas.section_box.level_cut_mode = true;
+                            } else {
+                                universal_canvas.section_box.apply_level_cut(
+                                    &build_view.bim_bus.project,
+                                    story_idx.unwrap_or(self.active_story_idx),
+                                );
+                            }
+                        }
+                        crate::core::agent_tools::ToolSectionBoxCommand::SetBounds {
+                            min_enu_m,
+                            max_enu_m,
+                            clip_terrain,
+                        } => {
+                            universal_canvas.section_box.min_enu_m = min_enu_m;
+                            universal_canvas.section_box.max_enu_m = max_enu_m;
+                            universal_canvas.section_box.clip_terrain_and_city = clip_terrain;
+                            universal_canvas.section_box.enabled = true;
+                            universal_canvas.section_box.level_cut_mode = false;
+                        }
+                    }
+                }
+                self.push_trace(format!("Tool {} -> {}", call.name, outcome.summary), outcome.ok);
+                summaries.push(format!("• `{}`: {}", call.name, outcome.summary));
+                response_parts.push(serde_json::json!({
+                    "functionResponse": {
+                        "name": outcome.name,
+                        "response": { "result": outcome.result_json }
+                    }
+                }));
             }
-            if reply.ok {
-                let (clean_text, directives) = parse_gemini_action_directives(&reply.text);
-                let msg_idx = ai_assistant.chat_history.len();
-                let final_msg = if clean_text.is_empty() {
-                    format!("[{}] Prepared {} engineering directive(s).", reply.model, directives.len())
+
+            let model_content = reply.raw_model_content.clone().unwrap_or_else(|| {
+                let parts: Vec<serde_json::Value> = reply
+                    .function_calls
+                    .iter()
+                    .map(|c| {
+                        serde_json::json!({
+                            "functionCall": { "name": c.name, "args": c.args }
+                        })
+                    })
+                    .collect();
+                serde_json::json!({ "role": "model", "parts": parts })
+            });
+            self.gemini_tool_loop_contents.push(model_content);
+            self.gemini_tool_loop_contents.push(serde_json::json!({
+                "role": "user",
+                "parts": response_parts
+            }));
+
+            let can_continue =
+                self.gemini_tool_loop_depth < 5 && !self.gemini_api_key_draft.trim().is_empty();
+            if can_continue {
+                self.gemini_tool_loop_depth += 1;
+                let model_id = if reply.model.trim().is_empty() {
+                    self.active_gemini_model_id()
                 } else {
-                    format!("[{}]:\n{}", reply.model, clean_text)
+                    reply.model.clone()
                 };
-                ai_assistant.chat_history.push(crate::models::ChatMessage {
-                    is_user: false,
-                    message: final_msg,
-                    time: crate::core::web_bridge::unix_timestamp_label(),
-                });
-                self.turn_metadata.push(AntigravityTurnMeta {
-                    msg_index: msg_idx,
-                    mode_label: self.agent_mode.label().to_string(),
-                    model_label: self.agent_model.short_label().to_string(),
-                    context_chips: Vec::new(),
-                    trace_steps: vec![format!("Gemini ({}) replied", reply.model)],
-                });
-                if !directives.is_empty() {
+                let tools = crate::core::agent_tools::gemini_function_declarations();
+                if let Ok(next_id) = crate::core::web_bridge::gemini_send_raw_contents(
+                    &self.gemini_api_key_draft,
+                    &model_id,
+                    &self.gemini_tool_loop_system_prompt,
+                    &self.gemini_tool_loop_contents,
+                    Some(&tools),
+                ) {
+                    self.gemini_inflight_req_id = Some(next_id);
+                    self.sessions_dirty = true;
+                    return out;
+                }
+            }
+
+            let mut msg_lines = vec![format!(
+                "[{} • Tools ({})]:",
+                reply.model,
+                reply.function_calls.len()
+            )];
+            if !reply.text.trim().is_empty() {
+                msg_lines.push(reply.text.trim().to_string());
+            }
+            msg_lines.extend(summaries);
+            ai_assistant.chat_history.push(crate::models::ChatMessage {
+                is_user: false,
+                message: msg_lines.join("\n"),
+                time: crate::core::web_bridge::unix_timestamp_label(),
+            });
+            self.sessions_dirty = true;
+            return out;
+        }
+
+        let (clean_text, directives) = parse_gemini_action_directives(&reply.text);
+        let msg_idx = ai_assistant.chat_history.len();
+        let final_msg = if clean_text.is_empty() {
+            format!(
+                "[{}] Prepared {} engineering directive(s).",
+                reply.model,
+                directives.len()
+            )
+        } else {
+            format!("[{}]:\n{}", reply.model, clean_text)
+        };
+        ai_assistant.chat_history.push(crate::models::ChatMessage {
+            is_user: false,
+            message: final_msg,
+            time: crate::core::web_bridge::unix_timestamp_label(),
+        });
+        self.turn_metadata.push(AntigravityTurnMeta {
+            msg_index: msg_idx,
+            mode_label: self.agent_mode.label().to_string(),
+            model_label: self.active_model_display_label(),
+            context_chips: Vec::new(),
+            trace_steps: vec![format!("Gemini ({}) replied", reply.model)],
+        });
+        if !directives.is_empty() {
                     let mapped: Vec<PlannedProposalAction> = directives
                         .iter()
                         .map(|d| match d {
@@ -1716,21 +1896,8 @@ impl SpatialWorkspaceState {
                         out.merge(sub);
                     }
                 }
-                self.push_trace(format!("Gemini {} ready", reply.model), true);
-                self.sessions_dirty = true;
-            } else {
-                let err = reply.error.unwrap_or_else(|| "Unknown Gemini API error".to_string());
-                ai_assistant.chat_history.push(crate::models::ChatMessage {
-                    is_user: false,
-                    message: format!(
-                        "[Gemini API Notice]: {err}\nClick the Key icon in Dynamic Island to verify your Gemini API Key or switch model to EigenAI Pro (offline FEM engine)."
-                    ),
-                    time: crate::core::web_bridge::unix_timestamp_label(),
-                });
-                self.push_trace("Gemini API request failed (check Key)", false);
-                self.sessions_dirty = true;
-            }
-        }
+        self.push_trace(format!("Gemini {} ready", reply.model), true);
+        self.sessions_dirty = true;
         out
     }
 
@@ -2369,6 +2536,52 @@ impl SpatialWorkspaceState {
                     universal_canvas.section_box.level_cut_mode = false;
                     universal_canvas.section_box.clip_terrain_and_city = false;
                     self.push_trace("3D Section Box reset and disabled", true);
+                }
+                "/model" => {
+                    let sub = arg.trim();
+                    if sub.is_empty() {
+                        let model_lbl = self.active_model_display_label();
+                        let api_id = self.active_gemini_model_id();
+                        self.push_trace(
+                            format!("Active AI Model: {model_lbl} (API ID: {api_id})"),
+                            true,
+                        );
+                    } else if matches!(sub.to_ascii_lowercase().as_str(), "reset" | "default" | "clear") {
+                        self.custom_gemini_model_id.clear();
+                        self.push_trace(
+                            format!("Reset to preset model: {}", self.agent_model.label()),
+                            true,
+                        );
+                    } else {
+                        self.custom_gemini_model_id = sub.to_string();
+                        if self.agent_model == AgentModelChoice::EigenAiProFem {
+                            self.agent_model = AgentModelChoice::Gemini25Pro;
+                        }
+                        self.push_trace(format!("Custom Gemini Model ID -> {sub}"), true);
+                    }
+                }
+                "/tools" => {
+                    let sub = arg.trim().to_ascii_lowercase();
+                    match sub.as_str() {
+                        "on" | "enable" | "true" => {
+                            self.gemini_native_tools_enabled = true;
+                            self.push_trace("Native Gemini Function Calling enabled", true);
+                        }
+                        "off" | "disable" | "false" => {
+                            self.gemini_native_tools_enabled = false;
+                            self.push_trace("Native Gemini Function Calling disabled", true);
+                        }
+                        _ => {
+                            let names = crate::core::agent_tools::registered_tool_names().join(", ");
+                            self.push_trace(
+                                format!(
+                                    "Native Tools ({}): {names}",
+                                    if self.gemini_native_tools_enabled { "ON" } else { "OFF" }
+                                ),
+                                true,
+                            );
+                        }
+                    }
                 }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");
@@ -4653,21 +4866,20 @@ impl SpatialWorkspaceState {
         }
 
         // 4. Live Google Gemini REST Client when Gemini model + API Key are configured
-        if matches!(
-            self.agent_model,
-            AgentModelChoice::Gemini25Flash | AgentModelChoice::Gemini25Pro
-        ) && !self.gemini_api_key_draft.trim().is_empty()
-        {
+        if self.is_live_gemini_armed() {
             let (lat, lon) = universal_canvas.ground_origin_lat_lon;
             let site = compute_site_environmental_coupling(lat, lon, &universal_canvas.earth_world);
             let crit_ctx = Self::format_critical_bim_context(&build_view.bim_bus.project, members);
             let sys_prompt = format!(
-                "You are EigenAI inside EigenGraph (Geospatial Earth + Structural BIM/FEM & EigenGate EigenGate platform). \
+                "You are EigenAI inside EigenGraph (Geospatial Earth + Structural BIM/FEM & EigenGate platform). \
                  Respond concisely in professional civil & structural engineering English. \
+                 Prefer calling the registered engineering function tools (inspect_model, run_structural_audit, \
+                 run_solar_ottv, run_daylight_analysis, resize_column, resize_beam, add_story, auto_repair_model, \
+                 set_section_box, fly_to_location) to read deterministic physics and verify modifications rather than guessing numbers. \
                  Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s. \
                  Active BIM elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}. \
-                 To propose workspace actions, you may append bracket directives: \
-                 [[FLY:lat,lon,zoom]], [[BIM:portal 3x2 @6m 2floors]], [[RESIZE_COL:id,w_mm,d_mm]], [[RESIZE_BEAM:id,b_mm,h_mm]], [[ADD_COL:x_mm,y_mm,w_mm,d_mm]], [[ADD_STORY]], [[ADD_SLAB]], [[APPLY_SITE_SEISMIC]], [[REPAIR]], [[EIGENGATE_AUDIT]], [[RUN_DESIGN_PIPELINE:brief]], [[EXPORT_FEASIBILITY_S115]], [[EXPORT_DESIGN_IFCX]], [[RUN_SOLAR_OTTV:LOWE,OVERHANG,WWR40,H14]], [[TOGGLE_SOLAR_3D]], [[EXPORT_SOLAR_IFCX]], [[RUN_DAYLIGHT:MINIMALIST,OFFICE,VLT65]], [[TOGGLE_DAYLIGHT_3D]], [[EXPORT_DAYLIGHT_IFCX]], [[BATCH_PIN_CITY:keyword,city]], [[PIN_ACTIVE:lat,lon,heading]], [[AUDIT_NEIGHBORHOOD]], [[TOGGLE_TOPO]], [[TOGGLE_VECTOR]], [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
+                 For legacy studio sheets not covered by function declarations, you may append bracket directives such as \
+                 [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
                 site.elevation_m,
                 site.seismic_pga_ss_g,
                 site.design_wind_ms,
@@ -4675,7 +4887,7 @@ impl SpatialWorkspaceState {
                 build_view.bim_bus.project.slabs.len(),
                 members.len()
             );
-            let mut history_turns: Vec<(bool, String)> = ai_assistant
+            let mut contents: Vec<serde_json::Value> = ai_assistant
                 .chat_history
                 .iter()
                 .rev()
@@ -4683,16 +4895,34 @@ impl SpatialWorkspaceState {
                 .collect::<Vec<_>>()
                 .into_iter()
                 .rev()
-                .map(|m| (m.is_user, m.message.clone()))
+                .filter(|m| !m.message.trim().is_empty())
+                .map(|m| {
+                    serde_json::json!({
+                        "role": if m.is_user { "user" } else { "model" },
+                        "parts": [{ "text": m.message.trim() }]
+                    })
+                })
                 .collect();
-            history_turns.push((true, enriched_prompt.clone()));
+            contents.push(serde_json::json!({
+                "role": "user",
+                "parts": [{ "text": enriched_prompt.clone() }]
+            }));
 
-            let model_id = self.agent_model.gemini_model_id();
-            if let Ok(req_id) = crate::core::web_bridge::gemini_send_conversation(
+            self.gemini_tool_loop_contents = contents.clone();
+            self.gemini_tool_loop_system_prompt = sys_prompt.clone();
+            self.gemini_tool_loop_depth = 0;
+
+            let model_id = self.active_gemini_model_id();
+            let model_lbl = self.active_model_display_label();
+            let tools_opt = self
+                .gemini_native_tools_enabled
+                .then(crate::core::agent_tools::gemini_function_declarations);
+            if let Ok(req_id) = crate::core::web_bridge::gemini_send_raw_contents(
                 &self.gemini_api_key_draft,
-                model_id,
+                &model_id,
                 &sys_prompt,
-                &history_turns,
+                &contents,
+                tools_opt.as_ref(),
             ) {
                 let user_idx = ai_assistant.chat_history.len();
                 ai_assistant.chat_history.push(crate::models::ChatMessage {
@@ -4704,7 +4934,7 @@ impl SpatialWorkspaceState {
                     self.turn_metadata.push(AntigravityTurnMeta {
                         msg_index: user_idx,
                         mode_label: self.agent_mode.label().to_string(),
-                        model_label: self.agent_model.short_label().to_string(),
+                        model_label: model_lbl.clone(),
                         context_chips: chip_labels,
                         trace_steps: step_traces,
                     });
@@ -4713,7 +4943,7 @@ impl SpatialWorkspaceState {
                 self.command_bar_expanded = true;
                 self.context_picker_open = false;
                 self.sessions_dirty = true;
-                self.push_trace(format!("Querying {}...", self.agent_model.short_label()), true);
+                self.push_trace(format!("Querying {model_lbl}..."), true);
                 return actions;
             }
         }

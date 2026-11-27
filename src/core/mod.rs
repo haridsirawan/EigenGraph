@@ -69,6 +69,7 @@ pub mod shm_watchdog;
 pub mod evacuation_routing;
 pub mod web_bridge;
 pub mod vector_dossier;
+pub mod agent_tools;
 
 pub use linalg::{CsrMatrix, Matrix};
 pub use model::{
@@ -378,6 +379,10 @@ pub use daylight_interior::{
     evaluate_daylight_interior, DaylightCell3D, DaylightInteriorConfig,
     DaylightInteriorIfcxOverlay, DaylightInteriorReport, InteriorFinishPalette,
     InteriorSpaceTypology, RoomFinishScheduleItem, NS_EG_DAYLIGHT_INTERIOR,
+};
+pub use agent_tools::{
+    execute_headless_tool, gemini_function_declarations, registered_tool_names, GeminiToolCall,
+    ToolExecutionOutcome, ToolSectionBoxCommand,
 };
 
 

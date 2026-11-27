@@ -6485,3 +6485,211 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_v0874_gemini_function_calling_loop_custom_model_and_ribbon_scrollbar_clearance() {
+        for cmd in ["/model", "/tools"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|c| c.cmd == cmd),
+                "Missing v0.8.7.4 slash command {cmd} in SLASH_COMMANDS"
+            );
+        }
+
+        // 1. Native Gemini functionCall + thoughtSignature parsing and payload schema
+        let raw_fc_json = r#"{
+            "candidates": [{
+                "content": {
+                    "role": "model",
+                    "parts": [
+                        { "text": "Inspecting model and applying level cut." },
+                        {
+                            "thoughtSignature": "sig_v0874_abc",
+                            "functionCall": {
+                                "name": "set_section_box",
+                                "args": { "mode": "level_cut", "z_cut_m": 4.2 }
+                            }
+                        }
+                    ]
+                }
+            }]
+        }"#;
+        let parsed = crate::core::web_bridge::parse_gemini_turn_response(raw_fc_json)
+            .expect("Parsed functionCall turn");
+        assert_eq!(parsed.function_calls.len(), 1);
+        assert_eq!(parsed.function_calls[0].name, "set_section_box");
+        assert!(parsed.raw_model_content.is_some());
+
+        let tools_schema = crate::core::agent_tools::gemini_function_declarations();
+        let payload = crate::core::web_bridge::build_gemini_tool_contents_payload(
+            "System",
+            &[serde_json::json!({ "role": "user", "parts": [{ "text": "Audit" }] })],
+            Some(&tools_schema),
+            "gemini-4-pro",
+        );
+        assert!(payload["tools"][0]["functionDeclarations"].as_array().is_some());
+        assert_eq!(payload["generationConfig"]["maxOutputTokens"], 4096);
+
+        // 2. Custom model ID + /tools slash commands & preserved AgentModelChoice::next()
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        assert_eq!(AgentModelChoice::Gemini25Pro.next(), AgentModelChoice::EigenAiProFem);
+        let _ = spatial.execute_spatial_input(
+            "/model gemini-3.5-pro",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert_eq!(spatial.active_gemini_model_id(), "gemini-3.5-pro");
+        let _ = spatial.execute_spatial_input(
+            "/model reset",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(spatial.custom_gemini_model_id.is_empty());
+
+        let _ = spatial.execute_spatial_input(
+            "/tools off",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(!spatial.gemini_native_tools_enabled);
+        let _ = spatial.execute_spatial_input(
+            "/tools on",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(spatial.gemini_native_tools_enabled);
+
+        // 3. Simulated Gemini tool call execution via handle_gemini_reply
+        let col_id = build.bim_bus.project.columns[0].id;
+        let sim_reply = crate::core::web_bridge::GeminiApiReply {
+            request_id: 99,
+            model: "gemini-3.5-pro".to_string(),
+            ok: true,
+            text: parsed.text.clone(),
+            error: None,
+            function_calls: vec![
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "inspect_model".to_string(),
+                    args: serde_json::json!({}),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "set_section_box".to_string(),
+                    args: serde_json::json!({ "mode": "level_cut", "z_cut_m": 4.2 }),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "resize_column".to_string(),
+                    args: serde_json::json!({ "column_id": col_id, "width_mm": 525, "depth_mm": 525 }),
+                },
+            ],
+            raw_model_content: parsed.raw_model_content,
+        };
+        let hud_act =
+            spatial.handle_gemini_reply(sim_reply, &mut canvas, &mut build, &mut ai);
+        assert!(hud_act.sync_fem_and_earth);
+        assert!(canvas.section_box.enabled && canvas.section_box.level_cut_mode);
+        assert!((canvas.section_box.max_enu_m[2] - 4.2).abs() < 1e-4);
+        assert!((build.bim_bus.project.columns[0].width_mm - 525.0).abs() < 1e-6);
+        assert_eq!(spatial.gemini_tool_loop_contents.len(), 2);
+        assert_eq!(
+            spatial.gemini_tool_loop_contents[1]["parts"][1]["functionResponse"]["name"],
+            "set_section_box"
+        );
+
+        // 4. Ribbon dedicated solid scrollbar clearance + API Key / Custom Model popover responsiveness
+        let ribbon_src = include_str!("ribbon_ui.rs");
+        assert!(ribbon_src.contains("ScrollStyle::solid()"));
+        assert!(ribbon_src.contains("bar_inner_margin = 5.0"));
+
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            for tab in RibbonCategoryTab::ALL {
+                let ctx = egui::Context::default();
+                let mut sp = SpatialWorkspaceState::default();
+                sp.mobile_deck_pinned = true;
+                sp.active_ribbon_tab = tab;
+                for _ in 0..4 {
+                    let raw = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(win_w, win_h),
+                        )),
+                        ..Default::default()
+                    };
+                    let mut out = ctx.run_ui(raw, |ui| {
+                        let _ = sp.render_hud_overlays(
+                            ui.ctx(),
+                            &theme,
+                            &mut canvas,
+                            &mut build,
+                            &mut ai,
+                            &members,
+                            &projects,
+                            &mut db_components,
+                        );
+                    });
+                    out.textures_delta.clear();
+                }
+                assert_eq!(sp.hud_rects.len(), 1);
+                let r = sp.hud_rects[0];
+                assert!(
+                    r.height() <= 270.0,
+                    "Ribbon tab {} exceeded 270px with scrollbar clearance ({}) at {win_w}x{win_h}",
+                    tab.label(),
+                    r.height()
+                );
+            }
+
+            let ctx_key = egui::Context::default();
+            let mut sp_key = SpatialWorkspaceState::default();
+            sp_key.mobile_deck_pinned = true;
+            sp_key.api_key_popover_open = true;
+            for _ in 0..4 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(win_w, win_h),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx_key.run_ui(raw, |ui| {
+                    let _ = sp_key.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(sp_key.hud_rects.len(), 1);
+            assert!(sp_key.hud_rects[0].right() <= win_w + 1.0);
+        }
+    }
