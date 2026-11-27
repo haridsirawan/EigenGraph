@@ -1879,6 +1879,24 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         icon: AppIcon::SaveDisk,
     },
     SlashCommandSpec {
+        cmd: "/section",
+        category: "Modeling",
+        description: "Toggle WebGPU 3D Section Box (`fit`, `site`, or `off`)",
+        icon: AppIcon::SectionCut,
+    },
+    SlashCommandSpec {
+        cmd: "/level-cut",
+        category: "Modeling",
+        description: "Toggle Active Level Cut Plane (optional elevation in meters, e.g. `/level-cut 4.5`)",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/section-reset",
+        category: "Modeling",
+        description: "Reset and disable 3D Section Box and Level Cut Plane",
+        icon: AppIcon::ZoomFit,
+    },
+    SlashCommandSpec {
         cmd: "/iso",
         category: "Canvas",
         description: "Set Earth 3D camera to Isometric site tilt (42°)",
@@ -1979,12 +1997,6 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         category: "Lens",
         description: "Restore clean architectural & Earth rendering",
         icon: AppIcon::Sparkles,
-    },
-    SlashCommandSpec {
-        cmd: "/section",
-        category: "Lens",
-        description: "Toggle 3D horizontal section cut plane (e.g. /section 4.5)",
-        icon: AppIcon::RulerSquare,
     },
     SlashCommandSpec {
         cmd: "/clonestory",

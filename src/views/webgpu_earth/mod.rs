@@ -69,6 +69,11 @@ pub struct RtcCameraUniforms {
     pub golden_mix: f32,
     pub enable_lighting: f32,
     pub render_site_pass: bool,
+    pub section_clip_enabled: bool,
+    pub section_clip_terrain: bool,
+    pub section_clip_min_enu: [f32; 3],
+    pub section_clip_max_enu: [f32; 3],
+    pub section_cut_rim_m: f32,
 }
 
 impl RtcCameraUniforms {
@@ -258,7 +263,25 @@ impl RtcCameraUniforms {
             golden_mix,
             enable_lighting: if camera.day_night_lighting { 1.0 } else { 0.0 },
             render_site_pass,
+            section_clip_enabled: false,
+            section_clip_terrain: false,
+            section_clip_min_enu: [-30.0, -30.0, -10.0],
+            section_clip_max_enu: [30.0, 30.0, 24.0],
+            section_cut_rim_m: 0.14,
         }
+    }
+
+    /// Configures 3D hardware WGSL Section Box / Active Level Cut Plane clipping bounds (RTC ENU meters).
+    pub fn with_section_box(
+        mut self,
+        section: &crate::views::universal_canvas::SectionBoxConfig,
+    ) -> Self {
+        let (lo, hi) = section.normalized_bounds();
+        self.section_clip_enabled = section.enabled;
+        self.section_clip_terrain = section.clip_terrain_and_city;
+        self.section_clip_min_enu = lo;
+        self.section_clip_max_enu = hi;
+        self
     }
 
     /// Projects a world unit-sphere point through `planet_mvp` into screen pixels.
@@ -309,6 +332,8 @@ impl RtcCameraUniforms {
                 self.night_mix,
             ],
             golden_pad: [self.golden_mix, 0.0, 0.0, 0.0],
+            clip_min_and_mode: [0.0; 4],
+            clip_max_and_band: [0.0; 4],
         }
     }
 
@@ -340,7 +365,26 @@ impl RtcCameraUniforms {
                 self.night_mix,
             ],
             golden_pad: [self.golden_mix, 0.0, 0.0, 0.0],
+            clip_min_and_mode: [
+                self.section_clip_min_enu[0],
+                self.section_clip_min_enu[1],
+                self.section_clip_min_enu[2],
+                if self.section_clip_enabled { 1.0 } else { 0.0 },
+            ],
+            clip_max_and_band: [
+                self.section_clip_max_enu[0],
+                self.section_clip_max_enu[1],
+                self.section_clip_max_enu[2],
+                self.section_cut_rim_m,
+            ],
         }
+    }
+
+    fn to_site_unclipped_pass_uniforms(&self) -> EarthPassUniforms {
+        let mut u = self.to_site_pass_uniforms();
+        u.clip_min_and_mode = [0.0; 4];
+        u.clip_max_and_band = [0.0; 4];
+        u
     }
 }
 
@@ -373,6 +417,8 @@ struct EarthPassUniforms {
     fog_and_time: [f32; 4],
     atmo_and_night: [f32; 4],
     golden_pad: [f32; 4],
+    clip_min_and_mode: [f32; 4],
+    clip_max_and_band: [f32; 4],
 }
 
 fn struct_as_u8_slice<T: Copy>(val: &T) -> &[u8] {
@@ -405,6 +451,8 @@ struct EarthPassUniforms {
     fog_and_time: vec4<f32>,
     atmo_and_night: vec4<f32>,
     golden_pad: vec4<f32>,
+    clip_min_and_mode: vec4<f32>,
+    clip_max_and_band: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -441,6 +489,22 @@ fn vs_main(v_in: VertexIn) -> VertexOut {
 
 @fragment
 fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
+    let clip_active = u.clip_min_and_mode.w;
+    var cut_rim = 0.0;
+    if (clip_active > 0.5) {
+        let cmin = u.clip_min_and_mode.xyz;
+        let cmax = u.clip_max_and_band.xyz;
+        let wp = f_in.world_pos;
+        if (wp.x < cmin.x || wp.x > cmax.x || wp.y < cmin.y || wp.y > cmax.y || wp.z < cmin.z || wp.z > cmax.z) {
+            discard;
+        }
+        let band = max(u.clip_max_and_band.w, 0.02);
+        let d_min = min(wp.x - cmin.x, min(wp.y - cmin.y, wp.z - cmin.z));
+        let d_max = min(cmax.x - wp.x, min(cmax.y - wp.y, cmax.z - wp.z));
+        let d_edge = min(d_min, d_max);
+        cut_rim = 1.0 - smoothstep(0.0, band, d_edge);
+    }
+
     var n = select(vec3<f32>(0.0, 0.0, 1.0), normalize(f_in.normal), dot(f_in.normal, f_in.normal) > 1e-8);
     let sun_raw = u.sun_and_lit.xyz;
     let l = select(vec3<f32>(0.0, 0.0, 1.0), normalize(sun_raw), dot(sun_raw, sun_raw) > 1e-8);
@@ -734,6 +798,11 @@ fn fs_main(f_in: VertexOut) -> @location(0) vec4<f32> {
         col = mix(col, u_fog_c, clamp(fog_f, 0.0, 0.82));
     }
 
+    if (cut_rim > 0.001) {
+        let cut_col = vec3<f32>(0.22, 0.88, 0.96);
+        col = mix(col, cut_col, cut_rim * 0.72);
+    }
+
     return vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), out_alpha);
 }
 "#;
@@ -867,8 +936,11 @@ pub struct WebGpuEarthResources {
     rendered_this_frame: bool,
     planet_uniform_buf: wgpu::Buffer,
     site_uniform_buf: wgpu::Buffer,
+    site_unclipped_uniform_buf: wgpu::Buffer,
     planet_bind_group: wgpu::BindGroup,
     site_bind_group: wgpu::BindGroup,
+    site_unclipped_bind_group: wgpu::BindGroup,
+    split_terrain_clip: bool,
     planet_theme_uploaded: Option<VectorEarthTheme>,
     planet: GpuMeshSlot,
     site: GpuMeshSlot,
@@ -1072,6 +1144,12 @@ impl WebGpuEarthResources {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let site_unclipped_uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("eigengraph_site_unclipped_uniforms"),
+            size: u_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let make_bg = |label: &str, buf: &wgpu::Buffer| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1085,6 +1163,8 @@ impl WebGpuEarthResources {
         };
         let planet_bind_group = make_bg("eigengraph_planet_bg", &planet_uniform_buf);
         let site_bind_group = make_bg("eigengraph_site_bg", &site_uniform_buf);
+        let site_unclipped_bind_group =
+            make_bg("eigengraph_site_unclipped_bg", &site_unclipped_uniform_buf);
 
         Self {
             target_format,
@@ -1097,8 +1177,11 @@ impl WebGpuEarthResources {
             rendered_this_frame: false,
             planet_uniform_buf,
             site_uniform_buf,
+            site_unclipped_uniform_buf,
             planet_bind_group,
             site_bind_group,
+            site_unclipped_bind_group,
+            split_terrain_clip: false,
             planet_theme_uploaded: None,
             planet: GpuMeshSlot::default(),
             site: GpuMeshSlot::default(),
@@ -1298,14 +1381,21 @@ impl WebGpuEarthResources {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.opaque_pipeline);
-            pass.set_bind_group(0, &self.site_bind_group, &[]);
+            let terrain_bg = if self.split_terrain_clip {
+                &self.site_unclipped_bind_group
+            } else {
+                &self.site_bind_group
+            };
+            pass.set_bind_group(0, terrain_bg, &[]);
             self.site.draw(&mut pass);
+            pass.set_bind_group(0, &self.site_bind_group, &[]);
             self.bim.draw(&mut pass);
 
             pass.set_pipeline(&self.translucent_pipeline);
-            pass.set_bind_group(0, &self.site_bind_group, &[]);
+            pass.set_bind_group(0, terrain_bg, &[]);
             self.water_surface.draw(&mut pass);
             self.city_ambience.draw(&mut pass);
+            pass.set_bind_group(0, &self.site_bind_group, &[]);
             self.hinges.draw(&mut pass);
             self.subsurface.draw(&mut pass);
             self.risk_heatmap.draw(&mut pass);
@@ -1566,8 +1656,16 @@ impl egui_wgpu::CallbackTrait for WebGpuEarthPaintCallback {
 
         let pu = self.uniforms.to_planet_pass_uniforms();
         let su = self.uniforms.to_site_pass_uniforms();
+        let su_unclipped = self.uniforms.to_site_unclipped_pass_uniforms();
+        res.split_terrain_clip =
+            self.uniforms.section_clip_enabled && !self.uniforms.section_clip_terrain;
         queue.write_buffer(&res.planet_uniform_buf, 0, struct_as_u8_slice(&pu));
         queue.write_buffer(&res.site_uniform_buf, 0, struct_as_u8_slice(&su));
+        queue.write_buffer(
+            &res.site_unclipped_uniform_buf,
+            0,
+            struct_as_u8_slice(&su_unclipped),
+        );
 
         let vp = egui::epaint::ViewportInPixels::from_points(
             &self.viewport_rect,
@@ -1991,6 +2089,7 @@ impl WebGpuEarthState {
         solar_envelope_input: Option<SolarEnvelopeGpuInput<'_>>,
         daylight_interior_input: Option<DaylightInteriorGpuInput<'_>>,
         hazard_compute_input: Option<HazardComputeInput>,
+        section_box: &crate::views::universal_canvas::SectionBoxConfig,
     ) -> bool {
         if !self.ready || !self.enabled || !rect.is_positive() {
             return false;
@@ -2018,7 +2117,8 @@ impl WebGpuEarthState {
             site_origin,
             time_secs,
             render_site_pass,
-        );
+        )
+        .with_section_box(section_box);
 
         let pal = theme.palette();
         painter.rect_filled(rect, egui::CornerRadius::same(10), pal.space_bg);

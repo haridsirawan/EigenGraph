@@ -3,7 +3,7 @@
 //!
 //! Renders:
 //! - Layer 1: Quick-Access Bar (`Vault`, `Save`, `Undo`, `Redo`, `3D`, `Project · Level`, utilities) +
-//!   blue `File` pill & 10 scrollable AEC category tabs (`Planning` .. `Industrialization`) +
+//!   10 scrollable AEC category tabs (`Planning` .. `Industrialization`) +
 //!   horizontal grouped Icon-Above-Caption tool tiles with soft-pill bottom group footers.
 //! - Layer 2: Compact breadcrumb header (`<- Ribbon | Active Focus Layer | x`) when any overlay,
 //!   Project Browser, drawer, inspector, or chat is active so layers swap in-place cleanly.
@@ -207,7 +207,7 @@ impl SpatialWorkspaceState {
     }
 
     /// Renders Layer 1 of the Smart Dynamic Island:
-    /// Quick-Access Top Bar + Blue `File` pill & 10 scrollable AEC Lifecycle Category Tabs +
+    /// Quick-Access Top Bar + 10 scrollable AEC Lifecycle Category Tabs +
     /// Horizontal Grouped Icon-Above-Caption Ribbon Strip.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_categorized_ribbon_deck(
@@ -439,7 +439,7 @@ impl SpatialWorkspaceState {
 
         ui.add_space(3.0);
 
-        // Row B: Solid Blue `File` Pill + 10 Scrollable AEC Engineering Lifecycle Category Tabs
+        // Row B: 10 Scrollable AEC Engineering Lifecycle Category Tabs
         ScrollArea::horizontal()
             .id_salt("smart_ribbon_category_tabs")
             .max_width(deck_w)
@@ -450,25 +450,6 @@ impl SpatialWorkspaceState {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new("File")
-                                    .size(10.5)
-                                    .strong()
-                                    .color(Color32::WHITE),
-                            )
-                            .min_size(Vec2::new(42.0, 24.0))
-                            .fill(theme.accent_blue)
-                            .stroke(Stroke::NONE)
-                            .corner_radius(CornerRadius::same(6)),
-                        )
-                        .on_hover_text("Open Vault / Project Browser & Model Archive (Layer 2)")
-                        .clicked()
-                    {
-                        self.toggle_exclusive_drawer("vault");
-                    }
-
                     for tab in RibbonCategoryTab::ALL {
                         let active = self.active_ribbon_tab == tab;
                         let fill = if active {
@@ -854,6 +835,139 @@ impl SpatialWorkspaceState {
                 {
                     universal_canvas.earth_bim_author.active_tool =
                         crate::views::universal_canvas::EarthBimTool::None;
+                }
+            });
+        }
+
+        if universal_canvas.section_box.enabled {
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(deck_w);
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.spacing_mut().item_spacing.y = 2.0;
+                let lvl_cut = universal_canvas.section_box.level_cut_mode;
+                icons::icon_label(
+                    ui,
+                    if lvl_cut {
+                        AppIcon::Layers
+                    } else {
+                        AppIcon::SectionCut
+                    },
+                    12.0,
+                    theme.accent_blue,
+                    if lvl_cut { "Level Cut" } else { "Section Box" },
+                    10.5,
+                    theme.text_primary,
+                    true,
+                );
+                let mut axis_drag = |lbl: &str, val: &mut f32, range: std::ops::RangeInclusive<f32>| {
+                    ui.label(
+                        egui::RichText::new(lbl)
+                            .size(9.5)
+                            .color(theme.text_secondary),
+                    );
+                    ui.add(
+                        egui::DragValue::new(val)
+                            .range(range)
+                            .speed(0.25)
+                            .max_decimals(1)
+                            .suffix("m"),
+                    );
+                };
+                axis_drag("X0", &mut universal_canvas.section_box.min_enu_m[0], -200.0..=200.0);
+                axis_drag("X1", &mut universal_canvas.section_box.max_enu_m[0], -200.0..=200.0);
+                axis_drag("Y0", &mut universal_canvas.section_box.min_enu_m[1], -200.0..=200.0);
+                axis_drag("Y1", &mut universal_canvas.section_box.max_enu_m[1], -200.0..=200.0);
+                axis_drag("Z0", &mut universal_canvas.section_box.min_enu_m[2], -50.0..=250.0);
+                axis_drag("Z1", &mut universal_canvas.section_box.max_enu_m[2], -50.0..=250.0);
+                for i in 0..3 {
+                    if universal_canvas.section_box.max_enu_m[i]
+                        < universal_canvas.section_box.min_enu_m[i] + 0.5
+                    {
+                        universal_canvas.section_box.max_enu_m[i] =
+                            universal_canvas.section_box.min_enu_m[i] + 0.5;
+                    }
+                }
+                if lvl_cut {
+                    ui.label(
+                        egui::RichText::new("Off")
+                            .size(9.5)
+                            .color(theme.text_secondary),
+                    );
+                    if ui
+                        .add(
+                            egui::DragValue::new(
+                                &mut universal_canvas.section_box.cut_plane_offset_m,
+                            )
+                            .range(0.2..=4.0)
+                            .speed(0.1)
+                            .max_decimals(1)
+                            .suffix("m"),
+                        )
+                        .changed()
+                    {
+                        universal_canvas
+                            .section_box
+                            .apply_level_cut(&build_view.bim_bus.project, self.active_story_idx);
+                    }
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "Wire",
+                    universal_canvas.section_box.show_wireframe,
+                    theme.accent_blue,
+                    "Toggle 3D Section Box wireframe cage overlay",
+                )
+                .clicked()
+                {
+                    universal_canvas.section_box.show_wireframe =
+                        !universal_canvas.section_box.show_wireframe;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    "Site",
+                    universal_canvas.section_box.clip_terrain_and_city,
+                    theme.accent_orange,
+                    "Also clip IfcSite terrain, water, and city buildings outside Section Box",
+                )
+                .clicked()
+                {
+                    universal_canvas.section_box.clip_terrain_and_city =
+                        !universal_canvas.section_box.clip_terrain_and_city;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::ZoomFit),
+                    "Fit",
+                    false,
+                    theme.accent_green,
+                    "Fit Section Box to active BIM structure extents",
+                )
+                .clicked()
+                {
+                    universal_canvas
+                        .section_box
+                        .fit_to_bim_project(&build_view.bim_bus.project, 2.5);
+                    universal_canvas.section_box.level_cut_mode = false;
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Close),
+                    "Off",
+                    false,
+                    theme.text_secondary,
+                    "Disable 3D Section Box / Level Cut Plane",
+                )
+                .clicked()
+                {
+                    universal_canvas.section_box.enabled = false;
+                    universal_canvas.section_box.level_cut_mode = false;
                 }
             });
         }
@@ -1788,6 +1902,13 @@ impl SpatialWorkspaceState {
                     .clicked()
                     {
                         self.active_story_idx = (self.active_story_idx + 1) % lvl_cnt.max(1);
+                        if universal_canvas.section_box.enabled
+                            && universal_canvas.section_box.level_cut_mode
+                        {
+                            universal_canvas
+                                .section_box
+                                .apply_level_cut(&build_view.bim_bus.project, self.active_story_idx);
+                        }
                     }
                     if Self::ribbon_tool_tile(
                         ui,
@@ -1830,6 +1951,75 @@ impl SpatialWorkspaceState {
                     {
                         universal_canvas.webgpu_earth.enabled =
                             !universal_canvas.webgpu_earth.enabled;
+                    }
+                });
+
+                Self::ribbon_group(ui, theme, "Section", |ui| {
+                    let sb = &universal_canvas.section_box;
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::SectionCut,
+                        "Sec Box",
+                        sb.enabled && !sb.level_cut_mode,
+                        theme.accent_blue,
+                        "Toggle real-time WebGPU 3D Section Box clipping planes",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.toggle_section_box(&build_view.bim_bus.project);
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Layers,
+                        "Lvl Cut",
+                        universal_canvas.section_box.enabled
+                            && universal_canvas.section_box.level_cut_mode,
+                        theme.accent_green,
+                        "Toggle horizontal Active Level Cut Plane above the active story",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas
+                            .toggle_level_cut(&build_view.bim_bus.project, self.active_story_idx);
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::ZoomFit,
+                        "Fit Box",
+                        false,
+                        theme.accent_blue,
+                        "Fit 3D Section Box extents around the active BIM building",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas
+                            .section_box
+                            .fit_to_bim_project(&build_view.bim_bus.project, 2.5);
+                        universal_canvas.section_box.enabled = true;
+                        universal_canvas.section_box.level_cut_mode = false;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Mountain,
+                        "Site Cut",
+                        universal_canvas.section_box.clip_terrain_and_city,
+                        theme.accent_orange,
+                        "Toggle clipping of IfcSite terrain, coastal ocean & city buildings",
+                    )
+                    .clicked()
+                    {
+                        let next = !universal_canvas.section_box.clip_terrain_and_city;
+                        universal_canvas.section_box.clip_terrain_and_city = next;
+                        if next && !universal_canvas.section_box.enabled {
+                            universal_canvas
+                                .section_box
+                                .fit_to_bim_project(&build_view.bim_bus.project, 6.0);
+                            universal_canvas.section_box.enabled = true;
+                        }
                     }
                 });
             }

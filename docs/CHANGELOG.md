@@ -7,7 +7,17 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.8 (2/10)]
+## [Unreleased — Next: v0.8.8 (3/10)]
+
+### Update 3/10 (`v0.8.7.3` -> `v0.8.8`) — Hardware WebGPU 3D Section Box, Active Level Cut Plane & Ribbon Row B Cleanup
+- **Hardware WGSL 3D Section Box & Active Level Cut Plane (`src/views/webgpu_earth/mod.rs`, `src/views/universal_canvas/types.rs`, `src/views/universal_canvas/mod.rs`)**:
+  - Added [`SectionBoxConfig`](src/views/universal_canvas/types.rs) (`fit_to_bim_project`, `apply_level_cut`, `normalized_bounds`) with `.eigen.json` persistence in [`UnifiedWorkspaceArchive`](src/views/universal_canvas/types.rs), [`UniversalCanvasState::toggle_section_box`](src/views/universal_canvas/mod.rs), [`UniversalCanvasState::toggle_level_cut`](src/views/universal_canvas/mod.rs), and 3D cyan wireframe cage + cut-elevation badge projection [`UniversalCanvasState::paint_section_box_wireframe_overlay`](src/views/universal_canvas/mod.rs).
+  - Extended [`EarthPassUniforms`](src/views/webgpu_earth/mod.rs) and `EARTH_WGSL` (`clip_min_and_mode`, `clip_max_and_band`) with real-time RTC ENU fragment clipping (`discard`) and luminous cyan section-cut edge highlighting, plus dual `site_unclipped_bind_group` routing so Pass 1 Planetary Globe never clips and `IfcSite` terrain/water/city clipping stays optional (`clip_terrain_and_city`).
+- **Modeling Ribbon `"Section"` Group, Live Bounds Bar & Redundant `File` Pill Removal (`src/views/spatial_workspace/ribbon_ui.rs`, `src/views/spatial_workspace/types.rs`, `src/views/spatial_workspace/commands.rs`)**:
+  - Removed the redundant blue `File` pill next to `Planning` in Row B of [`SpatialWorkspaceState::render_categorized_ribbon_deck`](src/views/spatial_workspace/ribbon_ui.rs) (keeping the top-left Vault/File button in Row A).
+  - Added the `"Section"` tile group (`Sec Box`, `Lvl Cut`, `Fit Box`, `Site Cut`) under `RibbonCategoryTab::Modeling`, coupled `Datum` story cycling to active Level Cut elevation updates, added the compact contextual `X0..X1 / Y0..Y1 / Z0..Z1` live bounds bar (`Wire`, `Site`, `Fit`, `Off`), and registered `/section`, `/level-cut`, and `/section-reset` slash commands.
+- **Verification (`src/views/webgpu_earth/tests.rs`, `src/views/spatial_workspace/tests.rs`)**:
+  - Added [`test_v0873_webgpu_section_box_and_level_cut_gpu_clipping`](src/views/webgpu_earth/tests.rs) (live headless `wgpu` fragment `discard` pixel reduction check) and [`test_v0873_ribbon_no_redundant_file_pill_and_section_box_responsive`](src/views/spatial_workspace/tests.rs).
 
 ### Update 2/10 (`v0.8.7.2` -> `v0.8.8`) — Revit-Style Categorized Ribbon Polish, Startup Visibility, Width-First CI Fix & PWA Cache Bust
 - **Revit-Style Categorized Ribbon Visual Polish & Default Startup Visibility (`src/views/spatial_workspace/ribbon_ui.rs`, `src/app.rs`)**:

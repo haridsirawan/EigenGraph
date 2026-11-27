@@ -6372,3 +6372,116 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn test_v0873_ribbon_no_redundant_file_pill_and_section_box_responsive() {
+        for cmd in ["/section", "/level-cut", "/section-reset"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|c| c.cmd == cmd),
+                "Missing v0.8.7.3 section slash command {cmd} in SLASH_COMMANDS"
+            );
+        }
+
+        // Verify redundant blue "File" pill was removed from Row B ribbon tabs
+        let ribbon_src = include_str!("ribbon_ui.rs");
+        assert!(
+            !ribbon_src.contains("RichText::new(\"File\")"),
+            "Redundant Row B File pill must be removed next to Planning"
+        );
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let _ = spatial.execute_spatial_input(
+            "/section",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(canvas.section_box.enabled && !canvas.section_box.level_cut_mode);
+
+        let _ = spatial.execute_spatial_input(
+            "/section site",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(canvas.section_box.clip_terrain_and_city);
+
+        let _ = spatial.execute_spatial_input(
+            "/level-cut 4.8",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(canvas.section_box.enabled && canvas.section_box.level_cut_mode);
+        assert!((canvas.section_box.max_enu_m[2] - 4.8).abs() < 1e-4);
+
+        let _ = spatial.execute_spatial_input(
+            "/section-reset",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(!canvas.section_box.enabled);
+        assert!(!canvas.section_box.clip_terrain_and_city);
+
+        // Render Modeling Ribbon with live Section Box bar active across Desktop / Tablet / Mobile
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        canvas.toggle_section_box(&build.bim_bus.project);
+        assert!(canvas.section_box.enabled);
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            let ctx = egui::Context::default();
+            spatial.mobile_deck_pinned = true;
+            spatial.active_ribbon_tab = RibbonCategoryTab::Modeling;
+            for _ in 0..4 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            let r = spatial.hud_rects[0];
+            assert!(
+                r.left() >= -1.0 && r.right() <= win_w + 1.0,
+                "Modeling Ribbon with Section Box overflowed {win_w}: {r:?}"
+            );
+            assert!(
+                r.height() <= 320.0,
+                "Modeling Ribbon with Section Box too tall ({}) at {win_w}x{win_h}: {r:?}",
+                r.height()
+            );
+        }
+    }

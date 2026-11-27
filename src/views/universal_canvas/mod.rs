@@ -251,6 +251,8 @@ pub struct UniversalCanvasState {
     pub daylight_overlay_visible: bool,
     pub daylight_config: crate::core::daylight_interior::DaylightInteriorConfig,
     pub last_daylight_report: Option<crate::core::daylight_interior::DaylightInteriorReport>,
+    // Update v0.8.7.3 (3/10 -> v0.8.8): Real-Time WebGPU 3D Section Box & Active Level Cut Plane
+    pub section_box: SectionBoxConfig,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -445,6 +447,7 @@ impl Default for UniversalCanvasState {
             daylight_overlay_visible: false,
             daylight_config: crate::core::daylight_interior::DaylightInteriorConfig::default(),
             last_daylight_report: None,
+            section_box: SectionBoxConfig::default(),
         }
     }
 }
@@ -675,6 +678,118 @@ impl UniversalCanvasState {
                 egui::FontId::proportional(11.0),
                 Color32::WHITE,
             );
+        }
+    }
+
+    /// Toggles the 3D WebGPU Section Box, auto-fitting bounds to `project` when activated.
+    pub fn toggle_section_box(&mut self, project: &BimProject) -> bool {
+        if self.section_box.enabled && !self.section_box.level_cut_mode {
+            self.section_box.enabled = false;
+            self.status_message = Some("3D Section Box disabled".to_string());
+        } else {
+            self.section_box.fit_to_bim_project(project, 2.5);
+            self.section_box.enabled = true;
+            self.section_box.level_cut_mode = false;
+            self.status_message = Some(
+                "3D Section Box enabled — adjust X/Y/Z bounds in the Ribbon bar".to_string(),
+            );
+        }
+        self.section_box.enabled
+    }
+
+    /// Toggles the horizontal Active Level Cut Plane at `story_idx` above the story datum.
+    pub fn toggle_level_cut(&mut self, project: &BimProject, story_idx: usize) -> bool {
+        if self.section_box.enabled && self.section_box.level_cut_mode {
+            self.section_box.enabled = false;
+            self.section_box.level_cut_mode = false;
+            self.status_message = Some("Active Level Cut Plane disabled".to_string());
+        } else {
+            self.section_box.apply_level_cut(project, story_idx);
+            self.status_message = Some(format!(
+                "Active Level Cut Plane -> Z <= {:+.2} m",
+                self.section_box.max_enu_m[2]
+            ));
+        }
+        self.section_box.enabled
+    }
+
+    /// Projects and draws the 3D Section Box wireframe cage & top cut perimeter over Earth 3D.
+    pub fn paint_section_box_wireframe_overlay(
+        &self,
+        painter: &egui::Painter,
+        xform: &crate::core::gis::GlobeScreenTransform,
+    ) {
+        if !self.section_box.enabled || !self.section_box.show_wireframe {
+            return;
+        }
+        let (bmin, bmax) = self.section_box.normalized_bounds();
+        let corners_enu = [
+            [bmin[0], bmin[1], bmin[2]],
+            [bmax[0], bmin[1], bmin[2]],
+            [bmax[0], bmax[1], bmin[2]],
+            [bmin[0], bmax[1], bmin[2]],
+            [bmin[0], bmin[1], bmax[2]],
+            [bmax[0], bmin[1], bmax[2]],
+            [bmax[0], bmax[1], bmax[2]],
+            [bmin[0], bmax[1], bmax[2]],
+        ];
+        let mut projected: [Option<Pos2>; 8] = [None; 8];
+        for (i, c) in corners_enu.iter().enumerate() {
+            let ll = crate::core::gis::SlippyMapState::world_mm_to_lat_lon(
+                self.ground_origin_lat_lon,
+                [c[0] as f64 * 1000.0, c[1] as f64 * 1000.0],
+            );
+            if let Some((sp, _, true)) = xform.project_lat_lon_elev(ll.0, ll.1, c[2] as f64) {
+                projected[i] = Some(sp);
+            }
+        }
+        let wire_col = Color32::from_rgba_unmultiplied(56, 224, 245, 185);
+        let cut_col = Color32::from_rgba_unmultiplied(96, 242, 255, 235);
+        let base_and_vert_edges = [
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),
+            (0, 4),
+            (1, 5),
+            (2, 6),
+            (3, 7),
+        ];
+        for (a, b) in base_and_vert_edges {
+            if let (Some(pa), Some(pb)) = (projected[a], projected[b]) {
+                painter.line_segment([pa, pb], Stroke::new(1.3, wire_col));
+            }
+        }
+        for (a, b) in [(4, 5), (5, 6), (6, 7), (7, 4)] {
+            if let (Some(pa), Some(pb)) = (projected[a], projected[b]) {
+                painter.line_segment([pa, pb], Stroke::new(2.0, cut_col));
+            }
+        }
+        if let Some(anchor) = projected.iter().skip(4).flatten().min_by(|a, b| a.y.total_cmp(&b.y)) {
+            let badge = if self.section_box.level_cut_mode {
+                format!("Level Cut Z: {:+.1}m", bmax[2])
+            } else {
+                format!(
+                    "Section Box: {:.0}×{:.0}×{:.0} m",
+                    bmax[0] - bmin[0],
+                    bmax[1] - bmin[1],
+                    bmax[2] - bmin[2]
+                )
+            };
+            let bg = Color32::from_rgba_unmultiplied(11, 20, 39, 205);
+            let galley = painter.layout_no_wrap(badge, egui::FontId::proportional(10.0), cut_col);
+            let rect = Rect::from_min_size(
+                *anchor + egui::vec2(8.0, -22.0),
+                galley.size() + egui::vec2(12.0, 6.0),
+            );
+            painter.rect(
+                rect,
+                CornerRadius::same(5),
+                bg,
+                Stroke::new(0.9, cut_col.gamma_multiply(0.7)),
+                egui::StrokeKind::Inside,
+            );
+            painter.galley(rect.min + egui::vec2(6.0, 3.0), galley, cut_col);
         }
     }
 
@@ -2274,6 +2389,7 @@ impl UniversalCanvasState {
             sea_level_m: self.sea_level_m,
             show_water_surface: self.show_water_surface,
             terrain_sculpt: self.terrain_sculpt.clone(),
+            section_box: self.section_box.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -2430,6 +2546,7 @@ impl UniversalCanvasState {
         self.show_water_surface = archive.show_water_surface;
         self.terrain_sculpt = archive.terrain_sculpt;
         self.terrain_sculpt_undo_stack.clear();
+        self.section_box = archive.section_box;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -3239,6 +3356,7 @@ impl UniversalCanvasState {
                 solar_envelope_gpu_input,
                 daylight_interior_gpu_input,
                 hazard_compute_opt,
+                &self.section_box,
             );
             let xform = self.earth_world.render_3d_globe_with_gpu_mode(
                 ui,
@@ -3389,6 +3507,7 @@ impl UniversalCanvasState {
                 self.paint_terrain_sculpt_brush_ring(&painter, xform);
                 self.paint_road_spline_preview(&painter, xform);
                 self.paint_zone_parcel_preview(&painter, xform);
+                self.paint_section_box_wireframe_overlay(&painter, xform);
             }
             self.paint_planetary_world_buildings(&painter, rect, theme);
             if self.show_neighborhood_hazards {

@@ -2266,6 +2266,110 @@ impl SpatialWorkspaceState {
                         }
                     }
                 }
+                "/section" | "/cut" => {
+                    let sub = arg.trim().to_ascii_lowercase();
+                    if let Ok(z_m) = sub.trim_end_matches('m').trim().parse::<f64>() {
+                        if z_m.is_finite() {
+                            let z_clamped = z_m.clamp(0.5, 120.0);
+                            universal_canvas.earth_bim_author.section_cut_elev_m = z_clamped;
+                            universal_canvas.earth_bim_author.section_cut_active = true;
+                            universal_canvas
+                                .section_box
+                                .fit_to_bim_project(&build_view.bim_bus.project, 6.0);
+                            universal_canvas.section_box.min_enu_m[2] =
+                                universal_canvas.section_box.min_enu_m[2].min(z_clamped as f32 - 1.5);
+                            universal_canvas.section_box.max_enu_m[2] = z_clamped as f32;
+                            universal_canvas.section_box.enabled = true;
+                            universal_canvas.section_box.level_cut_mode = true;
+                            self.push_trace(
+                                format!("Section Cut & 3D Box ON @ Z = {z_clamped:.1}m"),
+                                true,
+                            );
+                        }
+                    } else {
+                        match sub.as_str() {
+                            "off" => {
+                                universal_canvas.section_box.enabled = false;
+                                universal_canvas.section_box.level_cut_mode = false;
+                                universal_canvas.earth_bim_author.section_cut_active = false;
+                                self.push_trace("3D Section Box & Cut OFF", true);
+                            }
+                            "fit" => {
+                                universal_canvas
+                                    .section_box
+                                    .fit_to_bim_project(&build_view.bim_bus.project, 2.5);
+                                universal_canvas.section_box.enabled = true;
+                                universal_canvas.section_box.level_cut_mode = false;
+                                self.push_trace("3D Section Box fitted to active BIM project", true);
+                            }
+                            "site" => {
+                                let next = !universal_canvas.section_box.clip_terrain_and_city;
+                                universal_canvas.section_box.clip_terrain_and_city = next;
+                                if next && !universal_canvas.section_box.enabled {
+                                    universal_canvas
+                                        .section_box
+                                        .fit_to_bim_project(&build_view.bim_bus.project, 6.0);
+                                    universal_canvas.section_box.enabled = true;
+                                }
+                                self.push_trace(
+                                    format!(
+                                        "Section Box site/city clipping {}",
+                                        if next { "enabled" } else { "disabled" }
+                                    ),
+                                    true,
+                                );
+                            }
+                            _ => {
+                                let on = universal_canvas
+                                    .toggle_section_box(&build_view.bim_bus.project);
+                                universal_canvas.earth_bim_author.section_cut_active = on;
+                                self.push_trace(
+                                    format!(
+                                        "3D Section Box {}",
+                                        if on { "enabled" } else { "disabled" }
+                                    ),
+                                    true,
+                                );
+                            }
+                        }
+                    }
+                }
+                "/level-cut" => {
+                    if let Ok(z_m) = arg.trim().parse::<f32>() {
+                        universal_canvas
+                            .section_box
+                            .fit_to_bim_project(&build_view.bim_bus.project, 6.0);
+                        universal_canvas.section_box.min_enu_m[2] =
+                            universal_canvas.section_box.min_enu_m[2].min(z_m - 1.5);
+                        universal_canvas.section_box.max_enu_m[2] = z_m;
+                        universal_canvas.section_box.enabled = true;
+                        universal_canvas.section_box.level_cut_mode = true;
+                        self.push_trace(format!("Active Level Cut Plane -> Z <= {z_m:+.2} m"), true);
+                    } else {
+                        let on = universal_canvas
+                            .toggle_level_cut(&build_view.bim_bus.project, self.active_story_idx);
+                        self.push_trace(
+                            format!(
+                                "Active Level Cut Plane {}",
+                                if on {
+                                    format!("-> Z <= {:+.2} m", universal_canvas.section_box.max_enu_m[2])
+                                } else {
+                                    "disabled".to_string()
+                                }
+                            ),
+                            true,
+                        );
+                    }
+                }
+                "/section-reset" => {
+                    universal_canvas
+                        .section_box
+                        .fit_to_bim_project(&build_view.bim_bus.project, 2.5);
+                    universal_canvas.section_box.enabled = false;
+                    universal_canvas.section_box.level_cut_mode = false;
+                    universal_canvas.section_box.clip_terrain_and_city = false;
+                    self.push_trace("3D Section Box reset and disabled", true);
+                }
                 "/iso" | "/3d" | "/bim" => {
                     self.apply_camera_preset(build_view, universal_canvas, "iso");
                     actions.fit_camera = true;
@@ -3436,31 +3540,6 @@ impl SpatialWorkspaceState {
                 "/shop-svg" => {
                     self.open_field_qaqc_drawer(0);
                     actions.export_shop_drawing_svg = true;
-                }
-                "/section" | "/cut" => {
-                    let elev_opt = arg
-                        .trim_end_matches('m')
-                        .trim()
-                        .parse::<f64>()
-                        .ok()
-                        .filter(|v| v.is_finite());
-                    if let Some(z_m) = elev_opt {
-                        universal_canvas.earth_bim_author.section_cut_elev_m =
-                            z_m.clamp(0.5, 120.0);
-                        universal_canvas.earth_bim_author.section_cut_active = true;
-                    } else {
-                        universal_canvas.earth_bim_author.section_cut_active =
-                            !universal_canvas.earth_bim_author.section_cut_active;
-                    }
-                    let trace_msg = if universal_canvas.earth_bim_author.section_cut_active {
-                        format!(
-                            "Section Cut ON @ Z = {:.1}m",
-                            universal_canvas.earth_bim_author.section_cut_elev_m
-                        )
-                    } else {
-                        "Section Cut OFF".to_string()
-                    };
-                    self.push_trace(trace_msg, true);
                 }
                 "/clonestory" | "/clone" => {
                     match self.clone_active_story_upward(build_view) {

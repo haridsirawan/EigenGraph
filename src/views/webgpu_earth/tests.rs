@@ -3217,3 +3217,215 @@ use crate::core::ifcx::IfcxDocument;
             "Living City ambience WGSL pass triggered WebGPU validation error: {val_err:?}"
         );
     }
+
+    #[test]
+    fn test_v0873_webgpu_section_box_and_level_cut_gpu_clipping() {
+        use crate::views::universal_canvas::SectionBoxConfig;
+        use std::sync::{Arc, Mutex};
+
+        let proj = BimProject::sample_bimcraft_building();
+        let mut sb = SectionBoxConfig::default();
+        sb.fit_to_bim_project(&proj, 2.5);
+        let (bmin, bmax) = sb.normalized_bounds();
+        assert!(bmin[0] < 0.0 && bmax[0] > 0.0);
+        assert!(bmin[1] < 0.0 && bmax[1] > 0.0);
+        assert!(bmax[2] > bmin[2] + 3.0);
+
+        sb.apply_level_cut(&proj, 0);
+        assert!(sb.enabled && sb.level_cut_mode);
+        assert!((sb.max_enu_m[2] - sb.cut_plane_offset_m).abs() < 0.25);
+
+        let mut cam = GlobeCamera::default();
+        cam.tilt_deg = 42.0;
+        cam.heading_deg = 22.0;
+        let xf = GlobeScreenTransform::from_view(
+            Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(64.0, 64.0)),
+            -6.2088,
+            106.8456,
+            17.5,
+            &cam,
+        );
+        let u_base = RtcCameraUniforms::from_globe_xform(
+            &xf,
+            VectorEarthTheme::CoastalBlueprint,
+            &cam,
+            (-6.2088, 106.8456),
+            1.0,
+            true,
+        );
+        let u_clipped = u_base.with_section_box(&sb);
+        assert_eq!(u_clipped.to_planet_pass_uniforms().clip_min_and_mode[3], 0.0);
+        assert_eq!(u_clipped.to_site_pass_uniforms().clip_min_and_mode[3], 1.0);
+        assert_eq!(
+            u_clipped.to_site_unclipped_pass_uniforms().clip_min_and_mode[3],
+            0.0
+        );
+
+        let bim_mesh = build_rtc_active_bim_fem_mesh(&ActiveBimGpuInput {
+            project: &proj,
+            members: &[],
+            lens: EarthBimLens::Clean,
+            erection_day_limit: 999,
+            deform_scale: 35.0,
+            active_modal_mode: 0,
+            modal_phase_sin: 0.0,
+            n1_removed_bim: None,
+            cascade_failed_bim: &[],
+            cascade_step_progress: 0.0,
+            heading_deg: 0.0,
+            subsurface_pile_depth_m: 4.0,
+            diff_overlay_active: false,
+            diff_added_bim: &[],
+            diff_modified_bim: &[],
+            diff_deleted_ghosts: &[],
+            replay_story_elevs_m: &[],
+            replay_story_disp_xyz_m: &[],
+            replay_ground_shake_xyz_m: [0.0, 0.0, 0.0],
+            replay_hinge_states: &[],
+            shm_story_retention: &[],
+        });
+        assert!(bim_mesh.indices.len() / 3 > 100);
+
+        fn poll_fut<F: std::future::Future>(fut: F) -> F::Output {
+            let mut fut = std::pin::pin!(fut);
+            let waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(&waker);
+            loop {
+                if let std::task::Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
+                    return out;
+                }
+                std::thread::yield_now();
+            }
+        }
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = poll_fut(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let Ok((device, queue)) =
+            poll_fut(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+
+        let val_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fmt = wgpu::TextureFormat::Bgra8Unorm;
+        let mut res = WebGpuEarthResources::new(&device, fmt);
+        res.bim.upload(&device, &queue, "bim_v0873", 1, &bim_mesh);
+        res.ensure_targets(&device, 64, 64);
+
+        let out_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("v0873_section_out"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: fmt,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let out_view = out_tex.create_view(&Default::default());
+        let read_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("v0873_readback"),
+            size: (64 * 64 * 4) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let render_and_count = |u_site: &EarthPassUniforms| -> usize {
+            queue.write_buffer(
+                &res.planet_uniform_buf,
+                0,
+                struct_as_u8_slice(&u_base.to_planet_pass_uniforms()),
+            );
+            queue.write_buffer(&res.site_uniform_buf, 0, struct_as_u8_slice(u_site));
+            let mut encoder = device.create_command_encoder(&Default::default());
+            res.render_offscreen_passes(&mut encoder, true);
+            {
+                let target = res.targets.as_ref().expect("Targets allocated");
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("v0873_composite_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &out_view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                    multiview_mask: None,
+                });
+                pass.set_viewport(0.0, 0.0, 64.0, 64.0, 0.0, 1.0);
+                pass.set_scissor_rect(0, 0, 64, 64);
+                pass.set_pipeline(&res.composite_pipeline);
+                pass.set_bind_group(0, &target.composite_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            encoder.copy_texture_to_buffer(
+                out_tex.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &read_buf,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(64 * 4),
+                        rows_per_image: None,
+                    },
+                },
+                wgpu::Extent3d {
+                    width: 64,
+                    height: 64,
+                    depth_or_array_layers: 1,
+                },
+            );
+            queue.submit([encoder.finish()]);
+            let done: Arc<Mutex<Option<Result<(), wgpu::BufferAsyncError>>>> =
+                Arc::new(Mutex::new(None));
+            let done_cb = Arc::clone(&done);
+            read_buf.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+                *done_cb.lock().unwrap() = Some(r);
+            });
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            assert!(matches!(*done.lock().unwrap(), Some(Ok(()))));
+            let bytes = read_buf.slice(..).get_mapped_range().expect("Mapped");
+            let count = bytes
+                .chunks_exact(4)
+                .filter(|px| (px[0] > 0 || px[1] > 0 || px[2] > 0) && px[3] > 0)
+                .count();
+            drop(bytes);
+            read_buf.unmap();
+            count
+        };
+
+        let full_pixels = render_and_count(&u_base.to_site_pass_uniforms());
+        assert!(
+            full_pixels > 40,
+            "Expected unclipped BIM render to produce visible pixels (got {full_pixels})"
+        );
+
+        let mut tight_clip = SectionBoxConfig::default();
+        tight_clip.enabled = true;
+        tight_clip.min_enu_m = [0.0, 0.0, -1.0];
+        tight_clip.max_enu_m = [3.0, 3.0, 1.5];
+        let u_tight = u_base.with_section_box(&tight_clip);
+        let clipped_pixels = render_and_count(&u_tight.to_site_pass_uniforms());
+        assert!(
+            clipped_pixels < full_pixels,
+            "Expected WGSL 3D Section Box discard to strictly reduce BIM pixels ({clipped_pixels} vs {full_pixels})"
+        );
+
+        let val_err = poll_fut(val_scope.pop());
+        assert!(
+            val_err.is_none(),
+            "Section Box WGSL clipping pass triggered WebGPU validation error: {val_err:?}"
+        );
+    }

@@ -312,7 +312,126 @@ pub struct UnifiedWorkspaceArchive {
     pub show_water_surface: bool,
     #[serde(default)]
     pub terrain_sculpt: crate::core::gis::TerrainSculptConfig,
+    #[serde(default)]
+    pub section_box: SectionBoxConfig,
     pub sha256_seal: String,
+}
+
+/// Real-time 3D WebGPU Section Box and active-story horizontal cut plane configuration (RTC ENU meters).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectionBoxConfig {
+    pub enabled: bool,
+    pub level_cut_mode: bool,
+    pub clip_terrain_and_city: bool,
+    pub show_wireframe: bool,
+    pub min_enu_m: [f32; 3],
+    pub max_enu_m: [f32; 3],
+    pub cut_plane_offset_m: f32,
+}
+
+impl Default for SectionBoxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            level_cut_mode: false,
+            clip_terrain_and_city: false,
+            show_wireframe: true,
+            min_enu_m: [-30.0, -30.0, -10.0],
+            max_enu_m: [30.0, 30.0, 24.0],
+            cut_plane_offset_m: 1.2,
+        }
+    }
+}
+
+impl SectionBoxConfig {
+    /// Returns axis-ordered `(min_enu_m, max_enu_m)` with a guaranteed `>= 0.5 m` span per axis.
+    pub fn normalized_bounds(&self) -> ([f32; 3], [f32; 3]) {
+        let mut lo = [0.0_f32; 3];
+        let mut hi = [0.0_f32; 3];
+        for i in 0..3 {
+            let a = self.min_enu_m[i].min(self.max_enu_m[i]);
+            let mut b = self.min_enu_m[i].max(self.max_enu_m[i]);
+            if b - a < 0.5 {
+                b = a + 0.5;
+            }
+            lo[i] = a;
+            hi[i] = b;
+        }
+        (lo, hi)
+    }
+
+    /// Fits the 3D section box around the active `BimProject` extents with `margin_m` padding.
+    pub fn fit_to_bim_project(&mut self, project: &BimProject, margin_m: f32) {
+        let margin = margin_m.max(1.0);
+        let mut min_x = f32::INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+
+        let mut push_xy_mm = |x_mm: f64, y_mm: f64| {
+            let xm = (x_mm * 0.001) as f32;
+            let ym = (y_mm * 0.001) as f32;
+            min_x = min_x.min(xm);
+            max_x = max_x.max(xm);
+            min_y = min_y.min(ym);
+            max_y = max_y.max(ym);
+        };
+
+        for c in &project.columns {
+            push_xy_mm(c.pos.0, c.pos.1);
+        }
+        for w in &project.walls {
+            push_xy_mm(w.start.0, w.start.1);
+            push_xy_mm(w.end.0, w.end.1);
+        }
+        for r in &project.runs {
+            push_xy_mm(r.start.0, r.start.1);
+            push_xy_mm(r.end.0, r.end.1);
+        }
+        for f in &project.footings {
+            push_xy_mm(f.pos.0, f.pos.1);
+        }
+        for s in &project.slabs {
+            for p in &s.boundary {
+                push_xy_mm(p.0, p.1);
+            }
+        }
+
+        if !min_x.is_finite() || !min_y.is_finite() {
+            self.min_enu_m = [-18.0, -18.0, -4.0];
+            self.max_enu_m = [18.0, 18.0, 14.0];
+            return;
+        }
+
+        let mut min_z = 0.0_f32;
+        let mut max_z = 4.0_f32;
+        for lvl in &project.levels {
+            let zm = (lvl.elevation_mm * 0.001) as f32;
+            min_z = min_z.min(zm);
+            max_z = max_z.max(zm);
+        }
+
+        self.min_enu_m = [min_x - margin, min_y - margin, min_z - 3.0];
+        self.max_enu_m = [max_x + margin, max_y + margin, (max_z + 2.0).max(min_z + 3.0)];
+    }
+
+    /// Configures a horizontal level cut plane just above the selected story elevation.
+    pub fn apply_level_cut(&mut self, project: &BimProject, story_idx: usize) {
+        self.fit_to_bim_project(project, 6.0);
+        let mut lvls = project.levels.clone();
+        lvls.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
+        let elev_m = if lvls.is_empty() {
+            0.0_f32
+        } else {
+            let idx = story_idx.min(lvls.len().saturating_sub(1));
+            (lvls[idx].elevation_mm * 0.001) as f32
+        };
+        let cut_z = elev_m + self.cut_plane_offset_m.clamp(0.2, 4.0);
+        self.min_enu_m[2] = self.min_enu_m[2].min(cut_z - 1.5);
+        self.max_enu_m[2] = cut_z;
+        self.enabled = true;
+        self.level_cut_mode = true;
+    }
 }
 
 fn default_globe_true() -> bool {
