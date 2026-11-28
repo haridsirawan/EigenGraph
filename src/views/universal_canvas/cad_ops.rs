@@ -235,6 +235,9 @@ impl UniversalCanvasState {
 
         self.selected_entity_ids.clear();
         for ent in &self.entities {
+            if !self.visibility_graphics.is_cad_layer_visible(&ent.layer_id) {
+                continue;
+            }
             let (e_min, e_max) = Self::entity_aabb(&ent.kind);
             let matched = if is_window {
                 e_min[0] >= min_x && e_max[0] <= max_x && e_min[1] >= min_y && e_max[1] <= max_y
@@ -249,9 +252,31 @@ impl UniversalCanvasState {
         self.selected_entity_ids.len()
     }
 
+    fn unlocked_target_entity_indices(&mut self) -> Vec<usize> {
+        let raw = self.target_entity_indices();
+        if raw.is_empty() {
+            return raw;
+        }
+        let unlocked: Vec<usize> = raw
+            .into_iter()
+            .filter(|&idx| {
+                self.entities
+                    .get(idx)
+                    .is_some_and(|e| !self.visibility_graphics.is_cad_layer_locked(&e.layer_id))
+            })
+            .collect();
+        if unlocked.is_empty() {
+            self.status_message = Some(
+                "Action blocked: selected 2D CAD layer is locked (unlock in Layers / VG)."
+                    .to_string(),
+            );
+        }
+        unlocked
+    }
+
     /// Translates the selected entities (or latest entity) by `(dx_mm, dy_mm)` with undo support.
     pub fn translate_selected_or_last(&mut self, dx_mm: f64, dy_mm: f64) -> bool {
-        let indices = self.target_entity_indices();
+        let indices = self.unlocked_target_entity_indices();
         if indices.is_empty() {
             return false;
         }
@@ -565,7 +590,7 @@ impl UniversalCanvasState {
                 start_mm: [0.0, 0.0],
                 end_mm: [len_mm * rad.cos(), len_mm * rad.sin()],
             },
-            color_rgb: [59, 130, 246],
+            color_rgb: self.visibility_graphics.active_cad_layer_color_rgb(),
             stroke_width: 2.2,
             layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
         });
@@ -594,7 +619,7 @@ impl UniversalCanvasState {
                 min_mm: [-hw, -hh],
                 max_mm: [hw, hh],
             },
-            color_rgb: [16, 185, 129],
+            color_rgb: self.visibility_graphics.active_cad_layer_color_rgb(),
             stroke_width: 2.2,
             layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
         });
@@ -621,7 +646,7 @@ impl UniversalCanvasState {
                 center_mm: [0.0, 0.0],
                 radius_mm: r_mm,
             },
-            color_rgb: [249, 115, 22],
+            color_rgb: self.visibility_graphics.active_cad_layer_color_rgb(),
             stroke_width: 2.2,
             layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
         });
@@ -631,7 +656,7 @@ impl UniversalCanvasState {
 
     /// Rotates the selected entities (or latest entity) around each entity centroid by `angle_deg` degrees with undo support.
     pub fn rotate_selected_or_last(&mut self, angle_deg: f64) -> bool {
-        let indices = self.target_entity_indices();
+        let indices = self.unlocked_target_entity_indices();
         if indices.is_empty() {
             return false;
         }
@@ -1164,7 +1189,7 @@ impl UniversalCanvasState {
 
     /// Deletes the selected entities (or latest entity) with undo support.
     pub fn delete_selected_or_last(&mut self) -> bool {
-        let mut indices = self.target_entity_indices();
+        let mut indices = self.unlocked_target_entity_indices();
         if indices.is_empty() {
             return false;
         }

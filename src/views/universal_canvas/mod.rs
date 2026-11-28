@@ -2796,7 +2796,7 @@ impl UniversalCanvasState {
         }
     }
 
-    /// Exports synchronized canvas entities and BIM grids to vector SVG.
+    /// Exports synchronized canvas entities and BIM grids to vector SVG (honoring Visibility/Graphics & CAD layers).
     pub fn export_svg(&self, bim_project: &BimProject, active_pillar: NavigationPillar) -> String {
         let mut svg = String::from(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"-2000 -11500 16000 13500\" width=\"1200\" height=\"900\" style=\"background:#0f1117\">\n",
@@ -2805,22 +2805,38 @@ impl UniversalCanvasState {
             "  <!-- EigenGraph Unified Canvas | Active Pillar: {} -->\n",
             active_pillar.clean_name()
         ));
-        for g in &bim_project.grids {
-            svg.push_str(&format!(
-                "  <line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#38bdf8\" stroke-opacity=\"0.35\" stroke-width=\"18\" stroke-dasharray=\"180,120\"/>\n",
-                g.start.0, -g.start.1, g.end.0, -g.end.1
-            ));
+        if self.visibility_graphics.bim.show_grid_and_axes {
+            for g in &bim_project.grids {
+                svg.push_str(&format!(
+                    "  <line data-layer=\"S-GRID\" x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#38bdf8\" stroke-opacity=\"0.35\" stroke-width=\"18\" stroke-dasharray=\"180,120\"/>\n",
+                    g.start.0, -g.start.1, g.end.0, -g.end.1
+                ));
+            }
         }
-        for w in &bim_project.walls {
-            svg.push_str(&format!(
-                "  <line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#94a3b8\" stroke-width=\"{:.1}\"/>\n",
-                w.start.0, -w.start.1, w.end.0, -w.end.1, w.thickness_mm.max(80.0)
-            ));
+        if self.visibility_graphics.bim.show_walls {
+            for w in &bim_project.walls {
+                svg.push_str(&format!(
+                    "  <line data-layer=\"S-WALL\" x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#94a3b8\" stroke-width=\"{:.1}\"/>\n",
+                    w.start.0, -w.start.1, w.end.0, -w.end.1, w.thickness_mm.max(80.0)
+                ));
+            }
         }
         for ent in &self.entities {
+            if !self.visibility_graphics.is_cad_layer_visible(&ent.layer_id) {
+                continue;
+            }
             if !self.sync_all_layers && ent.pillar_badge != active_pillar.badge() {
                 continue;
             }
+            let layer_tag = if ent.layer_id.trim().is_empty() {
+                "0-Sketch"
+            } else {
+                ent.layer_id.trim()
+            };
+            let layer_attr = layer_tag
+                .replace('&', "&amp;")
+                .replace('"', "&quot;")
+                .replace('<', "&lt;");
             let [r, g, b] = ent.color_rgb;
             let col = format!("rgb({r},{g},{b})");
             let sw = ent.stroke_width * 24.0;
@@ -2828,7 +2844,7 @@ impl UniversalCanvasState {
                 CanvasShapeKind::Line { start_mm, end_mm }
                 | CanvasShapeKind::Dimension { start_mm, end_mm } => {
                     svg.push_str(&format!(
-                        "  <line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"{col}\" stroke-width=\"{sw:.1}\"/>\n",
+                        "  <line data-layer=\"{layer_attr}\" x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"{col}\" stroke-width=\"{sw:.1}\"/>\n",
                         start_mm[0], -start_mm[1], end_mm[0], -end_mm[1]
                     ));
                 }
@@ -2838,7 +2854,7 @@ impl UniversalCanvasState {
                     let w = (max_mm[0] - min_mm[0]).abs();
                     let h = (max_mm[1] - min_mm[1]).abs();
                     svg.push_str(&format!(
-                        "  <rect x=\"{x:.1}\" y=\"{y:.1}\" width=\"{w:.1}\" height=\"{h:.1}\" fill=\"none\" stroke=\"{col}\" stroke-width=\"{sw:.1}\"/>\n"
+                        "  <rect data-layer=\"{layer_attr}\" x=\"{x:.1}\" y=\"{y:.1}\" width=\"{w:.1}\" height=\"{h:.1}\" fill=\"none\" stroke=\"{col}\" stroke-width=\"{sw:.1}\"/>\n"
                     ));
                 }
                 CanvasShapeKind::Circle {
@@ -2846,7 +2862,7 @@ impl UniversalCanvasState {
                     radius_mm,
                 } => {
                     svg.push_str(&format!(
-                        "  <circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"{:.1}\" fill=\"none\" stroke=\"{col}\" stroke-width=\"{sw:.1}\"/>\n",
+                        "  <circle data-layer=\"{layer_attr}\" cx=\"{:.1}\" cy=\"{:.1}\" r=\"{:.1}\" fill=\"none\" stroke=\"{col}\" stroke-width=\"{sw:.1}\"/>\n",
                         center_mm[0], -center_mm[1], radius_mm
                     ));
                 }
@@ -2857,7 +2873,7 @@ impl UniversalCanvasState {
                             .map(|p| format!("{:.1},{:.1}", p[0], -p[1]))
                             .collect();
                         svg.push_str(&format!(
-                            "  <polyline fill=\"none\" stroke=\"{col}\" stroke-width=\"{sw:.1}\" points=\"{}\"/>\n",
+                            "  <polyline data-layer=\"{layer_attr}\" fill=\"none\" stroke=\"{col}\" stroke-width=\"{sw:.1}\" points=\"{}\"/>\n",
                             pts.join(" ")
                         ));
                     }
@@ -2865,7 +2881,7 @@ impl UniversalCanvasState {
                 CanvasShapeKind::Callout { pos_mm, text } => {
                     let safe = text.replace('&', "&amp;").replace('<', "&lt;");
                     svg.push_str(&format!(
-                        "  <text x=\"{:.1}\" y=\"{:.1}\" fill=\"{col}\" font-size=\"260\" font-family=\"monospace\">{safe}</text>\n",
+                        "  <text data-layer=\"{layer_attr}\" x=\"{:.1}\" y=\"{:.1}\" fill=\"{col}\" font-size=\"260\" font-family=\"monospace\">{safe}</text>\n",
                         pos_mm[0], -pos_mm[1]
                     ));
                 }
@@ -2873,6 +2889,191 @@ impl UniversalCanvasState {
         }
         svg.push_str("</svg>\n");
         svg
+    }
+
+    /// Exports an AutoCAD-compatible `AC1015` DXF combining visible Revit/BIM categories
+    /// (`S-GRID`, `S-WALL`, `S-COLS`, `S-BEAMS`, `S-SLAB`, `S-FND`) and all visible 2D CAD drafting layers.
+    pub fn export_cad_dxf(
+        &self,
+        bim_project: &BimProject,
+        sheet_number: &str,
+        sheet_title: &str,
+    ) -> String {
+        fn push_pair(buf: &mut String, code: i32, val: &str) {
+            buf.push_str(&format!("{code}\n{val}\n"));
+        }
+        fn push_line(buf: &mut String, layer: &str, x1: f64, y1: f64, x2: f64, y2: f64) {
+            buf.push_str(&format!(
+                "0\nLINE\n8\n{layer}\n10\n{x1:.2}\n20\n{y1:.2}\n30\n0.0\n11\n{x2:.2}\n21\n{y2:.2}\n31\n0.0\n"
+            ));
+        }
+        fn push_poly(buf: &mut String, layer: &str, pts: &[[f64; 2]], closed: bool) {
+            if pts.len() < 2 {
+                return;
+            }
+            let flag = if closed { 1 } else { 0 };
+            buf.push_str(&format!("0\nLWPOLYLINE\n8\n{layer}\n90\n{}\n70\n{flag}\n", pts.len()));
+            for p in pts {
+                buf.push_str(&format!("10\n{:.2}\n20\n{:.2}\n", p[0], p[1]));
+            }
+        }
+        fn rgb_to_aci(rgb: [u8; 3]) -> i32 {
+            let [r, g, b] = rgb;
+            if r >= 200 && g < 120 && b < 120 {
+                1
+            } else if r >= 200 && g >= 180 && b < 120 {
+                2
+            } else if g >= 170 && r < 140 {
+                3
+            } else if b >= 200 && g >= 150 && r < 120 {
+                4
+            } else if b >= 180 && r < 120 {
+                5
+            } else if r >= 160 && b >= 160 {
+                6
+            } else {
+                7
+            }
+        }
+
+        let mut dxf = String::with_capacity(10_240);
+        push_pair(&mut dxf, 0, "SECTION");
+        push_pair(&mut dxf, 2, "HEADER");
+        push_pair(&mut dxf, 9, "$ACADVER");
+        push_pair(&mut dxf, 1, "AC1015");
+        push_pair(&mut dxf, 9, "$INSUNITS");
+        push_pair(&mut dxf, 70, "4");
+        push_pair(&mut dxf, 0, "ENDSEC");
+
+        let bim_layers: [(&str, i32); 7] = [
+            ("S-GRID", 8),
+            ("S-WALL", 7),
+            ("S-COLS", 5),
+            ("S-BEAMS", 3),
+            ("S-SLAB", 9),
+            ("S-FND", 6),
+            ("S-ANNO-DIMS", 2),
+        ];
+        let mut declared = std::collections::BTreeSet::new();
+        let mut table_layers: Vec<(String, i32, i32)> = Vec::new();
+        for (name, aci) in bim_layers {
+            declared.insert(name.to_string());
+            table_layers.push((name.to_string(), aci, 0));
+        }
+        for cad_layer in &self.visibility_graphics.cad_layers {
+            if declared.insert(cad_layer.id.clone()) {
+                let flags = i32::from(!cad_layer.visible) | (i32::from(cad_layer.locked) * 4);
+                table_layers.push((cad_layer.id.clone(), rgb_to_aci(cad_layer.color_rgb), flags));
+            }
+        }
+
+        push_pair(&mut dxf, 0, "SECTION");
+        push_pair(&mut dxf, 2, "TABLES");
+        push_pair(&mut dxf, 0, "TABLE");
+        push_pair(&mut dxf, 2, "LAYER");
+        dxf.push_str(&format!("70\n{}\n", table_layers.len()));
+        for (name, aci, flags) in &table_layers {
+            push_pair(&mut dxf, 0, "LAYER");
+            push_pair(&mut dxf, 2, name);
+            dxf.push_str(&format!("70\n{flags}\n62\n{aci}\n6\nCONTINUOUS\n"));
+        }
+        push_pair(&mut dxf, 0, "ENDTAB");
+        push_pair(&mut dxf, 0, "ENDSEC");
+
+        push_pair(&mut dxf, 0, "SECTION");
+        push_pair(&mut dxf, 2, "ENTITIES");
+
+        let vg = &self.visibility_graphics.bim;
+        if vg.show_grid_and_axes {
+            for g in &bim_project.grids {
+                push_line(&mut dxf, "S-GRID", g.start.0, g.start.1, g.end.0, g.end.1);
+            }
+        }
+        if vg.show_walls {
+            for w in &bim_project.walls {
+                let pts: Vec<[f64; 2]> = w.footprint_ring().into_iter().map(|p| [p.0, p.1]).collect();
+                push_poly(&mut dxf, "S-WALL", &pts, true);
+            }
+        }
+        if vg.show_columns {
+            for c in &bim_project.columns {
+                let pts: Vec<[f64; 2]> = c.footprint_ring().into_iter().map(|p| [p.0, p.1]).collect();
+                push_poly(&mut dxf, "S-COLS", &pts, true);
+            }
+        }
+        if vg.show_footings {
+            for f in &bim_project.footings {
+                let pts: Vec<[f64; 2]> = f.footprint_ring().into_iter().map(|p| [p.0, p.1]).collect();
+                push_poly(&mut dxf, "S-FND", &pts, true);
+            }
+        }
+        if vg.show_beams {
+            for r in &bim_project.runs {
+                push_line(&mut dxf, "S-BEAMS", r.start.0, r.start.1, r.end.0, r.end.1);
+            }
+        }
+        if vg.show_slabs {
+            for s in &bim_project.slabs {
+                let pts: Vec<[f64; 2]> = s.boundary.iter().map(|p| [p.0, p.1]).collect();
+                push_poly(&mut dxf, "S-SLAB", &pts, true);
+            }
+        }
+
+        for ent in &self.entities {
+            if !self.visibility_graphics.is_cad_layer_visible(&ent.layer_id) {
+                continue;
+            }
+            let layer = if ent.layer_id.trim().is_empty() {
+                "0-Sketch"
+            } else {
+                ent.layer_id.trim()
+            };
+            match &ent.kind {
+                CanvasShapeKind::Line { start_mm, end_mm }
+                | CanvasShapeKind::Dimension { start_mm, end_mm } => {
+                    push_line(&mut dxf, layer, start_mm[0], start_mm[1], end_mm[0], end_mm[1]);
+                }
+                CanvasShapeKind::Rectangle { min_mm, max_mm } => {
+                    let ring = [
+                        [min_mm[0], min_mm[1]],
+                        [max_mm[0], min_mm[1]],
+                        [max_mm[0], max_mm[1]],
+                        [min_mm[0], max_mm[1]],
+                    ];
+                    push_poly(&mut dxf, layer, &ring, true);
+                }
+                CanvasShapeKind::Circle {
+                    center_mm,
+                    radius_mm,
+                } => {
+                    dxf.push_str(&format!(
+                        "0\nCIRCLE\n8\n{layer}\n10\n{:.2}\n20\n{:.2}\n30\n0.0\n40\n{:.2}\n",
+                        center_mm[0], center_mm[1], radius_mm
+                    ));
+                }
+                CanvasShapeKind::Freehand { points_mm } => {
+                    push_poly(&mut dxf, layer, points_mm, false);
+                }
+                CanvasShapeKind::Callout { pos_mm, text } => {
+                    dxf.push_str(&format!(
+                        "0\nTEXT\n8\n{layer}\n10\n{:.2}\n20\n{:.2}\n30\n0.0\n40\n260.0\n1\n{}\n",
+                        pos_mm[0],
+                        pos_mm[1],
+                        text.replace('\n', " "),
+                    ));
+                }
+            }
+        }
+
+        dxf.push_str(&format!(
+            "0\nTEXT\n8\nS-ANNO-DIMS\n10\n0.0\n20\n-1800.0\n30\n0.0\n40\n420.0\n1\n{} | {} - {}\n",
+            bim_project.project_name.replace('\n', " "),
+            sheet_number,
+            sheet_title.replace('\n', " "),
+        ));
+        push_pair(&mut dxf, 0, "ENDSEC");
+        push_pair(&mut dxf, 0, "EOF");
+        dxf
     }
 
     /// Renders the unified canvas-first drawing workspace for the active sidebar module.

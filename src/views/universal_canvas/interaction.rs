@@ -1132,7 +1132,6 @@ impl UniversalCanvasState {
 
         let badge = active_pillar.badge().to_string();
         let pname = active_pillar.clean_name().to_string();
-        let color_rgb = self.active_color_rgb();
         let stroke_width = self.stroke_width;
 
         match self.active_tool {
@@ -1205,18 +1204,25 @@ impl UniversalCanvasState {
                     && self.active_freehand_mm.len() >= 2
                 {
                     let pts = std::mem::take(&mut self.active_freehand_mm);
-                    self.push_undo();
-                    let id = self.next_entity_id;
-                    self.next_entity_id += 1;
-                    self.entities.push(CanvasEntity {
-                        id,
-                        pillar_badge: badge,
-                        pillar_name: pname,
-                        kind: CanvasShapeKind::Freehand { points_mm: pts },
-                        color_rgb,
-                        stroke_width,
-                        layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
-                    });
+                    if self.visibility_graphics.is_active_cad_layer_locked() {
+                        self.status_message = Some(
+                            "Active 2D CAD layer is locked — unlock or switch layer in Layers / VG."
+                                .to_string(),
+                        );
+                    } else {
+                        self.push_undo();
+                        let id = self.next_entity_id;
+                        self.next_entity_id += 1;
+                        self.entities.push(CanvasEntity {
+                            id,
+                            pillar_badge: badge,
+                            pillar_name: pname,
+                            kind: CanvasShapeKind::Freehand { points_mm: pts },
+                            color_rgb: self.visibility_graphics.active_cad_layer_color_rgb(),
+                            stroke_width,
+                            layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
+                        });
+                    }
                 }
             }
             UniversalCanvasTool::Line
@@ -1243,38 +1249,45 @@ impl UniversalCanvasState {
                         };
                         let dist = (end[0] - start[0]).hypot(end[1] - start[1]);
                         if dist >= 50.0 {
-                            let kind = match self.active_tool {
-                                UniversalCanvasTool::Line => CanvasShapeKind::Line {
-                                    start_mm: start,
-                                    end_mm: end,
-                                },
-                                UniversalCanvasTool::Dimension => CanvasShapeKind::Dimension {
-                                    start_mm: start,
-                                    end_mm: end,
-                                },
-                                UniversalCanvasTool::Rectangle => CanvasShapeKind::Rectangle {
-                                    min_mm: [start[0].min(end[0]), start[1].min(end[1])],
-                                    max_mm: [start[0].max(end[0]), start[1].max(end[1])],
-                                },
-                                UniversalCanvasTool::Circle => CanvasShapeKind::Circle {
-                                    center_mm: start,
-                                    radius_mm: dist,
-                                },
-                                _ => unreachable!(),
-                            };
-                            self.push_undo();
-                            let id = self.next_entity_id;
-                            self.next_entity_id += 1;
-                            self.set_single_selection(Some(id));
-                            self.entities.push(CanvasEntity {
-                                id,
-                                pillar_badge: badge,
-                                pillar_name: pname,
-                                kind,
-                                color_rgb,
-                                stroke_width,
-                                layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
-                            });
+                            if self.visibility_graphics.is_active_cad_layer_locked() {
+                                self.status_message = Some(
+                                    "Active 2D CAD layer is locked — unlock or switch layer in Layers / VG."
+                                        .to_string(),
+                                );
+                            } else {
+                                let kind = match self.active_tool {
+                                    UniversalCanvasTool::Line => CanvasShapeKind::Line {
+                                        start_mm: start,
+                                        end_mm: end,
+                                    },
+                                    UniversalCanvasTool::Dimension => CanvasShapeKind::Dimension {
+                                        start_mm: start,
+                                        end_mm: end,
+                                    },
+                                    UniversalCanvasTool::Rectangle => CanvasShapeKind::Rectangle {
+                                        min_mm: [start[0].min(end[0]), start[1].min(end[1])],
+                                        max_mm: [start[0].max(end[0]), start[1].max(end[1])],
+                                    },
+                                    UniversalCanvasTool::Circle => CanvasShapeKind::Circle {
+                                        center_mm: start,
+                                        radius_mm: dist,
+                                    },
+                                    _ => unreachable!(),
+                                };
+                                self.push_undo();
+                                let id = self.next_entity_id;
+                                self.next_entity_id += 1;
+                                self.set_single_selection(Some(id));
+                                self.entities.push(CanvasEntity {
+                                    id,
+                                    pillar_badge: badge,
+                                    pillar_name: pname,
+                                    kind,
+                                    color_rgb: self.visibility_graphics.active_cad_layer_color_rgb(),
+                                    stroke_width,
+                                    layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
+                                });
+                            }
                         }
                     } else {
                         self.pending_start_mm = None;
@@ -1283,7 +1296,12 @@ impl UniversalCanvasState {
             }
             UniversalCanvasTool::Callout => {
                 if response.clicked_by(egui::PointerButton::Primary) {
-                    if let Some(pos) = response.interact_pointer_pos() {
+                    if self.visibility_graphics.is_active_cad_layer_locked() {
+                        self.status_message = Some(
+                            "Active 2D CAD layer is locked — unlock or switch layer in Layers / VG."
+                                .to_string(),
+                        );
+                    } else if let Some(pos) = response.interact_pointer_pos() {
                         let w = self.snap_point(screen_to_world(pos));
                         let note = if self.callout_draft.trim().is_empty() {
                             format!("{} Note", active_pillar.badge())
@@ -1301,7 +1319,7 @@ impl UniversalCanvasState {
                                 pos_mm: w,
                                 text: note,
                             },
-                            color_rgb,
+                            color_rgb: self.visibility_graphics.active_cad_layer_color_rgb(),
                             stroke_width,
                             layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
                         });
@@ -1315,8 +1333,17 @@ impl UniversalCanvasState {
                     if let Some(pos) = response.interact_pointer_pos() {
                         let w = screen_to_world(pos);
                         if let Some(idx) = self.find_nearest_entity_idx(w, hit_radius_mm) {
-                            self.push_undo();
-                            self.entities.remove(idx);
+                            if self
+                                .visibility_graphics
+                                .is_cad_layer_locked(&self.entities[idx].layer_id)
+                            {
+                                self.status_message = Some(
+                                    "Cannot erase entity on locked CAD layer.".to_string(),
+                                );
+                            } else {
+                                self.push_undo();
+                                self.entities.remove(idx);
+                            }
                         }
                     }
                 }
@@ -1337,6 +1364,9 @@ impl UniversalCanvasState {
     pub(super) fn find_nearest_entity_idx(&self, pt_mm: [f64; 2], max_dist_mm: f64) -> Option<usize> {
         let mut best: Option<(usize, f64)> = None;
         for (idx, ent) in self.entities.iter().enumerate() {
+            if !self.visibility_graphics.is_cad_layer_visible(&ent.layer_id) {
+                continue;
+            }
             let d = match &ent.kind {
                 CanvasShapeKind::Line { start_mm, end_mm }
                 | CanvasShapeKind::Dimension { start_mm, end_mm } => {

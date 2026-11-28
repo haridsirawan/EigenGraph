@@ -154,17 +154,91 @@ impl SpatialWorkspaceState {
                 ui.separator();
                 ui.add_space(4.0);
 
-                let body_actions = self.render_smart_popup_body(
-                    ui,
-                    theme,
-                    target,
-                    universal_canvas,
-                    build_view,
-                    ai_assistant,
-                    members,
-                    projects,
-                    db_components,
-                );
+                let locked_bim_kind = match target {
+                    SmartSelectionTarget::Column(_) => Some(BimElementKind::Column),
+                    SmartSelectionTarget::Beam(_) => Some(BimElementKind::Run),
+                    SmartSelectionTarget::Wall(_) => Some(BimElementKind::Wall),
+                    SmartSelectionTarget::Slab(_) => Some(BimElementKind::Slab),
+                    SmartSelectionTarget::Footing(_) => Some(BimElementKind::Footing),
+                    _ => None,
+                };
+                let locked_cad_layer = match target {
+                    SmartSelectionTarget::SketchEntity(eid) => universal_canvas
+                        .entities
+                        .iter()
+                        .find(|e| e.id == eid)
+                        .map(|e| e.layer_id.clone()),
+                    _ => None,
+                };
+                let is_locked = locked_bim_kind
+                    .is_some_and(|k| universal_canvas.visibility_graphics.bim.is_bim_kind_locked(k))
+                    || locked_cad_layer
+                        .as_deref()
+                        .is_some_and(|lid| universal_canvas.visibility_graphics.is_cad_layer_locked(lid));
+                if is_locked {
+                    Frame::new()
+                        .fill(theme.accent_orange.gamma_multiply(0.16))
+                        .corner_radius(CornerRadius::same(7))
+                        .stroke(Stroke::new(1.0, theme.accent_orange.gamma_multiply(0.45)))
+                        .inner_margin(Margin::symmetric(8, 4))
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                icons::icon_label(
+                                    ui,
+                                    AppIcon::Lock,
+                                    12.0,
+                                    theme.accent_orange,
+                                    "Locked Layer / Category — resize & delete disabled",
+                                    9.5,
+                                    theme.text_primary,
+                                    true,
+                                );
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    Some(AppIcon::Unlock),
+                                    "Unlock",
+                                    false,
+                                    theme.accent_orange,
+                                    "Unlock this category / layer in Layers / VG",
+                                )
+                                .clicked()
+                                {
+                                    if let Some(k) = locked_bim_kind {
+                                        universal_canvas
+                                            .visibility_graphics
+                                            .bim
+                                            .set_bim_kind_locked(k, false);
+                                    }
+                                    if let Some(ref lid) = locked_cad_layer {
+                                        universal_canvas
+                                            .visibility_graphics
+                                            .set_cad_layer_locked(lid, false);
+                                    }
+                                }
+                            });
+                        });
+                    ui.add_space(4.0);
+                }
+
+                let lock_edits = is_locked
+                    && (self.popup_tab == SmartPopupTab::Properties
+                        || matches!(target, SmartSelectionTarget::SketchEntity(_)));
+                let body_actions = ui
+                    .add_enabled_ui(!lock_edits, |ui| {
+                        self.render_smart_popup_body(
+                            ui,
+                            theme,
+                            target,
+                            universal_canvas,
+                            build_view,
+                            ai_assistant,
+                            members,
+                            projects,
+                            db_components,
+                        )
+                    })
+                    .inner;
                 actions.merge(body_actions);
             });
 

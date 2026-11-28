@@ -4597,6 +4597,10 @@ impl SpatialWorkspaceState {
                     actions.export_archive = true;
                     self.push_trace("Exported .eigen.json workspace", true);
                 }
+                "/export-dxf" | "/dxf" => {
+                    actions.export_cad_dxf = true;
+                    self.push_trace("Exported layer-aware AutoCAD .dxf", true);
+                }
                 "/theme" => {
                     actions.toggle_theme = true;
                     self.push_trace("Toggled Pro Dark / Engineering Daylight", true);

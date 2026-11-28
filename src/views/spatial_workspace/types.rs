@@ -3474,6 +3474,12 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Alias for /layers — open Revit-style Visibility/Graphics & 2D CAD Layer manager",
         icon: AppIcon::Layers,
     },
+    SlashCommandSpec {
+        cmd: "/export-dxf",
+        category: "Export",
+        description: "Export layer-aware AutoCAD AC1015 .dxf (visible BIM categories + CAD layers)",
+        icon: AppIcon::Document,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.
@@ -3667,6 +3673,8 @@ pub struct SpatialHudActions {
     pub export_mep_s116: bool,
     pub export_clash_s117: bool,
     pub export_city_infra_s118: bool,
+    // Update v0.8.8.2 (2/10 -> v0.8.9): Layer-Aware AutoCAD DXF Export
+    pub export_cad_dxf: bool,
 }
 
 /// Manual CAD/BIM/Earth drawing & measurement commands surfaced directly inside the Dynamic Island.
@@ -4158,5 +4166,6 @@ impl SpatialHudActions {
         self.export_mep_s116 |= other.export_mep_s116;
         self.export_clash_s117 |= other.export_clash_s117;
         self.export_city_infra_s118 |= other.export_city_infra_s118;
+        self.export_cad_dxf |= other.export_cad_dxf;
     }
 }

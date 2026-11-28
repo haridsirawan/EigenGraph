@@ -7494,3 +7494,151 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn test_v0882_layer_lock_enforcement_dxf_export_and_drafting_ribbon() {
+        // 1. Slash command & BIM lock helpers
+        assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == "/export-dxf"));
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        // Draw on default layer "0-Sketch", lock it, and verify translate/rotate/delete are blocked
+        let eid = canvas.commit_parametric_2d_line(6.0, 0.0, "G", "Drafting");
+        canvas.selected_entity_id = Some(eid);
+        canvas
+            .visibility_graphics
+            .set_cad_layer_locked("0-Sketch", true);
+        assert!(canvas.visibility_graphics.is_active_cad_layer_locked());
+        assert!(!canvas.translate_selected_or_last(1000.0, 500.0));
+        assert!(!canvas.rotate_selected_or_last(45.0));
+        assert!(!canvas.delete_selected_or_last());
+        assert_eq!(canvas.entities.len(), 1);
+
+        // Unlock restores mutation cleanly
+        canvas
+            .visibility_graphics
+            .set_cad_layer_locked("0-Sketch", false);
+        assert!(canvas.translate_selected_or_last(1000.0, 500.0));
+
+        // Add custom layer, draw entity, and test layer-aware DXF & SVG exports
+        assert!(canvas
+            .visibility_graphics
+            .add_custom_layer("A-Furn", [200, 120, 255]));
+        let _furn_id = canvas.commit_parametric_2d_rect(3.0, 2.0, "G", "Drafting");
+        assert_eq!(canvas.entities.len(), 2);
+
+        let full_dxf = canvas.export_cad_dxf(&build.bim_bus.project, "S-100", "Layer Plan");
+        assert!(full_dxf.contains("A-Furn"));
+        assert!(full_dxf.contains("S-COLS"));
+
+        // Hide Columns BIM category and hide A-Furn CAD layer -> both omitted from DXF & SVG
+        canvas.visibility_graphics.bim.show_columns = false;
+        if let Some(l) = canvas
+            .visibility_graphics
+            .cad_layers
+            .iter_mut()
+            .find(|l| l.id == "A-Furn")
+        {
+            l.visible = false;
+        }
+        let filtered_dxf = canvas.export_cad_dxf(&build.bim_bus.project, "S-100", "Layer Plan");
+        // Verify no ENTITIES polyline/circle/line on A-Furn (still declared in TABLES)
+        let entities_sec = filtered_dxf
+            .split("ENTITIES")
+            .nth(1)
+            .expect("ENTITIES section");
+        assert!(!entities_sec.contains("\nA-Furn\n"));
+        assert!(!entities_sec.contains("\nS-COLS\n"));
+
+        let filtered_svg = canvas.export_svg(&build.bim_bus.project, NavigationPillar::ParametricDED);
+        assert!(filtered_svg.contains(r#"data-layer="0-Sketch""#));
+        assert!(!filtered_svg.contains(r#"data-layer="A-Furn""#));
+
+        // 2. BIM category lock helper & Smart Inspector lock banner
+        canvas
+            .visibility_graphics
+            .bim
+            .set_bim_kind_locked(crate::core::BimElementKind::Column, true);
+        assert!(canvas
+            .visibility_graphics
+            .bim
+            .is_bim_kind_locked(crate::core::BimElementKind::Column));
+        let col_id = build.bim_bus.project.columns[0].id;
+        spatial.selected_target = Some(SmartSelectionTarget::Column(col_id));
+
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        let ctx_lock = egui::Context::default();
+        let mut out_lock = ctx_lock.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1280.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                let _ = spatial.render_hud_overlays(
+                    ui.ctx(),
+                    &theme,
+                    &mut canvas,
+                    &mut build,
+                    &mut ai,
+                    &members,
+                    &projects,
+                    &mut db_components,
+                );
+            },
+        );
+        out_lock.textures_delta.clear();
+
+        // 3. Drafting ribbon with new "Layers" group fits cleanly without overflow across Desktop, Tablet, Mobile
+        let act = spatial.execute_spatial_input(
+            "/export-dxf",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act.export_cad_dxf);
+
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            let ctx = egui::Context::default();
+            spatial.mobile_deck_pinned = true;
+            spatial.close_focus_layer_return_to_ribbon();
+            spatial.active_ribbon_tab = RibbonCategoryTab::Drafting;
+            for _ in 0..4 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            assert!(
+                spatial.hud_rects[0].right() <= win_w + 1.0,
+                "Drafting Layers ribbon overflowed {win_w}: {:?}",
+                spatial.hud_rects[0]
+            );
+        }
+    }

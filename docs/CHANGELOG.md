@@ -7,7 +7,18 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.9 (1/10)]
+## [Unreleased — Next: v0.8.9 (2/10)]
+
+### Update 2/10 (`v0.8.8.2` -> `v0.8.9`) — True BIM/CAD Layer Lock Enforcement, Layer-Aware AutoCAD DXF & SVG Export, and Drafting Layers Ribbon
+- **True BIM Category & 2D CAD Layer Lock Enforcement (`src/views/universal_canvas/{types.rs, cad_ops.rs, interaction.rs}`, `src/views/spatial_workspace/smart_popup.rs`)**:
+  - Added [`BimCategoryVisibility::is_bim_kind_locked`](src/views/universal_canvas/types.rs) / [`set_bim_kind_locked`](src/views/universal_canvas/types.rs) and [`VisibilityGraphicsState`](src/views/universal_canvas/types.rs) active-layer helpers (`active_cad_layer_color_rgb`, `is_active_cad_layer_locked`, `set_cad_layer_locked`, `cycle_active_cad_layer`).
+  - Locked 2D CAD layers block creation, eraser removal, translation, rotation, and deletion (`unlocked_target_entity_indices`), while hidden CAD layers are skipped by marquee selection and hit-testing.
+  - Wired an inline lock banner with 1-click **`Unlock`** inside [`render_embedded_smart_inspector_in_island`](src/views/spatial_workspace/smart_popup.rs) disabling `Resize*` / `Delete` controls when a BIM category or 2D CAD layer is locked.
+- **Layer-Aware AutoCAD DXF & SVG Export + Drafting Ribbon `"Layers"` Group (`src/views/universal_canvas/mod.rs`, `src/views/spatial_workspace/{ribbon_ui.rs, types.rs, commands.rs}`, `src/app.rs`)**:
+  - Updated [`UniversalCanvasState::export_svg`](src/views/universal_canvas/mod.rs) with `data-layer` attributes and visibility filtering, and added [`UniversalCanvasState::export_cad_dxf`](src/views/universal_canvas/mod.rs) emitting AutoCAD `AC1015` `.dxf` files honoring BIM `VG` flags (`S-GRID`, `S-WALL`, `S-COLS`, `S-BEAMS`, `S-SLAB`, `S-FND`) alongside visible custom 2D CAD drafting layers.
+  - Added the **`"Layers"`** group (`cycle active CAD layer`, `Lock/Unlock`, `VG / Layers`, `DXF`) in `RibbonCategoryTab::Drafting` plus `/export-dxf` (`/dxf`) command dispatch.
+- **Verification (`src/views/spatial_workspace/tests.rs`)**:
+  - Added [`test_v0882_layer_lock_enforcement_dxf_export_and_drafting_ribbon`](src/views/spatial_workspace/tests.rs).
 
 ### Update 1/10 (`v0.8.8.1` -> `v0.8.9`) — Row A `Project Browser` & `Properties` Quick Pills + Unified `Layers / VG` Manager inside Dynamic Island
 - **Row A Centered `Project Browser` & `Properties` Quick Pills (`src/views/spatial_workspace/ribbon_ui.rs`)**:

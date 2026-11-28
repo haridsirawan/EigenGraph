@@ -4256,6 +4256,27 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if hud_actions.export_cad_dxf {
+            let dxf = self.universal_canvas.export_cad_dxf(
+                &self.build_view.bim_bus.project,
+                "S-100",
+                &self.build_view.bim_bus.project.project_name,
+            );
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_layers_plan.dxf");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &dxf,
+                "application/dxf;charset=utf-8",
+            ) {
+                Ok(dest) => {
+                    self.spatial_workspace
+                        .push_trace(format!("Exported AutoCAD .dxf -> {dest}"), true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
         if hud_actions.run_zoning_agent {
             let rep = self
                 .universal_canvas

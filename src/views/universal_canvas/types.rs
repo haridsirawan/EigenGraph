@@ -289,6 +289,28 @@ impl BimCategoryVisibility {
         self.show_footings = key == "footings";
         self.show_grid_and_axes = key == "grid";
     }
+
+    /// Returns whether a BIM element category is currently locked against inspector edits or deletion.
+    pub fn is_bim_kind_locked(&self, kind: crate::core::BimElementKind) -> bool {
+        match kind {
+            crate::core::BimElementKind::Column => self.lock_columns,
+            crate::core::BimElementKind::Run => self.lock_beams,
+            crate::core::BimElementKind::Wall => self.lock_walls,
+            crate::core::BimElementKind::Slab => self.lock_slabs,
+            crate::core::BimElementKind::Footing => self.lock_footings,
+        }
+    }
+
+    /// Updates lock status for a BIM element category (e.g. 1-click unlock inside Smart Inspector).
+    pub fn set_bim_kind_locked(&mut self, kind: crate::core::BimElementKind, locked: bool) {
+        match kind {
+            crate::core::BimElementKind::Column => self.lock_columns = locked,
+            crate::core::BimElementKind::Run => self.lock_beams = locked,
+            crate::core::BimElementKind::Wall => self.lock_walls = locked,
+            crate::core::BimElementKind::Slab => self.lock_slabs = locked,
+            crate::core::BimElementKind::Footing => self.lock_footings = locked,
+        }
+    }
 }
 
 /// AutoCAD-compatible 2D CAD drafting & annotation layer definition.
@@ -408,6 +430,58 @@ impl VisibilityGraphicsState {
             .iter()
             .find(|l| l.id == key)
             .is_some_and(|l| l.locked)
+    }
+
+    pub fn active_cad_layer(&self) -> Option<&CadDraftingLayer> {
+        let key = if self.active_cad_layer_id.trim().is_empty() {
+            "0-Sketch"
+        } else {
+            self.active_cad_layer_id.trim()
+        };
+        self.cad_layers
+            .iter()
+            .find(|l| l.id == key)
+            .or_else(|| self.cad_layers.first())
+    }
+
+    pub fn active_cad_layer_color_rgb(&self) -> [u8; 3] {
+        self.active_cad_layer()
+            .map_or([56, 189, 248], |l| l.color_rgb)
+    }
+
+    pub fn is_active_cad_layer_locked(&self) -> bool {
+        self.is_cad_layer_locked(&self.active_cad_layer_id)
+    }
+
+    pub fn set_cad_layer_locked(&mut self, layer_id: &str, locked: bool) {
+        let key = if layer_id.trim().is_empty() {
+            "0-Sketch"
+        } else {
+            layer_id.trim()
+        };
+        if let Some(layer) = self.cad_layers.iter_mut().find(|l| l.id == key) {
+            layer.locked = locked;
+        }
+    }
+
+    pub fn cycle_active_cad_layer(&mut self) {
+        if self.cad_layers.is_empty() {
+            return;
+        }
+        let cur = self
+            .cad_layers
+            .iter()
+            .position(|l| l.id == self.active_cad_layer_id)
+            .unwrap_or(0);
+        for offset in 1..=self.cad_layers.len() {
+            let idx = (cur + offset) % self.cad_layers.len();
+            if self.cad_layers[idx].visible {
+                self.active_cad_layer_id = self.cad_layers[idx].id.clone();
+                return;
+            }
+        }
+        let next = (cur + 1) % self.cad_layers.len();
+        self.active_cad_layer_id = self.cad_layers[next].id.clone();
     }
 
     pub fn content_revision_hash(&self) -> u64 {

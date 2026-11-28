@@ -1776,6 +1776,74 @@ impl SpatialWorkspaceState {
                         }
                     }
                 });
+                Self::ribbon_group(ui, theme, "Layers", |ui| {
+                    let act_layer = universal_canvas
+                        .visibility_graphics
+                        .active_cad_layer()
+                        .cloned();
+                    let layer_lbl = act_layer
+                        .as_ref()
+                        .map_or_else(|| "0-Sketch".to_string(), |l| l.name.clone());
+                    let layer_locked = act_layer.as_ref().is_some_and(|l| l.locked);
+                    let layer_col = act_layer.as_ref().map_or(theme.accent_blue, |l| {
+                        Color32::from_rgb(l.color_rgb[0], l.color_rgb[1], l.color_rgb[2])
+                    });
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Layers,
+                        &layer_lbl,
+                        true,
+                        layer_col,
+                        "Cycle active 2D CAD drafting layer (AutoCAD-compatible)",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.visibility_graphics.cycle_active_cad_layer();
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        if layer_locked { AppIcon::Lock } else { AppIcon::Unlock },
+                        if layer_locked { "Locked" } else { "Lock" },
+                        layer_locked,
+                        theme.accent_orange,
+                        "Lock / unlock active 2D CAD drafting layer",
+                    )
+                    .clicked()
+                    {
+                        let id = universal_canvas.visibility_graphics.active_cad_layer_id.clone();
+                        universal_canvas
+                            .visibility_graphics
+                            .set_cad_layer_locked(&id, !layer_locked);
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::SlidersPanel,
+                        "VG / Layers",
+                        self.project_browser_drawer_open && self.project_browser_tab == 1,
+                        theme.accent_blue,
+                        "Open Visibility/Graphics (VG) & 2D CAD Layer manager",
+                    )
+                    .clicked()
+                    {
+                        self.open_project_browser_drawer(1);
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::Document,
+                        "DXF",
+                        false,
+                        theme.accent_green,
+                        "Export layer-aware AutoCAD AC1015 .dxf",
+                    )
+                    .clicked()
+                    {
+                        actions.export_cad_dxf = true;
+                    }
+                });
                 Self::ribbon_group(ui, theme, "Sheets & Diff", |ui| {
                     if Self::ribbon_tool_tile(
                         ui,
