@@ -1164,6 +1164,149 @@ impl SpatialWorkspaceState {
                         }
                     }
                 }
+                if let Some(vg_cmd) = outcome.vg_command.clone() {
+                    match vg_cmd {
+                        crate::core::agent_tools::ToolVgCommand::ResetAll => {
+                            universal_canvas.visibility_graphics.bim.reset_all();
+                        }
+                        crate::core::agent_tools::ToolVgCommand::ShowAllBim => {
+                            universal_canvas.visibility_graphics.bim.show_all();
+                        }
+                        crate::core::agent_tools::ToolVgCommand::ClearOverlays => {
+                            universal_canvas.hide_all_engineering_overlays();
+                        }
+                        crate::core::agent_tools::ToolVgCommand::IsolateCategory { category } => {
+                            universal_canvas
+                                .visibility_graphics
+                                .bim
+                                .isolate_category(&category);
+                        }
+                        crate::core::agent_tools::ToolVgCommand::SetCategory {
+                            category,
+                            visible,
+                            locked,
+                        } => {
+                            let bim_vg = &mut universal_canvas.visibility_graphics.bim;
+                            match category.as_str() {
+                                "columns" => {
+                                    if let Some(v) = visible {
+                                        bim_vg.show_columns = v;
+                                    }
+                                    if let Some(l) = locked {
+                                        bim_vg.lock_columns = l;
+                                    }
+                                }
+                                "beams" => {
+                                    if let Some(v) = visible {
+                                        bim_vg.show_beams = v;
+                                    }
+                                    if let Some(l) = locked {
+                                        bim_vg.lock_beams = l;
+                                    }
+                                }
+                                "walls" => {
+                                    if let Some(v) = visible {
+                                        bim_vg.show_walls = v;
+                                    }
+                                    if let Some(l) = locked {
+                                        bim_vg.lock_walls = l;
+                                    }
+                                }
+                                "slabs" => {
+                                    if let Some(v) = visible {
+                                        bim_vg.show_slabs = v;
+                                    }
+                                    if let Some(l) = locked {
+                                        bim_vg.lock_slabs = l;
+                                    }
+                                }
+                                "footings" => {
+                                    if let Some(v) = visible {
+                                        bim_vg.show_footings = v;
+                                    }
+                                    if let Some(l) = locked {
+                                        bim_vg.lock_footings = l;
+                                    }
+                                }
+                                "grid" => {
+                                    if let Some(v) = visible {
+                                        bim_vg.show_grid_and_axes = v;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        crate::core::agent_tools::ToolVgCommand::ExportVgIfcx => {
+                            out.export_vg_filtered_ifcx = true;
+                        }
+                    }
+                }
+                if let Some(cad_cmd) = outcome.cad_layer_command.clone() {
+                    match cad_cmd {
+                        crate::core::agent_tools::ToolCadLayerCommand::AddLayer {
+                            name,
+                            color_rgb,
+                        } => {
+                            let added = universal_canvas
+                                .visibility_graphics
+                                .add_custom_layer(&name, color_rgb);
+                            if !added {
+                                if let Some(existing) = universal_canvas
+                                    .visibility_graphics
+                                    .cad_layers
+                                    .iter()
+                                    .find(|l| {
+                                        l.id.eq_ignore_ascii_case(&name)
+                                            || l.name.eq_ignore_ascii_case(&name)
+                                    })
+                                    .map(|l| l.id.clone())
+                                {
+                                    universal_canvas.visibility_graphics.active_cad_layer_id =
+                                        existing;
+                                }
+                            }
+                        }
+                        crate::core::agent_tools::ToolCadLayerCommand::SetActiveLayer { name } => {
+                            if let Some(found) = universal_canvas
+                                .visibility_graphics
+                                .cad_layers
+                                .iter()
+                                .find(|l| {
+                                    l.id.eq_ignore_ascii_case(&name)
+                                        || l.name.eq_ignore_ascii_case(&name)
+                                })
+                                .map(|l| l.id.clone())
+                            {
+                                universal_canvas.visibility_graphics.active_cad_layer_id = found;
+                            }
+                        }
+                        crate::core::agent_tools::ToolCadLayerCommand::ConfigureLayer {
+                            name,
+                            visible,
+                            locked,
+                        } => {
+                            if let Some(layer) = universal_canvas
+                                .visibility_graphics
+                                .cad_layers
+                                .iter_mut()
+                                .find(|l| {
+                                    l.id.eq_ignore_ascii_case(&name)
+                                        || l.name.eq_ignore_ascii_case(&name)
+                                })
+                            {
+                                if let Some(v) = visible {
+                                    layer.visible = v;
+                                }
+                                if let Some(l) = locked {
+                                    layer.locked = l;
+                                }
+                            }
+                        }
+                        crate::core::agent_tools::ToolCadLayerCommand::ExportDxf => {
+                            out.export_cad_dxf = true;
+                        }
+                    }
+                }
                 self.push_trace(format!("Tool {} -> {}", call.name, outcome.summary), outcome.ok);
                 summaries.push(format!("• `{}`: {}", call.name, outcome.summary));
                 response_parts.push(serde_json::json!({
@@ -5213,9 +5356,9 @@ impl SpatialWorkspaceState {
         }
     }
 
-    /// Update `v0.8.7.9` (`9/10` -> `v0.8.8`): Builds the unified Gemini Copilot system prompt,
-    /// dynamically enumerating all 15 registered native function tools alongside live MEP, Clash,
-    /// Subsurface Utilities, Road Intersections, City-to-BIM & Section Box telemetry.
+    /// Update `v0.8.8.4` (`4/10` -> `v0.8.9`): Builds the unified Gemini Copilot system prompt,
+    /// dynamically enumerating all 17 registered native function tools alongside live MEP, Clash,
+    /// Subsurface Utilities, Road Intersections, City-to-BIM, Section Box, Visibility/Graphics & CAD layer telemetry.
     pub fn build_gemini_copilot_system_prompt(
         &self,
         universal_canvas: &UniversalCanvasState,
@@ -5300,14 +5443,39 @@ impl SpatialWorkspaceState {
             .as_ref()
             .map(|p| format!(" | Promoted Parcel: {} ({}F)", p.building_name, p.floors))
             .unwrap_or_default();
+        let vg_hidden = universal_canvas.visibility_graphics.bim.hidden_labels();
+        let vg_locked = universal_canvas.visibility_graphics.bim.locked_labels();
+        let vg_ctx = format!(
+            " | VG: hidden=[{}], locked=[{}]",
+            if vg_hidden.is_empty() {
+                "none".to_string()
+            } else {
+                vg_hidden.join(",")
+            },
+            if vg_locked.is_empty() {
+                "none".to_string()
+            } else {
+                vg_locked.join(",")
+            },
+        );
+        let active_cad_name = universal_canvas
+            .visibility_graphics
+            .active_cad_layer()
+            .map(|l| format!("{} (vis={}, locked={})", l.name, l.visible, l.locked))
+            .unwrap_or_else(|| universal_canvas.visibility_graphics.active_cad_layer_id.clone());
+        let cad_ctx = format!(
+            " | ActiveCADLayer={}, TotalCADLayers={}",
+            active_cad_name,
+            universal_canvas.visibility_graphics.cad_layers.len()
+        );
 
         format!(
             "You are EigenAI inside EigenGraph (Geospatial Earth + OpenBIM/6-DOF FEM + MEP/BCF/Urban Infra platform). \
              Respond concisely in professional civil & structural engineering English. \
              Prefer calling the registered engineering function tools ({tool_list}) to inspect deterministic physics and verify modifications rather than guessing numbers. \
              Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s, SectionBox={sec_box}. \
-             Active BIM '{}': elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}{mep_ctx}{clash_ctx}{util_ctx}{int_ctx}{promo_ctx}. \
-             City Scene: {} roads, {} zones. Pure-Vector Sheets available: S-000, S-100..S-118. \
+             Active BIM '{}': elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}{mep_ctx}{clash_ctx}{util_ctx}{int_ctx}{promo_ctx}{vg_ctx}{cad_ctx}. \
+             City Scene: {} roads, {} zones. Pure-Vector Sheets available: S-000, S-100..S-118; CAD DXF & VG-filtered IFCX exports supported via tools. \
              For legacy studio sheets not covered by function declarations, you may append bracket directives such as \
              [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",
             site.elevation_m,

@@ -43,6 +43,41 @@ pub enum ToolSectionBoxCommand {
     },
 }
 
+/// Visibility/Graphics (VG) & overlay action requested by the Gemini agent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ToolVgCommand {
+    ResetAll,
+    ShowAllBim,
+    ClearOverlays,
+    IsolateCategory {
+        category: String,
+    },
+    SetCategory {
+        category: String,
+        visible: Option<bool>,
+        locked: Option<bool>,
+    },
+    ExportVgIfcx,
+}
+
+/// AutoCAD-compatible CAD drafting layer action requested by the Gemini agent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ToolCadLayerCommand {
+    AddLayer {
+        name: String,
+        color_rgb: [u8; 3],
+    },
+    SetActiveLayer {
+        name: String,
+    },
+    ConfigureLayer {
+        name: String,
+        visible: Option<bool>,
+        locked: Option<bool>,
+    },
+    ExportDxf,
+}
+
 /// Deterministic outcome returned by [`execute_headless_tool`] and fed back to Gemini via `functionResponse`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolExecutionOutcome {
@@ -55,6 +90,8 @@ pub struct ToolExecutionOutcome {
     pub fit_camera: bool,
     pub section_box_update: Option<ToolSectionBoxCommand>,
     pub fly_target: Option<(f64, f64, f32)>,
+    pub vg_command: Option<ToolVgCommand>,
+    pub cad_layer_command: Option<ToolCadLayerCommand>,
 }
 
 impl ToolExecutionOutcome {
@@ -70,11 +107,13 @@ impl ToolExecutionOutcome {
             fit_camera: false,
             section_box_update: None,
             fly_target: None,
+            vg_command: None,
+            cad_layer_command: None,
         }
     }
 }
 
-const TOOL_NAMES: [&str; 15] = [
+const TOOL_NAMES: [&str; 17] = [
     "inspect_model",
     "run_structural_audit",
     "run_solar_ottv",
@@ -90,6 +129,8 @@ const TOOL_NAMES: [&str; 15] = [
     "auto_repair_model",
     "set_section_box",
     "fly_to_location",
+    "set_visibility_graphics",
+    "manage_cad_layers",
 ];
 
 /// Returns all registered headless engineering tool names.
@@ -357,6 +398,47 @@ pub fn gemini_function_declarations() -> Value {
                         },
                         "required": ["lat", "lon"]
                     }
+                },
+                {
+                    "name": "set_visibility_graphics",
+                    "description": "Control BIM category visibility/locks (Columns, Beams, Walls, Slabs, Footings, Grid), isolate categories, clear overlays, or export VG-filtered IFCX.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "mode": {
+                                "type": "STRING",
+                                "description": "Action: 'set_category', 'isolate', 'show_all', 'reset_all', 'clear_overlays', or 'export_vg_ifcx'."
+                            },
+                            "category": {
+                                "type": "STRING",
+                                "description": "BIM category for 'set_category' or 'isolate': 'columns', 'beams', 'walls', 'slabs', 'footings', or 'grid'."
+                            },
+                            "visible": { "type": "BOOLEAN", "description": "Show or hide the target category in 'set_category' mode." },
+                            "locked": { "type": "BOOLEAN", "description": "Lock or unlock the target category against accidental edits in 'set_category' mode (grid cannot be locked)." }
+                        },
+                        "required": ["mode"]
+                    }
+                },
+                {
+                    "name": "manage_cad_layers",
+                    "description": "Manage AutoCAD-compatible 2D CAD drafting layers (create layer, set active layer, show/hide/lock layers) or export layer-aware DXF.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "mode": {
+                                "type": "STRING",
+                                "description": "Action: 'add', 'set_active', 'configure', or 'export_dxf'."
+                            },
+                            "layer_name": {
+                                "type": "STRING",
+                                "description": "Layer name or ID (e.g. '0-Sketch', 'S-Grid', 'A-Anno', 'C-Survey', or custom name)."
+                            },
+                            "visible": { "type": "BOOLEAN", "description": "Toggle layer visibility in 'configure' mode." },
+                            "locked": { "type": "BOOLEAN", "description": "Lock or unlock layer entities against edits/deletion in 'configure' mode." },
+                            "color_hex": { "type": "STRING", "description": "Optional '#RRGGBB' stroke accent color when adding a custom layer." }
+                        },
+                        "required": ["mode"]
+                    }
                 }
             ]
         }
@@ -394,6 +476,34 @@ fn arg_vec3(args: &Value, key: &str) -> Option<[f32; 3]> {
         Some([x, y, z])
     } else {
         None
+    }
+}
+
+fn normalize_bim_vg_category(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "column" | "columns" | "col" | "cols" => Some("columns"),
+        "beam" | "beams" | "run" | "runs" | "girder" | "girders" => Some("beams"),
+        "wall" | "walls" => Some("walls"),
+        "slab" | "slabs" | "floor" | "floors" | "roof" => Some("slabs"),
+        "footing" | "footings" | "foundation" | "foundations" => Some("footings"),
+        "grid" | "grids" | "axis" | "axes" => Some("grid"),
+        _ => None,
+    }
+}
+
+fn parse_hex_rgb_or_default(hex: Option<&str>, default: [u8; 3]) -> [u8; 3] {
+    let Some(raw) = hex.map(|s| s.trim().trim_start_matches('#')) else {
+        return default;
+    };
+    if raw.len() != 6 {
+        return default;
+    }
+    let r = u8::from_str_radix(&raw[0..2], 16);
+    let g = u8::from_str_radix(&raw[2..4], 16);
+    let b = u8::from_str_radix(&raw[4..6], 16);
+    match (r, g, b) {
+        (Ok(r), Ok(g), Ok(b)) => [r, g, b],
+        _ => default,
     }
 }
 
@@ -533,6 +643,8 @@ pub fn execute_headless_tool_with_city(
                 fit_camera: false,
                 section_box_update: None,
                 fly_target: None,
+                vg_command: None,
+                cad_layer_command: None,
             }
         }
         "run_structural_audit" => {
@@ -596,6 +708,8 @@ pub fn execute_headless_tool_with_city(
                         fit_camera: false,
                         section_box_update: None,
                         fly_target: None,
+                        vg_command: None,
+                        cad_layer_command: None,
                     }
                 }
                 Err(err) => ToolExecutionOutcome::err(name, err),
@@ -655,6 +769,8 @@ pub fn execute_headless_tool_with_city(
                 fit_camera: false,
                 section_box_update: None,
                 fly_target: None,
+                vg_command: None,
+                cad_layer_command: None,
             }
         }
         "run_daylight_analysis" => {
@@ -705,6 +821,8 @@ pub fn execute_headless_tool_with_city(
                 fit_camera: false,
                 section_box_update: None,
                 fly_target: None,
+                vg_command: None,
+                cad_layer_command: None,
             }
         }
         "run_mep_systems" => {
@@ -758,6 +876,8 @@ pub fn execute_headless_tool_with_city(
                 fit_camera: false,
                 section_box_update: None,
                 fly_target: None,
+                vg_command: None,
+                cad_layer_command: None,
             }
         }
         "run_clash_detection" => {
@@ -822,6 +942,8 @@ pub fn execute_headless_tool_with_city(
                 fit_camera: false,
                 section_box_update: None,
                 fly_target: None,
+                vg_command: None,
+                cad_layer_command: None,
             }
         }
         "run_urban_utilities" => {
@@ -878,6 +1000,8 @@ pub fn execute_headless_tool_with_city(
                 fit_camera: false,
                 section_box_update: None,
                 fly_target: None,
+                vg_command: None,
+                cad_layer_command: None,
             }
         }
         "evaluate_road_intersections" => {
@@ -932,6 +1056,8 @@ pub fn execute_headless_tool_with_city(
                 fit_camera: false,
                 section_box_update: None,
                 fly_target: None,
+                vg_command: None,
+                cad_layer_command: None,
             }
         }
         "promote_city_building_to_bim" => {
@@ -994,6 +1120,8 @@ pub fn execute_headless_tool_with_city(
                 fit_camera: true,
                 section_box_update: None,
                 fly_target: Some((summary.target_lat_lon.0, summary.target_lat_lon.1, 17.8)),
+                vg_command: None,
+                cad_layer_command: None,
             }
         }
         "resize_column" => {
@@ -1040,6 +1168,8 @@ pub fn execute_headless_tool_with_city(
                     fit_camera: false,
                     section_box_update: None,
                     fly_target: None,
+                    vg_command: None,
+                    cad_layer_command: None,
                 },
                 Err(err) => ToolExecutionOutcome::err(name, err),
             }
@@ -1080,6 +1210,8 @@ pub fn execute_headless_tool_with_city(
                     fit_camera: false,
                     section_box_update: None,
                     fly_target: None,
+                    vg_command: None,
+                    cad_layer_command: None,
                 },
                 Err(err) => ToolExecutionOutcome::err(name, err),
             }
@@ -1115,6 +1247,8 @@ pub fn execute_headless_tool_with_city(
                     fit_camera: true,
                     section_box_update: None,
                     fly_target: None,
+                    vg_command: None,
+                    cad_layer_command: None,
                 },
                 Err(err) => ToolExecutionOutcome::err(name, err),
             }
@@ -1140,6 +1274,8 @@ pub fn execute_headless_tool_with_city(
                 fit_camera: false,
                 section_box_update: None,
                 fly_target: None,
+                vg_command: None,
+                cad_layer_command: None,
             },
             Err(err) => ToolExecutionOutcome::err(name, err),
         },
@@ -1209,6 +1345,8 @@ pub fn execute_headless_tool_with_city(
                 fit_camera: false,
                 section_box_update: Some(cmd),
                 fly_target: None,
+                vg_command: None,
+                cad_layer_command: None,
             }
         }
         "fly_to_location" => {
@@ -1238,6 +1376,204 @@ pub fn execute_headless_tool_with_city(
                 fit_camera: true,
                 section_box_update: None,
                 fly_target: Some((lat_c, lon_c, zoom)),
+                vg_command: None,
+                cad_layer_command: None,
+            }
+        }
+        "set_visibility_graphics" => {
+            let mode = call
+                .args
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("set_category")
+                .trim()
+                .to_ascii_lowercase();
+            let raw_cat = call.args.get("category").and_then(|v| v.as_str());
+            let visible = call.args.get("visible").and_then(|v| v.as_bool());
+            let locked = call.args.get("locked").and_then(|v| v.as_bool());
+            let (cmd, summary) = match mode.as_str() {
+                "reset_all" | "reset" => (
+                    ToolVgCommand::ResetAll,
+                    "Reset BIM Visibility/Graphics: all categories visible & unlocked".to_string(),
+                ),
+                "show_all" => (
+                    ToolVgCommand::ShowAllBim,
+                    "Revealed all BIM Visibility/Graphics categories".to_string(),
+                ),
+                "clear_overlays" | "clear" => (
+                    ToolVgCommand::ClearOverlays,
+                    "Cleared active 3D engineering overlays".to_string(),
+                ),
+                "export_vg_ifcx" | "export_ifcx" => (
+                    ToolVgCommand::ExportVgIfcx,
+                    "Exported VG-filtered IFCX (IFC 5) OpenBIM snapshot".to_string(),
+                ),
+                "isolate" => {
+                    let Some(cat) = raw_cat.and_then(normalize_bim_vg_category) else {
+                        return ToolExecutionOutcome::err(
+                            name,
+                            "isolate mode requires a valid 'category' ('columns', 'beams', 'walls', 'slabs', 'footings', or 'grid').",
+                        );
+                    };
+                    (
+                        ToolVgCommand::IsolateCategory {
+                            category: cat.to_string(),
+                        },
+                        format!("Isolated BIM Visibility/Graphics category '{cat}'"),
+                    )
+                }
+                "set_category" | "set" => {
+                    let Some(cat) = raw_cat.and_then(normalize_bim_vg_category) else {
+                        return ToolExecutionOutcome::err(
+                            name,
+                            "set_category mode requires a valid 'category' ('columns', 'beams', 'walls', 'slabs', 'footings', or 'grid').",
+                        );
+                    };
+                    if visible.is_none() && locked.is_none() {
+                        return ToolExecutionOutcome::err(
+                            name,
+                            "set_category mode requires 'visible' and/or 'locked' boolean.",
+                        );
+                    }
+                    if cat == "grid" && locked.is_some() && visible.is_none() {
+                        return ToolExecutionOutcome::err(
+                            name,
+                            "Structural grid axis visibility can be toggled, but grid axes cannot be locked.",
+                        );
+                    }
+                    (
+                        ToolVgCommand::SetCategory {
+                            category: cat.to_string(),
+                            visible,
+                            locked,
+                        },
+                        format!(
+                            "Updated BIM VG '{cat}' (visible={visible:?}, locked={locked:?})"
+                        ),
+                    )
+                }
+                _ => {
+                    return ToolExecutionOutcome::err(
+                        name,
+                        "Unknown mode for set_visibility_graphics. Use 'set_category', 'isolate', 'show_all', 'reset_all', 'clear_overlays', or 'export_vg_ifcx'.",
+                    );
+                }
+            };
+            ToolExecutionOutcome {
+                name: name.to_string(),
+                ok: true,
+                summary: summary.clone(),
+                result_json: json!({
+                    "ok": true,
+                    "mode": mode,
+                    "category": raw_cat,
+                    "visible": visible,
+                    "locked": locked,
+                    "message": summary,
+                }),
+                mutated_bim: false,
+                sync_fem_and_earth: false,
+                fit_camera: false,
+                section_box_update: None,
+                fly_target: None,
+                vg_command: Some(cmd),
+                cad_layer_command: None,
+            }
+        }
+        "manage_cad_layers" => {
+            let mode = call
+                .args
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("set_active")
+                .trim()
+                .to_ascii_lowercase();
+            let layer_name = call
+                .args
+                .get("layer_name")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let visible = call.args.get("visible").and_then(|v| v.as_bool());
+            let locked = call.args.get("locked").and_then(|v| v.as_bool());
+            let color_rgb = parse_hex_rgb_or_default(
+                call.args.get("color_hex").and_then(|v| v.as_str()),
+                [56, 189, 248],
+            );
+            let (cmd, summary) = match mode.as_str() {
+                "add" | "create" => {
+                    let Some(lname) = layer_name else {
+                        return ToolExecutionOutcome::err(name, "add mode requires non-empty 'layer_name'.");
+                    };
+                    (
+                        ToolCadLayerCommand::AddLayer {
+                            name: lname.to_string(),
+                            color_rgb,
+                        },
+                        format!("Created & activated CAD layer '{lname}' (RGB {:?})", color_rgb),
+                    )
+                }
+                "set_active" | "activate" => {
+                    let Some(lname) = layer_name else {
+                        return ToolExecutionOutcome::err(name, "set_active mode requires 'layer_name'.");
+                    };
+                    (
+                        ToolCadLayerCommand::SetActiveLayer {
+                            name: lname.to_string(),
+                        },
+                        format!("Activated CAD drafting layer '{lname}'"),
+                    )
+                }
+                "configure" | "set" => {
+                    let Some(lname) = layer_name else {
+                        return ToolExecutionOutcome::err(name, "configure mode requires 'layer_name'.");
+                    };
+                    if visible.is_none() && locked.is_none() {
+                        return ToolExecutionOutcome::err(
+                            name,
+                            "configure mode requires 'visible' and/or 'locked' boolean.",
+                        );
+                    }
+                    (
+                        ToolCadLayerCommand::ConfigureLayer {
+                            name: lname.to_string(),
+                            visible,
+                            locked,
+                        },
+                        format!("Configured CAD layer '{lname}' (visible={visible:?}, locked={locked:?})"),
+                    )
+                }
+                "export_dxf" | "dxf" => (
+                    ToolCadLayerCommand::ExportDxf,
+                    "Exported layer-aware AutoCAD AC1015 .dxf sheet".to_string(),
+                ),
+                _ => {
+                    return ToolExecutionOutcome::err(
+                        name,
+                        "Unknown mode for manage_cad_layers. Use 'add', 'set_active', 'configure', or 'export_dxf'.",
+                    );
+                }
+            };
+            ToolExecutionOutcome {
+                name: name.to_string(),
+                ok: true,
+                summary: summary.clone(),
+                result_json: json!({
+                    "ok": true,
+                    "mode": mode,
+                    "layer_name": layer_name,
+                    "visible": visible,
+                    "locked": locked,
+                    "color_rgb": color_rgb,
+                    "message": summary,
+                }),
+                mutated_bim: false,
+                sync_fem_and_earth: false,
+                fit_camera: false,
+                section_box_update: None,
+                fly_target: None,
+                vg_command: None,
+                cad_layer_command: Some(cmd),
             }
         }
         _ => ToolExecutionOutcome::err(name, format!("Unknown engineering tool '{name}'.")),
@@ -1255,7 +1591,7 @@ mod tests {
         let fn_decls = decls[0]["functionDeclarations"]
             .as_array()
             .expect("functionDeclarations array");
-        assert_eq!(fn_decls.len(), 15);
+        assert_eq!(fn_decls.len(), 17);
         for expected in registered_tool_names() {
             assert!(
                 fn_decls.iter().any(|d| d["name"].as_str() == Some(*expected)),
@@ -1439,6 +1775,47 @@ mod tests {
             sec.section_box_update,
             Some(ToolSectionBoxCommand::LevelCut { z_m: Some(z), .. }) if (z - 4.2).abs() < 1e-4
         ));
+
+        let vg = execute_headless_tool(
+            &GeminiToolCall {
+                name: "set_visibility_graphics".to_string(),
+                args: json!({ "mode": "set_category", "category": "columns", "locked": true, "visible": true }),
+            },
+            &mut bus,
+            &site,
+            (-6.2088, 106.8456),
+            0,
+            false,
+        );
+        assert!(vg.ok);
+        assert_eq!(
+            vg.vg_command,
+            Some(ToolVgCommand::SetCategory {
+                category: "columns".to_string(),
+                visible: Some(true),
+                locked: Some(true),
+            })
+        );
+
+        let cad = execute_headless_tool(
+            &GeminiToolCall {
+                name: "manage_cad_layers".to_string(),
+                args: json!({ "mode": "add", "layer_name": "S-FOUNDATION-GRID", "color_hex": "#22C55E" }),
+            },
+            &mut bus,
+            &site,
+            (-6.2088, 106.8456),
+            0,
+            false,
+        );
+        assert!(cad.ok);
+        assert_eq!(
+            cad.cad_layer_command,
+            Some(ToolCadLayerCommand::AddLayer {
+                name: "S-FOUNDATION-GRID".to_string(),
+                color_rgb: [34, 197, 94],
+            })
+        );
 
         let bad = execute_headless_tool(
             &GeminiToolCall {

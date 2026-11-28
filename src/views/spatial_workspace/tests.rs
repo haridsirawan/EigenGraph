@@ -7731,3 +7731,135 @@ use crate::theme::MacTheme;
         assert!(canvas.visibility_graphics.bim.is_all_visible());
         assert!(!canvas.visibility_graphics.bim.any_locked());
     }
+
+    #[test]
+    fn test_v0884_gemini_tools_vg_cad_layers_and_prompt_telemetry() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        let mut ai = AiAssistantView::default();
+
+        // 1. Registered tools & Gemini system prompt include #16 & #17 + initial telemetry.
+        let prompt_before =
+            spatial.build_gemini_copilot_system_prompt(&canvas, &build.bim_bus.project, &[]);
+        assert!(prompt_before.contains("set_visibility_graphics"));
+        assert!(prompt_before.contains("manage_cad_layers"));
+        assert!(prompt_before.contains("VG: hidden=[none], locked=[none]"));
+        assert!(prompt_before.contains("ActiveCADLayer=0-Sketch (vis=true, locked=false)"));
+
+        // 2. Dispatch Tool #16 (hide beams & lock columns) + Tool #17 (add + lock custom layer)
+        // via handle_gemini_reply without network key so it commits cleanly in-turn.
+        spatial.gemini_api_key_draft.clear();
+        let reply_mutate = crate::core::web_bridge::GeminiApiReply {
+            request_id: 1,
+            model: "gemini-2.5-flash".to_string(),
+            ok: true,
+            text: String::new(),
+            function_calls: vec![
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "set_visibility_graphics".to_string(),
+                    args: serde_json::json!({
+                        "mode": "set_category",
+                        "category": "columns",
+                        "locked": true,
+                        "visible": true
+                    }),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "set_visibility_graphics".to_string(),
+                    args: serde_json::json!({
+                        "mode": "set_category",
+                        "category": "beams",
+                        "visible": false
+                    }),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "manage_cad_layers".to_string(),
+                    args: serde_json::json!({
+                        "mode": "add",
+                        "layer_name": "S-FOUNDATION",
+                        "color_hex": "#38BDF8"
+                    }),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "manage_cad_layers".to_string(),
+                    args: serde_json::json!({
+                        "mode": "configure",
+                        "layer_name": "S-FOUNDATION",
+                        "locked": true
+                    }),
+                },
+            ],
+            raw_model_content: None,
+            error: None,
+        };
+        let _ = spatial.handle_gemini_reply(reply_mutate, &mut canvas, &mut build, &mut ai);
+        assert!(canvas.visibility_graphics.bim.lock_columns);
+        assert!(!canvas.visibility_graphics.bim.show_beams);
+        assert_eq!(canvas.visibility_graphics.active_cad_layer_id, "S-FOUNDATION");
+        assert!(canvas.visibility_graphics.is_cad_layer_locked("S-FOUNDATION"));
+
+        let prompt_after =
+            spatial.build_gemini_copilot_system_prompt(&canvas, &build.bim_bus.project, &[]);
+        assert!(prompt_after.contains("VG: hidden=[Beams], locked=[Columns]"));
+        assert!(prompt_after.contains("ActiveCADLayer=S-FOUNDATION (vis=true, locked=true)"));
+
+        // 3. Export triggers & VG reset through native Gemini tools.
+        let reply_export = crate::core::web_bridge::GeminiApiReply {
+            request_id: 2,
+            model: "gemini-2.5-flash".to_string(),
+            ok: true,
+            text: String::new(),
+            function_calls: vec![
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "set_visibility_graphics".to_string(),
+                    args: serde_json::json!({ "mode": "export_vg_ifcx" }),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "manage_cad_layers".to_string(),
+                    args: serde_json::json!({ "mode": "export_dxf" }),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "set_visibility_graphics".to_string(),
+                    args: serde_json::json!({ "mode": "reset_all" }),
+                },
+            ],
+            raw_model_content: None,
+            error: None,
+        };
+        let out_export =
+            spatial.handle_gemini_reply(reply_export, &mut canvas, &mut build, &mut ai);
+        assert!(out_export.export_vg_filtered_ifcx);
+        assert!(out_export.export_cad_dxf);
+        assert!(canvas.visibility_graphics.bim.is_all_visible());
+        assert!(!canvas.visibility_graphics.bim.any_locked());
+
+        // 4. 3D Selected/Locked element badge smoke check (offscreen painter).
+        if let Some(col) = build.bim_bus.project.columns.first() {
+            canvas.globe_mode = true;
+            canvas.world_map.set_center(
+                canvas.ground_origin_lat_lon.0,
+                canvas.ground_origin_lat_lon.1,
+            );
+            canvas.world_map.zoom_level = 16.5;
+            canvas.highlighted_bim_element = Some((crate::core::BimElementKind::Column, col.id));
+            canvas.visibility_graphics.bim.lock_columns = true;
+            let ctx = egui::Context::default();
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, 800.0))),
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let rect = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, 800.0));
+                let xf = crate::core::gis::GlobeScreenTransform::from_view(
+                    rect,
+                    canvas.world_map.center_lat_lon.0,
+                    canvas.world_map.center_lat_lon.1,
+                    canvas.world_map.zoom_level,
+                    &canvas.earth_world.camera,
+                );
+                canvas.paint_selected_element_badge_overlay(ui.painter(), &xf, &build.bim_bus.project);
+            });
+            out.textures_delta.clear();
+        }
+    }

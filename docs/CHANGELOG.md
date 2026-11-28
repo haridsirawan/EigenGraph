@@ -7,7 +7,18 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.9 (3/10)]
+## [Unreleased — Next: v0.8.9 (4/10)]
+
+### Update 4/10 (`v0.8.8.4` -> `v0.8.9`) — Gemini Copilot Native VG/CAD Tools #16–#17, Prompt Telemetry & 3D Selected Element Callout Badge
+- **Native Gemini Engineering Tools #16 & #17 (`src/core/{agent_tools.rs, mod.rs}`)**:
+  - Registered `"set_visibility_graphics"` (`ToolVgCommand`: `SetCategory`, `IsolateCategory`, `ShowAllBim`, `ResetAll`, `ClearOverlays`, `ExportVgIfcx`) and `"manage_cad_layers"` (`ToolCadLayerCommand`: `AddLayer`, `SetActiveLayer`, `ConfigureLayer`, `ExportDxf`) inside [`TOOL_NAMES`](src/core/agent_tools.rs) (17 native tools total), [`gemini_function_declarations()`](src/core/agent_tools.rs), and [`execute_headless_tool_with_city`](src/core/agent_tools.rs).
+  - Updated [`test_v0874_headless_tool_registry_and_execution`](src/core/agent_tools.rs) to assert all 17 declarations and deterministic execution of both new VG/CAD tools.
+- **Gemini Copilot Dispatch & Live VG/CAD Telemetry (`src/views/spatial_workspace/commands.rs`)**:
+  - Wired `outcome.vg_command` and `outcome.cad_layer_command` inside [`SpatialWorkspaceState::handle_gemini_reply`](src/views/spatial_workspace/commands.rs) to toggle/lock BIM categories, isolate views, clear 3D overlays, create/activate/lock CAD layers, and trigger VG-filtered `.ifcx` or layer-aware `.dxf` exports.
+  - Added live `VG: hidden=[...], locked=[...]` and `ActiveCADLayer=...` state telemetry to [`SpatialWorkspaceState::build_gemini_copilot_system_prompt`](src/views/spatial_workspace/commands.rs).
+- **3D Selected/Locked Element Callout Badge (`src/views/universal_canvas/mod.rs`)**:
+  - Added [`UniversalCanvasState::paint_selected_element_badge_overlay`](src/views/universal_canvas/mod.rs) to render a pure-vector pill badge above the selected 3D BIM element displaying live dimensions/span and an amber `· LOCKED` indicator whenever the category is locked.
+- **Verification**: Added [`test_v0884_gemini_tools_vg_cad_layers_and_prompt_telemetry`](src/views/spatial_workspace/tests.rs) and verified `cargo check --lib` alongside targeted VG/CAD/Gemini/Dynamic Island regression suites.
 
 ### Update 3/10 (`v0.8.8.3` -> `v0.8.9`) — 3D BIM Picking/Authoring VG Guards, CPU Fallback Parity, Contextual `VG Filter:` Ribbon Strip & VG-Filtered IFCX Export
 - **3D Viewport BIM Picking, Authoring Lock Guards & CPU Fallback Parity (`src/views/universal_canvas/{interaction.rs, render_layers.rs, types.rs}`)**:

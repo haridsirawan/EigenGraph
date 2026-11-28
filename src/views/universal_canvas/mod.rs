@@ -859,6 +859,151 @@ impl UniversalCanvasState {
         }
     }
 
+    /// Update `v0.8.8.4` (`4/10` -> `v0.8.9`): Projects and draws a crisp pure-vector pill badge above
+    /// the active 3D selected BIM element showing section/span dimensions and `· LOCKED` amber status.
+    pub fn paint_selected_element_badge_overlay(
+        &self,
+        painter: &egui::Painter,
+        xform: &crate::core::gis::GlobeScreenTransform,
+        bim_project: &BimProject,
+    ) {
+        let Some((kind, id)) = self.highlighted_bim_element else {
+            return;
+        };
+        if !self.visibility_graphics.bim.is_bim_kind_visible(kind) {
+            return;
+        }
+        let lift_scale = if self.world_map.zoom_level < 14.5 {
+            8.0
+        } else {
+            1.0
+        };
+        let resolved: Option<((f64, f64), f64, String)> = match kind {
+            crate::core::BimElementKind::Column => bim_project
+                .columns
+                .iter()
+                .find(|c| c.id == id)
+                .map(|c| {
+                    let z_m = bim_project.level_elevation(c.top_level_id) * 0.001;
+                    (
+                        (c.pos.0, c.pos.1),
+                        z_m,
+                        format!("{} {:.0}×{:.0} mm", c.name, c.width_mm, c.depth_mm),
+                    )
+                }),
+            crate::core::BimElementKind::Run => bim_project
+                .runs
+                .iter()
+                .find(|r| r.id == id)
+                .map(|r| {
+                    let mid = (0.5 * (r.start.0 + r.end.0), 0.5 * (r.start.1 + r.end.1));
+                    let z_m = bim_project.level_elevation(r.level_id) * 0.001;
+                    let span_m = ((r.end.0 - r.start.0).hypot(r.end.1 - r.start.1)) * 0.001;
+                    (
+                        mid,
+                        z_m,
+                        format!(
+                            "{} {:.0}×{:.0} ({:.1}m)",
+                            r.name, r.width_mm, r.depth_mm, span_m
+                        ),
+                    )
+                }),
+            crate::core::BimElementKind::Wall => bim_project
+                .walls
+                .iter()
+                .find(|w| w.id == id)
+                .map(|w| {
+                    let mid = (0.5 * (w.start.0 + w.end.0), 0.5 * (w.start.1 + w.end.1));
+                    let z_m = w
+                        .top_level_id
+                        .map(|tid| bim_project.level_elevation(tid))
+                        .unwrap_or_else(|| {
+                            bim_project.level_elevation(w.base_level_id) + w.unconnected_height_mm
+                        })
+                        * 0.001;
+                    let len_m = ((w.end.0 - w.start.0).hypot(w.end.1 - w.start.1)) * 0.001;
+                    (
+                        mid,
+                        z_m,
+                        format!("{} t={:.0}mm ({:.1}m)", w.name, w.thickness_mm, len_m),
+                    )
+                }),
+            crate::core::BimElementKind::Slab => bim_project
+                .slabs
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| {
+                    let n = s.boundary.len().max(1) as f64;
+                    let centroid = s.boundary.iter().fold((0.0, 0.0), |acc, p| (acc.0 + p.0, acc.1 + p.1));
+                    let z_m = bim_project.level_elevation(s.level_id) * 0.001;
+                    (
+                        (centroid.0 / n, centroid.1 / n),
+                        z_m,
+                        format!("{} t={:.0}mm", s.name, s.thickness_mm),
+                    )
+                }),
+            crate::core::BimElementKind::Footing => bim_project
+                .footings
+                .iter()
+                .find(|f| f.id == id)
+                .map(|f| {
+                    let z_m = bim_project.level_elevation(f.level_id) * 0.001;
+                    (
+                        (f.pos.0, f.pos.1),
+                        z_m,
+                        format!(
+                            "{} {:.0}×{:.0}×{:.0} mm",
+                            f.name, f.width_mm, f.length_mm, f.thickness_mm
+                        ),
+                    )
+                }),
+        };
+        let Some((pos_mm, elev_m, mut badge)) = resolved else {
+            return;
+        };
+        let Some(anchor) = self.project_active_bim_mm(xform, pos_mm.0, pos_mm.1, elev_m, lift_scale)
+        else {
+            return;
+        };
+        if !xform.rect.expand(48.0).contains(anchor) {
+            return;
+        }
+        let locked = self.visibility_graphics.bim.is_bim_kind_locked(kind);
+        if locked {
+            badge.push_str(" · LOCKED");
+        }
+        let accent = if locked {
+            Color32::from_rgb(245, 158, 11)
+        } else {
+            Color32::from_rgb(56, 189, 248)
+        };
+        let bg = Color32::from_rgba_unmultiplied(11, 20, 39, 224);
+        let galley = painter.layout_no_wrap(badge, egui::FontId::proportional(10.5), accent);
+        let pill_sz = galley.size() + egui::vec2(14.0, 6.0);
+        let mut pill_min = anchor + egui::vec2(-pill_sz.x * 0.5, -pill_sz.y - 12.0);
+        pill_min.x = pill_min
+            .x
+            .clamp(xform.rect.left() + 6.0, (xform.rect.right() - pill_sz.x - 6.0).max(xform.rect.left() + 6.0));
+        pill_min.y = pill_min
+            .y
+            .clamp(xform.rect.top() + 6.0, (xform.rect.bottom() - pill_sz.y - 6.0).max(xform.rect.top() + 6.0));
+        let pill_rect = Rect::from_min_size(pill_min, pill_sz);
+        let clip_painter = painter.with_clip_rect(xform.rect);
+        clip_painter.line_segment(
+            [anchor, Pos2::new(pill_rect.center().x, pill_rect.bottom())],
+            Stroke::new(1.2, accent.gamma_multiply(0.8)),
+        );
+        clip_painter.circle_filled(anchor, 3.2, accent);
+        clip_painter.rect(
+            pill_rect,
+            CornerRadius::same(6),
+            bg,
+            Stroke::new(1.1, accent.gamma_multiply(0.85)),
+            egui::StrokeKind::Inside,
+        );
+        clip_painter.galley(pill_rect.min + egui::vec2(7.0, 3.0), galley, accent);
+    }
+
     /// Equips Cities: Skylines II road/bridge spline authoring and clears conflicting sculpt brushes.
     pub fn set_road_author_mode(
         &mut self,
@@ -4028,6 +4173,9 @@ impl UniversalCanvasState {
                 members,
                 &world_to_screen,
             );
+        }
+        if let Some(ref xform) = active_globe_xform {
+            self.paint_selected_element_badge_overlay(&painter, xform, bim_project);
         }
         self.paint_entities(&painter, rect, theme, active_pillar, &world_to_screen);
         self.paint_live_preview(&painter, rect, theme, &world_to_screen);
