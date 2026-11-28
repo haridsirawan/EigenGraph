@@ -8631,12 +8631,12 @@ impl SpatialWorkspaceState {
         cap_w: f32,
         is_mobile: bool,
     ) {
-        let bw = (cap_w - 10.0).max(170.0);
+        let bw = (cap_w - 18.0).max(160.0);
         Frame::new()
             .fill(theme.bg_card.gamma_multiply(0.32))
             .corner_radius(CornerRadius::same(12))
             .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.32)))
-            .inner_margin(Margin::symmetric(8, 6))
+            .inner_margin(Margin::same(8))
             .show(ui, |ui| {
                 ui.set_width(bw);
                 ui.set_max_width(bw);
@@ -9544,12 +9544,12 @@ impl SpatialWorkspaceState {
         actions: &mut SpatialHudActions,
         cap_w: f32,
     ) {
-        let pw = (cap_w - 10.0).max(170.0);
+        let pw = (cap_w - 18.0).max(160.0);
         Frame::new()
             .fill(theme.bg_card.gamma_multiply(0.32))
             .corner_radius(CornerRadius::same(12))
             .stroke(Stroke::new(1.0, theme.accent_green.gamma_multiply(0.34)))
-            .inner_margin(Margin::symmetric(8, 6))
+            .inner_margin(Margin::same(8))
             .show(ui, |ui| {
                 ui.set_width(pw);
                 ui.set_max_width(pw);

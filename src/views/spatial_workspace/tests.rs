@@ -8295,3 +8295,58 @@ use crate::theme::MacTheme;
         assert!(!entities_explicit.contains("62\n256\n"));
         assert!(entities_explicit.contains("0\nLINE\n8\n0-Sketch\n62\n"));
     }
+
+    #[test]
+    fn test_v0888_dynamic_island_uniform_margins_and_zero_overflow() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            // 1. Resting Dynamic Island
+            spatial.close_focus_layer_return_to_ribbon();
+            spatial.project_browser_drawer_open = false;
+            spatial.properties_drawer_open = false;
+            spatial.mobile_deck_pinned = false;
+            for tab in [0usize, 1usize] {
+                if tab == 1 {
+                    spatial.open_project_browser_drawer(1);
+                }
+                let ctx = egui::Context::default();
+                for _ in 0..3 {
+                    let raw = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(win_w, win_h),
+                        )),
+                        ..Default::default()
+                    };
+                    let mut out = ctx.run_ui(raw, |ui| {
+                        let _ = spatial.render_hud_overlays(
+                            ui.ctx(),
+                            &theme_helper_for_test(),
+                            &mut canvas,
+                            &mut build,
+                            &mut ai,
+                            &members,
+                            &projects,
+                            &mut db_components,
+                        );
+                    });
+                    out.textures_delta.clear();
+                }
+                assert_eq!(spatial.hud_rects.len(), 1);
+                assert!(
+                    spatial.hud_rects[0].right() <= win_w + 1.0,
+                    "Dynamic Island overflow with uniform padding @ {win_w}px (tab={tab}): {:?}",
+                    spatial.hud_rects[0]
+                );
+            }
+        }
+    }

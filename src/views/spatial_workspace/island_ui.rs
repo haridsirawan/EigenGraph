@@ -1918,11 +1918,11 @@ impl SpatialWorkspaceState {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
 
                 ui.vertical(|ui| {
-                    // A. ONE UNIFIED GROWING LIQUID GLASS DYNAMIC ISLAND (morphs seamlessly upward & wider when needed; zero floating checkmark badges outside)
-                    let island_glass = Self::antigravity_glass_frame(&frame_theme, 20, Margin::symmetric(12, 9)).show(
+                    // A. ONE UNIFIED GROWING LIQUID GLASS DYNAMIC ISLAND (uniform symmetric padding on all 4 edges)
+                    let island_glass = Self::antigravity_glass_frame(&frame_theme, 20, Margin::same(10)).show(
                         ui,
                         |ui| {
-                            let cap_w = (dock_w - 32.0).max(160.0);
+                            let cap_w = (dock_w - 22.0).max(160.0);
                             ui.set_width(cap_w);
                             ui.set_max_width(cap_w);
 
@@ -1937,9 +1937,9 @@ impl SpatialWorkspaceState {
                             .fill(frame_theme.bg_card.gamma_multiply(0.45))
                             .corner_radius(CornerRadius::same(12))
                             .stroke(Stroke::new(1.0, frame_theme.accent_blue.gamma_multiply(0.38)))
-                            .inner_margin(Margin::symmetric(12, 10))
+                            .inner_margin(Margin::same(10))
                             .show(ui, |ui| {
-                                let pw = (cap_w - 34.0).max(160.0);
+                                let pw = (cap_w - 22.0).max(160.0);
                                 ui.set_width(pw);
                                 ui.set_max_width(pw);
                                 ui.horizontal(|ui| {
@@ -2073,9 +2073,9 @@ impl SpatialWorkspaceState {
                     if self.history_popover_open {
                         Frame::new()
                             .fill(Color32::TRANSPARENT)
-                            .inner_margin(Margin::symmetric(2, 4))
+                            .inner_margin(Margin::same(4))
                             .show(ui, |ui| {
-                                let hw = (cap_w - 10.0).max(160.0);
+                                let hw = (cap_w - 8.0).max(160.0);
                                 ui.set_width(hw);
                                 ui.set_max_width(hw);
                                 ui.horizontal(|ui| {
@@ -2151,9 +2151,9 @@ impl SpatialWorkspaceState {
                     if self.api_key_popover_open {
                         Frame::new()
                             .fill(Color32::TRANSPARENT)
-                            .inner_margin(Margin::symmetric(2, 4))
+                            .inner_margin(Margin::same(4))
                             .show(ui, |ui| {
-                                let kw = (cap_w - 10.0).max(160.0);
+                                let kw = (cap_w - 8.0).max(160.0);
                                 ui.set_width(kw);
                                 ui.set_max_width(kw);
                                 ui.horizontal(|ui| {
@@ -2281,9 +2281,9 @@ impl SpatialWorkspaceState {
                         let diff_opt = universal_canvas.last_ifcx_visual_diff.clone();
                         Frame::new()
                             .fill(Color32::TRANSPARENT)
-                            .inner_margin(Margin::symmetric(2, 4))
+                            .inner_margin(Margin::same(4))
                             .show(ui, |ui| {
-                                let dw = (cap_w - 10.0).max(160.0);
+                                let dw = (cap_w - 8.0).max(160.0);
                                 ui.set_width(dw);
                                 ui.set_max_width(dw);
                                 ui.horizontal(|ui| {
@@ -2499,9 +2499,9 @@ impl SpatialWorkspaceState {
                         let pf_opt = universal_canvas.last_portfolio_retrofit_report.clone();
                         Frame::new()
                             .fill(Color32::TRANSPARENT)
-                            .inner_margin(Margin::symmetric(2, 4))
+                            .inner_margin(Margin::same(4))
                             .show(ui, |ui| {
-                                let dw = (cap_w - 10.0).max(160.0);
+                                let dw = (cap_w - 8.0).max(160.0);
                                 ui.set_width(dw);
                                 ui.set_max_width(dw);
                                 ui.horizontal(|ui| {
@@ -3237,9 +3237,9 @@ impl SpatialWorkspaceState {
                         let chat_h = (vp.y * if is_mobile { 0.22 } else { 0.25 }).clamp(90.0, 210.0);
                         Frame::new()
                             .fill(Color32::TRANSPARENT)
-                            .inner_margin(Margin::symmetric(2, 4))
+                            .inner_margin(Margin::same(4))
                             .show(ui, |ui| {
-                            let chat_w = (cap_w - 10.0).max(170.0);
+                            let chat_w = (cap_w - 8.0).max(170.0);
                             ui.set_width(chat_w);
                             ui.set_max_width(chat_w);
                             ui.horizontal(|ui| {
@@ -3681,9 +3681,9 @@ impl SpatialWorkspaceState {
                                 .fill(composer_fill)
                                 .corner_radius(CornerRadius::same(12))
                                 .stroke(Stroke::new(1.0, composer_stroke))
-                                .inner_margin(Margin::symmetric(10, 6))
+                                .inner_margin(Margin::same(8))
                                 .show(ui, |ui| {
-                                    let row_w = (cap_w - 22.0).max(160.0);
+                                    let row_w = (cap_w - 18.0).max(160.0);
                                     ui.set_width(row_w);
                                     ui.horizontal(|ui| {
                                         let _ = icons::draw_icon(ui, AppIcon::Sparkles, 13.0, theme.accent_blue);

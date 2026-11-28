@@ -42,12 +42,12 @@ impl SpatialWorkspaceState {
         }
 
         let mut close_popup = false;
-        let iw = (cap_w - 32.0).max(160.0);
+        let iw = (cap_w - 22.0).max(160.0);
         Frame::new()
             .fill(theme.bg_card.gamma_multiply(0.45))
             .corner_radius(CornerRadius::same(12))
             .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.35)))
-            .inner_margin(Margin::symmetric(10, 8))
+            .inner_margin(Margin::same(10))
             .show(ui, |ui| {
                 ui.set_width(iw);
                 ui.set_max_width(iw);

@@ -5,6 +5,7 @@
 //! By: Harids Irawan, S.T., M.T., EigenGraph Platform, 2026.
 
 use std::collections::{HashMap, HashSet};
+use serde::{Deserialize, Serialize};
 use crate::core::linalg::Matrix;
 use crate::core::model::StructuralModel;
 use crate::core::solver::FemSolver;
@@ -543,6 +544,55 @@ pub struct N2WoodburyScreeningReport {
     pub critical_pairs_count: usize,
     pub min_pair_eigengate: f64,
     pub pair_results: Vec<N2PairRedundancyResult>,
+}
+
+/// Engineering retrofit intervention strategy evaluated by EigenGate Sensitivity Advisor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RetrofitStrategyKind {
+    SectionUpgrade25Pct,
+    SectionUpgrade50Pct,
+    AddParallelTieOrBrace,
+}
+
+impl RetrofitStrategyKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SectionUpgrade25Pct => "+25% Section Upgrade",
+            Self::SectionUpgrade50Pct => "+50% Section Upgrade",
+            Self::AddParallelTieOrBrace => "Parallel Tie / Secondary Brace",
+        }
+    }
+}
+
+/// Ranked member strengthening option quantified by $\Delta\text{ARI} / \text{Ton}$ material efficiency.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EigenGateRetrofitCandidate {
+    pub member_id: usize,
+    pub member_name: String,
+    pub strategy: RetrofitStrategyKind,
+    pub baseline_member_ari: f64,
+    pub projected_member_ari: f64,
+    pub delta_system_ari: f64,
+    pub baseline_margin_ms: f64,
+    pub projected_margin_ms: f64,
+    pub added_mass_kg: f64,
+    pub estimated_cost_usd: f64,
+    pub efficiency_ari_per_ton: f64,
+    pub rationale: String,
+}
+
+/// EigenGate spectral bottleneck sensitivity & optimal retrofit ranking report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EigenGateSensitivityReport {
+    pub baseline_min_ari: f64,
+    pub baseline_avg_ari: f64,
+    pub baseline_critical_count: usize,
+    pub n2_coupled_mechanism_pairs: usize,
+    pub n2_min_pair_ari: f64,
+    pub top_bottleneck_member_id: Option<usize>,
+    pub top_bottleneck_name: String,
+    pub candidates: Vec<EigenGateRetrofitCandidate>,
+    pub summary_verdict: String,
 }
 
 // -----------------------------------------------------------------------------
@@ -1215,6 +1265,171 @@ impl EigenGateEngine {
             }
         }
     }
+
+    /// Evaluates spectral redundancy sensitivity across critical bottleneck members and ranks
+    /// optimal section upgrades and parallel tie/brace additions by $\Delta\text{ARI} / \text{Ton}$.
+    pub fn evaluate_sensitivity_and_retrofit_advisor(
+        model: &StructuralModel,
+    ) -> Result<EigenGateSensitivityReport, String> {
+        let base = Self::evaluate_redundancy_fast(model)?;
+        let n2_rep = Self::evaluate_n2_woodbury_fast(model).ok();
+        let n2_coupled = n2_rep.as_ref().map_or(0, |r| r.coupled_mechanism_pairs);
+        let n2_min_ari = n2_rep
+            .as_ref()
+            .map_or(base.min_system_eigengate, |r| r.min_pair_eigengate);
+
+        let mut bottlenecks = base.member_results.clone();
+        bottlenecks.sort_by(|a, b| {
+            a.eigengate
+                .partial_cmp(&b.eigengate)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let top_id = bottlenecks.first().map(|m| m.member_id);
+        let top_name = bottlenecks
+            .first()
+            .map(|m| m.member_name.clone())
+            .unwrap_or_else(|| "None".to_string());
+
+        let next_elem_id = model.elements.iter().map(|e| e.id).max().unwrap_or(0) + 1000;
+        let mut candidates = Vec::new();
+
+        for (b_rank, bm) in bottlenecks.iter().take(4).enumerate() {
+            let Some(orig_elem_idx) = model.elements.iter().position(|e| e.id == bm.member_id) else {
+                continue;
+            };
+            let orig_elem = &model.elements[orig_elem_idx];
+            let len_m = model.member_length(orig_elem).unwrap_or(3.5).max(0.25);
+
+            for (s_idx, strategy) in [
+                RetrofitStrategyKind::SectionUpgrade25Pct,
+                RetrofitStrategyKind::SectionUpgrade50Pct,
+                RetrofitStrategyKind::AddParallelTieOrBrace,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut mod_model = model.clone();
+                let added_area_m2 = match strategy {
+                    RetrofitStrategyKind::SectionUpgrade25Pct => {
+                        let e = &mut mod_model.elements[orig_elem_idx];
+                        let da = e.section.area * 0.25;
+                        e.section.area *= 1.25;
+                        e.section.iy *= 1.56;
+                        e.section.iz *= 1.56;
+                        e.section.j_torsion *= 1.56;
+                        e.section.width *= 1.12;
+                        e.section.depth *= 1.12;
+                        da
+                    }
+                    RetrofitStrategyKind::SectionUpgrade50Pct => {
+                        let e = &mut mod_model.elements[orig_elem_idx];
+                        let da = e.section.area * 0.50;
+                        e.section.area *= 1.50;
+                        e.section.iy *= 2.25;
+                        e.section.iz *= 2.25;
+                        e.section.j_torsion *= 2.25;
+                        e.section.width *= 1.22;
+                        e.section.depth *= 1.22;
+                        da
+                    }
+                    RetrofitStrategyKind::AddParallelTieOrBrace => {
+                        let mut brace = orig_elem.clone();
+                        brace.id = next_elem_id + b_rank * 10 + s_idx;
+                        brace.name = format!("{} [Alt-Tie]", orig_elem.name);
+                        brace.section.area *= 0.35;
+                        brace.section.iy *= 0.35;
+                        brace.section.iz *= 0.35;
+                        brace.section.j_torsion *= 0.35;
+                        let da = brace.section.area;
+                        mod_model.elements.push(brace);
+                        da
+                    }
+                };
+
+                let Ok(proj) = Self::evaluate_redundancy_fast(&mod_model) else {
+                    continue;
+                };
+                let proj_bm = proj
+                    .member_results
+                    .iter()
+                    .find(|m| m.member_id == bm.member_id);
+                let projected_member_ari = proj_bm.map_or(proj.min_system_eigengate, |m| m.eigengate);
+                let projected_margin_ms = proj_bm.map_or(bm.svd_margin, |m| m.svd_margin);
+                let delta_sys = proj.min_system_eigengate - base.min_system_eigengate;
+                let delta_mem = projected_member_ari - bm.eigengate;
+                let effective_gain = delta_sys.max(delta_mem).max(0.0);
+
+                let added_mass_kg = (added_area_m2 * len_m * orig_elem.material.density).max(1.0);
+                let estimated_cost_usd = added_mass_kg * 3.85;
+                let efficiency = effective_gain / (added_mass_kg / 1000.0).max(0.01);
+
+                candidates.push(EigenGateRetrofitCandidate {
+                    member_id: bm.member_id,
+                    member_name: bm.member_name.clone(),
+                    strategy,
+                    baseline_member_ari: bm.eigengate,
+                    projected_member_ari,
+                    delta_system_ari: delta_sys,
+                    baseline_margin_ms: bm.svd_margin,
+                    projected_margin_ms,
+                    added_mass_kg,
+                    estimated_cost_usd,
+                    efficiency_ari_per_ton: efficiency,
+                    rationale: format!(
+                        "{}: #{} ({}) ARI {:.3} -> {:.3} (dSys={:+.3}, +{:.0}kg)",
+                        strategy.label(),
+                        bm.member_id,
+                        bm.member_name,
+                        bm.eigengate,
+                        projected_member_ari,
+                        delta_sys,
+                        added_mass_kg
+                    ),
+                });
+            }
+        }
+
+        candidates.sort_by(|a, b| {
+            b.efficiency_ari_per_ton
+                .partial_cmp(&a.efficiency_ari_per_ton)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        candidates.truncate(6);
+
+        let best_desc = candidates
+            .first()
+            .map(|c| {
+                format!(
+                    "Top option: {} on #{} ({:.2} ARI/t)",
+                    c.strategy.label(),
+                    c.member_id,
+                    c.efficiency_ari_per_ton
+                )
+            })
+            .unwrap_or_else(|| "No actionable retrofit candidates required".to_string());
+
+        let summary_verdict = format!(
+            "EigenGate Sensitivity: Min ARI={:.3}, Avg={:.3}, Critical={}, N-2 Mechanisms={}. {}",
+            base.min_system_eigengate,
+            base.average_eigengate,
+            base.critical_members_count,
+            n2_coupled,
+            best_desc,
+        );
+
+        Ok(EigenGateSensitivityReport {
+            baseline_min_ari: base.min_system_eigengate,
+            baseline_avg_ari: base.average_eigengate,
+            baseline_critical_count: base.critical_members_count,
+            n2_coupled_mechanism_pairs: n2_coupled,
+            n2_min_pair_ari: n2_min_ari,
+            top_bottleneck_member_id: top_id,
+            top_bottleneck_name: top_name,
+            candidates,
+            summary_verdict,
+        })
+    }
 }
 
 /// Complete before-vs-after diagnostics from an interactive single-member (`N-1`) disruption test.
@@ -1480,5 +1695,33 @@ mod tests {
             assert!(m.b1_amplification >= 1.0);
             assert!(m.buckling_margin >= 0.0 && m.buckling_margin <= 1.0);
         }
+    }
+
+    #[test]
+    fn test_v0888_eigengate_sensitivity_and_retrofit_advisor() {
+        let mut engine = crate::core::parametric::ParametricEngine::new();
+        let mut model = engine.generate_warren_truss().expect("Warren truss");
+        model.add_load(NodalLoad::force_y(3, -55_000.0));
+
+        let rep = EigenGateEngine::evaluate_sensitivity_and_retrofit_advisor(&model)
+            .expect("Sensitivity advisor succeeds on stable truss");
+        assert!(rep.top_bottleneck_member_id.is_some());
+        assert!(!rep.candidates.is_empty());
+        assert!(rep
+            .candidates
+            .iter()
+            .all(|c| c.added_mass_kg > 0.0 && c.estimated_cost_usd > 0.0));
+        assert!(
+            rep.candidates
+                .iter()
+                .any(|c| c.projected_member_ari >= c.baseline_member_ari - 1e-6),
+            "Retrofit candidate must maintain or lift member ARI"
+        );
+        assert!(
+            rep.candidates
+                .windows(2)
+                .all(|w| w[0].efficiency_ari_per_ton >= w[1].efficiency_ari_per_ton - 1e-9),
+            "Candidates must be sorted by descending ARI/ton efficiency"
+        );
     }
 }

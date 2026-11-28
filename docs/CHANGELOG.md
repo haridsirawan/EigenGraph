@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.9 (7/10)]
+## [Unreleased — Next: v0.8.9 (8/10)]
+
+### Update 8/10 (`v0.8.8.8` -> `v0.8.9`) — EigenFlow Sequential Cascade (`N-1 -> N-k` + UFC DIF), EigenGate Spectral Sensitivity & Uniform Dynamic Island Margins
+- **Uniform Symmetric Dynamic Island Padding (`src/views/spatial_workspace/{island_ui.rs, drawers.rs, smart_popup.rs}`)**:
+  - Normalized Dynamic Island capsule, Embedded Panel, Prompt Composer, Project Browser, Live Properties, and Smart Inspector padding to equal `Margin::same(...)` edges (`left == right == top == bottom`) with matched inner widths so spacing is crisp and symmetric on every side.
+- **EigenFlow Sequential Progressive Collapse Cascade (`src/core/eigenflow.rs`)**:
+  - Added [`EigenFlowCascadeVerdict`](src/core/eigenflow.rs), [`EigenFlowCascadeWave`](src/core/eigenflow.rs), [`EigenFlowCascadeReport`](src/core/eigenflow.rs), and [`evaluate_eigenflow_cascade`](src/core/eigenflow.rs) (also embedded in `EigenFlowStudioReport::cascade`), simulating sequential multi-wave Woodbury load redistribution (`N-1 -> N-2 -> ... -> N-k`) with UFC 4-023-03 Dynamic Increase Factor (DIF) and deterministic `Arrested` / `PartialCollapse` / `GlobalMechanism` verdicts.
+- **EigenGate Spectral Sensitivity & Optimal Retrofit Advisor (`src/core/eigengate.rs`, `src/core/mod.rs`)**:
+  - Added [`RetrofitStrategyKind`](src/core/eigengate.rs), [`EigenGateRetrofitCandidate`](src/core/eigengate.rs), [`EigenGateSensitivityReport`](src/core/eigengate.rs), and [`EigenGateEngine::evaluate_sensitivity_and_retrofit_advisor`](src/core/eigengate.rs) to rank optimal `+25%` / `+50%` section upgrades and parallel tie/brace additions by `delta_ARI / ton`.
+- **Verification**: Added deterministic unit tests across `core::eigenflow`, `core::eigengate`, and `views::spatial_workspace` (`test_v0888_*`) and verified responsive zero-overflow stability across Desktop, Tablet, and Mobile viewports.
 
 ### Update 7/10 (`v0.8.8.7` -> `v0.8.9`) — Remove Floating Checkmark Above Dynamic Island, DXF `BYLAYER` ACI Parity & CAD Slash Commands
 - **Clean Resting Dynamic Island Surface (`src/views/spatial_workspace/{island_ui.rs, ribbon_ui.rs}`)**:

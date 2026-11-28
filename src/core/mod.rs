@@ -83,8 +83,9 @@ pub use solver::{
     SecondOrderStabilityResult, SecondOrderStabilitySolver,
 };
 pub use eigengate::{
-    EigenGateEngine, KinematicGuardReport, MemberRedundancyResult, N1SimulationReport,
-    N2PairRedundancyResult, N2WoodburyScreeningReport, RedundancyAssessment,
+    EigenGateEngine, EigenGateRetrofitCandidate, EigenGateSensitivityReport, KinematicGuardReport,
+    MemberRedundancyResult, N1SimulationReport, N2PairRedundancyResult,
+    N2WoodburyScreeningReport, RedundancyAssessment, RetrofitStrategyKind,
 };
 pub use parametric::{ParametricEngine, ParametricFormula};
 pub use interop::{
@@ -307,8 +308,10 @@ pub use field_fabrication::{
     PourStripStatus, PourStripZone,
 };
 pub use eigenflow::{
-    evaluate_eigenflow_studio, EigenFlowConfig, EigenFlowHingeMarker3D, EigenFlowIfcxOverlay,
-    EigenFlowStudioReport, EigenFlowWoodburyResult, RedistributedMemberFlow, NS_EG_EIGENFLOW,
+    evaluate_eigenflow_cascade, evaluate_eigenflow_studio, EigenFlowCascadeReport,
+    EigenFlowCascadeVerdict, EigenFlowCascadeWave, EigenFlowConfig, EigenFlowHingeMarker3D,
+    EigenFlowIfcxOverlay, EigenFlowStudioReport, EigenFlowWoodburyResult, RedistributedMemberFlow,
+    NS_EG_EIGENFLOW,
 };
 pub use extreme_events::{
     evaluate_extreme_events, BlastMemberImpact3D, ExtremeEventEigenFlowCoupling,

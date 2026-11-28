@@ -10,6 +10,8 @@
 //!   and maps formed plastic hinges into 3D local ENU coordinates `[east, north, up]`.
 //! - Emits compact non-destructive `eigengraph::eigenflow` IFCX overlays (`EigenFlowIfcxOverlay`).
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::core::bim::BimProject;
@@ -134,6 +136,57 @@ pub struct EigenFlowIfcxOverlay {
     pub summary_verdict: String,
 }
 
+/// Progressive collapse outcome verdict for EigenFlow sequential multi-wave Woodbury cascades.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EigenFlowCascadeVerdict {
+    #[default]
+    Arrested,
+    PartialCollapse,
+    GlobalMechanism,
+}
+
+impl EigenFlowCascadeVerdict {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Arrested => "Arrested (Alternate Load Path Stable)",
+            Self::PartialCollapse => "Partial Progressive Damage",
+            Self::GlobalMechanism => "Global Collapse Mechanism",
+        }
+    }
+}
+
+/// Single propagation wave inside an EigenFlow sequential progressive collapse simulation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EigenFlowCascadeWave {
+    pub wave_index: usize,
+    pub failed_element_ids: Vec<usize>,
+    pub failed_element_names: Vec<String>,
+    pub failed_segments_enu_m: Vec<([f64; 3], [f64; 3])>,
+    pub redistributed_members: Vec<RedistributedMemberFlow>,
+    pub ufc_dif_omega: f64,
+    pub wave_shed_force_kn: f64,
+    pub cumulative_failed_ratio_pct: f64,
+    pub residual_stability_margin_ms: f64,
+    pub wave_eigengate_score: f64,
+}
+
+/// Sequential `N-1 -> N-2 -> ... -> N-k` Woodbury progressive collapse cascade with UFC 4-023-03 DIF.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct EigenFlowCascadeReport {
+    pub initiating_element_id: usize,
+    pub initiating_element_name: String,
+    pub ufc_dynamic_increase_factor: f64,
+    pub max_waves_simulated: usize,
+    pub waves: Vec<EigenFlowCascadeWave>,
+    pub total_failed_elements: usize,
+    pub total_elements: usize,
+    pub damage_ratio_pct: f64,
+    pub final_stability_margin_ms: f64,
+    pub final_residual_reserve_rrr: f64,
+    pub verdict: EigenFlowCascadeVerdict,
+    pub summary_verdict: String,
+}
+
 /// Unified EigenFlow Non-Linear Studio Report combining Woodbury `P1 -> P2` and Pushover ADRS.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EigenFlowStudioReport {
@@ -146,6 +199,8 @@ pub struct EigenFlowStudioReport {
     pub delta_score_nl_minus_lin: f64,
     pub site_sds_g: f64,
     pub site_sd1_g: f64,
+    #[serde(default)]
+    pub cascade: EigenFlowCascadeReport,
     pub summary_verdict: String,
 }
 
@@ -617,6 +672,13 @@ pub fn evaluate_eigenflow_studio(
         perf.ductility_demand_mu,
     );
 
+    let cascade = evaluate_eigenflow_cascade_from_model(
+        &model,
+        intact_fea.as_ref(),
+        eg_report.as_ref(),
+        config,
+    );
+
     let mut cfg_out = config.clone();
     cfg_out.pushover_steps = push_steps;
     cfg_out.active_step_idx = config.active_step_idx.min(n_steps.saturating_sub(1));
@@ -631,6 +693,283 @@ pub fn evaluate_eigenflow_studio(
         delta_score_nl_minus_lin,
         site_sds_g: spectrum.sds,
         site_sd1_g: spectrum.sd1,
+        cascade,
+        summary_verdict,
+    }
+}
+
+/// Evaluates an iterative sequential `N-1 -> N-2 -> ... -> N-k` Woodbury progressive collapse cascade
+/// with UFC 4-023-03 Dynamic Increase Factor (DIF) for the active BIM project.
+pub fn evaluate_eigenflow_cascade(
+    bim: &BimProject,
+    _site: Option<&SiteEnvironmentalCoupling>,
+    config: &EigenFlowConfig,
+) -> EigenFlowCascadeReport {
+    let mut model = bim.to_structural_model();
+    if model.elements.len() < 2 || model.nodes.len() < 3 {
+        model = build_reference_portal_model(&bim.project_name);
+    }
+    let eg_report = EigenGateEngine::evaluate_redundancy_fast(&model).ok();
+    let intact_fea = FemSolver::solve(&model).ok();
+    evaluate_eigenflow_cascade_from_model(&model, intact_fea.as_ref(), eg_report.as_ref(), config)
+}
+
+fn evaluate_eigenflow_cascade_from_model(
+    model: &StructuralModel,
+    intact_fea: Option<&crate::core::solver::AnalysisResult>,
+    eg_report: Option<&crate::core::eigengate::RedundancyAssessment>,
+    config: &EigenFlowConfig,
+) -> EigenFlowCascadeReport {
+    let n_elem = model.elements.len().max(1);
+    let init_idx = config
+        .disrupted_element_id
+        .and_then(|eid| model.elements.iter().position(|e| e.id == eid))
+        .or_else(|| {
+            eg_report.and_then(|rep| {
+                rep.member_results
+                    .iter()
+                    .min_by(|a, b| {
+                        a.eigengate
+                            .partial_cmp(&b.eigengate)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .and_then(|mr| model.elements.iter().position(|e| e.id == mr.member_id))
+            })
+        })
+        .unwrap_or(0);
+
+    let init_elem = &model.elements[init_idx];
+    let lambda_val = config.stiffness_retention_lambda.clamp(0.0, 0.90);
+    let intact_forces_kn: Vec<f64> = (0..model.elements.len())
+        .map(|i| {
+            let e = &model.elements[i];
+            let cap = (e.section.area * e.material.yield_strength / 1000.0).max(50.0);
+            intact_fea
+                .and_then(|f| f.member_axial_forces.get(i))
+                .map(|v| v.abs() / 1000.0)
+                .filter(|v| *v > 1.0)
+                .unwrap_or(cap * 0.38)
+        })
+        .collect();
+    let capacities_kn: Vec<f64> = model
+        .elements
+        .iter()
+        .map(|e| (e.section.area * e.material.yield_strength / 1000.0).max(50.0))
+        .collect();
+    let stiffnesses: Vec<f64> = model
+        .elements
+        .iter()
+        .map(|e| element_stiffness_proxy(model, e))
+        .collect();
+
+    let mut failed_set = HashSet::new();
+    let mut frontier: Vec<usize> = vec![init_idx];
+    failed_set.insert(init_idx);
+    let mut cum_extra_kn = vec![0.0_f64; model.elements.len()];
+    let mut waves = Vec::new();
+    let max_waves = 5usize;
+    let mut final_margin = 1.0_f64;
+    let mut final_rrr = 1.0_f64;
+    let mut max_dif = 1.08_f64;
+
+    for wave_index in 0..max_waves {
+        if frontier.is_empty() {
+            break;
+        }
+        let frontier_nodes: HashSet<usize> = frontier
+            .iter()
+            .flat_map(|&idx| [model.elements[idx].start_node, model.elements[idx].end_node])
+            .collect();
+        let mut surviving_neighbors: Vec<usize> = model
+            .elements
+            .iter()
+            .enumerate()
+            .filter(|&(idx, e)| {
+                !failed_set.contains(&idx)
+                    && (frontier_nodes.contains(&e.start_node)
+                        || frontier_nodes.contains(&e.end_node))
+            })
+            .map(|(idx, _)| idx)
+            .collect();
+
+        if surviving_neighbors.len() < 2 {
+            let hop2_nodes: HashSet<usize> = surviving_neighbors
+                .iter()
+                .flat_map(|&idx| [model.elements[idx].start_node, model.elements[idx].end_node])
+                .collect();
+            for (idx, e) in model.elements.iter().enumerate() {
+                if !failed_set.contains(&idx)
+                    && !surviving_neighbors.contains(&idx)
+                    && (hop2_nodes.contains(&e.start_node) || hop2_nodes.contains(&e.end_node))
+                {
+                    surviving_neighbors.push(idx);
+                }
+            }
+        }
+
+        let k_frontier: f64 = frontier.iter().map(|&idx| stiffnesses[idx]).sum();
+        let k_neighbors: f64 = surviving_neighbors.iter().map(|&idx| stiffnesses[idx]).sum();
+        let h_wave = if surviving_neighbors.is_empty() || k_neighbors <= 1e-6 {
+            1.0
+        } else {
+            (k_frontier / (k_frontier + k_neighbors)).clamp(0.18, 0.99)
+        };
+        let lambda_eff = if wave_index == 0 { lambda_val } else { 0.0 };
+        let ms_wave = (1.0 - (1.0 - lambda_eff) * h_wave).clamp(0.0, 1.0);
+        let frontier_force_kn: f64 = frontier
+            .iter()
+            .map(|&idx| intact_forces_kn[idx] + cum_extra_kn[idx])
+            .sum();
+
+        let prev_max_mu = surviving_neighbors
+            .iter()
+            .map(|&idx| {
+                let dcr = (intact_forces_kn[idx] + cum_extra_kn[idx]) / capacities_kn[idx];
+                if dcr <= 0.85 {
+                    1.0
+                } else {
+                    (1.0 + (dcr - 0.85) * 4.2).clamp(1.0, 8.0)
+                }
+            })
+            .fold(1.5_f64, f64::max);
+        // UFC 4-023-03 Dynamic Increase Factor Omega_LD = 1.08 + 0.76 / (m_req - 0.17)
+        let ufc_dif_omega = (1.08 + 0.76 / (prev_max_mu.max(1.0) - 0.17)).clamp(1.08, 2.0);
+        max_dif = max_dif.max(ufc_dif_omega);
+
+        let wave_shed_force_kn = if surviving_neighbors.is_empty() || ms_wave < 1e-4 {
+            frontier_force_kn * (1.0 - lambda_eff) * ufc_dif_omega
+        } else {
+            (frontier_force_kn * (1.0 - lambda_eff) * ufc_dif_omega * h_wave / ms_wave.max(0.08))
+                .min(frontier_force_kn * 2.5)
+        };
+
+        let mut sorted_neighbors = surviving_neighbors.clone();
+        sorted_neighbors.sort_by(|&a, &b| {
+            stiffnesses[b]
+                .partial_cmp(&stiffnesses[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let mut redistributed_members = Vec::new();
+        let mut next_frontier = Vec::new();
+        if k_neighbors > 1e-6 {
+            for &idx in sorted_neighbors.iter().take(8) {
+                let elem = &model.elements[idx];
+                let share = (stiffnesses[idx] / k_neighbors).clamp(0.0, 1.0);
+                let delta_n_kn = wave_shed_force_kn * share;
+                cum_extra_kn[idx] += delta_n_kn;
+                let dcr = ((intact_forces_kn[idx] + cum_extra_kn[idx]) / capacities_kn[idx])
+                    .clamp(0.0, 4.0);
+                let mu = if dcr <= 0.85 {
+                    1.0
+                } else {
+                    (1.0 + (dcr - 0.85) * 4.2).clamp(1.0, 8.0)
+                };
+                let overload = dcr >= 1.0 || mu >= 3.5;
+                if overload && failed_set.insert(idx) {
+                    next_frontier.push(idx);
+                }
+                redistributed_members.push(RedistributedMemberFlow {
+                    element_id: elem.id,
+                    element_name: elem.name.clone(),
+                    p0_enu_m: node_enu_for(model, elem.start_node),
+                    p1_enu_m: node_enu_for(model, elem.end_node),
+                    intact_axial_kn: intact_forces_kn[idx],
+                    delta_n_kn,
+                    share_pct: share * 100.0,
+                    post_yield_dcr: dcr,
+                    ductility_mu: mu,
+                    is_critical_overload: overload,
+                });
+            }
+        }
+
+        let max_wave_dcr = redistributed_members
+            .iter()
+            .map(|m| m.post_yield_dcr)
+            .fold(0.0_f64, f64::max);
+        let wave_rrr = if ms_wave < 1e-4 || surviving_neighbors.is_empty() {
+            0.0
+        } else {
+            (lambda_eff + (1.0 - lambda_eff) * (1.0 - 0.55 * max_wave_dcr.min(1.5))).clamp(0.05, 1.0)
+        };
+        let stress_pen = (wave_shed_force_kn / (frontier_force_kn.max(50.0) * 1.8)).min(1.0);
+        let wave_score = if ms_wave < 1e-4 || surviving_neighbors.is_empty() {
+            0.0
+        } else {
+            (0.5 * (1.0 + wave_rrr) * (1.0 - 0.45 * stress_pen) * ms_wave.sqrt()).clamp(0.0, 1.0)
+        };
+
+        let failed_ids: Vec<usize> = frontier.iter().map(|&idx| model.elements[idx].id).collect();
+        let failed_names: Vec<String> = frontier
+            .iter()
+            .map(|&idx| model.elements[idx].name.clone())
+            .collect();
+        let failed_segs: Vec<([f64; 3], [f64; 3])> = frontier
+            .iter()
+            .map(|&idx| {
+                let e = &model.elements[idx];
+                (node_enu_for(model, e.start_node), node_enu_for(model, e.end_node))
+            })
+            .collect();
+        let cum_ratio_pct = (failed_set.len() as f64 / n_elem as f64) * 100.0;
+
+        waves.push(EigenFlowCascadeWave {
+            wave_index,
+            failed_element_ids: failed_ids,
+            failed_element_names: failed_names,
+            failed_segments_enu_m: failed_segs,
+            redistributed_members,
+            ufc_dif_omega,
+            wave_shed_force_kn,
+            cumulative_failed_ratio_pct: cum_ratio_pct,
+            residual_stability_margin_ms: ms_wave,
+            wave_eigengate_score: wave_score,
+        });
+
+        final_margin = ms_wave;
+        final_rrr = wave_rrr;
+        if next_frontier.is_empty() || ms_wave < 0.05 {
+            break;
+        }
+        frontier = next_frontier;
+    }
+
+    let total_failed = failed_set.len();
+    let damage_ratio_pct = (total_failed as f64 / n_elem as f64) * 100.0;
+    let verdict = if final_margin < 0.05 || damage_ratio_pct >= 45.0 || total_failed >= n_elem {
+        EigenFlowCascadeVerdict::GlobalMechanism
+    } else if waves.len() > 1 || damage_ratio_pct >= 18.0 {
+        EigenFlowCascadeVerdict::PartialCollapse
+    } else {
+        EigenFlowCascadeVerdict::Arrested
+    };
+
+    let summary_verdict = format!(
+        "Cascade [{}] on #{}: {} wave(s), {}/{} failed ({:.1}%), UFC DIF={:.2}x, Final m_s={:.3}, RRR={:.2}",
+        verdict.label(),
+        init_elem.id,
+        waves.len(),
+        total_failed,
+        n_elem,
+        damage_ratio_pct,
+        max_dif,
+        final_margin,
+        final_rrr,
+    );
+
+    EigenFlowCascadeReport {
+        initiating_element_id: init_elem.id,
+        initiating_element_name: init_elem.name.clone(),
+        ufc_dynamic_increase_factor: max_dif,
+        max_waves_simulated: max_waves,
+        waves,
+        total_failed_elements: total_failed,
+        total_elements: n_elem,
+        damage_ratio_pct,
+        final_stability_margin_ms: final_margin,
+        final_residual_reserve_rrr: final_rrr,
+        verdict,
         summary_verdict,
     }
 }
@@ -702,5 +1041,28 @@ mod tests {
         assert!(json.contains("eigengraph::eigenflow"));
         assert!(json.contains("/earth/analysis/eigenflow"));
         assert!(!json.contains("ARI"));
+    }
+
+    #[test]
+    fn test_v0888_eigenflow_sequential_cascade_and_ufc_dif() {
+        let bim = BimProject::sample_bimcraft_building();
+        let cfg = EigenFlowConfig::default();
+        let cascade = evaluate_eigenflow_cascade(&bim, None, &cfg);
+        assert!(
+            !cascade.waves.is_empty(),
+            "Cascade must simulate at least Wave 0"
+        );
+        assert!(
+            (1.08..=2.0).contains(&cascade.ufc_dynamic_increase_factor),
+            "UFC DIF must stay within [1.08, 2.0]: {}",
+            cascade.ufc_dynamic_increase_factor
+        );
+        assert!(cascade.total_failed_elements >= 1);
+        assert!(cascade.waves[0].wave_shed_force_kn > 0.0);
+
+        let studio = evaluate_eigenflow_studio(&bim, None, &cfg);
+        assert_eq!(studio.cascade.waves.len(), cascade.waves.len());
+        assert_eq!(studio.cascade.verdict, cascade.verdict);
+        assert!(!studio.cascade.summary_verdict.is_empty());
     }
 }
