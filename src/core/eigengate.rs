@@ -1294,7 +1294,7 @@ impl EigenGateEngine {
         let next_elem_id = model.elements.iter().map(|e| e.id).max().unwrap_or(0) + 1000;
         let mut candidates = Vec::new();
 
-        for (b_rank, bm) in bottlenecks.iter().take(4).enumerate() {
+        for (b_rank, bm) in bottlenecks.iter().take(3).enumerate() {
             let Some(orig_elem_idx) = model.elements.iter().position(|e| e.id == bm.member_id) else {
                 continue;
             };

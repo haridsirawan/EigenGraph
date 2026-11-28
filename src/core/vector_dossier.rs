@@ -1779,27 +1779,43 @@ pub fn build_eigenflow_nonlinear_annex_svg(
     let _ = writeln!(
         svg,
         r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="120" rx="5" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.0"/>
-<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#1e3a8a">PRESCRIPTIVE NON-LINEAR RECOMMENDATION</text>
-<text x="{:.1}" y="{:.1}" font-size="8.6" font-family="monospace" fill="#0f172a">{}</text>
-<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#1d4ed8">{}</text>
-<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
+<text x="{:.1}" y="{:.1}" font-size="9.2" font-weight="bold" fill="#1e3a8a">PRESCRIPTIVE NON-LINEAR &amp; CASCADE VERDICT</text>
+<text x="{:.1}" y="{:.1}" font-size="8.4" font-family="monospace" fill="#0f172a">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.2" font-family="monospace" fill="#9a3412">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.0" font-family="monospace" fill="#1d4ed8">{}</text>
+<text x="{:.1}" y="{:.1}" font-size="8.0" font-family="monospace" fill="#475569">SHA-256 SEAL: {seal_token}</text>"##,
         p3x + 14.0,
         p3y + 368.0,
         p3w - 28.0,
         p3x + 24.0,
-        p3y + 390.0,
+        p3y + 388.0,
         p3x + 24.0,
-        p3y + 414.0,
+        p3y + 408.0,
         escape_xml(&truncate_clean(&wb.prescriptive_recommendation, 84)),
         p3x + 24.0,
-        p3y + 440.0,
+        p3y + 428.0,
+        escape_xml(&truncate_clean(
+            &format!(
+                "CASCADE: {} | {}w, {}/{} ({:.1}%), UFC DIF={:.2}x, m_s={:.2}",
+                report.cascade.verdict.label(),
+                report.cascade.waves.len(),
+                report.cascade.total_failed_elements,
+                report.cascade.total_elements,
+                report.cascade.damage_ratio_pct,
+                report.cascade.ufc_dynamic_increase_factor,
+                report.cascade.final_stability_margin_ms,
+            ),
+            92,
+        )),
+        p3x + 24.0,
+        p3y + 450.0,
         escape_xml(
             &checkpoint_hash
                 .map(|h| format!("IFCX CHECKPOINT SEAL: {h}"))
                 .unwrap_or_else(|| "IFCX CHECKPOINT SEAL: Live Local EigenFlow Baseline".to_string()),
         ),
         p3x + 24.0,
-        p3y + 466.0,
+        p3y + 470.0,
     );
 
     // Panel 4: Woodbury P1 -> P2 Load-Path Redistribution Schedule (Bottom Right)

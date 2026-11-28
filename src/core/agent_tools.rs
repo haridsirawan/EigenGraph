@@ -91,6 +91,17 @@ pub enum ToolCadLayerCommand {
     ExportDxf,
 }
 
+/// Non-linear EigenFlow Cascade & EigenGate Sensitivity action requested by the Gemini agent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ToolEigenFlowCommand {
+    RunCascade {
+        disrupted_element_id: Option<usize>,
+        lambda: f64,
+        show_3d: bool,
+    },
+    OpenSensitivityAdvisor,
+}
+
 /// Deterministic outcome returned by [`execute_headless_tool`] and fed back to Gemini via `functionResponse`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolExecutionOutcome {
@@ -105,6 +116,7 @@ pub struct ToolExecutionOutcome {
     pub fly_target: Option<(f64, f64, f32)>,
     pub vg_command: Option<ToolVgCommand>,
     pub cad_layer_command: Option<ToolCadLayerCommand>,
+    pub eigenflow_command: Option<ToolEigenFlowCommand>,
 }
 
 impl ToolExecutionOutcome {
@@ -122,11 +134,12 @@ impl ToolExecutionOutcome {
             fly_target: None,
             vg_command: None,
             cad_layer_command: None,
+            eigenflow_command: None,
         }
     }
 }
 
-const TOOL_NAMES: [&str; 17] = [
+const TOOL_NAMES: [&str; 19] = [
     "inspect_model",
     "run_structural_audit",
     "run_solar_ottv",
@@ -144,6 +157,8 @@ const TOOL_NAMES: [&str; 17] = [
     "fly_to_location",
     "set_visibility_graphics",
     "manage_cad_layers",
+    "run_eigengate_n2_sensitivity",
+    "run_eigenflow_cascade",
 ];
 
 /// Returns all registered headless engineering tool names.
@@ -454,6 +469,40 @@ pub fn gemini_function_declarations() -> Value {
                         },
                         "required": ["mode"]
                     }
+                },
+                {
+                    "name": "run_eigengate_n2_sensitivity",
+                    "description": "Evaluate simultaneous N-2 Woodbury failure pairs and rank optimal section upgrades & parallel brace retrofits by delta-ARI per ton.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "open_studio": {
+                                "type": "BOOLEAN",
+                                "description": "Whether to open the Cascade & Retrofit Studio drawer in Dynamic Island (default true)."
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "run_eigenflow_cascade",
+                    "description": "Simulate sequential N-1 -> N-2 -> ... -> N-k progressive collapse propagation with UFC 4-023-03 Dynamic Increase Factor (DIF) and optionally toggle 3D wave visualization.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "disrupted_element_id": {
+                                "type": "INTEGER",
+                                "description": "Optional FEM element ID to initiate P1 failure (auto-picks lowest EigenGate bottleneck if omitted)."
+                            },
+                            "lambda": {
+                                "type": "NUMBER",
+                                "description": "Post-yield stiffness retention factor in [0.0, 0.90] (default 0.0 = full removal)."
+                            },
+                            "show_3d": {
+                                "type": "BOOLEAN",
+                                "description": "Whether to enable 3D WebGPU multi-wave collapse conduit visualization (default true)."
+                            }
+                        }
+                    }
                 }
             ]
         }
@@ -660,6 +709,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
                 vg_command: None,
                 cad_layer_command: None,
+                eigenflow_command: None,
             }
         }
         "run_structural_audit" => {
@@ -725,6 +775,7 @@ pub fn execute_headless_tool_with_city(
                         fly_target: None,
                         vg_command: None,
                         cad_layer_command: None,
+                eigenflow_command: None,
                     }
                 }
                 Err(err) => ToolExecutionOutcome::err(name, err),
@@ -786,6 +837,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
                 vg_command: None,
                 cad_layer_command: None,
+                eigenflow_command: None,
             }
         }
         "run_daylight_analysis" => {
@@ -838,6 +890,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
                 vg_command: None,
                 cad_layer_command: None,
+                eigenflow_command: None,
             }
         }
         "run_mep_systems" => {
@@ -893,6 +946,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
                 vg_command: None,
                 cad_layer_command: None,
+                eigenflow_command: None,
             }
         }
         "run_clash_detection" => {
@@ -959,6 +1013,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
                 vg_command: None,
                 cad_layer_command: None,
+                eigenflow_command: None,
             }
         }
         "run_urban_utilities" => {
@@ -1017,6 +1072,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
                 vg_command: None,
                 cad_layer_command: None,
+                eigenflow_command: None,
             }
         }
         "evaluate_road_intersections" => {
@@ -1073,6 +1129,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
                 vg_command: None,
                 cad_layer_command: None,
+                eigenflow_command: None,
             }
         }
         "promote_city_building_to_bim" => {
@@ -1137,6 +1194,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: Some((summary.target_lat_lon.0, summary.target_lat_lon.1, 17.8)),
                 vg_command: None,
                 cad_layer_command: None,
+                eigenflow_command: None,
             }
         }
         "resize_column" => {
@@ -1185,6 +1243,7 @@ pub fn execute_headless_tool_with_city(
                     fly_target: None,
                     vg_command: None,
                     cad_layer_command: None,
+                eigenflow_command: None,
                 },
                 Err(err) => ToolExecutionOutcome::err(name, err),
             }
@@ -1227,6 +1286,7 @@ pub fn execute_headless_tool_with_city(
                     fly_target: None,
                     vg_command: None,
                     cad_layer_command: None,
+                eigenflow_command: None,
                 },
                 Err(err) => ToolExecutionOutcome::err(name, err),
             }
@@ -1264,6 +1324,7 @@ pub fn execute_headless_tool_with_city(
                     fly_target: None,
                     vg_command: None,
                     cad_layer_command: None,
+                eigenflow_command: None,
                 },
                 Err(err) => ToolExecutionOutcome::err(name, err),
             }
@@ -1291,6 +1352,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
                 vg_command: None,
                 cad_layer_command: None,
+                eigenflow_command: None,
             },
             Err(err) => ToolExecutionOutcome::err(name, err),
         },
@@ -1362,6 +1424,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
                 vg_command: None,
                 cad_layer_command: None,
+                eigenflow_command: None,
             }
         }
         "fly_to_location" => {
@@ -1393,6 +1456,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: Some((lat_c, lon_c, zoom)),
                 vg_command: None,
                 cad_layer_command: None,
+                eigenflow_command: None,
             }
         }
         "set_visibility_graphics" => {
@@ -1493,6 +1557,7 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
                 vg_command: Some(cmd),
                 cad_layer_command: None,
+                eigenflow_command: None,
             }
         }
         "manage_cad_layers" => {
@@ -1658,6 +1723,135 @@ pub fn execute_headless_tool_with_city(
                 fly_target: None,
                 vg_command: None,
                 cad_layer_command: Some(cmd),
+                eigenflow_command: None,
+            }
+        }
+        "run_eigengate_n2_sensitivity" => {
+            if bim_bus.project.is_empty() {
+                return ToolExecutionOutcome::err(
+                    name,
+                    "Active BIM project is empty; add columns/beams or promote a parcel first.",
+                );
+            }
+            let model = bim_bus.project.to_structural_model();
+            if model.elements.len() < 2 || model.nodes.len() < 3 {
+                return ToolExecutionOutcome::err(
+                    name,
+                    "Need at least 2 structural frame elements to evaluate N-2 sensitivity & retrofit advisor.",
+                );
+            }
+            match EigenGateEngine::evaluate_sensitivity_and_retrofit_advisor(&model) {
+                Ok(rep) => {
+                    let top_candidates: Vec<Value> = rep
+                        .candidates
+                        .iter()
+                        .take(6)
+                        .map(|c| {
+                            json!({
+                                "member_id": c.member_id,
+                                "member_name": c.member_name,
+                                "strategy": c.strategy.label(),
+                                "baseline_member_ari": c.baseline_member_ari,
+                                "projected_member_ari": c.projected_member_ari,
+                                "delta_system_ari": c.delta_system_ari,
+                                "added_mass_kg": c.added_mass_kg,
+                                "estimated_cost_usd": c.estimated_cost_usd,
+                                "efficiency_ari_per_ton": c.efficiency_ari_per_ton,
+                            })
+                        })
+                        .collect();
+                    ToolExecutionOutcome {
+                        name: name.to_string(),
+                        ok: true,
+                        summary: rep.summary_verdict.clone(),
+                        result_json: json!({
+                            "ok": true,
+                            "baseline_min_ari": rep.baseline_min_ari,
+                            "baseline_avg_ari": rep.baseline_avg_ari,
+                            "baseline_critical_count": rep.baseline_critical_count,
+                            "n2_coupled_mechanism_pairs": rep.n2_coupled_mechanism_pairs,
+                            "n2_min_pair_ari": rep.n2_min_pair_ari,
+                            "top_bottleneck_member_id": rep.top_bottleneck_member_id,
+                            "top_bottleneck_name": rep.top_bottleneck_name,
+                            "candidates": top_candidates,
+                            "summary_verdict": rep.summary_verdict,
+                        }),
+                        mutated_bim: false,
+                        sync_fem_and_earth: false,
+                        fit_camera: false,
+                        section_box_update: None,
+                        fly_target: None,
+                        vg_command: None,
+                        cad_layer_command: None,
+                        eigenflow_command: Some(ToolEigenFlowCommand::OpenSensitivityAdvisor),
+                    }
+                }
+                Err(err) => ToolExecutionOutcome::err(name, err),
+            }
+        }
+        "run_eigenflow_cascade" => {
+            use crate::core::eigenflow::{evaluate_eigenflow_cascade, EigenFlowConfig};
+
+            let disrupted_element_id = arg_usize(&call.args, "disrupted_element_id");
+            let lambda = arg_f64(&call.args, "lambda")
+                .unwrap_or(0.0)
+                .clamp(0.0, 0.90);
+            let show_3d = call
+                .args
+                .get("show_3d")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let cfg = EigenFlowConfig {
+                disrupted_element_id,
+                stiffness_retention_lambda: lambda,
+                ..EigenFlowConfig::default()
+            };
+            let rep = evaluate_eigenflow_cascade(&bim_bus.project, Some(site), &cfg);
+            let waves_json: Vec<Value> = rep
+                .waves
+                .iter()
+                .map(|w| {
+                    json!({
+                        "wave_index": w.wave_index,
+                        "failed_element_ids": w.failed_element_ids,
+                        "ufc_dif_omega": w.ufc_dif_omega,
+                        "wave_shed_force_kn": w.wave_shed_force_kn,
+                        "cumulative_failed_ratio_pct": w.cumulative_failed_ratio_pct,
+                        "residual_stability_margin_ms": w.residual_stability_margin_ms,
+                    })
+                })
+                .collect();
+            ToolExecutionOutcome {
+                name: name.to_string(),
+                ok: true,
+                summary: rep.summary_verdict.clone(),
+                result_json: json!({
+                    "ok": true,
+                    "initiating_element_id": rep.initiating_element_id,
+                    "initiating_element_name": rep.initiating_element_name,
+                    "ufc_dynamic_increase_factor": rep.ufc_dynamic_increase_factor,
+                    "wave_count": rep.waves.len(),
+                    "waves": waves_json,
+                    "total_failed_elements": rep.total_failed_elements,
+                    "total_elements": rep.total_elements,
+                    "damage_ratio_pct": rep.damage_ratio_pct,
+                    "final_stability_margin_ms": rep.final_stability_margin_ms,
+                    "final_residual_reserve_rrr": rep.final_residual_reserve_rrr,
+                    "verdict": rep.verdict.label(),
+                    "summary_verdict": rep.summary_verdict,
+                }),
+                mutated_bim: false,
+                sync_fem_and_earth: false,
+                fit_camera: false,
+                section_box_update: None,
+                fly_target: None,
+                vg_command: None,
+                cad_layer_command: None,
+                eigenflow_command: Some(ToolEigenFlowCommand::RunCascade {
+                    disrupted_element_id,
+                    lambda,
+                    show_3d,
+                }),
             }
         }
         _ => ToolExecutionOutcome::err(name, format!("Unknown engineering tool '{name}'.")),
@@ -1675,7 +1869,7 @@ mod tests {
         let fn_decls = decls[0]["functionDeclarations"]
             .as_array()
             .expect("functionDeclarations array");
-        assert_eq!(fn_decls.len(), 17);
+        assert_eq!(fn_decls.len(), 19);
         for expected in registered_tool_names() {
             assert!(
                 fn_decls.iter().any(|d| d["name"].as_str() == Some(*expected)),
@@ -1898,6 +2092,49 @@ mod tests {
             Some(ToolCadLayerCommand::AddLayer {
                 name: "S-FOUNDATION-GRID".to_string(),
                 color_rgb: [34, 197, 94],
+            })
+        );
+
+        let mut ef_bus = BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let sens = execute_headless_tool(
+            &GeminiToolCall {
+                name: "run_eigengate_n2_sensitivity".to_string(),
+                args: json!({ "open_studio": true }),
+            },
+            &mut ef_bus,
+            &site,
+            (-6.2088, 106.8456),
+            0,
+            false,
+        );
+        assert!(sens.ok, "Sensitivity failed: {}", sens.summary);
+        assert_eq!(
+            sens.eigenflow_command,
+            Some(ToolEigenFlowCommand::OpenSensitivityAdvisor)
+        );
+        assert!(sens.result_json["candidates"]
+            .as_array()
+            .is_some_and(|a| !a.is_empty()));
+
+        let cascade = execute_headless_tool(
+            &GeminiToolCall {
+                name: "run_eigenflow_cascade".to_string(),
+                args: json!({ "lambda": 0.0, "show_3d": true }),
+            },
+            &mut ef_bus,
+            &site,
+            (-6.2088, 106.8456),
+            0,
+            false,
+        );
+        assert!(cascade.ok, "Cascade failed: {}", cascade.summary);
+        assert!(cascade.result_json["wave_count"].as_u64().unwrap_or(0) >= 1);
+        assert_eq!(
+            cascade.eigenflow_command,
+            Some(ToolEigenFlowCommand::RunCascade {
+                disrupted_element_id: None,
+                lambda: 0.0,
+                show_3d: true,
             })
         );
 

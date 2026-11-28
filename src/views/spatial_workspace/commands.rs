@@ -1091,6 +1091,7 @@ impl SpatialWorkspaceState {
                 compute_site_environmental_coupling(lat, lon, &universal_canvas.earth_world);
             let mut response_parts = Vec::with_capacity(reply.function_calls.len());
             let mut summaries = Vec::with_capacity(reply.function_calls.len());
+            let mut refresh_eigenflow_after_batch = false;
 
             for call in &reply.function_calls {
                 let outcome = crate::core::agent_tools::execute_headless_tool_with_city(
@@ -1354,6 +1355,30 @@ impl SpatialWorkspaceState {
                         }
                     }
                 }
+                if let Some(ef_cmd) = outcome.eigenflow_command.clone() {
+                    match ef_cmd {
+                        crate::core::agent_tools::ToolEigenFlowCommand::OpenSensitivityAdvisor => {
+                            refresh_eigenflow_after_batch = true;
+                            self.open_eigenflow_drawer(2);
+                        }
+                        crate::core::agent_tools::ToolEigenFlowCommand::RunCascade {
+                            disrupted_element_id,
+                            lambda,
+                            show_3d,
+                        } => {
+                            if let Some(eid) = disrupted_element_id {
+                                universal_canvas.eigenflow_config.disrupted_element_id = Some(eid);
+                            }
+                            universal_canvas.eigenflow_config.stiffness_retention_lambda =
+                                lambda.clamp(0.0, 0.90);
+                            refresh_eigenflow_after_batch = true;
+                            if show_3d {
+                                universal_canvas.eigenflow_overlay_visible = true;
+                            }
+                            self.open_eigenflow_drawer(2);
+                        }
+                    }
+                }
                 self.push_trace(format!("Tool {} -> {}", call.name, outcome.summary), outcome.ok);
                 summaries.push(format!("• `{}`: {}", call.name, outcome.summary));
                 response_parts.push(serde_json::json!({
@@ -1362,6 +1387,11 @@ impl SpatialWorkspaceState {
                         "response": { "result": outcome.result_json }
                     }
                 }));
+            }
+            if refresh_eigenflow_after_batch {
+                let rep = universal_canvas.run_eigenflow_studio(&build_view.bim_bus.project);
+                universal_canvas.eigenflow_active_cascade_wave =
+                    rep.cascade.waves.len().saturating_sub(1);
             }
 
             let model_content = reply.raw_model_content.clone().unwrap_or_else(|| {
@@ -5557,13 +5587,41 @@ impl SpatialWorkspaceState {
             universal_canvas.visibility_graphics.cad_layers.len(),
             universal_canvas.visibility_graphics.color_by_layer,
         );
+        let cascade_ctx = universal_canvas
+            .last_eigenflow_report
+            .as_ref()
+            .map(|r| {
+                format!(
+                    " | EigenFlow Cascade: {}, waves={}, failed={}/{}, DIF={:.2}x",
+                    r.cascade.verdict.label(),
+                    r.cascade.waves.len(),
+                    r.cascade.total_failed_elements,
+                    r.cascade.total_elements,
+                    r.cascade.ufc_dynamic_increase_factor
+                )
+            })
+            .unwrap_or_default();
+        let sens_ctx = universal_canvas
+            .last_eigengate_sensitivity
+            .as_ref()
+            .and_then(|s| s.candidates.first().map(|c| (s, c)))
+            .map(|(s, c)| {
+                format!(
+                    " | EigenGate Sensitivity: N-2 Mech={}, Top={} #{} ({:.1} ARI/t)",
+                    s.n2_coupled_mechanism_pairs,
+                    c.strategy.label(),
+                    c.member_id,
+                    c.efficiency_ari_per_ton
+                )
+            })
+            .unwrap_or_default();
 
         format!(
             "You are EigenAI inside EigenGraph (Geospatial Earth + OpenBIM/6-DOF FEM + MEP/BCF/Urban Infra platform). \
              Respond concisely in professional civil & structural engineering English. \
              Prefer calling the registered engineering function tools ({tool_list}) to inspect deterministic physics and verify modifications rather than guessing numbers. \
              Current Earth Site: ({lat:.3} deg, {lon:.3} deg), Elevation={:.1}m, Seismic Ss={:.2}g, Wind={:.1}m/s, SectionBox={sec_box}. \
-             Active BIM '{}': elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}{mep_ctx}{clash_ctx}{util_ctx}{int_ctx}{promo_ctx}{vg_ctx}{cad_ctx}. \
+             Active BIM '{}': elements={}, Slabs={}, FEM members={}. Top members: {crit_ctx}{mep_ctx}{clash_ctx}{util_ctx}{int_ctx}{promo_ctx}{vg_ctx}{cad_ctx}{cascade_ctx}{sens_ctx}. \
              City Scene: {} roads, {} zones. Pure-Vector Sheets available: S-000, S-100..S-118; CAD DXF & VG-filtered IFCX exports supported via tools. \
              For legacy studio sheets not covered by function declarations, you may append bracket directives such as \
              [[OPEN_SHEET:Analysis|Scheduling|Budgeting|Sustainability|Safety|Report]].",

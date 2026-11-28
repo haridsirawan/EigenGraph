@@ -7,7 +7,18 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.9 (9/10)]
+## [0.8.9] — 2026-11-28
+
+### Update 10/10 (`v0.8.9` Milestone Release) — Native Gemini Tools #18–#19, Cascade IFCX/Sheet `S-104` Parity & Release `v0.8.9`
+- **Native Gemini Engineering Tools #18 & #19 (`src/core/{agent_tools.rs, mod.rs}`, `src/views/spatial_workspace/commands.rs`)**:
+  - Registered `"run_eigengate_n2_sensitivity"` (Woodbury `N-2` mechanism screening + $\Delta\text{ARI}/\text{Ton}$ sensitivity ranking) and `"run_eigenflow_cascade"` (sequential `N-1 -> N-k` collapse cascade + UFC DIF) in [`TOOL_NAMES`](src/core/agent_tools.rs) (19 native tools total), [`gemini_function_declarations()`](src/core/agent_tools.rs), and [`execute_headless_tool_with_city`](src/core/agent_tools.rs).
+  - Wired `outcome.eigenflow_command` inside [`SpatialWorkspaceState::handle_gemini_reply`](src/views/spatial_workspace/commands.rs) and surfaced live Cascade & EigenGate Sensitivity telemetry in [`SpatialWorkspaceState::build_gemini_copilot_system_prompt`](src/views/spatial_workspace/commands.rs).
+- **IFCX & Archival Sheet `S-104` Cascade Parity (`src/core/{eigenflow.rs, vector_dossier.rs}`)**:
+  - Enriched [`EigenFlowIfcxOverlay`](src/core/eigenflow.rs) (`eigengraph::eigenflow`) with `cascade_waves_count`, `cascade_failed_elements`, `cascade_damage_ratio_pct`, `cascade_ufc_dif`, and `cascade_verdict`.
+  - Updated pure-vector Sheet `S-104` ([`build_eigenflow_nonlinear_annex_svg`](src/core/vector_dossier.rs)) to embed `report.cascade.summary_verdict`.
+- **Milestone Verification & Release (`v0.8.9`)**:
+  - Bumped platform version to `0.8.9` in [`Cargo.toml`](Cargo.toml), [`About EigenGraph`](src/views/settings.rs), [`docs/CHANGELOG.md`](docs/CHANGELOG.md), and [`docs/IFCX Earth.md`](docs/IFCX%20Earth.md).
+  - Verified full native test suite (`cargo test --lib`) plus `wasm32-unknown-unknown` check and release build before deploying to `origin main`.
 
 ### Update 9/10 (`v0.8.8.9` -> `v0.8.9`) — Interactive EigenFlow Cascade & Retrofit Studio Tab, 3D Multi-Wave Overlays, Live Properties Failure Trigger & `/eigenflow-cascade` Slash Commands
 - **Dynamic Island `Cascade & Retrofit` Studio Tab (`src/views/spatial_workspace/{mod.rs, drawers.rs}`)**:

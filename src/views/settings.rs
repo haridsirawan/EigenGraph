@@ -96,18 +96,18 @@ pub const ENGINEERING_MATH_CATALOG: &[AboutFeatureMathSpec] = &[
     AboutFeatureMathSpec {
         category_idx: 2,
         category_badge: "EigenGate & Flow",
-        title: "Branch 1: Linear EigenGate Redundancy & SVD Kinematic Guard",
+        title: "Branch 1: Linear EigenGate Redundancy, Sensitivity & Retrofit Advisor",
         modules_and_codes: "core/eigengate.rs • UFC 4-023-03 Alternate Path, GSA",
-        capabilities: "Evaluates O(N^2) single-element (N-1) and Woodbury simultaneous pair (N-2) outage redundancy, computes spectral leverage & mechanism ratios, and detects geometric instability via SVD.",
-        math_logic: "Element Leverage: h_e = k_e * b_e^T * K^-1 * b_e\nKinematic Mechanism Guard: m_e = 1 - h_e  (singularity as m_e -> 0)\nSherman-Morrison (N-1): (K - k_e*b_e*b_e^T)^-1 = K^-1 + (K^-1*b_e*b_e^T*K^-1*k_e) / (1 - h_e)\nWoodbury (N-2): S = I_2 - U^T * K^-1 * U,  det(S) -> Redundancy Pair Index\nSingularity: sigma_min(K) via SVD; Aggregate Redundancy Index (ARI in [0, 1])",
+        capabilities: "Evaluates O(N^2) single-element (N-1) and Woodbury simultaneous pair (N-2) outage redundancy, detects geometric instability via SVD, and ranks section upgrades & parallel braces by delta-ARI per ton.",
+        math_logic: "Element Leverage: h_e = k_e * b_e^T * K^-1 * b_e\nKinematic Mechanism Guard: m_e = 1 - h_e  (singularity as m_e -> 0)\nWoodbury (N-2): S = I_2 - U^T * K^-1 * U,  det(S) -> Redundancy Pair Index\nSensitivity Ranking: eff = max(delta_ARI_sys, delta_ARI_mem) / added_mass_ton",
     },
     AboutFeatureMathSpec {
         category_idx: 2,
         category_badge: "EigenGate & Flow",
-        title: "Branch 2: EigenFlow Non-Linear Woodbury P1->P2 & Pushover ADRS",
-        modules_and_codes: "core/eigenflow.rs, core/pushover.rs, core/nonlinear.rs • ATC-40, ASCE 41-17",
-        capabilities: "Models staggered stiffness degradation (lambda), 1-hop & 2-hop topological load-path redistribution, P-Delta pushover capacity curves, ADRS capacity-demand intersection, and plastic hinge states.",
-        math_logic: "Degraded Stiffness: K_deg = K - (1 - lambda) * k_e * b_e * b_e^T\nRedistribution Reserve: RRR = V_u / V_y ;  Ductility mu = Delta_u / Delta_y\nADRS Transform: S_a = V_b / (W * alpha_1),  S_d = Delta_roof / (PF_1 * phi_1)\nEffective Damping: beta_eff = 0.05 + kappa * (2/pi) * (mu*alpha - mu + 1) / ...",
+        title: "Branch 2: EigenFlow Non-Linear Woodbury P1->P2, Sequential Cascade & ADRS",
+        modules_and_codes: "core/eigenflow.rs, core/pushover.rs, core/nonlinear.rs • ATC-40, ASCE 41-17, UFC 4-023-03",
+        capabilities: "Models staggered stiffness degradation (lambda), sequential multi-wave collapse cascades (N-1 -> N-k) with UFC Dynamic Increase Factor, Pushover ADRS capacity-demand intersection, and 3D WebGPU/CPU overlays.",
+        math_logic: "Degraded Stiffness: K_deg = K - (1 - lambda) * k_e * b_e * b_e^T\nUFC 4-023-03 DIF: Omega_LD = clamp(1.08 + 0.76 / (mu - 0.17), 1.08, 2.0)\nRedistribution Reserve: RRR = V_u / V_y ;  Ductility mu = Delta_u / Delta_y\nADRS Transform: S_a = V_b / (W * alpha_1),  S_d = Delta_roof / (PF_1 * phi_1)",
     },
     AboutFeatureMathSpec {
         category_idx: 1,
@@ -1165,7 +1165,7 @@ mod tests {
 
     #[test]
     fn test_v088_milestone_release_version_and_about_catalog() {
-        assert_eq!(env!("CARGO_PKG_VERSION"), "0.8.8");
+        assert_eq!(env!("CARGO_PKG_VERSION"), "0.8.9");
         assert!(ENGINEERING_MATH_CATALOG.len() >= 20);
         assert!(ENGINEERING_MATH_CATALOG
             .iter()

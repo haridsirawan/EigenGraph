@@ -389,7 +389,8 @@ pub use daylight_interior::{
 };
 pub use agent_tools::{
     execute_headless_tool, gemini_function_declarations, registered_tool_names, GeminiToolCall,
-    ToolCadLayerCommand, ToolExecutionOutcome, ToolSectionBoxCommand, ToolVgCommand,
+    ToolCadLayerCommand, ToolEigenFlowCommand, ToolExecutionOutcome, ToolSectionBoxCommand,
+    ToolVgCommand,
 };
 pub use mep_engine::{
     evaluate_mep_systems, FireHazardClass, FireSprinklerSummary, HvacSystemPreset,

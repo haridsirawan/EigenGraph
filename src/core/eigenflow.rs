@@ -133,6 +133,16 @@ pub struct EigenFlowIfcxOverlay {
     pub ductility_mu: f64,
     pub redistributed_p2_ids: Vec<usize>,
     pub redistributed_p2_delta_n_kn: Vec<f64>,
+    #[serde(default)]
+    pub cascade_waves_count: usize,
+    #[serde(default)]
+    pub cascade_failed_elements: usize,
+    #[serde(default)]
+    pub cascade_damage_ratio_pct: f64,
+    #[serde(default)]
+    pub cascade_ufc_dif: f64,
+    #[serde(default)]
+    pub cascade_verdict: String,
     pub summary_verdict: String,
 }
 
@@ -243,6 +253,11 @@ impl EigenFlowStudioReport {
                 .iter()
                 .map(|m| m.delta_n_kn)
                 .collect(),
+            cascade_waves_count: self.cascade.waves.len(),
+            cascade_failed_elements: self.cascade.total_failed_elements,
+            cascade_damage_ratio_pct: self.cascade.damage_ratio_pct,
+            cascade_ufc_dif: self.cascade.ufc_dynamic_increase_factor,
+            cascade_verdict: self.cascade.summary_verdict.clone(),
             summary_verdict: self.summary_verdict.clone(),
         }
     }

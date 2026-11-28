@@ -1,8 +1,8 @@
 # EigenGraph IFCX Earth — 100% Pure-Rust • 100% Vector • 100% IFCX (IFC 5) Living Earth Structural Simulator
 
-> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.8` Delivered**  
+> **Status**: Complete Roadmap Implemented — **`v0.6.4` – `v0.8.9` Delivered**  
 > **Core Architectural Mandate**: **100% Pure Rust • 100% Vector • 100% Pure WebGPU (`wgpu` + WGSL) • 100% IFCX (buildingSMART IFC 5 JSON ECS) • 0% Legacy STEP IFC (`IFC2x3`/`IFC4`/`IFC4.3`) • 0% WebGL • 0% External Raster**  
-> **Current Platform**: EigenGraph `v0.8.8` (*Cities: Skylines II × IFCX* Living Earth World-Building + Hardware WebGPU Section Box & Underground X-Ray + Building MEP / 3D Clash BCF / Subsurface Urban Utilities / Smart Intersections + Native 15-Tool Gemini Agent + Master Dossier `S-000` [`S-100`–`S-118`])  
+> **Current Platform**: EigenGraph `v0.8.9` (*Cities: Skylines II × IFCX* Living Earth World-Building + Unified Split `Project Browser` / `Live Properties` + Visibility/Graphics & AutoCAD-Compatible CAD Layers + Uniform Dynamic Island + EigenFlow Sequential Collapse Cascade (`N-1 -> N-k` + UFC DIF) & EigenGate Sensitivity Retrofit Advisor + Native 19-Tool Gemini Agent + Master Dossier `S-000` [`S-100`–`S-118`])  
 > **UI Contract Alignment**: Strictly preserves the Single Unified Dynamically Widening Liquid Glass Dynamic Island (zero detached pop-ups) and Edge-to-Edge 3D Earth Viewport defined in [`docs/UI_ARCHITECTURE.md`](UI_ARCHITECTURE.md).
 
 ---
@@ -286,3 +286,9 @@ Strictly aligned with EigenGraph's sequential semantic versioning rule (`AGENTS.
 - **Subsurface Urban Utilities (`wgpu::CompareFunction::Always` X-Ray), City-to-BIM & Smart Road Intersections (`S-118`) + Master Index `S-000` (`v0.8.7.7`–`v0.8.8`)**:
   - `urban_utilities` (`eigengraph::gis::urban_utilities`, `material_kind = 33.0`): Road-following buried water, sewer/storm, and 20 kV power networks rendered through terrain via dedicated `xray_pipeline`.
   - `city_promotion` (`eigengraph::gis::city_intersections`): `TJunction` / `FourWayCross` / `Roundabout` detection with HCM 6th Ed. LOS grading, 3D WebGPU crosswalks & roundabouts, live City-to-BIM promotion into editable 6-DOF `BimProject`, 15 registered Gemini engineering tools, and Master Dossier Index `S-000` spanning all 19 archival sheets `S-100`–`S-118`.
+
+### Phase 89 (`v0.8.9`) — Unified Project Browser & Live Properties, AutoCAD CAD Layers & VG, Uniform Dynamic Island, EigenFlow Cascade (`N-1 -> N-k` + UFC DIF), EigenGate Sensitivity & 19-Tool Gemini Agent *(Implemented)*
+- **Unified Split `Project Browser`, `Live Properties` & CAD/VG Layer Ecosystem (`v0.8.8.1`–`v0.8.8.7`)**:
+  - Added Row A `Project Browser` & `Properties` quick pills, Split `Project Browser` (`Model Tree` | `Layers / VG` | `Vault`), lock-enforced BIM category & AutoCAD-compatible CAD drafting layers (`0-Sketch`, `S-Grid`, `A-Anno`, `C-Survey`, `+ AIA`, `+ ISO 13567`), `ByLayer` stroke color parity across 2D/3D canvas + SVG + DXF AC1015 (`62 = 256`), VG-filtered `.ifcx` export (`EG_VISIBILITY_GRAPHICS`), 3D selected/locked callout badge, clean resting Dynamic Island without external floating badges, and uniform symmetric `Margin::same(...)` Dynamic Island padding across all 4 edges.
+- **EigenFlow Sequential Progressive Collapse Cascade, EigenGate Sensitivity Advisor & 19-Tool Gemini Agent (`v0.8.8.8`–`v0.8.9`)**:
+  - `eigenflow` & `eigengate` (`v0.8.8.8`–`v0.8.9`): Iterative `N-1 -> N-2 -> ... -> N-k` Woodbury collapse cascade with UFC 4-023-03 Dynamic Increase Factor ($\Omega_{LD}$), spectral sensitivity & optimal retrofit ranking ($\Delta\text{ARI}/\text{Ton}$), interactive `Cascade & Retrofit` Dynamic Island studio tab (`Wave Prev`/`Wave Next`, `Test P1`), 1-click `"Simulate Failure (EigenFlow)"` in `Live Properties`, WebGPU & CPU `Wave 1+` 3D overlays, `EigenFlowIfcxOverlay` & Sheet `S-104` cascade parity, and Native Gemini Tools #16 (`set_visibility_graphics`), #17 (`manage_cad_layers`), #18 (`run_eigengate_n2_sensitivity`), and #19 (`run_eigenflow_cascade`).

@@ -1919,10 +1919,10 @@ impl SpatialWorkspaceState {
 
                 ui.vertical(|ui| {
                     // A. ONE UNIFIED GROWING LIQUID GLASS DYNAMIC ISLAND (uniform symmetric padding on all 4 edges)
-                    let island_glass = Self::antigravity_glass_frame(&frame_theme, 20, Margin::same(10)).show(
+                    let island_glass = Self::antigravity_glass_frame(&frame_theme, 20, Margin::same(8)).show(
                         ui,
                         |ui| {
-                            let cap_w = (dock_w - 22.0).max(160.0);
+                            let cap_w = (dock_w - 18.0).max(160.0);
                             ui.set_width(cap_w);
                             ui.set_max_width(cap_w);
 
@@ -1937,9 +1937,9 @@ impl SpatialWorkspaceState {
                             .fill(frame_theme.bg_card.gamma_multiply(0.45))
                             .corner_radius(CornerRadius::same(12))
                             .stroke(Stroke::new(1.0, frame_theme.accent_blue.gamma_multiply(0.38)))
-                            .inner_margin(Margin::same(10))
+                            .inner_margin(Margin::same(8))
                             .show(ui, |ui| {
-                                let pw = (cap_w - 22.0).max(160.0);
+                                let pw = (cap_w - 18.0).max(160.0);
                                 ui.set_width(pw);
                                 ui.set_max_width(pw);
                                 ui.horizontal(|ui| {
@@ -3681,9 +3681,9 @@ impl SpatialWorkspaceState {
                                 .fill(composer_fill)
                                 .corner_radius(CornerRadius::same(12))
                                 .stroke(Stroke::new(1.0, composer_stroke))
-                                .inner_margin(Margin::same(8))
+                                .inner_margin(Margin::same(6))
                                 .show(ui, |ui| {
-                                    let row_w = (cap_w - 18.0).max(160.0);
+                                    let row_w = (cap_w - 14.0).max(160.0);
                                     ui.set_width(row_w);
                                     ui.horizontal(|ui| {
                                         let _ = icons::draw_icon(ui, AppIcon::Sparkles, 13.0, theme.accent_blue);

@@ -8435,3 +8435,69 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_v089_release_tools18_19_cascade_ifcx_s104_and_copilot_telemetry() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+
+        // 1. Dispatch Tools #18 & #19 through handle_gemini_reply cleanly
+        spatial.gemini_api_key_draft.clear();
+        let reply = crate::core::web_bridge::GeminiApiReply {
+            request_id: 10,
+            model: "gemini-2.5-flash".to_string(),
+            ok: true,
+            text: String::new(),
+            function_calls: vec![
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "run_eigengate_n2_sensitivity".to_string(),
+                    args: serde_json::json!({ "open_studio": true }),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "run_eigenflow_cascade".to_string(),
+                    args: serde_json::json!({ "lambda": 0.0, "show_3d": true }),
+                },
+            ],
+            raw_model_content: None,
+            error: None,
+        };
+        let _ = spatial.handle_gemini_reply(reply, &mut canvas, &mut build, &mut ai);
+        assert!(spatial.eigenflow_drawer_open);
+        assert_eq!(spatial.eigenflow_drawer_tab, 2);
+        assert!(canvas.eigenflow_overlay_visible);
+
+        let ef_rep = canvas
+            .last_eigenflow_report
+            .as_ref()
+            .expect("EigenFlow studio report after Tool #19");
+        assert!(!ef_rep.cascade.waves.is_empty());
+
+        // 2. Copilot system prompt enumerates Tools #18-#19 and includes Cascade + Sensitivity telemetry
+        let sys_prompt =
+            spatial.build_gemini_copilot_system_prompt(&canvas, &build.bim_bus.project, &[]);
+        assert!(sys_prompt.contains("run_eigengate_n2_sensitivity"));
+        assert!(sys_prompt.contains("run_eigenflow_cascade"));
+        assert!(sys_prompt.contains("EigenFlow Cascade:"));
+        assert!(sys_prompt.contains("EigenGate Sensitivity:"));
+
+        // 3. EigenFlow IFCX overlay carries cascade telemetry without exposing forbidden "ARI" label
+        let overlay = ef_rep.to_ifcx_overlay();
+        assert_eq!(overlay.cascade_waves_count, ef_rep.cascade.waves.len());
+        assert_eq!(overlay.cascade_failed_elements, ef_rep.cascade.total_failed_elements);
+        let overlay_json = serde_json::to_string(&overlay).expect("serialize overlay");
+        assert!(!overlay_json.contains("ARI"));
+
+        // 4. Archival Sheet S-104 SVG includes cascade summary verdict
+        let s104 = crate::core::vector_dossier::build_eigenflow_nonlinear_annex_svg(
+            &build.bim_bus.project.project_name,
+            ef_rep,
+            "S-104",
+            None,
+        );
+        assert!(s104.svg_content.contains("CASCADE VERDICT"));
+        assert!(s104.svg_content.contains("UFC DIF="));
+    }
