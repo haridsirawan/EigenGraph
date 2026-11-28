@@ -331,6 +331,13 @@ impl SpatialWorkspaceState {
                 actions.fit_camera = true;
             }
 
+            let vg_filtered = !universal_canvas.visibility_graphics.bim.is_all_visible()
+                || universal_canvas.visibility_graphics.bim.any_locked();
+            let browser_accent = if vg_filtered {
+                theme.accent_orange
+            } else {
+                theme.accent_blue
+            };
             if !is_mobile && deck_w >= 540.0 {
                 ui.add_space(6.0);
                 let title_max_w = (deck_w - 360.0).max(160.0);
@@ -358,8 +365,8 @@ impl SpatialWorkspaceState {
                             theme,
                             Some(AppIcon::Layers),
                             "Project Browser",
-                            self.project_browser_drawer_open,
-                            theme.accent_blue,
+                            self.project_browser_drawer_open || vg_filtered,
+                            browser_accent,
                             &format!(
                                 "{proj_name}  ·  {story_lbl} — Open Project Browser (Model Tree, Layers / VG & Vault)"
                             ),
@@ -393,8 +400,8 @@ impl SpatialWorkspaceState {
                     ui,
                     theme,
                     AppIcon::Layers,
-                    self.project_browser_drawer_open,
-                    theme.accent_blue,
+                    self.project_browser_drawer_open || vg_filtered,
+                    browser_accent,
                     &format!("{proj_name} · {story_lbl} — Open Project Browser (Model Tree, Layers / VG & Vault)"),
                 )
                 .clicked()

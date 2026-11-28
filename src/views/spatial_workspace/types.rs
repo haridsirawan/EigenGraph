@@ -3486,6 +3486,24 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export Visibility/Graphics (VG) filtered IFCX view snapshot (.ifcx)",
         icon: AppIcon::Document,
     },
+    SlashCommandSpec {
+        cmd: "/bylayer",
+        category: "Drafting",
+        description: "Toggle AutoCAD ByLayer color override for 2D CAD entities & SVG/DXF exports",
+        icon: AppIcon::SlidersPanel,
+    },
+    SlashCommandSpec {
+        cmd: "/preset-aia",
+        category: "Drafting",
+        description: "Apply standard AIA Structural & MEP CAD drafting layer preset",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/preset-iso",
+        category: "Drafting",
+        description: "Apply ISO 13567 international CAD drafting layer preset",
+        icon: AppIcon::Layers,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.

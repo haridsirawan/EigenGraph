@@ -4795,6 +4795,38 @@ impl SpatialWorkspaceState {
                     actions.export_vg_filtered_ifcx = true;
                     self.push_trace("Exported VG-filtered IFCX view (.ifcx)", true);
                 }
+                "/bylayer" => {
+                    universal_canvas.visibility_graphics.color_by_layer =
+                        !universal_canvas.visibility_graphics.color_by_layer;
+                    self.push_trace(
+                        format!(
+                            "CAD ByLayer color override -> {}",
+                            if universal_canvas.visibility_graphics.color_by_layer {
+                                "ON"
+                            } else {
+                                "OFF"
+                            }
+                        ),
+                        true,
+                    );
+                }
+                "/preset-aia" => {
+                    let added = universal_canvas.visibility_graphics.apply_standard_preset(
+                        crate::views::universal_canvas::CadLayerStandardPreset::AiaStructural,
+                    );
+                    self.open_project_browser_drawer(1);
+                    self.push_trace(format!("Applied AIA layer preset (+{added} layers)"), true);
+                }
+                "/preset-iso" | "/preset-iso13567" => {
+                    let added = universal_canvas.visibility_graphics.apply_standard_preset(
+                        crate::views::universal_canvas::CadLayerStandardPreset::Iso13567,
+                    );
+                    self.open_project_browser_drawer(1);
+                    self.push_trace(
+                        format!("Applied ISO 13567 layer preset (+{added} layers)"),
+                        true,
+                    );
+                }
                 "/theme" => {
                     actions.toggle_theme = true;
                     self.push_trace("Toggled Pro Dark / Engineering Daylight", true);

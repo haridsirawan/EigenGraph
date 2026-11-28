@@ -1918,38 +1918,7 @@ impl SpatialWorkspaceState {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
 
                 ui.vertical(|ui| {
-                    // A. Minimalist icon-only status trace above the resting Dynamic Island
-                    if !should_expand && !self.recent_trace_chips.is_empty() && !slash_mode {
-                        ui.horizontal_wrapped(|ui| {
-                            for chip in self
-                                .recent_trace_chips
-                                .iter()
-                                .rev()
-                                .take(if is_mobile { 1 } else { 2 })
-                            {
-                                let col = if chip.ok {
-                                    frame_theme.accent_green
-                                } else {
-                                    frame_theme.accent_orange
-                                };
-                                let _ = Self::glass_icon_button(
-                                    ui,
-                                    &frame_theme,
-                                    if chip.ok {
-                                        AppIcon::CheckCircle
-                                    } else {
-                                        AppIcon::AlertTriangle
-                                    },
-                                    true,
-                                    col,
-                                    &chip.label,
-                                );
-                            }
-                        });
-                        ui.add_space(4.0);
-                    }
-
-                    // B. ONE UNIFIED GROWING LIQUID GLASS DYNAMIC ISLAND (morphs seamlessly upward & wider when needed)
+                    // A. ONE UNIFIED GROWING LIQUID GLASS DYNAMIC ISLAND (morphs seamlessly upward & wider when needed; zero floating checkmark badges outside)
                     let island_glass = Self::antigravity_glass_frame(&frame_theme, 20, Margin::symmetric(12, 9)).show(
                         ui,
                         |ui| {

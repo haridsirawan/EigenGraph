@@ -8166,3 +8166,132 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_v0887_hide_floating_checkmark_dxf_bylayer_aci_and_cad_slash_commands() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        // 1. Resting Dynamic Island height is identical with vs without trace chips (no floating checkmark badge outside).
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            spatial.recent_trace_chips.clear();
+            let ctx_empty = egui::Context::default();
+            for _ in 0..3 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx_empty.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme_helper_for_test(),
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            let h_without_trace = spatial.hud_rects[0].height();
+
+            spatial.push_trace("Model verified cleanly", true);
+            let ctx_trace = egui::Context::default();
+            for _ in 0..3 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx_trace.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme_helper_for_test(),
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            assert!(spatial.hud_rects[0].right() <= win_w + 1.0);
+            let h_with_trace = spatial.hud_rects[0].height();
+            assert!(
+                (h_with_trace - h_without_trace).abs() < 0.5,
+                "Floating trace row changed Dynamic Island height @ {win_w}px: without={h_without_trace:.1}, with={h_with_trace:.1}",
+            );
+        }
+
+        // 2. Slash commands (/bylayer, /preset-aia, /preset-iso) registered & functional.
+        assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == "/bylayer"));
+        assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == "/preset-aia"));
+        assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == "/preset-iso"));
+
+        let _ = spatial.execute_spatial_input(
+            "/preset-aia",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(canvas
+            .visibility_graphics
+            .cad_layers
+            .iter()
+            .any(|l| l.id == "S-REBR"));
+        assert_eq!(spatial.project_browser_tab, 1);
+
+        let _ = spatial.execute_spatial_input(
+            "/bylayer",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(canvas.visibility_graphics.color_by_layer);
+
+        let _ = spatial.execute_spatial_input(
+            "/preset-iso",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(canvas
+            .visibility_graphics
+            .cad_layers
+            .iter()
+            .any(|l| l.id == "S-28-COLS"));
+
+        // 3. AutoCAD AC1015 DXF export emits BYLAYER ACI 256 when color_by_layer is true,
+        //    and explicit entity ACI when color_by_layer is false.
+        let _line_id = canvas.commit_parametric_2d_line(6.0, 0.0, "G", "Drafting");
+        canvas.visibility_graphics.color_by_layer = true;
+        let dxf_bylayer = canvas.export_cad_dxf(&build.bim_bus.project, "S-100", "ByLayer DXF");
+        let entities_bylayer = dxf_bylayer.split("ENTITIES").nth(1).unwrap_or("");
+        assert!(entities_bylayer.contains("0\nLINE\n8\n0-Sketch\n62\n256\n"));
+
+        canvas.visibility_graphics.color_by_layer = false;
+        let dxf_explicit = canvas.export_cad_dxf(&build.bim_bus.project, "S-100", "Explicit DXF");
+        let entities_explicit = dxf_explicit.split("ENTITIES").nth(1).unwrap_or("");
+        assert!(!entities_explicit.contains("62\n256\n"));
+        assert!(entities_explicit.contains("0\nLINE\n8\n0-Sketch\n62\n"));
+    }

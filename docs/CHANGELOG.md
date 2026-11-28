@@ -7,7 +7,17 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.9 (6/10)]
+## [Unreleased — Next: v0.8.9 (7/10)]
+
+### Update 7/10 (`v0.8.8.7` -> `v0.8.9`) — Remove Floating Checkmark Above Dynamic Island, DXF `BYLAYER` ACI Parity & CAD Slash Commands
+- **Clean Resting Dynamic Island Surface (`src/views/spatial_workspace/{island_ui.rs, ribbon_ui.rs}`)**:
+  - Removed the floating green checkmark / alert icon row above the resting Dynamic Island capsule (`island_ui.rs`) so the HUD remains visually distraction-free while preserving internal `recent_trace_chips` diagnostics.
+  - Added amber VG filter state accenting on the Row A `Project Browser` pill and mobile icon button whenever BIM categories are hidden or locked (`ribbon_ui.rs`).
+- **AutoCAD AC1015 DXF `BYLAYER` (`62 / 256`) & Table Merge Parity (`src/views/universal_canvas/mod.rs`)**:
+  - Updated [`UniversalCanvasState::export_cad_dxf`](src/views/universal_canvas/mod.rs) to emit DXF group `62 = 256` (`BYLAYER`) for CAD entities when `color_by_layer` is active (or explicit entity ACI color otherwise) and merge overlapping CAD layer table colors/flags seamlessly.
+- **Drafting & Layer Standard Slash Commands (`src/views/spatial_workspace/{types.rs, commands.rs}`)**:
+  - Added `/bylayer`, `/preset-aia`, and `/preset-iso` to [`SLASH_COMMANDS`](src/views/spatial_workspace/types.rs) and wired execution inside [`execute_spatial_input`](src/views/spatial_workspace/commands.rs).
+- **Verification**: Added [`test_v0887_hide_floating_checkmark_dxf_bylayer_aci_and_cad_slash_commands`](src/views/spatial_workspace/tests.rs) and verified `cargo check --lib` alongside targeted DXF/HUD regression tests.
 
 ### Update 6/10 (`v0.8.8.6` -> `v0.8.9`) — AIA/ISO 13567 CAD Layer Presets, SVG `ByLayer` Parity, Drafting Ribbon `ByLayer` Toggle & Extended Tool #17
 - **AIA & ISO 13567 Drafting Layer Standards (`src/views/universal_canvas/{types.rs, mod.rs}`)**:

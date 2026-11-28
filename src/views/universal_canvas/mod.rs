@@ -3053,17 +3053,39 @@ impl UniversalCanvasState {
         fn push_pair(buf: &mut String, code: i32, val: &str) {
             buf.push_str(&format!("{code}\n{val}\n"));
         }
-        fn push_line(buf: &mut String, layer: &str, x1: f64, y1: f64, x2: f64, y2: f64) {
+        fn push_line(
+            buf: &mut String,
+            layer: &str,
+            aci: Option<i32>,
+            x1: f64,
+            y1: f64,
+            x2: f64,
+            y2: f64,
+        ) {
+            buf.push_str(&format!("0\nLINE\n8\n{layer}\n"));
+            if let Some(code) = aci {
+                buf.push_str(&format!("62\n{code}\n"));
+            }
             buf.push_str(&format!(
-                "0\nLINE\n8\n{layer}\n10\n{x1:.2}\n20\n{y1:.2}\n30\n0.0\n11\n{x2:.2}\n21\n{y2:.2}\n31\n0.0\n"
+                "10\n{x1:.2}\n20\n{y1:.2}\n30\n0.0\n11\n{x2:.2}\n21\n{y2:.2}\n31\n0.0\n"
             ));
         }
-        fn push_poly(buf: &mut String, layer: &str, pts: &[[f64; 2]], closed: bool) {
+        fn push_poly(
+            buf: &mut String,
+            layer: &str,
+            aci: Option<i32>,
+            pts: &[[f64; 2]],
+            closed: bool,
+        ) {
             if pts.len() < 2 {
                 return;
             }
             let flag = if closed { 1 } else { 0 };
-            buf.push_str(&format!("0\nLWPOLYLINE\n8\n{layer}\n90\n{}\n70\n{flag}\n", pts.len()));
+            buf.push_str(&format!("0\nLWPOLYLINE\n8\n{layer}\n"));
+            if let Some(code) = aci {
+                buf.push_str(&format!("62\n{code}\n"));
+            }
+            buf.push_str(&format!("90\n{}\n70\n{flag}\n", pts.len()));
             for p in pts {
                 buf.push_str(&format!("10\n{:.2}\n20\n{:.2}\n", p[0], p[1]));
             }
@@ -3112,9 +3134,14 @@ impl UniversalCanvasState {
             table_layers.push((name.to_string(), aci, 0));
         }
         for cad_layer in &self.visibility_graphics.cad_layers {
-            if declared.insert(cad_layer.id.clone()) {
-                let flags = i32::from(!cad_layer.visible) | (i32::from(cad_layer.locked) * 4);
-                table_layers.push((cad_layer.id.clone(), rgb_to_aci(cad_layer.color_rgb), flags));
+            let aci = rgb_to_aci(cad_layer.color_rgb);
+            let flags = i32::from(!cad_layer.visible) | (i32::from(cad_layer.locked) * 4);
+            if let Some(entry) = table_layers.iter_mut().find(|(n, _, _)| n == &cad_layer.id) {
+                entry.1 = aci;
+                entry.2 = flags;
+            } else {
+                declared.insert(cad_layer.id.clone());
+                table_layers.push((cad_layer.id.clone(), aci, flags));
             }
         }
 
@@ -3137,36 +3164,36 @@ impl UniversalCanvasState {
         let vg = &self.visibility_graphics.bim;
         if vg.show_grid_and_axes {
             for g in &bim_project.grids {
-                push_line(&mut dxf, "S-GRID", g.start.0, g.start.1, g.end.0, g.end.1);
+                push_line(&mut dxf, "S-GRID", None, g.start.0, g.start.1, g.end.0, g.end.1);
             }
         }
         if vg.show_walls {
             for w in &bim_project.walls {
                 let pts: Vec<[f64; 2]> = w.footprint_ring().into_iter().map(|p| [p.0, p.1]).collect();
-                push_poly(&mut dxf, "S-WALL", &pts, true);
+                push_poly(&mut dxf, "S-WALL", None, &pts, true);
             }
         }
         if vg.show_columns {
             for c in &bim_project.columns {
                 let pts: Vec<[f64; 2]> = c.footprint_ring().into_iter().map(|p| [p.0, p.1]).collect();
-                push_poly(&mut dxf, "S-COLS", &pts, true);
+                push_poly(&mut dxf, "S-COLS", None, &pts, true);
             }
         }
         if vg.show_footings {
             for f in &bim_project.footings {
                 let pts: Vec<[f64; 2]> = f.footprint_ring().into_iter().map(|p| [p.0, p.1]).collect();
-                push_poly(&mut dxf, "S-FND", &pts, true);
+                push_poly(&mut dxf, "S-FND", None, &pts, true);
             }
         }
         if vg.show_beams {
             for r in &bim_project.runs {
-                push_line(&mut dxf, "S-BEAMS", r.start.0, r.start.1, r.end.0, r.end.1);
+                push_line(&mut dxf, "S-BEAMS", None, r.start.0, r.start.1, r.end.0, r.end.1);
             }
         }
         if vg.show_slabs {
             for s in &bim_project.slabs {
                 let pts: Vec<[f64; 2]> = s.boundary.iter().map(|p| [p.0, p.1]).collect();
-                push_poly(&mut dxf, "S-SLAB", &pts, true);
+                push_poly(&mut dxf, "S-SLAB", None, &pts, true);
             }
         }
 
@@ -3179,10 +3206,24 @@ impl UniversalCanvasState {
             } else {
                 ent.layer_id.trim()
             };
+            // AutoCAD DXF ACI 256 = BYLAYER; otherwise emit explicit entity ACI color.
+            let ent_aci = if self.visibility_graphics.color_by_layer {
+                256
+            } else {
+                rgb_to_aci(ent.color_rgb)
+            };
             match &ent.kind {
                 CanvasShapeKind::Line { start_mm, end_mm }
                 | CanvasShapeKind::Dimension { start_mm, end_mm } => {
-                    push_line(&mut dxf, layer, start_mm[0], start_mm[1], end_mm[0], end_mm[1]);
+                    push_line(
+                        &mut dxf,
+                        layer,
+                        Some(ent_aci),
+                        start_mm[0],
+                        start_mm[1],
+                        end_mm[0],
+                        end_mm[1],
+                    );
                 }
                 CanvasShapeKind::Rectangle { min_mm, max_mm } => {
                     let ring = [
@@ -3191,23 +3232,23 @@ impl UniversalCanvasState {
                         [max_mm[0], max_mm[1]],
                         [min_mm[0], max_mm[1]],
                     ];
-                    push_poly(&mut dxf, layer, &ring, true);
+                    push_poly(&mut dxf, layer, Some(ent_aci), &ring, true);
                 }
                 CanvasShapeKind::Circle {
                     center_mm,
                     radius_mm,
                 } => {
                     dxf.push_str(&format!(
-                        "0\nCIRCLE\n8\n{layer}\n10\n{:.2}\n20\n{:.2}\n30\n0.0\n40\n{:.2}\n",
+                        "0\nCIRCLE\n8\n{layer}\n62\n{ent_aci}\n10\n{:.2}\n20\n{:.2}\n30\n0.0\n40\n{:.2}\n",
                         center_mm[0], center_mm[1], radius_mm
                     ));
                 }
                 CanvasShapeKind::Freehand { points_mm } => {
-                    push_poly(&mut dxf, layer, points_mm, false);
+                    push_poly(&mut dxf, layer, Some(ent_aci), points_mm, false);
                 }
                 CanvasShapeKind::Callout { pos_mm, text } => {
                     dxf.push_str(&format!(
-                        "0\nTEXT\n8\n{layer}\n10\n{:.2}\n20\n{:.2}\n30\n0.0\n40\n260.0\n1\n{}\n",
+                        "0\nTEXT\n8\n{layer}\n62\n{ent_aci}\n10\n{:.2}\n20\n{:.2}\n30\n0.0\n40\n260.0\n1\n{}\n",
                         pos_mm[0],
                         pos_mm[1],
                         text.replace('\n', " "),
