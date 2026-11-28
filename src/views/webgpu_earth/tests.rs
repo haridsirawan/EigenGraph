@@ -1910,6 +1910,7 @@ use crate::core::ifcx::IfcxDocument;
         let mesh = build_rtc_eigenflow_mesh(&EigenFlowGpuInput {
             report: &report,
             active_step_idx: 6,
+            active_cascade_wave: report.cascade.waves.len().saturating_sub(1),
             heading_deg: 18.0,
             visible: true,
         });

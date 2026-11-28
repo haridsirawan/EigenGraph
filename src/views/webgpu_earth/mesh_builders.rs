@@ -3290,6 +3290,7 @@ fn push_animated_flow_strut_enu(
 pub struct EigenFlowGpuInput<'a> {
     pub report: &'a crate::core::eigenflow::EigenFlowStudioReport,
     pub active_step_idx: usize,
+    pub active_cascade_wave: usize,
     pub heading_deg: f64,
     pub visible: bool,
 }
@@ -3371,6 +3372,36 @@ pub fn build_rtc_eigenflow_mesh(input: &EigenFlowGpuInput<'_>) -> GpuMeshPayload
             sev,
             12.0,
         );
+    }
+
+    // 2B. Sequential Progressive Collapse Cascade Waves (Wave 1 orange, Wave 2+ violet) up to active scrubbed wave
+    for wave in &input.report.cascade.waves {
+        if wave.wave_index == 0 || wave.wave_index > input.active_cascade_wave {
+            continue;
+        }
+        let (w_col, w_sev) = if wave.wave_index == 1 {
+            ([1.0_f32, 0.45, 0.14, 0.94], 0.85_f32)
+        } else {
+            ([0.82_f32, 0.28, 0.98, 0.96], 0.98_f32)
+        };
+        for &(raw_a, raw_b) in &wave.failed_segments_enu_m {
+            let a = rot_enu(raw_a);
+            let b = rot_enu(raw_b);
+            push_animated_flow_strut_enu(&mut verts, &mut idxs, a, b, 0.36, 0.36, w_col, w_sev, 12.0);
+            push_octahedron_beacon_enu(
+                &mut verts,
+                &mut idxs,
+                [
+                    (0.5 * (a[0] + b[0])) as f32,
+                    (0.5 * (a[1] + b[1])) as f32,
+                    (0.5 * (a[2] + b[2])) as f32,
+                ],
+                0.46,
+                w_col,
+                w_sev,
+                12.0,
+            );
+        }
     }
 
     // 3. Pushover Step Plastic Hinges up to active scrubbed step

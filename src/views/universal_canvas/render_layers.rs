@@ -2825,6 +2825,33 @@ impl UniversalCanvasState {
             }
         }
 
+        for wave in &report.cascade.waves {
+            if wave.wave_index == 0 || wave.wave_index > self.eigenflow_active_cascade_wave {
+                continue;
+            }
+            let w_col = if wave.wave_index == 1 {
+                Color32::from_rgb(255, 138, 36)
+            } else {
+                Color32::from_rgb(191, 90, 242)
+            };
+            for (seg_idx, &(raw_a, raw_b)) in wave.failed_segments_enu_m.iter().enumerate() {
+                if let (Some(a), Some(b)) = (proj_enu(raw_a), proj_enu(raw_b)) {
+                    clip.line_segment([a, b], Stroke::new(3.6, w_col));
+                    let mid = Pos2::new(0.5 * (a.x + b.x), 0.5 * (a.y + b.y));
+                    clip.circle_filled(mid, 5.0, w_col);
+                    if let Some(&fid) = wave.failed_element_ids.get(seg_idx) {
+                        clip.text(
+                            mid + Vec2::new(0.0, -8.0),
+                            Align2::CENTER_BOTTOM,
+                            format!("W{} #{fid}", wave.wave_index),
+                            egui::FontId::monospace(8.5),
+                            Color32::WHITE,
+                        );
+                    }
+                }
+            }
+        }
+
         let active_step = self.eigenflow_config.active_step_idx;
         for h in &report.hinges_3d {
             if h.formed_at_step <= active_step {

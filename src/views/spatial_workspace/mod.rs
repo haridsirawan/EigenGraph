@@ -712,10 +712,10 @@ impl SpatialWorkspaceState {
         self.field_qaqc_drawer_open = true;
     }
 
-    /// Idempotently opens the Phase 83 EigenFlow Non-Linear Studio drawer (`0` = Woodbury `P1->P2`, `1` = Pushover & ADRS).
+    /// Idempotently opens the EigenFlow Non-Linear Studio drawer (`0` = Woodbury `P1->P2`, `1` = Pushover & ADRS, `2` = Cascade & Retrofit).
     pub fn open_eigenflow_drawer(&mut self, tab: usize) {
         self.toggle_exclusive_drawer("__none");
-        self.eigenflow_drawer_tab = tab.min(1);
+        self.eigenflow_drawer_tab = tab.min(2);
         self.eigenflow_drawer_open = true;
     }
 

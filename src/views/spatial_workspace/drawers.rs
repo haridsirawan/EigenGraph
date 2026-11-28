@@ -2334,7 +2334,11 @@ impl SpatialWorkspaceState {
                 theme.text_primary,
                 true,
             );
-            for (idx, lbl) in [(0usize, "Woodbury P1->P2"), (1usize, "Pushover & ADRS")] {
+            for (idx, lbl) in [
+                (0usize, "Woodbury P1->P2"),
+                (1usize, "Pushover & ADRS"),
+                (2usize, "Cascade & Retrofit"),
+            ] {
                 if Self::glass_pill_button(
                     ui,
                     theme,
@@ -2390,7 +2394,7 @@ impl SpatialWorkspaceState {
                             }
                         }
                     }
-                } else {
+                } else if tab == 1 {
                     ui.label(RichText::new("Pattern:").size(9.0).color(theme.text_muted));
                     for (pat, lbl) in [
                         (LateralLoadPattern::FirstModeModal, "FirstMode"),
@@ -2430,6 +2434,48 @@ impl SpatialWorkspaceState {
                             .monospace()
                             .color(theme.text_primary),
                     );
+                } else {
+                    let n_waves = universal_canvas
+                        .last_eigenflow_report
+                        .as_ref()
+                        .map(|r| r.cascade.waves.len().max(1))
+                        .unwrap_or(1);
+                    if Self::glass_pill_button(ui, theme, None, "Wave Prev", false, theme.accent_blue, "Step backward through collapse waves").clicked() {
+                        universal_canvas.eigenflow_active_cascade_wave =
+                            universal_canvas.eigenflow_active_cascade_wave.saturating_sub(1);
+                    }
+                    if Self::glass_pill_button(ui, theme, None, "Wave Next", false, theme.accent_orange, "Step forward through sequential collapse waves").clicked() {
+                        universal_canvas.eigenflow_active_cascade_wave =
+                            (universal_canvas.eigenflow_active_cascade_wave + 1).min(n_waves.saturating_sub(1));
+                        universal_canvas.eigenflow_overlay_visible = true;
+                    }
+                    ui.label(
+                        RichText::new(format!(
+                            "Wave {}/{}",
+                            universal_canvas.eigenflow_active_cascade_wave.min(n_waves.saturating_sub(1)) + 1,
+                            n_waves
+                        ))
+                        .size(8.8)
+                        .monospace()
+                        .color(theme.text_primary),
+                    );
+                    if let Some(ref rep) = universal_canvas.last_eigenflow_report {
+                        icons::pill_badge(
+                            ui,
+                            AppIcon::Bolt,
+                            format!("DIF {:.2}x", rep.cascade.ufc_dynamic_increase_factor),
+                            theme.accent_orange,
+                        );
+                        let v_col = match rep.cascade.verdict {
+                            crate::core::eigenflow::EigenFlowCascadeVerdict::Arrested => theme.accent_green,
+                            crate::core::eigenflow::EigenFlowCascadeVerdict::PartialCollapse => theme.accent_orange,
+                            crate::core::eigenflow::EigenFlowCascadeVerdict::GlobalMechanism => theme.accent_red,
+                        };
+                        icons::pill_badge(ui, AppIcon::Shield, rep.cascade.verdict.label(), v_col);
+                    }
+                    if Self::glass_pill_button(ui, theme, None, "Run Sensitivity", false, theme.accent_green, "Recompute Cascade + EigenGate Retrofit Advisor").clicked() {
+                        actions.run_eigenflow_studio = true;
+                    }
                 }
                 if Self::glass_pill_button(
                     ui,
@@ -2459,7 +2505,11 @@ impl SpatialWorkspaceState {
                 ui.set_max_width(inner_w);
                 ui.vertical(|ui| {
                     ui.set_max_width(inner_w);
-                    let Some(ref rep) = universal_canvas.last_eigenflow_report else {
+                    let sens_snap = universal_canvas.last_eigengate_sensitivity.clone();
+                    let active_wave = universal_canvas.eigenflow_active_cascade_wave;
+                    let mut set_wave_opt: Option<usize> = None;
+                    let mut test_elem_opt: Option<usize> = None;
+                    let Some(rep) = universal_canvas.last_eigenflow_report.clone() else {
                         ui.label(RichText::new("Evaluating EigenFlow Non-Linear Studio...").size(9.5).color(theme.text_muted));
                         return;
                     };
@@ -2538,7 +2588,8 @@ impl SpatialWorkspaceState {
                                 );
                             }
                         }
-                    } else if is_left {
+                    } else if tab == 1 {
+                        if is_left {
                         let raw = &rep.pushover_csm.raw_pushover;
                         let perf = &rep.pushover_csm.performance_point;
                         ui.label(
@@ -2599,6 +2650,133 @@ impl SpatialWorkspaceState {
                         }
                         p.circle_filled(to_adrs(perf.sd_star_m * 1000.0, perf.sa_star_g), 5.0, theme.accent_green);
                         ui.label(RichText::new(perf.performance_level.label()).size(8.6).color(theme.accent_green));
+                        }
+                    } else if is_left {
+                        let cas = &rep.cascade;
+                        ui.label(
+                            RichText::new("Sequential Progressive Collapse Cascade (N-1 -> N-k)")
+                                .size(10.0)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Initiating: #{} ({}) | Failed: {}/{} ({:.1}%) | DIF={:.2}x | Final m_s={:.3} | RRR={:.2}",
+                                cas.initiating_element_id,
+                                cas.initiating_element_name,
+                                cas.total_failed_elements,
+                                cas.total_elements,
+                                cas.damage_ratio_pct,
+                                cas.ufc_dynamic_increase_factor,
+                                cas.final_stability_margin_ms,
+                                cas.final_residual_reserve_rrr,
+                            ))
+                            .size(8.8)
+                            .monospace()
+                            .color(theme.text_secondary),
+                        );
+                        ui.label(
+                            RichText::new(&cas.summary_verdict)
+                                .size(8.8)
+                                .color(match cas.verdict {
+                                    crate::core::eigenflow::EigenFlowCascadeVerdict::Arrested => theme.accent_green,
+                                    crate::core::eigenflow::EigenFlowCascadeVerdict::PartialCollapse => theme.accent_orange,
+                                    crate::core::eigenflow::EigenFlowCascadeVerdict::GlobalMechanism => theme.accent_red,
+                                }),
+                        );
+                        ui.add_space(4.0);
+                        ui.horizontal_wrapped(|ui| {
+                            for w in &cas.waves {
+                                let is_cur = w.wave_index == active_wave;
+                                let lbl = format!(
+                                    "W{} (+{} elem | m_s={:.2})",
+                                    w.wave_index,
+                                    w.failed_element_ids.len(),
+                                    w.residual_stability_margin_ms
+                                );
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    None,
+                                    lbl,
+                                    is_cur,
+                                    theme.accent_orange,
+                                    "Jump 3D EigenFlow visualization to this propagation wave",
+                                )
+                                .clicked()
+                                {
+                                    set_wave_opt = Some(w.wave_index);
+                                }
+                            }
+                        });
+                    } else {
+                        ui.label(
+                            RichText::new("EigenGate Sensitivity & Optimal Retrofit Advisor")
+                                .size(10.0)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
+                        if let Some(ref sens) = sens_snap {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Baseline Min ARI={:.3} | Avg={:.3} | Crit={} | N-2 Mech={}",
+                                    sens.baseline_min_ari,
+                                    sens.baseline_avg_ari,
+                                    sens.baseline_critical_count,
+                                    sens.n2_coupled_mechanism_pairs
+                                ))
+                                .size(8.8)
+                                .monospace()
+                                .color(theme.accent_blue),
+                            );
+                            ui.add_space(3.0);
+                            for c in sens.candidates.iter().take(4) {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "#{} {} | {:.3}->{:.3} | +{:.0}kg | {:.1} ARI/t",
+                                            c.member_id,
+                                            c.strategy.label(),
+                                            c.baseline_member_ari,
+                                            c.projected_member_ari,
+                                            c.added_mass_kg,
+                                            c.efficiency_ari_per_ton
+                                        ))
+                                        .size(8.6)
+                                        .monospace()
+                                        .color(theme.text_primary),
+                                    );
+                                    if Self::glass_pill_button(
+                                        ui,
+                                        theme,
+                                        Some(AppIcon::Bolt),
+                                        "Test P1",
+                                        false,
+                                        theme.accent_red,
+                                        &c.rationale,
+                                    )
+                                    .clicked()
+                                    {
+                                        test_elem_opt = Some(c.member_id);
+                                    }
+                                });
+                            }
+                        } else {
+                            ui.label(
+                                RichText::new("Click Run Sensitivity to rank optimal retrofit upgrades.")
+                                    .size(8.8)
+                                    .color(theme.text_muted),
+                            );
+                        }
+                    }
+                    if let Some(w_idx) = set_wave_opt {
+                        universal_canvas.eigenflow_active_cascade_wave = w_idx;
+                        universal_canvas.eigenflow_overlay_visible = true;
+                    }
+                    if let Some(eid) = test_elem_opt {
+                        actions.eigenflow_select_element = Some(eid);
+                        actions.run_eigenflow_studio = true;
+                        universal_canvas.eigenflow_overlay_visible = true;
                     }
                 });
             });

@@ -3504,6 +3504,18 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Apply ISO 13567 international CAD drafting layer preset",
         icon: AppIcon::Layers,
     },
+    SlashCommandSpec {
+        cmd: "/eigenflow-cascade",
+        category: "Analysis",
+        description: "Run EigenFlow sequential collapse cascade (N-1 -> N-k + UFC DIF) & open Cascade Studio",
+        icon: AppIcon::Bolt,
+    },
+    SlashCommandSpec {
+        cmd: "/retrofit-advisor",
+        category: "Analysis",
+        description: "Run EigenGate spectral sensitivity & rank optimal structural retrofit upgrades",
+        icon: AppIcon::Shield,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.

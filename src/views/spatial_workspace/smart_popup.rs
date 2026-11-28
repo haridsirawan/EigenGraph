@@ -1153,6 +1153,29 @@ impl SpatialWorkspaceState {
                         ui.add_space(4.0);
                         if icons::icon_button(
                             ui,
+                            AppIcon::Bolt,
+                            "Simulate Failure (EigenFlow)",
+                            10.5,
+                            theme.accent_orange,
+                            theme.accent_orange.gamma_multiply(0.14),
+                            Stroke::new(0.9, theme.accent_orange.gamma_multiply(0.55)),
+                            CornerRadius::same(8),
+                            Vec2::new(ui.available_width(), 26.0),
+                        )
+                        .clicked()
+                        {
+                            actions.eigenflow_select_element = fem_id;
+                            actions.run_eigenflow_studio = true;
+                            universal_canvas.eigenflow_overlay_visible = true;
+                            self.open_eigenflow_drawer(2);
+                            self.push_trace(
+                                format!("Simulating EigenFlow cascade on Column #{col_id}"),
+                                true,
+                            );
+                        }
+                        ui.add_space(4.0);
+                        if icons::icon_button(
+                            ui,
                             AppIcon::Trash,
                             "Delete Column (Undoable)",
                             10.5,
@@ -1463,6 +1486,29 @@ impl SpatialWorkspaceState {
                             && self.auto_size_selected_element(build_view).is_ok()
                         {
                             actions.sync_fem_and_earth = true;
+                        }
+                        ui.add_space(4.0);
+                        if icons::icon_button(
+                            ui,
+                            AppIcon::Bolt,
+                            "Simulate Failure (EigenFlow)",
+                            10.5,
+                            theme.accent_orange,
+                            theme.accent_orange.gamma_multiply(0.14),
+                            Stroke::new(0.9, theme.accent_orange.gamma_multiply(0.55)),
+                            CornerRadius::same(8),
+                            Vec2::new(ui.available_width(), 26.0),
+                        )
+                        .clicked()
+                        {
+                            actions.eigenflow_select_element = fem_id;
+                            actions.run_eigenflow_studio = true;
+                            universal_canvas.eigenflow_overlay_visible = true;
+                            self.open_eigenflow_drawer(2);
+                            self.push_trace(
+                                format!("Simulating EigenFlow cascade on Beam #{run_id}"),
+                                true,
+                            );
                         }
                         ui.add_space(4.0);
                         if icons::icon_button(

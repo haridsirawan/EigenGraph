@@ -7,7 +7,16 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.9 (8/10)]
+## [Unreleased — Next: v0.8.9 (9/10)]
+
+### Update 9/10 (`v0.8.8.9` -> `v0.8.9`) — Interactive EigenFlow Cascade & Retrofit Studio Tab, 3D Multi-Wave Overlays, Live Properties Failure Trigger & `/eigenflow-cascade` Slash Commands
+- **Dynamic Island `Cascade & Retrofit` Studio Tab (`src/views/spatial_workspace/{mod.rs, drawers.rs}`)**:
+  - Expanded [`EigenFlow Studio`](src/views/spatial_workspace/drawers.rs) to 3 tabs (`Woodbury P1->P2`, `Pushover & ADRS`, `Cascade & Retrofit`) featuring a `Wave Prev` / `Wave Next` scrubber, UFC DIF & verdict badges, clickable wave pills, and the ranked EigenGate Sensitivity & Retrofit Advisor table with 1-click `"Test P1"` testing.
+- **3D WebGPU & CPU Fallback Multi-Wave Cascade Rendering (`src/views/webgpu_earth/{mesh_builders.rs, mod.rs}`, `src/views/universal_canvas/{mod.rs, render_layers.rs}`)**:
+  - Updated [`EigenFlowGpuInput`](src/views/webgpu_earth/mesh_builders.rs), [`build_rtc_eigenflow_mesh`](src/views/webgpu_earth/mesh_builders.rs), GPU revision hashing, and [`paint_cpu_eigenflow_fallback`](src/views/universal_canvas/render_layers.rs) to display progressive `Wave 1+` cascade struts and octants (`P1` crimson -> `Wave 1` orange -> `Wave 2+` violet) in 3D.
+- **1-Click `Simulate Failure (EigenFlow)` & Slash Commands (`src/views/spatial_workspace/{smart_popup.rs, types.rs, commands.rs}`)**:
+  - Added `"Simulate Failure (EigenFlow)"` inside `Live Properties` / Smart Inspector for Columns and Beams, and registered `/eigenflow-cascade` & `/retrofit-advisor` in `SLASH_COMMANDS`.
+- **Verification**: Added [`test_v0889_eigenflow_cascade_tab_retrofit_advisor_and_slash_commands`](src/views/spatial_workspace/tests.rs) and verified `cargo check --lib` alongside targeted WebGPU/UI regression suites.
 
 ### Update 8/10 (`v0.8.8.8` -> `v0.8.9`) — EigenFlow Sequential Cascade (`N-1 -> N-k` + UFC DIF), EigenGate Spectral Sensitivity & Uniform Dynamic Island Margins
 - **Uniform Symmetric Dynamic Island Padding (`src/views/spatial_workspace/{island_ui.rs, drawers.rs, smart_popup.rs}`)**:

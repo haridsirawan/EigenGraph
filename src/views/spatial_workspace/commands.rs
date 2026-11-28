@@ -4131,6 +4131,15 @@ impl SpatialWorkspaceState {
                 "/eigenflow-svg" => {
                     actions.export_eigenflow_svg = true;
                 }
+                "/eigenflow-cascade" | "/retrofit-advisor" => {
+                    self.open_eigenflow_drawer(2);
+                    actions.run_eigenflow_studio = true;
+                    let rep = universal_canvas.run_eigenflow_studio(&build_view.bim_bus.project);
+                    universal_canvas.eigenflow_active_cascade_wave =
+                        rep.cascade.waves.len().saturating_sub(1);
+                    universal_canvas.eigenflow_overlay_visible = true;
+                    self.push_trace(rep.cascade.summary_verdict.clone(), true);
+                }
                 "/extreme" => {
                     self.open_extreme_events_drawer(0);
                     actions.run_extreme_events = true;

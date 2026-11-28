@@ -8350,3 +8350,88 @@ use crate::theme::MacTheme;
             }
         }
     }
+
+    #[test]
+    fn test_v0889_eigenflow_cascade_tab_retrofit_advisor_and_slash_commands() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        // 1. Slash commands /eigenflow-cascade & /retrofit-advisor registered and populate live cascade + sensitivity state
+        assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == "/eigenflow-cascade"));
+        assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == "/retrofit-advisor"));
+
+        let _ = spatial.execute_spatial_input(
+            "/eigenflow-cascade",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(spatial.eigenflow_drawer_open);
+        assert_eq!(spatial.eigenflow_drawer_tab, 2);
+        assert!(canvas.eigenflow_overlay_visible);
+        let ef_rep = canvas
+            .last_eigenflow_report
+            .as_ref()
+            .expect("EigenFlow report populated");
+        assert!(!ef_rep.cascade.waves.is_empty());
+        let sens_rep = canvas
+            .last_eigengate_sensitivity
+            .as_ref()
+            .expect("EigenGate sensitivity populated");
+        assert!(!sens_rep.candidates.is_empty());
+
+        let mesh = crate::views::webgpu_earth::build_rtc_eigenflow_mesh(
+            &crate::views::webgpu_earth::EigenFlowGpuInput {
+                report: ef_rep,
+                active_step_idx: 0,
+                active_cascade_wave: ef_rep.cascade.waves.len().saturating_sub(1),
+                heading_deg: 0.0,
+                visible: true,
+            },
+        );
+        assert!(!mesh.vertices.is_empty());
+        assert!(!mesh.indices.is_empty());
+
+        // 2. Responsive Cascade & Retrofit Studio Tab 2 zero-overflow check across Desktop, Tablet & Mobile
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            let ctx = egui::Context::default();
+            for _ in 0..2 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(win_w, win_h),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme_helper_for_test(),
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            assert!(
+                spatial.hud_rects[0].right() <= win_w + 1.0,
+                "EigenFlow Cascade & Retrofit Tab 2 overflow @ {win_w}px: {:?}",
+                spatial.hud_rects[0]
+            );
+        }
+    }

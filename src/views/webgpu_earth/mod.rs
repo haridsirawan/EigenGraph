@@ -2539,8 +2539,10 @@ impl WebGpuEarthState {
                     ^ wb.lambda_val.to_bits()
                     ^ (pat << 18)
                     ^ ((ef_in.active_step_idx as u64) << 24)
+                    ^ ((ef_in.active_cascade_wave as u64) << 30)
                     ^ ((wb.redistributed_p2.len() as u64) << 36)
                     ^ ((ef_in.heading_deg.round() as u64) << 44)
+                    ^ ((ef_in.report.cascade.waves.len() as u64) << 52)
                     ^ u64::from(ef_in.visible).wrapping_mul(0x9E37_79B9_7F4A_7C15);
                 if rev != self.cached_eigenflow_hash {
                     let mesh = build_rtc_eigenflow_mesh(ef_in);

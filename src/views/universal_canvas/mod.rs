@@ -184,6 +184,8 @@ pub struct UniversalCanvasState {
     pub eigenflow_overlay_visible: bool,
     pub eigenflow_config: crate::core::eigenflow::EigenFlowConfig,
     pub last_eigenflow_report: Option<crate::core::eigenflow::EigenFlowStudioReport>,
+    pub eigenflow_active_cascade_wave: usize,
+    pub last_eigengate_sensitivity: Option<crate::core::eigengate::EigenGateSensitivityReport>,
     pub eigenflow_pushover_playing: bool,
     pub eigenflow_play_accum_sec: f32,
     // Phase 84: Extreme Events Studio (Blast UFC 3-340-02 & Structural Fire ISO 834/EC)
@@ -415,6 +417,8 @@ impl Default for UniversalCanvasState {
             eigenflow_overlay_visible: false,
             eigenflow_config: crate::core::eigenflow::EigenFlowConfig::default(),
             last_eigenflow_report: None,
+            eigenflow_active_cascade_wave: 0,
+            last_eigengate_sensitivity: None,
             eigenflow_pushover_playing: false,
             eigenflow_play_accum_sec: 0.0,
             extreme_events_overlay_visible: false,
@@ -1975,7 +1979,22 @@ impl UniversalCanvasState {
         rep
     }
 
-    /// Evaluates Branch 2 EigenFlow Non-Linear Woodbury (`P1 -> P2`) & Pushover ADRS Capacity Spectrum.
+    /// Evaluates EigenGate Spectral Sensitivity & Optimal Retrofit Advisor for the active BIM model.
+    pub fn run_eigengate_sensitivity(
+        &mut self,
+        bim_project: &BimProject,
+    ) -> Option<crate::core::eigengate::EigenGateSensitivityReport> {
+        let model = bim_project.to_structural_model();
+        if model.elements.len() < 2 || model.nodes.len() < 3 {
+            self.last_eigengate_sensitivity = None;
+            return None;
+        }
+        let rep = crate::core::EigenGateEngine::evaluate_sensitivity_and_retrofit_advisor(&model).ok();
+        self.last_eigengate_sensitivity = rep.clone();
+        rep
+    }
+
+    /// Evaluates Branch 2 EigenFlow Non-Linear Woodbury (`P1 -> P2`), Sequential Cascade & Pushover ADRS Capacity Spectrum.
     pub fn run_eigenflow_studio(
         &mut self,
         bim_project: &BimProject,
@@ -1989,7 +2008,11 @@ impl UniversalCanvasState {
         let n_steps = rep.pushover_csm.raw_pushover.steps.len().max(1);
         self.eigenflow_config.active_step_idx =
             self.eigenflow_config.active_step_idx.min(n_steps.saturating_sub(1));
+        let n_waves = rep.cascade.waves.len().max(1);
+        self.eigenflow_active_cascade_wave =
+            self.eigenflow_active_cascade_wave.min(n_waves.saturating_sub(1));
         self.last_eigenflow_report = Some(rep.clone());
+        let _ = self.run_eigengate_sensitivity(bim_project);
         rep
     }
 
@@ -2846,6 +2869,8 @@ impl UniversalCanvasState {
         self.last_permit_report = None;
         self.eigenflow_config = archive.eigenflow_config;
         self.last_eigenflow_report = None;
+        self.eigenflow_active_cascade_wave = 0;
+        self.last_eigengate_sensitivity = None;
         self.extreme_events_config = archive.extreme_events_config;
         self.last_extreme_events_report = None;
         self.isolation_studio_config = archive.isolation_studio_config;
@@ -3757,6 +3782,7 @@ impl UniversalCanvasState {
                     crate::views::webgpu_earth::EigenFlowGpuInput {
                         report: rep,
                         active_step_idx: self.eigenflow_config.active_step_idx,
+                        active_cascade_wave: self.eigenflow_active_cascade_wave,
                         heading_deg: active_heading_deg,
                         visible: true,
                     }
