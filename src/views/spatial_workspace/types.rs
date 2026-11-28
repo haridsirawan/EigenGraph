@@ -3450,6 +3450,30 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "Export A3 Sheet S-103 Pure-Vector Rebar BBS & Field QA/QC Shop Annex .svg",
         icon: AppIcon::Printer,
     },
+    SlashCommandSpec {
+        cmd: "/browser",
+        category: "Workspace",
+        description: "Open Unified Project Browser (Model Tree, Layers / VG & Vault) in Dynamic Island",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/properties",
+        category: "Workspace",
+        description: "Open Live Properties & Smart Element Inspector inside Dynamic Island",
+        icon: AppIcon::SlidersPanel,
+    },
+    SlashCommandSpec {
+        cmd: "/layers",
+        category: "Workspace",
+        description: "Open Visibility/Graphics (VG) BIM Categories, IFCX Overlays & 2D CAD Layers",
+        icon: AppIcon::Layers,
+    },
+    SlashCommandSpec {
+        cmd: "/vg",
+        category: "Workspace",
+        description: "Alias for /layers — open Revit-style Visibility/Graphics & 2D CAD Layer manager",
+        icon: AppIcon::Layers,
+    },
 ];
 
 /// Side-effect requests produced by the Antigravity Spatial HUD for `EigenGraphApp` to commit.

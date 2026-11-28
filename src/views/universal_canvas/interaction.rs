@@ -1215,6 +1215,7 @@ impl UniversalCanvasState {
                         kind: CanvasShapeKind::Freehand { points_mm: pts },
                         color_rgb,
                         stroke_width,
+                        layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
                     });
                 }
             }
@@ -1272,6 +1273,7 @@ impl UniversalCanvasState {
                                 kind,
                                 color_rgb,
                                 stroke_width,
+                                layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
                             });
                         }
                     } else {
@@ -1301,6 +1303,7 @@ impl UniversalCanvasState {
                             },
                             color_rgb,
                             stroke_width,
+                            layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
                         });
                     }
                 }

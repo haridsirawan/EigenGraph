@@ -3852,6 +3852,9 @@ impl UniversalCanvasState {
         };
 
         for ent in &self.entities {
+            if !self.visibility_graphics.is_cad_layer_visible(&ent.layer_id) {
+                continue;
+            }
             if !self.sync_all_layers && ent.pillar_badge != active_badge {
                 continue;
             }

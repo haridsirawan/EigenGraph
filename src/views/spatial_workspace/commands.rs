@@ -4581,6 +4581,18 @@ impl SpatialWorkspaceState {
                         self.push_trace("Nothing to redo", false);
                     }
                 }
+                "/browser" => {
+                    self.open_project_browser_drawer(0);
+                    self.push_trace("Opened Project Browser (Model Tree)", true);
+                }
+                "/layers" | "/vg" => {
+                    self.open_project_browser_drawer(1);
+                    self.push_trace("Opened Layers / Visibility Graphics (VG)", true);
+                }
+                "/properties" => {
+                    self.open_properties_drawer();
+                    self.push_trace("Opened Live Properties Inspector", true);
+                }
                 "/save" | "/export" => {
                     actions.export_archive = true;
                     self.push_trace("Exported .eigen.json workspace", true);

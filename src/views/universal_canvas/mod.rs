@@ -269,6 +269,8 @@ pub struct UniversalCanvasState {
     pub intersection_config: crate::core::gis::CityIntersectionConfig,
     pub last_intersection_report: Option<crate::core::gis::CityIntersectionNetworkReport>,
     pub last_promotion_summary: Option<crate::core::gis::CityToBimPromotionSummary>,
+    // Update v0.8.8.1 (1/10 -> v0.8.9): Unified Visibility/Graphics (VG) & 2D CAD Layers
+    pub visibility_graphics: VisibilityGraphicsState,
 }
 
 /// Result of clicking a planetary cluster beacon or 3D neighbor building on Earth 3D.
@@ -476,11 +478,47 @@ impl Default for UniversalCanvasState {
             intersection_config: crate::core::gis::CityIntersectionConfig::default(),
             last_intersection_report: None,
             last_promotion_summary: None,
+            visibility_graphics: VisibilityGraphicsState::default(),
         }
     }
 }
 
 impl UniversalCanvasState {
+    /// Clears all analytical, hazard, MEP, clash, utilities, and conceptual 3D overlays back to core BIM + Earth.
+    pub fn hide_all_engineering_overlays(&mut self) {
+        self.district_hazard.seismic_wave_active = false;
+        self.district_hazard.pounding_overlay_active = false;
+        self.district_hazard.venturi_wind_active = false;
+        self.district_hazard.flood_plane_active = false;
+        self.subsurface_ssi.xray_subsurface_visible = false;
+        self.portfolio_retrofit_config.overlay_visible = false;
+        self.ground_motion_replay_config.show_plastic_hinges = false;
+        self.ground_motion_replay_config.show_fragility_loss_overlay = false;
+        self.evacuation_config.overlay_visible = false;
+        self.collab_state.config.risk_heatmap_visible = false;
+        self.ifcx_diff_overlay_active = false;
+        self.field_qaqc_overlay_visible = false;
+        self.eigenflow_overlay_visible = false;
+        self.extreme_events_overlay_visible = false;
+        self.isolation_overlay_visible = false;
+        self.wind_overlay_visible = false;
+        self.shear_wall_overlay_visible = false;
+        self.connection_overlay_visible = false;
+        self.prestress_overlay_visible = false;
+        self.composite_overlay_visible = false;
+        self.reliability_overlay_visible = false;
+        self.foundation_overlay_visible = false;
+        self.construction_lca_overlay_visible = false;
+        self.zoning_overlay_visible = false;
+        self.program_overlay_visible = false;
+        self.massing_overlay_visible = false;
+        self.solar_overlay_visible = false;
+        self.daylight_overlay_visible = false;
+        self.mep_overlay_visible = false;
+        self.clash_overlay_visible = false;
+        self.urban_utilities_overlay_visible = false;
+        self.section_box.enabled = false;
+    }
     /// Initializes native Pure WebGPU (`wgpu` + WGSL) 3D Vector Earth pipelines from `egui_wgpu::RenderState`.
     pub fn init_webgpu_earth(&mut self, render_state: &egui_wgpu::RenderState) {
         self.webgpu_earth.init_wgpu(render_state);
@@ -2542,6 +2580,7 @@ impl UniversalCanvasState {
             clash_config: self.clash_config.clone(),
             urban_utilities_config: self.urban_utilities_config.clone(),
             intersection_config: self.intersection_config.clone(),
+            visibility_graphics: self.visibility_graphics.clone(),
             sha256_seal: String::new(),
         }
     }
@@ -2708,6 +2747,7 @@ impl UniversalCanvasState {
         self.intersection_config = archive.intersection_config;
         self.last_intersection_report = None;
         self.last_promotion_summary = None;
+        self.visibility_graphics = archive.visibility_graphics;
         if self.collab_state.config.risk_heatmap_visible {
             let _ = self.refresh_district_risk_field(bim_project, members);
         } else {
@@ -3145,6 +3185,7 @@ impl UniversalCanvasState {
                     Vec::new()
                 };
             let active_bim_gpu = if !bim_project.is_empty() {
+                self.webgpu_earth.bim_visibility = self.visibility_graphics.bim;
                 Some(crate::views::webgpu_earth::ActiveBimGpuInput {
                     project: bim_project,
                     members,

@@ -7306,3 +7306,191 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_v0881_row_a_project_browser_properties_and_layers_vg_responsive() {
+        // 1. Slash commands registration & execution
+        for cmd in ["/browser", "/properties", "/layers", "/vg"] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|s| s.cmd == cmd),
+                "Missing v0.8.8.1 slash command {cmd}"
+            );
+        }
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        let _ = spatial.execute_spatial_input(
+            "/vg",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(spatial.project_browser_drawer_open);
+        assert_eq!(spatial.project_browser_tab, 1);
+
+        let _ = spatial.execute_spatial_input(
+            "/properties",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(spatial.properties_drawer_open);
+        assert!(!spatial.project_browser_drawer_open);
+
+        // 2. Visibility/Graphics BIM mesh pruning + custom 2D CAD layers + archive persistence
+        let all_tris = crate::views::webgpu_earth::build_rtc_active_bim_fem_mesh_with_visibility(
+            &crate::views::webgpu_earth::ActiveBimGpuInput {
+                project: &build.bim_bus.project,
+                members: &members,
+                lens: crate::views::universal_canvas::EarthBimLens::Clean,
+                erection_day_limit: 90,
+                deform_scale: 25.0,
+                active_modal_mode: 0,
+                modal_phase_sin: 0.0,
+                n1_removed_bim: None,
+                cascade_failed_bim: &[],
+                cascade_step_progress: 0.0,
+                subsurface_pile_depth_m: 6.0,
+                heading_deg: 0.0,
+                diff_overlay_active: false,
+                diff_added_bim: &[],
+                diff_modified_bim: &[],
+                diff_deleted_ghosts: &[],
+                replay_story_elevs_m: &[],
+                replay_story_disp_xyz_m: &[],
+                replay_ground_shake_xyz_m: [0.0; 3],
+                replay_hinge_states: &[],
+                shm_story_retention: &[],
+            },
+            &canvas.visibility_graphics.bim,
+        )
+        .indices
+        .len();
+        canvas.visibility_graphics.bim.show_columns = false;
+        let no_col_tris = crate::views::webgpu_earth::build_rtc_active_bim_fem_mesh_with_visibility(
+            &crate::views::webgpu_earth::ActiveBimGpuInput {
+                project: &build.bim_bus.project,
+                members: &members,
+                lens: crate::views::universal_canvas::EarthBimLens::Clean,
+                erection_day_limit: 90,
+                deform_scale: 25.0,
+                active_modal_mode: 0,
+                modal_phase_sin: 0.0,
+                n1_removed_bim: None,
+                cascade_failed_bim: &[],
+                cascade_step_progress: 0.0,
+                subsurface_pile_depth_m: 6.0,
+                heading_deg: 0.0,
+                diff_overlay_active: false,
+                diff_added_bim: &[],
+                diff_modified_bim: &[],
+                diff_deleted_ghosts: &[],
+                replay_story_elevs_m: &[],
+                replay_story_disp_xyz_m: &[],
+                replay_ground_shake_xyz_m: [0.0; 3],
+                replay_hinge_states: &[],
+                shm_story_retention: &[],
+            },
+            &canvas.visibility_graphics.bim,
+        )
+        .indices
+        .len();
+        assert!(no_col_tris < all_tris, "Hiding Columns must reduce BIM triangle count");
+
+        assert!(canvas.visibility_graphics.add_custom_layer("A-Furn", [200, 120, 255]));
+        assert_eq!(canvas.visibility_graphics.active_cad_layer_id, "A-Furn");
+        canvas.mep_overlay_visible = true;
+        canvas.clash_overlay_visible = true;
+        canvas.hide_all_engineering_overlays();
+        assert!(!canvas.mep_overlay_visible && !canvas.clash_overlay_visible);
+
+        // Roundtrip persistence inside .eigen.json
+        let ws = crate::views::universal_canvas::WorkspaceCanvasSettings {
+            theme_mode: crate::theme::ThemeMode::ProDark,
+            canvas_height_ratio: 0.82,
+            freeze_by_default: true,
+            show_grid: true,
+            snap_to_grid: true,
+            grid_spacing_mm: 500.0,
+            show_bim_base_layer: true,
+            show_domain_overlay: true,
+            sync_all_layers: true,
+            show_floating_inspector: false,
+            show_ai_copilot: false,
+            unit_system: "SI".to_string(),
+            design_standard: "SNI".to_string(),
+            solver_threads: 4,
+            enable_svd_guard: true,
+            enable_anti_leakage: true,
+        };
+        let archive = canvas.build_unified_archive(&build.bim_bus.project, &members, &[], ws);
+        let json = archive.to_pretty_json().expect("archive json");
+        let mut canvas2 = UniversalCanvasState::default();
+        let mut bim2 = BimProject::empty();
+        let mut m2 = Vec::new();
+        let mut v2 = Vec::new();
+        canvas2
+            .apply_unified_archive(&json, &mut bim2, &mut m2, &mut v2)
+            .expect("apply roundtrip");
+        assert!(!canvas2.visibility_graphics.bim.show_columns);
+        assert!(canvas2
+            .visibility_graphics
+            .cad_layers
+            .iter()
+            .any(|l| l.id == "A-Furn"));
+
+        // 3. Responsive single-capsule layout verification across Desktop, Tablet, and Mobile
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        for (tab, open_props) in [(0usize, false), (1, false), (0, true)] {
+            for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+                let ctx = egui::Context::default();
+                spatial.mobile_deck_pinned = true;
+                if open_props {
+                    spatial.open_properties_drawer();
+                    spatial.selected_target = build.bim_bus.project.columns.first().map(|c| SmartSelectionTarget::Column(c.id));
+                } else {
+                    spatial.selected_target = None;
+                    spatial.open_project_browser_drawer(tab);
+                }
+                for _ in 0..4 {
+                    let raw = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                        ..Default::default()
+                    };
+                    let mut out = ctx.run_ui(raw, |ui| {
+                        let _ = spatial.render_hud_overlays(
+                            ui.ctx(),
+                            &theme,
+                            &mut canvas,
+                            &mut build,
+                            &mut ai,
+                            &members,
+                            &projects,
+                            &mut db_components,
+                        );
+                    });
+                    out.textures_delta.clear();
+                }
+                assert_eq!(spatial.hud_rects.len(), 1);
+                assert!(
+                    spatial.hud_rects[0].right() <= win_w + 1.0,
+                    "Project Browser / Properties overflowed {win_w}: {:?}",
+                    spatial.hud_rects[0]
+                );
+            }
+        }
+    }

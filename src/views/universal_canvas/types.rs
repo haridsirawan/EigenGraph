@@ -203,6 +203,220 @@ pub struct CanvasEntity {
     pub kind: CanvasShapeKind,
     pub color_rgb: [u8; 3],
     pub stroke_width: f32,
+    #[serde(default)]
+    pub layer_id: String,
+}
+
+/// Revit-style Visibility/Graphics (VG) category visibility & lock controls for the active BIM model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BimCategoryVisibility {
+    #[serde(default = "default_globe_true")]
+    pub show_columns: bool,
+    #[serde(default = "default_globe_true")]
+    pub show_beams: bool,
+    #[serde(default = "default_globe_true")]
+    pub show_walls: bool,
+    #[serde(default = "default_globe_true")]
+    pub show_slabs: bool,
+    #[serde(default = "default_globe_true")]
+    pub show_footings: bool,
+    #[serde(default = "default_globe_true")]
+    pub show_grid_and_axes: bool,
+    #[serde(default)]
+    pub lock_columns: bool,
+    #[serde(default)]
+    pub lock_beams: bool,
+    #[serde(default)]
+    pub lock_walls: bool,
+    #[serde(default)]
+    pub lock_slabs: bool,
+    #[serde(default)]
+    pub lock_footings: bool,
+}
+
+impl Default for BimCategoryVisibility {
+    fn default() -> Self {
+        Self {
+            show_columns: true,
+            show_beams: true,
+            show_walls: true,
+            show_slabs: true,
+            show_footings: true,
+            show_grid_and_axes: true,
+            lock_columns: false,
+            lock_beams: false,
+            lock_walls: false,
+            lock_slabs: false,
+            lock_footings: false,
+        }
+    }
+}
+
+impl BimCategoryVisibility {
+    pub fn bitmask(&self) -> u64 {
+        u64::from(self.show_columns)
+            | (u64::from(self.show_beams) << 1)
+            | (u64::from(self.show_walls) << 2)
+            | (u64::from(self.show_slabs) << 3)
+            | (u64::from(self.show_footings) << 4)
+            | (u64::from(self.show_grid_and_axes) << 5)
+    }
+
+    pub fn show_all(&mut self) {
+        self.show_columns = true;
+        self.show_beams = true;
+        self.show_walls = true;
+        self.show_slabs = true;
+        self.show_footings = true;
+        self.show_grid_and_axes = true;
+    }
+
+    pub fn is_all_visible(&self) -> bool {
+        self.show_columns
+            && self.show_beams
+            && self.show_walls
+            && self.show_slabs
+            && self.show_footings
+            && self.show_grid_and_axes
+    }
+
+    pub fn isolate_category(&mut self, category: &str) {
+        let key = category.to_ascii_lowercase();
+        self.show_columns = key == "columns";
+        self.show_beams = key == "beams";
+        self.show_walls = key == "walls";
+        self.show_slabs = key == "slabs";
+        self.show_footings = key == "footings";
+        self.show_grid_and_axes = key == "grid";
+    }
+}
+
+/// AutoCAD-compatible 2D CAD drafting & annotation layer definition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CadDraftingLayer {
+    pub id: String,
+    pub name: String,
+    pub visible: bool,
+    pub locked: bool,
+    pub color_rgb: [u8; 3],
+}
+
+impl CadDraftingLayer {
+    pub fn default_layers() -> Vec<Self> {
+        vec![
+            Self {
+                id: "0-Sketch".to_string(),
+                name: "0-Sketch".to_string(),
+                visible: true,
+                locked: false,
+                color_rgb: [56, 189, 248],
+            },
+            Self {
+                id: "S-Grid".to_string(),
+                name: "S-Grid".to_string(),
+                visible: true,
+                locked: false,
+                color_rgb: [148, 163, 184],
+            },
+            Self {
+                id: "A-Anno".to_string(),
+                name: "A-Anno".to_string(),
+                visible: true,
+                locked: false,
+                color_rgb: [250, 204, 21],
+            },
+            Self {
+                id: "C-Survey".to_string(),
+                name: "C-Survey".to_string(),
+                visible: true,
+                locked: false,
+                color_rgb: [52, 211, 153],
+            },
+        ]
+    }
+}
+
+/// Unified Visibility/Graphics (VG) + 2D CAD Drafting Layer manager persisted in `.eigen.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VisibilityGraphicsState {
+    #[serde(default)]
+    pub bim: BimCategoryVisibility,
+    #[serde(default = "CadDraftingLayer::default_layers")]
+    pub cad_layers: Vec<CadDraftingLayer>,
+    #[serde(default = "default_cad_layer_id")]
+    pub active_cad_layer_id: String,
+}
+
+fn default_cad_layer_id() -> String {
+    "0-Sketch".to_string()
+}
+
+impl Default for VisibilityGraphicsState {
+    fn default() -> Self {
+        Self {
+            bim: BimCategoryVisibility::default(),
+            cad_layers: CadDraftingLayer::default_layers(),
+            active_cad_layer_id: default_cad_layer_id(),
+        }
+    }
+}
+
+impl VisibilityGraphicsState {
+    pub fn add_custom_layer(&mut self, raw_name: &str, color_rgb: [u8; 3]) -> bool {
+        let trimmed = raw_name.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        let id = trimmed.replace(' ', "-");
+        if self
+            .cad_layers
+            .iter()
+            .any(|l| l.id.eq_ignore_ascii_case(&id) || l.name.eq_ignore_ascii_case(trimmed))
+        {
+            return false;
+        }
+        self.cad_layers.push(CadDraftingLayer {
+            id: id.clone(),
+            name: trimmed.to_string(),
+            visible: true,
+            locked: false,
+            color_rgb,
+        });
+        self.active_cad_layer_id = id;
+        true
+    }
+
+    pub fn is_cad_layer_visible(&self, layer_id: &str) -> bool {
+        let key = if layer_id.trim().is_empty() {
+            "0-Sketch"
+        } else {
+            layer_id.trim()
+        };
+        self.cad_layers
+            .iter()
+            .find(|l| l.id == key)
+            .map_or(true, |l| l.visible)
+    }
+
+    pub fn is_cad_layer_locked(&self, layer_id: &str) -> bool {
+        let key = if layer_id.trim().is_empty() {
+            "0-Sketch"
+        } else {
+            layer_id.trim()
+        };
+        self.cad_layers
+            .iter()
+            .find(|l| l.id == key)
+            .is_some_and(|l| l.locked)
+    }
+
+    pub fn content_revision_hash(&self) -> u64 {
+        let mut h = self.bim.bitmask() ^ (self.cad_layers.len() as u64).wrapping_mul(1_000_003);
+        for (idx, l) in self.cad_layers.iter().enumerate() {
+            h ^= (u64::from(l.visible) | (u64::from(l.locked) << 1)) << ((idx * 2) % 48);
+        }
+        h
+    }
 }
 
 /// Workspace and canvas preferences persisted inside the single-file archive.
@@ -322,6 +536,8 @@ pub struct UnifiedWorkspaceArchive {
     pub urban_utilities_config: crate::core::gis::UrbanUtilitiesConfig,
     #[serde(default)]
     pub intersection_config: crate::core::gis::CityIntersectionConfig,
+    #[serde(default)]
+    pub visibility_graphics: VisibilityGraphicsState,
     pub sha256_seal: String,
 }
 

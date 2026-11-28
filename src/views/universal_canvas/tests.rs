@@ -65,6 +65,7 @@ use crate::theme::ThemeMode;
             },
             color_rgb: [245, 158, 11],
             stroke_width: 2.5,
+            layer_id: String::new(),
         });
         assert_eq!(canvas.count_for_pillar(NavigationPillar::SafetyHealth), 1);
         assert_eq!(canvas.entities.len(), initial_len + 1);
@@ -102,6 +103,7 @@ use crate::theme::ThemeMode;
             },
             color_rgb: [56, 189, 248],
             stroke_width: 2.0,
+            layer_id: String::new(),
         });
         canvas.next_entity_id = 2;
         canvas.selected_entity_id = Some(1);
@@ -209,6 +211,7 @@ use crate::theme::ThemeMode;
             },
             color_rgb: [56, 189, 248],
             stroke_width: 2.0,
+            layer_id: String::new(),
         });
         let (pure_end_pt, pure_end_kind) =
             canvas.snap_point_with_osnap([23980.0, 15.0], None, None, 200.0);
@@ -227,6 +230,7 @@ use crate::theme::ThemeMode;
             },
             color_rgb: [56, 189, 248],
             stroke_width: 2.0,
+            layer_id: String::new(),
         });
         canvas.next_entity_id = 91;
 

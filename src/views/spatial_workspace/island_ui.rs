@@ -1877,7 +1877,9 @@ impl SpatialWorkspaceState {
                 || self.solar_drawer_open
                 || self.daylight_drawer_open
                 || self.mep_drawer_open
-                || self.clash_drawer_open,
+                || self.clash_drawer_open
+                || self.project_browser_drawer_open
+                || self.properties_drawer_open,
         );
 
         let max_allowed_w = (vp.x - 16.0).max(200.0);
@@ -2068,34 +2070,36 @@ impl SpatialWorkspaceState {
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
                     ui.set_max_width(cap_w);
-                    if let Some(SmartSelectionTarget::EarthSite { lat, lon }) = self.selected_target {
-                        let site_actions = self.render_earth_site_inspector_strip(
-                            ui,
-                            theme,
-                            lat,
-                            lon,
-                            cap_w,
-                            universal_canvas,
-                            build_view,
-                        );
-                        actions.merge(site_actions);
-                        ui.separator();
-                    } else if let Some(target) = self.selected_target {
-                        let smart_actions = self.render_embedded_smart_inspector_in_island(
-                            ui,
-                            theme,
-                            target,
-                            cap_w,
-                            universal_canvas,
-                            build_view,
-                            ai_assistant,
-                            members,
-                            projects,
-                            db_components,
-                        );
-                        actions.merge(smart_actions);
-                        ui.add_space(4.0);
-                        ui.separator();
+                    if !self.project_browser_drawer_open && !self.properties_drawer_open {
+                        if let Some(SmartSelectionTarget::EarthSite { lat, lon }) = self.selected_target {
+                            let site_actions = self.render_earth_site_inspector_strip(
+                                ui,
+                                theme,
+                                lat,
+                                lon,
+                                cap_w,
+                                universal_canvas,
+                                build_view,
+                            );
+                            actions.merge(site_actions);
+                            ui.separator();
+                        } else if let Some(target) = self.selected_target {
+                            let smart_actions = self.render_embedded_smart_inspector_in_island(
+                                ui,
+                                theme,
+                                target,
+                                cap_w,
+                                universal_canvas,
+                                build_view,
+                                ai_assistant,
+                                members,
+                                projects,
+                                db_components,
+                            );
+                            actions.merge(smart_actions);
+                            ui.add_space(4.0);
+                            ui.separator();
+                        }
                     }
                     if self.history_popover_open {
                         Frame::new()
@@ -3182,6 +3186,40 @@ impl SpatialWorkspaceState {
                             &mut actions,
                             cap_w,
                             is_mobile,
+                        );
+                        ui.separator();
+                    }
+
+                    if self.project_browser_drawer_open {
+                        self.render_project_browser_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            build_view,
+                            ai_assistant,
+                            members,
+                            projects,
+                            db_components,
+                            vault_projects,
+                            &mut actions,
+                            cap_w,
+                            is_mobile,
+                        );
+                        ui.separator();
+                    }
+
+                    if self.properties_drawer_open {
+                        self.render_properties_drawer(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            build_view,
+                            ai_assistant,
+                            members,
+                            projects,
+                            db_components,
+                            &mut actions,
+                            cap_w,
                         );
                         ui.separator();
                     }

@@ -567,6 +567,7 @@ impl UniversalCanvasState {
             },
             color_rgb: [59, 130, 246],
             stroke_width: 2.2,
+            layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
         });
         self.set_single_selection(Some(id));
         id
@@ -595,6 +596,7 @@ impl UniversalCanvasState {
             },
             color_rgb: [16, 185, 129],
             stroke_width: 2.2,
+            layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
         });
         self.set_single_selection(Some(id));
         id
@@ -621,6 +623,7 @@ impl UniversalCanvasState {
             },
             color_rgb: [249, 115, 22],
             stroke_width: 2.2,
+            layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
         });
         self.set_single_selection(Some(id));
         id
@@ -727,6 +730,7 @@ impl UniversalCanvasState {
                 },
                 color_rgb: col,
                 stroke_width: self.stroke_width,
+                layer_id: "S-Grid".to_string(),
             });
             created_ids.push(id);
         }
@@ -744,6 +748,7 @@ impl UniversalCanvasState {
                 },
                 color_rgb: col,
                 stroke_width: self.stroke_width,
+                layer_id: "S-Grid".to_string(),
             });
             created_ids.push(id);
         }
@@ -1001,6 +1006,7 @@ impl UniversalCanvasState {
                     },
                     color_rgb: self.active_color_rgb(),
                     stroke_width: self.stroke_width,
+                    layer_id: self.visibility_graphics.active_cad_layer_id.clone(),
                 });
                 self.set_single_selection(Some(id));
                 return format!(

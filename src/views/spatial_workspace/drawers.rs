@@ -8612,4 +8612,928 @@ impl SpatialWorkspaceState {
             });
         });
     }
+
+    /// Update `v0.8.8.1` (`1/10` -> `v0.8.9`): Renders the Unified Split `Project Browser` (`Model Tree` |
+    /// `Layers / VG` | `Vault`) inside Dynamic Island, paired side-by-side with live `Properties` on desktop.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn render_project_browser_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        ai_assistant: &mut AiAssistantView,
+        members: &[StructuralMember],
+        projects: &[ProjectItem],
+        db_components: &mut Vec<DatabaseComponent>,
+        vault_projects: &[crate::core::vault::PersonalVaultProjectEntry],
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+        is_mobile: bool,
+    ) {
+        let bw = (cap_w - 10.0).max(170.0);
+        Frame::new()
+            .fill(theme.bg_card.gamma_multiply(0.32))
+            .corner_radius(CornerRadius::same(12))
+            .stroke(Stroke::new(1.0, theme.accent_blue.gamma_multiply(0.32)))
+            .inner_margin(Margin::symmetric(8, 6))
+            .show(ui, |ui| {
+                ui.set_width(bw);
+                ui.set_max_width(bw);
+
+                ui.horizontal_wrapped(|ui| {
+                    icons::icon_label(
+                        ui,
+                        AppIcon::Layers,
+                        13.0,
+                        theme.accent_blue,
+                        "Project Browser",
+                        11.2,
+                        theme.text_primary,
+                        true,
+                    );
+                    for (idx, lbl) in [(0usize, "Model Tree"), (1usize, "Layers / VG"), (2usize, "Vault")] {
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            lbl,
+                            self.project_browser_tab == idx,
+                            theme.accent_blue,
+                            &format!("Switch Project Browser to {lbl}"),
+                        )
+                        .clicked()
+                        {
+                            self.project_browser_tab = idx;
+                        }
+                    }
+                    if !is_mobile && bw >= 820.0 {
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::SlidersPanel),
+                            if self.project_browser_split_properties {
+                                "Split: Browser + Properties"
+                            } else {
+                                "Show Split Properties"
+                            },
+                            self.project_browser_split_properties,
+                            theme.accent_green,
+                            "Toggle side-by-side Live Properties pane alongside Project Browser",
+                        )
+                        .clicked()
+                        {
+                            self.project_browser_split_properties =
+                                !self.project_browser_split_properties;
+                        }
+                    } else if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::SlidersPanel),
+                        "Properties ->",
+                        false,
+                        theme.accent_green,
+                        "Switch to Live Properties Inspector",
+                    )
+                    .clicked()
+                    {
+                        self.open_properties_drawer();
+                    }
+                    if icons::icon_only_button(
+                        ui,
+                        AppIcon::Close,
+                        theme.text_secondary,
+                        Color32::TRANSPARENT,
+                        Stroke::NONE,
+                        CornerRadius::same(6),
+                        Vec2::splat(18.0),
+                        "Close Project Browser",
+                    )
+                    .clicked()
+                    {
+                        self.project_browser_drawer_open = false;
+                    }
+                });
+                ui.separator();
+
+                let split_active = !is_mobile && bw >= 820.0 && self.project_browser_split_properties;
+                if split_active {
+                    let left_w = ((bw - 18.0) * 0.40).clamp(260.0, 440.0);
+                    let right_w = (bw - left_w - 18.0).max(260.0);
+                    ui.horizontal_top(|ui| {
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(left_w, 0.0),
+                            Layout::top_down(Align::LEFT),
+                            |ui| {
+                                ui.set_width(left_w);
+                                ui.set_max_width(left_w);
+                                self.render_project_browser_left_pane(
+                                    ui,
+                                    theme,
+                                    universal_canvas,
+                                    build_view,
+                                    vault_projects,
+                                    actions,
+                                    left_w,
+                                );
+                            },
+                        );
+                        ui.separator();
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(right_w, 0.0),
+                            Layout::top_down(Align::LEFT),
+                            |ui| {
+                                ui.set_width(right_w);
+                                ui.set_max_width(right_w);
+                                self.render_properties_pane_body(
+                                    ui,
+                                    theme,
+                                    universal_canvas,
+                                    build_view,
+                                    ai_assistant,
+                                    members,
+                                    projects,
+                                    db_components,
+                                    actions,
+                                    right_w,
+                                );
+                            },
+                        );
+                    });
+                } else {
+                    self.render_project_browser_left_pane(
+                        ui,
+                        theme,
+                        universal_canvas,
+                        build_view,
+                        vault_projects,
+                        actions,
+                        bw - 8.0,
+                    );
+                }
+            });
+    }
+
+    fn render_project_browser_left_pane(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        vault_projects: &[crate::core::vault::PersonalVaultProjectEntry],
+        actions: &mut SpatialHudActions,
+        pane_w: f32,
+    ) {
+        ui.set_width(pane_w);
+        ui.set_max_width(pane_w);
+        match self.project_browser_tab {
+            0 => {
+                // Tab 0: Revit-style Model Tree (Levels/Views, BIM Elements, City/Utilities, Sheets)
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Filter:").size(9.0).color(theme.text_muted));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.project_browser_search)
+                            .desired_width((pane_w - 72.0).max(90.0))
+                            .hint_text("Search levels, C1, B1, S-116..."),
+                    );
+                    if !self.project_browser_search.is_empty() && ui.button("x").clicked() {
+                        self.project_browser_search.clear();
+                    }
+                });
+                let q = self.project_browser_search.trim().to_ascii_lowercase();
+
+                ui.add_space(3.0);
+                ui.label(
+                    RichText::new("Levels & Camera Views")
+                        .size(9.4)
+                        .strong()
+                        .color(theme.accent_blue),
+                );
+                let mut sorted_levels = build_view.bim_bus.project.levels.clone();
+                sorted_levels.sort_by(|a, b| a.elevation_mm.total_cmp(&b.elevation_mm));
+                ui.horizontal_wrapped(|ui| {
+                    for (idx, lvl) in sorted_levels.iter().enumerate() {
+                        let lbl = if lvl.name.contains("m)") {
+                            lvl.name.clone()
+                        } else {
+                            format!("{} ({:.1}m)", lvl.name, lvl.elevation_mm * 0.001)
+                        };
+                        if !q.is_empty() && !lbl.to_ascii_lowercase().contains(&q) {
+                            continue;
+                        }
+                        let active = idx == self.active_story_idx;
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            lbl,
+                            active,
+                            theme.accent_blue,
+                            "Activate level & sync active horizontal Level Cut plane",
+                        )
+                        .clicked()
+                        {
+                            self.active_story_idx = idx;
+                            if universal_canvas.section_box.level_cut_mode {
+                                universal_canvas
+                                    .section_box
+                                    .apply_level_cut(&build_view.bim_bus.project, self.active_story_idx);
+                            }
+                        }
+                    }
+                    for (cam_key, cam_lbl) in [("iso", "3D Iso"), ("top", "Top Plan"), ("elev", "Elev")] {
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Cube3D),
+                            cam_lbl,
+                            false,
+                            theme.text_secondary,
+                            &format!("Switch 3D camera to {cam_lbl}"),
+                        )
+                        .clicked()
+                        {
+                            self.apply_camera_preset(build_view, universal_canvas, cam_key);
+                            actions.fit_camera = true;
+                        }
+                    }
+                });
+
+                ui.add_space(3.0);
+                let proj = &build_view.bim_bus.project;
+                ui.label(
+                    RichText::new(format!(
+                        "BIM Elements ({} Col · {} Beam · {} Wall · {} Slab · {} Ftg)",
+                        proj.columns.len(),
+                        proj.runs.len(),
+                        proj.walls.len(),
+                        proj.slabs.len(),
+                        proj.footings.len(),
+                    ))
+                    .size(9.2)
+                    .strong()
+                    .color(theme.accent_green),
+                );
+                let mut picked: Option<SmartSelectionTarget> = None;
+                ui.horizontal_wrapped(|ui| {
+                    for c in proj.columns.iter().take(8) {
+                        let name = format!("C{}", c.id);
+                        if !q.is_empty() && !name.to_ascii_lowercase().contains(&q) && !"column".contains(&q) {
+                            continue;
+                        }
+                        let act = self.selected_target == Some(SmartSelectionTarget::Column(c.id));
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Column),
+                            name,
+                            act,
+                            theme.accent_blue,
+                            "Inspect Column in Live Properties",
+                        )
+                        .clicked()
+                        {
+                            picked = Some(SmartSelectionTarget::Column(c.id));
+                        }
+                    }
+                    for b in proj.runs.iter().take(8) {
+                        let name = format!("B{}", b.id);
+                        if !q.is_empty() && !name.to_ascii_lowercase().contains(&q) && !"beam".contains(&q) {
+                            continue;
+                        }
+                        let act = self.selected_target == Some(SmartSelectionTarget::Beam(b.id));
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Beam),
+                            name,
+                            act,
+                            theme.accent_blue,
+                            "Inspect Beam in Live Properties",
+                        )
+                        .clicked()
+                        {
+                            picked = Some(SmartSelectionTarget::Beam(b.id));
+                        }
+                    }
+                    for w in proj.walls.iter().take(6) {
+                        let name = format!("W{}", w.id);
+                        if !q.is_empty() && !name.to_ascii_lowercase().contains(&q) && !"wall".contains(&q) {
+                            continue;
+                        }
+                        let act = self.selected_target == Some(SmartSelectionTarget::Wall(w.id));
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Wall),
+                            name,
+                            act,
+                            theme.accent_green,
+                            "Inspect Wall in Live Properties",
+                        )
+                        .clicked()
+                        {
+                            picked = Some(SmartSelectionTarget::Wall(w.id));
+                        }
+                    }
+                    for s in proj.slabs.iter().take(4) {
+                        let name = format!("S{}", s.id);
+                        if !q.is_empty() && !name.to_ascii_lowercase().contains(&q) && !"slab".contains(&q) {
+                            continue;
+                        }
+                        let act = self.selected_target == Some(SmartSelectionTarget::Slab(s.id));
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Slab),
+                            name,
+                            act,
+                            theme.text_secondary,
+                            "Inspect Slab in Live Properties",
+                        )
+                        .clicked()
+                        {
+                            picked = Some(SmartSelectionTarget::Slab(s.id));
+                        }
+                    }
+                    for f in proj.footings.iter().take(4) {
+                        let name = format!("F{}", f.id);
+                        if !q.is_empty() && !name.to_ascii_lowercase().contains(&q) && !"footing".contains(&q) {
+                            continue;
+                        }
+                        let act = self.selected_target == Some(SmartSelectionTarget::Footing(f.id));
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            Some(AppIcon::Target),
+                            name,
+                            act,
+                            theme.accent_orange,
+                            "Inspect Footing in Live Properties",
+                        )
+                        .clicked()
+                        {
+                            picked = Some(SmartSelectionTarget::Footing(f.id));
+                        }
+                    }
+                });
+                if let Some(t) = picked {
+                    self.selected_target = Some(t);
+                    self.popup_tab = SmartPopupTab::Properties;
+                }
+
+                ui.add_space(3.0);
+                ui.label(
+                    RichText::new(format!(
+                        "City & Overlays ({} Roads · {} Zones · {} CAD Shapes)",
+                        universal_canvas.city_scene.roads.len(),
+                        universal_canvas.city_scene.zones.len(),
+                        universal_canvas.entities.len(),
+                    ))
+                    .size(9.0)
+                    .strong()
+                    .color(theme.accent_orange),
+                );
+                ui.horizontal_wrapped(|ui| {
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Building),
+                        "City -> BIM Hub",
+                        false,
+                        theme.accent_orange,
+                        "Open City-to-BIM & Road Intersections Studio",
+                    )
+                    .clicked()
+                    {
+                        self.open_city_hub_drawer(0);
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::SectionCut),
+                        "Urban Utilities",
+                        false,
+                        theme.accent_blue,
+                        "Open Subsurface Urban Utilities & Underground X-Ray",
+                    )
+                    .clicked()
+                    {
+                        self.open_utilities_drawer(0);
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Printer),
+                        "Index S-000",
+                        false,
+                        theme.accent_green,
+                        "Export Master Engineering Dossier Drawing Index S-000 (S-100..S-118) .svg",
+                    )
+                    .clicked()
+                    {
+                        actions.export_master_dossier_svg = true;
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "S-116",
+                        false,
+                        theme.accent_blue,
+                        "Export Archival Sheet S-116 Building MEP Systems .svg",
+                    )
+                    .clicked()
+                    {
+                        actions.export_mep_s116 = true;
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "S-117",
+                        false,
+                        theme.accent_orange,
+                        "Export Archival Sheet S-117 3D Clash & BCF 2.1 .svg",
+                    )
+                    .clicked()
+                    {
+                        actions.export_clash_s117 = true;
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "S-118",
+                        false,
+                        theme.accent_green,
+                        "Export Archival Sheet S-118 Urban Utilities & Intersections .svg",
+                    )
+                    .clicked()
+                    {
+                        actions.export_city_infra_s118 = true;
+                    }
+                });
+            }
+            1 => {
+                // Tab 1: Unified Visibility/Graphics (Revit VG + IFCX Overlays + 2D CAD Layers)
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new("BIM Model Categories (Visibility / Graphics)")
+                            .size(9.4)
+                            .strong()
+                            .color(theme.accent_blue),
+                    );
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::CheckCircle),
+                        "Show All BIM",
+                        universal_canvas.visibility_graphics.bim.is_all_visible(),
+                        theme.accent_green,
+                        "Restore visibility of all BIM structural & architectural categories",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.visibility_graphics.bim.show_all();
+                    }
+                });
+
+                let mut isolate_cat: Option<&'static str> = None;
+                {
+                    let vg = &mut universal_canvas.visibility_graphics.bim;
+                    for (key, lbl, vis_flag, lock_flag) in [
+                        ("columns", "Columns (S-COLS)", &mut vg.show_columns, Some(&mut vg.lock_columns)),
+                        ("beams", "Beams & Braces (S-BEAM)", &mut vg.show_beams, Some(&mut vg.lock_beams)),
+                        ("walls", "Walls & Core (A-WALL)", &mut vg.show_walls, Some(&mut vg.lock_walls)),
+                        ("slabs", "Slabs & Roof (S-SLAB)", &mut vg.show_slabs, Some(&mut vg.lock_slabs)),
+                        ("footings", "Footings & Piles (S-FND)", &mut vg.show_footings, Some(&mut vg.lock_footings)),
+                        ("grid", "Grid & Reference Axes", &mut vg.show_grid_and_axes, None),
+                    ] {
+                        ui.horizontal(|ui| {
+                            let v_lbl = if *vis_flag { "Show" } else { "Hidden" };
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::SectionCut),
+                                v_lbl,
+                                *vis_flag,
+                                if *vis_flag { theme.accent_green } else { theme.text_muted },
+                                "Toggle category visibility in 3D WebGPU viewport",
+                            )
+                            .clicked()
+                            {
+                                *vis_flag = !*vis_flag;
+                            }
+                            if let Some(lf) = lock_flag {
+                                if Self::glass_icon_button(
+                                    ui,
+                                    theme,
+                                    if *lf { AppIcon::Lock } else { AppIcon::Unlock },
+                                    *lf,
+                                    theme.accent_orange,
+                                    "Lock / unlock category against accidental edits",
+                                )
+                                .clicked()
+                                {
+                                    *lf = !*lf;
+                                }
+                            }
+                            ui.label(
+                                RichText::new(lbl)
+                                    .size(9.0)
+                                    .color(if *vis_flag { theme.text_primary } else { theme.text_muted }),
+                            );
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if Self::glass_pill_button(
+                                    ui,
+                                    theme,
+                                    None,
+                                    "Isolate",
+                                    false,
+                                    theme.accent_blue,
+                                    &format!("Isolate {lbl} only"),
+                                )
+                                .clicked()
+                                {
+                                    isolate_cat = Some(key);
+                                }
+                            });
+                        });
+                    }
+                }
+                if let Some(cat) = isolate_cat {
+                    universal_canvas.visibility_graphics.bim.isolate_category(cat);
+                }
+
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new("IFCX & 3D Engineering Overlays")
+                            .size(9.4)
+                            .strong()
+                            .color(theme.accent_orange),
+                    );
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Close),
+                        "Clear Overlays",
+                        false,
+                        theme.accent_red,
+                        "Hide all active 3D hazard/MEP/clash/solar/section overlays back to clean BIM",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.hide_all_engineering_overlays();
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    let overlays: [(&str, &mut bool); 15] = [
+                        ("MEP", &mut universal_canvas.mep_overlay_visible),
+                        ("Clash 3D", &mut universal_canvas.clash_overlay_visible),
+                        ("Utilities", &mut universal_canvas.urban_utilities_overlay_visible),
+                        ("X-Ray Ground", &mut universal_canvas.urban_utilities_config.xray_underground),
+                        ("Ocean", &mut universal_canvas.show_water_surface),
+                        ("Section Box", &mut universal_canvas.section_box.enabled),
+                        ("Solar OTTV", &mut universal_canvas.solar_overlay_visible),
+                        ("Daylight Lux", &mut universal_canvas.daylight_overlay_visible),
+                        ("Zoning", &mut universal_canvas.zoning_overlay_visible),
+                        ("Massing", &mut universal_canvas.massing_overlay_visible),
+                        ("SSI Soil", &mut universal_canvas.subsurface_ssi.xray_subsurface_visible),
+                        ("EigenFlow", &mut universal_canvas.eigenflow_overlay_visible),
+                        ("Extreme", &mut universal_canvas.extreme_events_overlay_visible),
+                        ("QA/QC 3D", &mut universal_canvas.field_qaqc_overlay_visible),
+                        ("Evac", &mut universal_canvas.evacuation_config.overlay_visible),
+                    ];
+                    for (olbl, flag) in overlays {
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            olbl,
+                            *flag,
+                            theme.accent_blue,
+                            &format!("Toggle {olbl} 3D overlay"),
+                        )
+                        .clicked()
+                        {
+                            *flag = !*flag;
+                        }
+                    }
+                });
+
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("2D CAD Drafting Layers (AutoCAD-Compatible DXF)")
+                        .size(9.4)
+                        .strong()
+                        .color(theme.accent_green),
+                );
+                let active_id = universal_canvas.visibility_graphics.active_cad_layer_id.clone();
+                let mut set_active: Option<String> = None;
+                let entities = &universal_canvas.entities;
+                for layer in &mut universal_canvas.visibility_graphics.cad_layers {
+                    let count = entities
+                        .iter()
+                        .filter(|e| {
+                            if e.layer_id.trim().is_empty() {
+                                layer.id == "0-Sketch"
+                            } else {
+                                e.layer_id == layer.id
+                            }
+                        })
+                        .count();
+                    let is_act = layer.id == active_id;
+                    ui.horizontal(|ui| {
+                        let dot_col = Color32::from_rgb(layer.color_rgb[0], layer.color_rgb[1], layer.color_rgb[2]);
+                        let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
+                        ui.painter().circle_filled(dot_rect.center(), 4.5, dot_col);
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            format!("{} ({count})", layer.name),
+                            is_act,
+                            theme.accent_blue,
+                            "Set as active 2D CAD drafting layer",
+                        )
+                        .clicked()
+                        {
+                            set_active = Some(layer.id.clone());
+                        }
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            if layer.visible { "On" } else { "Off" },
+                            layer.visible,
+                            theme.accent_green,
+                            "Toggle 2D CAD layer visibility",
+                        )
+                        .clicked()
+                        {
+                            layer.visible = !layer.visible;
+                        }
+                        if Self::glass_icon_button(
+                            ui,
+                            theme,
+                            if layer.locked { AppIcon::Lock } else { AppIcon::Unlock },
+                            layer.locked,
+                            theme.accent_orange,
+                            "Lock / unlock 2D CAD layer",
+                        )
+                        .clicked()
+                        {
+                            layer.locked = !layer.locked;
+                        }
+                    });
+                }
+                if let Some(nid) = set_active {
+                    universal_canvas.visibility_graphics.active_cad_layer_id = nid;
+                }
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.new_cad_layer_name)
+                            .desired_width((pane_w - 110.0).max(90.0))
+                            .hint_text("New layer (e.g. A-Furn)..."),
+                    );
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Plus),
+                        "+ Layer",
+                        false,
+                        theme.accent_green,
+                        "Create custom 2D CAD drafting layer",
+                    )
+                    .clicked()
+                        && universal_canvas
+                            .visibility_graphics
+                            .add_custom_layer(&self.new_cad_layer_name, [168, 85, 247])
+                    {
+                        self.new_cad_layer_name.clear();
+                    }
+                });
+            }
+            _ => {
+                // Tab 2: Vault Workspace Files
+                let vault_act = self.render_vault_workspace_bar(
+                    ui,
+                    theme,
+                    vault_projects,
+                    universal_canvas,
+                    pane_w,
+                );
+                actions.merge(vault_act);
+            }
+        }
+    }
+
+    /// Standalone `Properties` Drawer inside Dynamic Island (Row A quick pill or `/properties`).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn render_properties_drawer(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        ai_assistant: &mut AiAssistantView,
+        members: &[StructuralMember],
+        projects: &[ProjectItem],
+        db_components: &mut Vec<DatabaseComponent>,
+        actions: &mut SpatialHudActions,
+        cap_w: f32,
+    ) {
+        let pw = (cap_w - 10.0).max(170.0);
+        Frame::new()
+            .fill(theme.bg_card.gamma_multiply(0.32))
+            .corner_radius(CornerRadius::same(12))
+            .stroke(Stroke::new(1.0, theme.accent_green.gamma_multiply(0.34)))
+            .inner_margin(Margin::symmetric(8, 6))
+            .show(ui, |ui| {
+                ui.set_width(pw);
+                ui.set_max_width(pw);
+                ui.horizontal(|ui| {
+                    icons::icon_label(
+                        ui,
+                        AppIcon::SlidersPanel,
+                        13.0,
+                        theme.accent_green,
+                        "Live Properties",
+                        11.2,
+                        theme.text_primary,
+                        true,
+                    );
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Layers),
+                        "Project Browser",
+                        false,
+                        theme.accent_blue,
+                        "Open Split Project Browser + Properties",
+                    )
+                    .clicked()
+                    {
+                        self.open_project_browser_drawer(self.project_browser_tab);
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if icons::icon_only_button(
+                            ui,
+                            AppIcon::Close,
+                            theme.text_secondary,
+                            Color32::TRANSPARENT,
+                            Stroke::NONE,
+                            CornerRadius::same(6),
+                            Vec2::splat(18.0),
+                            "Close Properties",
+                        )
+                        .clicked()
+                        {
+                            self.properties_drawer_open = false;
+                        }
+                    });
+                });
+                ui.separator();
+                self.render_properties_pane_body(
+                    ui,
+                    theme,
+                    universal_canvas,
+                    build_view,
+                    ai_assistant,
+                    members,
+                    projects,
+                    db_components,
+                    actions,
+                    pw - 8.0,
+                );
+            });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_properties_pane_body(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        ai_assistant: &mut AiAssistantView,
+        members: &[StructuralMember],
+        projects: &[ProjectItem],
+        db_components: &mut Vec<DatabaseComponent>,
+        actions: &mut SpatialHudActions,
+        pane_w: f32,
+    ) {
+        if let Some(target) = self.selected_target {
+            if let SmartSelectionTarget::EarthSite { lat, lon } = target {
+                let site_actions = self.render_earth_site_inspector_strip(
+                    ui,
+                    theme,
+                    lat,
+                    lon,
+                    pane_w,
+                    universal_canvas,
+                    build_view,
+                );
+                actions.merge(site_actions);
+                ui.separator();
+            } else {
+                let smart_actions = self.render_embedded_smart_inspector_in_island(
+                    ui,
+                    theme,
+                    target,
+                    pane_w,
+                    universal_canvas,
+                    build_view,
+                    ai_assistant,
+                    members,
+                    projects,
+                    db_components,
+                );
+                actions.merge(smart_actions);
+                return;
+            }
+        }
+
+        ui.set_width(pane_w);
+        ui.set_max_width(pane_w);
+        ui.label(
+            RichText::new("Project & Active View Properties (Click any 3D element or Model Tree item to edit)")
+                .size(9.4)
+                .strong()
+                .color(theme.accent_green),
+        );
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Project:").size(9.0).color(theme.text_muted));
+            ui.add(
+                egui::TextEdit::singleline(&mut build_view.bim_bus.project.project_name)
+                    .desired_width((pane_w - 90.0).max(120.0)),
+            );
+        });
+        let (_, _, story_lbl, lvl_cnt) = self.active_base_and_top_levels(&build_view.bim_bus.project);
+        let (lat, lon) = universal_canvas.ground_origin_lat_lon;
+        ui.label(
+            RichText::new(format!(
+                "Active Story: {story_lbl} ({lvl_cnt} levels)  •  WGS-84: ({lat:.4}, {lon:.4})"
+            ))
+            .size(8.8)
+            .monospace()
+            .color(theme.text_secondary),
+        );
+        let proj = &build_view.bim_bus.project;
+        ui.label(
+            RichText::new(format!(
+                "Inventory: {} Cols · {} Beams · {} Walls · {} Slabs · {} Footings · {} CAD",
+                proj.columns.len(),
+                proj.runs.len(),
+                proj.walls.len(),
+                proj.slabs.len(),
+                proj.footings.len(),
+                universal_canvas.entities.len(),
+            ))
+            .size(8.6)
+            .monospace()
+            .color(theme.text_primary),
+        );
+        ui.add_space(3.0);
+        ui.label(RichText::new("Visual Lens & Section Cut:").size(9.0).strong().color(theme.text_primary));
+        ui.horizontal_wrapped(|ui| {
+            for (lens, lbl) in [
+                (SpatialLens::Clean, "Clean BIM"),
+                (SpatialLens::DcrHeatmap, "DCR%"),
+                (SpatialLens::EigenGateRedundancy, "EigenGate"),
+                (SpatialLens::BendingMoment, "Moment"),
+                (SpatialLens::DeformedShape, "Deformed"),
+                (SpatialLens::ModalVibration, "Modal"),
+            ] {
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    None,
+                    lbl,
+                    self.active_lens == lens,
+                    theme.accent_blue,
+                    &format!("Switch 3D viewport lens to {lbl}"),
+                )
+                .clicked()
+                {
+                    self.apply_lens_to_views(lens, build_view, universal_canvas);
+                }
+            }
+            if Self::glass_pill_button(
+                ui,
+                theme,
+                Some(AppIcon::SectionCut),
+                if universal_canvas.section_box.enabled { "Section Box ON" } else { "Section Box" },
+                universal_canvas.section_box.enabled,
+                theme.accent_orange,
+                "Toggle hardware WebGPU 3D Section Box",
+            )
+            .clicked()
+            {
+                universal_canvas.toggle_section_box(&build_view.bim_bus.project);
+            }
+        });
+    }
 }

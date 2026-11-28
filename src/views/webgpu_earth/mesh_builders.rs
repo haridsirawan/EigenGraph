@@ -1111,14 +1111,25 @@ pub(super) fn structural_dcr_color(dcr: f64) -> [f32; 4] {
     }
 }
 
+/// Builds the unified 3D Pure WebGPU mesh for the active editable `BimProject` with default visibility.
+pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPayload {
+    build_rtc_active_bim_fem_mesh_with_visibility(
+        input,
+        &crate::views::universal_canvas::BimCategoryVisibility::default(),
+    )
+}
+
 /// Builds the unified 3D Pure WebGPU mesh for the active editable `BimProject` inside the shared
-/// 24-bit hardware Z-buffered RTC scene:
+/// 24-bit hardware Z-buffered RTC scene, honoring Revit-style category visibility (`vis`):
 /// - Subsurface 3D pile caps + 4 deep foundation pile shafts beneath every `BimFooting`
 /// - Columns, beams/runs, walls, and floor/roof slabs colored by active structural lens
 ///   (`Clean`, `DcrHeatmap`, `AriRedundancy`, `MomentStress`, `Erection4D`)
 /// - 60 FPS animated `DeformedShape` & `ModalVibration` displacements ($\mathbf{p}(t) = \mathbf{p}_0 + s \sin(\omega t)\,\boldsymbol{\phi}_k$)
 /// - Translucent crimson `N-1` disruption ghost on the removed structural member
-pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPayload {
+pub fn build_rtc_active_bim_fem_mesh_with_visibility(
+    input: &ActiveBimGpuInput<'_>,
+    vis: &crate::views::universal_canvas::BimCategoryVisibility,
+) -> GpuMeshPayload {
     let proj = input.project;
     if proj.is_empty() {
         return GpuMeshPayload::default();
@@ -1331,6 +1342,7 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
     };
 
     // 1. Subsurface 3D Pile Caps & 4 Deep Pile Shafts (`BimFooting`)
+    if vis.show_footings {
     for (idx, ftg) in proj.footings.iter().enumerate() {
         if input.lens == EarthBimLens::Erection4D && idx + 1 > input.erection_day_limit {
             continue;
@@ -1396,9 +1408,11 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             }
         }
     }
+    }
 
     // 2. Structural Columns (`BimColumn`) with live top/bottom modal shear displacement
     let domino_sag_m = (input.cascade_step_progress.clamp(0.15, 1.0) as f64) * 0.45;
+    if vis.show_columns {
     for (idx, c) in proj.columns.iter().enumerate() {
         if input.lens == EarthBimLens::Erection4D && idx + 5 > input.erection_day_limit {
             continue;
@@ -1439,8 +1453,10 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             3.0,
         );
     }
+    }
 
     // 3. Structural Beams & Inclined BRB Braces (`BimRun`)
+    if vis.show_beams {
     for (idx, r) in proj.runs.iter().enumerate() {
         if input.lens == EarthBimLens::Erection4D && idx + 12 > input.erection_day_limit {
             continue;
@@ -1501,8 +1517,10 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
         ];
         push_box_prism_enu(&mut verts, &mut idxs, &fp, z_bot as f32, z_top as f32, col, 3.0);
     }
+    }
 
     // 4. Compound & Shear Walls (`BimWall`)
+    if vis.show_walls {
     for (idx, w) in proj.walls.iter().enumerate() {
         if input.lens == EarthBimLens::Erection4D && idx + 20 > input.erection_day_limit {
             continue;
@@ -1556,8 +1574,10 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             2.0,
         );
     }
+    }
 
     // 5. Floor & Roof Slabs (`BimSlab`)
+    if vis.show_slabs {
     for (idx, s) in proj.slabs.iter().enumerate() {
         if input.lens == EarthBimLens::Erection4D && idx + 16 > input.erection_day_limit {
             continue;
@@ -1589,6 +1609,7 @@ pub fn build_rtc_active_bim_fem_mesh(input: &ActiveBimGpuInput<'_>) -> GpuMeshPa
             },
         );
         push_extruded_building_prism_enu(&mut verts, &mut idxs, &fp, base_z, th, col, col);
+    }
     }
 
     // 6. Deleted IFCX Diff AABB Ghost Volumes (Translucent Crimson)

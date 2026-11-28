@@ -7,6 +7,22 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [Unreleased — Next: v0.8.9 (1/10)]
+
+### Update 1/10 (`v0.8.8.1` -> `v0.8.9`) — Row A `Project Browser` & `Properties` Quick Pills + Unified `Layers / VG` Manager inside Dynamic Island
+- **Row A Centered `Project Browser` & `Properties` Quick Pills (`src/views/spatial_workspace/ribbon_ui.rs`)**:
+  - Replaced the static centered project/level label in Row A with interactive 1-click **`Project Browser`** and dynamic **`Properties`** pills (`Properties · <Selected>`) on Desktop/Tablet, collapsing smoothly into icon buttons on Mobile (`< 540 px`) with zero added capsule height.
+- **Unified Split `Project Browser` (`Model Tree` | `Layers / VG` | `Vault`) & Live `Properties` Drawer (`src/views/spatial_workspace/{mod.rs, island_ui.rs, drawers.rs, types.rs, commands.rs}`)**:
+  - Added [`render_project_browser_drawer`](src/views/spatial_workspace/drawers.rs) displaying a side-by-side Split `Project Browser` + `Properties` layout on wide desktop viewports (`>= 820 px`) and clean responsive stacking on Tablet/Mobile, hosting searchable Levels/Views, BIM elements (`Columns`, `Beams`, `Walls`, `Slabs`, `Footings`), City & Utilities links, direct `S-000` / `S-116`–`S-118` archival exports, `Layers / VG`, and Vault explorer.
+  - Added standalone [`render_properties_drawer`](src/views/spatial_workspace/drawers.rs) plus `/browser`, `/properties`, `/layers`, and `/vg` slash commands.
+- **Persistent Revit-Style `VG` Categories, Overlay Reset & 2D CAD Drafting Layers (`src/views/universal_canvas/{types.rs, mod.rs, render_layers.rs, cad_ops.rs, interaction.rs}`, `src/views/webgpu_earth/{mod.rs, mesh_builders.rs}`)**:
+  - Added [`BimCategoryVisibility`](src/views/universal_canvas/types.rs), [`CadDraftingLayer`](src/views/universal_canvas/types.rs) (`0-Sketch`, `S-Grid`, `A-Anno`, `C-Survey`, plus custom `+ Layer` creation), and [`VisibilityGraphicsState`](src/views/universal_canvas/types.rs) persisted inside `.eigen.json` archives with [`UniversalCanvasState::hide_all_engineering_overlays`](src/views/universal_canvas/mod.rs).
+  - Wired [`build_rtc_active_bim_fem_mesh_with_visibility`](src/views/webgpu_earth/mesh_builders.rs) and `WebGpuEarthState::bim_visibility` so toggling `Columns`, `Beams`, `Walls`, `Slabs`, `Footings`, or `Isolate` immediately updates 3D WebGPU meshes and filters 2D CAD layers.
+- **Verification (`src/views/spatial_workspace/tests.rs`)**:
+  - Added [`test_v0881_row_a_project_browser_properties_and_layers_vg_responsive`](src/views/spatial_workspace/tests.rs) verifying slash dispatch, WebGPU BIM category triangle pruning, archive persistence, and zero horizontal overflow across Desktop (`1440×900`), Tablet (`768×900`), and Mobile (`390×844`).
+
+---
+
 ## [v0.8.8] — 2026-11-27
 
 ### Update 10/10 (`v0.8.8` Milestone Release) — Master Index `S-000` (`S-100`–`S-118`), Full Native + WASM Verification & Production Release

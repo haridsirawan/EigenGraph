@@ -206,6 +206,13 @@ pub struct SpatialWorkspaceState {
     // Update v0.8.7.8 (8/10 -> v0.8.8): City-to-BIM Promotion & Smart Road Intersections Drawer
     pub city_hub_drawer_open: bool,
     pub city_hub_drawer_tab: usize,
+    // Update v0.8.8.1 (1/10 -> v0.8.9): Row A Project Browser & Properties Quick Pills + Unified Layers/VG
+    pub project_browser_drawer_open: bool,
+    pub project_browser_tab: usize,
+    pub project_browser_search: String,
+    pub project_browser_split_properties: bool,
+    pub properties_drawer_open: bool,
+    pub new_cad_layer_name: String,
 }
 
 impl Default for SpatialWorkspaceState {
@@ -356,6 +363,12 @@ impl Default for SpatialWorkspaceState {
             utilities_drawer_tab: 0,
             city_hub_drawer_open: false,
             city_hub_drawer_tab: 0,
+            project_browser_drawer_open: false,
+            project_browser_tab: 0,
+            project_browser_search: String::new(),
+            project_browser_split_properties: true,
+            properties_drawer_open: false,
+            new_cad_layer_name: String::new(),
         }
     }
 }
@@ -431,6 +444,8 @@ impl SpatialWorkspaceState {
             || self.clash_drawer_open
             || self.utilities_drawer_open
             || self.city_hub_drawer_open
+            || self.project_browser_drawer_open
+            || self.properties_drawer_open
             || self.gemini_inflight_req_id.is_some()
             || self.mobile_deck_pinned
             || self.selected_target.is_some()
@@ -474,6 +489,8 @@ impl SpatialWorkspaceState {
         self.clash_drawer_open = false;
         self.utilities_drawer_open = false;
         self.city_hub_drawer_open = false;
+        self.project_browser_drawer_open = false;
+        self.properties_drawer_open = false;
         self.mobile_deck_pinned = false;
         self.hover_more_tools_open = false;
         self.composer_had_focus = false;
@@ -647,6 +664,16 @@ impl SpatialWorkspaceState {
             self.city_hub_drawer_open = false;
         } else {
             self.city_hub_drawer_open = !self.city_hub_drawer_open;
+        }
+        if drawer != "project_browser" {
+            self.project_browser_drawer_open = false;
+        } else {
+            self.project_browser_drawer_open = !self.project_browser_drawer_open;
+        }
+        if drawer != "properties" {
+            self.properties_drawer_open = false;
+        } else {
+            self.properties_drawer_open = !self.properties_drawer_open;
         }
     }
 
@@ -850,11 +877,28 @@ impl SpatialWorkspaceState {
         self.city_hub_drawer_open = true;
     }
 
+    /// Idempotently opens the Unified `Project Browser` drawer (`0` = Model Tree, `1` = Layers / VG, `2` = Vault).
+    pub fn open_project_browser_drawer(&mut self, tab: usize) {
+        self.toggle_exclusive_drawer("__none");
+        self.project_browser_tab = tab.min(2);
+        self.project_browser_drawer_open = true;
+    }
+
+    /// Idempotently opens the live `Properties` drawer inside the Dynamic Island.
+    pub fn open_properties_drawer(&mut self) {
+        self.toggle_exclusive_drawer("__none");
+        self.properties_drawer_open = true;
+    }
+
     /// Returns the active Layer 2 exclusive focus overlay `(title, icon)` when a drawer,
     /// Project Browser, AI chat, Smart Inspector, or Slash Palette is open inside the Dynamic Island.
     pub fn active_focus_layer_info(&self, slash_mode: bool) -> Option<(&'static str, crate::icons::AppIcon)> {
         use crate::icons::AppIcon;
-        if self.selected_target.is_some() {
+        if self.project_browser_drawer_open {
+            Some(("Project Browser", AppIcon::Layers))
+        } else if self.properties_drawer_open {
+            Some(("Properties", AppIcon::SlidersPanel))
+        } else if self.selected_target.is_some() {
             Some(("Smart Inspector", AppIcon::Target))
         } else if self.vault_drawer_open || self.vault_path_popover_open {
             Some(("Project Browser & Vault", AppIcon::Folder))

@@ -1880,6 +1880,7 @@ pub struct WebGpuEarthState {
     pub last_water_surface_tris: usize,
     pub last_city_ambience_tris: usize,
     pub last_compute_particles: u32,
+    pub bim_visibility: crate::views::universal_canvas::BimCategoryVisibility,
     #[cfg(not(target_arch = "wasm32"))]
     wgpu_device: Option<wgpu::Device>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -2281,9 +2282,13 @@ impl WebGpuEarthState {
 
         let pending_bim = if render_site_pass {
             if let Some(ref bim_in) = active_bim {
-                let rev = Self::compute_active_bim_hash(bim_in);
+                let rev = Self::compute_active_bim_hash(bim_in)
+                    ^ self.bim_visibility.bitmask().wrapping_mul(0x9e37_79b9_7f4a_7c15);
                 if rev != self.cached_bim_hash {
-                    let mesh = build_rtc_active_bim_fem_mesh(bim_in);
+                    let mesh = build_rtc_active_bim_fem_mesh_with_visibility(
+                        bim_in,
+                        &self.bim_visibility,
+                    );
                     self.last_bim_tris = mesh.indices.len() / 3;
                     self.cached_bim_hash = rev;
                     Some((rev, mesh))
