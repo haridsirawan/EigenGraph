@@ -7,6 +7,12 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
+## [Unreleased — Next: v0.9.0 (1/10)]
+
+### Update 1/10 (`v0.8.9.1` -> `v0.9.0`) — Compact Icon-Only `Project Browser` & `Properties` Triggers Beside `3D Isometric Earth`
+- **Row A Compact Icon Cluster (`src/views/spatial_workspace/ribbon_ui.rs`)**:
+  - Replaced the centered `Project Browser` and `Properties` text pills on Row A with crisp icon-only buttons (`AppIcon::Layers` and `AppIcon::SlidersPanel`) positioned directly to the right of the `Default 3D Isometric Earth / BIM View` (`AppIcon::Cube3D`) button across Desktop, Tablet, and Mobile viewports, freeing horizontal breathing room on Row A while preserving VG filter amber highlighting and dynamic selection tooltips.
+
 ## [0.8.9] — 2026-11-28
 
 ### Update 10/10 (`v0.8.9` Milestone Release) — Native Gemini Tools #18–#19, Cascade IFCX/Sheet `S-104` Parity & Release `v0.8.9`

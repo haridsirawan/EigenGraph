@@ -221,7 +221,7 @@ impl SpatialWorkspaceState {
         vault_name: &str,
         actions: &mut SpatialHudActions,
         cap_w: f32,
-        is_mobile: bool,
+        _is_mobile: bool,
     ) {
         let deck_w = (cap_w - 6.0).max(165.0);
         ui.set_width(deck_w);
@@ -338,91 +338,58 @@ impl SpatialWorkspaceState {
             } else {
                 theme.accent_blue
             };
-            if !is_mobile && deck_w >= 540.0 {
-                ui.add_space(6.0);
-                let title_max_w = (deck_w - 360.0).max(160.0);
-                let prop_lbl = match self.selected_target {
-                    Some(SmartSelectionTarget::Column(id)) => format!("Properties · C{id}"),
-                    Some(SmartSelectionTarget::Beam(id)) => format!("Properties · B{id}"),
-                    Some(SmartSelectionTarget::Wall(id)) => format!("Properties · W{id}"),
-                    Some(SmartSelectionTarget::Footing(id)) => format!("Properties · F{id}"),
-                    Some(SmartSelectionTarget::Slab(id)) => format!("Properties · S{id}"),
-                    Some(SmartSelectionTarget::SketchEntity(id)) => format!("Properties · 2D#{id}"),
-                    Some(SmartSelectionTarget::EarthSite { .. }) => "Properties · Site".to_string(),
-                    None => "Properties".to_string(),
-                };
-                ui.allocate_ui_with_layout(
-                    Vec2::new(title_max_w, 22.0),
-                    Layout::left_to_right(Align::Center),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        let center_span = (ui.available_width() - 208.0).max(0.0) * 0.5;
-                        if center_span > 2.0 {
-                            ui.add_space(center_span);
-                        }
-                        if Self::glass_pill_button(
-                            ui,
-                            theme,
-                            Some(AppIcon::Layers),
-                            "Project Browser",
-                            self.project_browser_drawer_open || vg_filtered,
-                            browser_accent,
-                            &format!(
-                                "{proj_name}  ·  {story_lbl} — Open Project Browser (Model Tree, Layers / VG & Vault)"
-                            ),
-                        )
-                        .clicked()
-                        {
-                            self.toggle_exclusive_drawer("project_browser");
-                        }
-                        if Self::glass_pill_button(
-                            ui,
-                            theme,
-                            Some(AppIcon::SlidersPanel),
-                            prop_lbl,
-                            self.properties_drawer_open || self.selected_target.is_some(),
-                            theme.accent_green,
-                            "Open Live Properties & Smart Element Inspector inside Dynamic Island",
-                        )
-                        .clicked()
-                        {
-                            if self.selected_target.is_some() && !self.properties_drawer_open {
-                                self.selected_target = None;
-                            } else {
-                                self.toggle_exclusive_drawer("properties");
-                            }
-                        }
-                    },
-                );
-            } else {
-                ui.separator();
-                if Self::glass_icon_button(
-                    ui,
-                    theme,
-                    AppIcon::Layers,
-                    self.project_browser_drawer_open || vg_filtered,
-                    browser_accent,
-                    &format!("{proj_name} · {story_lbl} — Open Project Browser (Model Tree, Layers / VG & Vault)"),
-                )
-                .clicked()
-                {
-                    self.toggle_exclusive_drawer("project_browser");
+            let prop_tip = match self.selected_target {
+                Some(SmartSelectionTarget::Column(id)) => {
+                    format!("Properties · C{id} — Open Live Properties & Smart Element Inspector")
                 }
-                if Self::glass_icon_button(
-                    ui,
-                    theme,
-                    AppIcon::SlidersPanel,
-                    self.properties_drawer_open || self.selected_target.is_some(),
-                    theme.accent_green,
-                    "Open Live Properties & Smart Element Inspector",
-                )
-                .clicked()
-                {
-                    if self.selected_target.is_some() && !self.properties_drawer_open {
-                        self.selected_target = None;
-                    } else {
-                        self.toggle_exclusive_drawer("properties");
-                    }
+                Some(SmartSelectionTarget::Beam(id)) => {
+                    format!("Properties · B{id} — Open Live Properties & Smart Element Inspector")
+                }
+                Some(SmartSelectionTarget::Wall(id)) => {
+                    format!("Properties · W{id} — Open Live Properties & Smart Element Inspector")
+                }
+                Some(SmartSelectionTarget::Footing(id)) => {
+                    format!("Properties · F{id} — Open Live Properties & Smart Element Inspector")
+                }
+                Some(SmartSelectionTarget::Slab(id)) => {
+                    format!("Properties · S{id} — Open Live Properties & Smart Element Inspector")
+                }
+                Some(SmartSelectionTarget::SketchEntity(id)) => {
+                    format!("Properties · 2D#{id} — Open Live Properties & Smart Element Inspector")
+                }
+                Some(SmartSelectionTarget::EarthSite { .. }) => {
+                    "Properties · Site — Open Live Properties & Smart Element Inspector".to_string()
+                }
+                None => "Properties — Open Live Properties & Smart Element Inspector".to_string(),
+            };
+            if Self::glass_icon_button(
+                ui,
+                theme,
+                AppIcon::Layers,
+                self.project_browser_drawer_open || vg_filtered,
+                browser_accent,
+                &format!(
+                    "{proj_name} · {story_lbl} — Open Project Browser (Model Tree, Layers / VG & Vault)"
+                ),
+            )
+            .clicked()
+            {
+                self.toggle_exclusive_drawer("project_browser");
+            }
+            if Self::glass_icon_button(
+                ui,
+                theme,
+                AppIcon::SlidersPanel,
+                self.properties_drawer_open || self.selected_target.is_some(),
+                theme.accent_green,
+                &prop_tip,
+            )
+            .clicked()
+            {
+                if self.selected_target.is_some() && !self.properties_drawer_open {
+                    self.selected_target = None;
+                } else {
+                    self.toggle_exclusive_drawer("properties");
                 }
             }
 
