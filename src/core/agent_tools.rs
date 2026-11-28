@@ -75,6 +75,19 @@ pub enum ToolCadLayerCommand {
         visible: Option<bool>,
         locked: Option<bool>,
     },
+    SetByLayer {
+        enabled: bool,
+    },
+    IsolateLayer {
+        name: String,
+    },
+    ShowAllLayers,
+    DeleteLayer {
+        name: String,
+    },
+    ApplyPreset {
+        preset: String,
+    },
     ExportDxf,
 }
 
@@ -421,13 +434,13 @@ pub fn gemini_function_declarations() -> Value {
                 },
                 {
                     "name": "manage_cad_layers",
-                    "description": "Manage AutoCAD-compatible 2D CAD drafting layers (create layer, set active layer, show/hide/lock layers) or export layer-aware DXF.",
+                    "description": "Manage AutoCAD-compatible 2D CAD drafting layers (create, activate, configure visibility/lock, isolate, delete with migration, toggle ByLayer colors, apply AIA/ISO 13567 presets, or export DXF).",
                     "parameters": {
                         "type": "OBJECT",
                         "properties": {
                             "mode": {
                                 "type": "STRING",
-                                "description": "Action: 'add', 'set_active', 'configure', or 'export_dxf'."
+                                "description": "Action: 'add', 'set_active', 'configure', 'isolate', 'show_all', 'delete', 'set_by_layer', 'apply_preset', or 'export_dxf'."
                             },
                             "layer_name": {
                                 "type": "STRING",
@@ -435,6 +448,8 @@ pub fn gemini_function_declarations() -> Value {
                             },
                             "visible": { "type": "BOOLEAN", "description": "Toggle layer visibility in 'configure' mode." },
                             "locked": { "type": "BOOLEAN", "description": "Lock or unlock layer entities against edits/deletion in 'configure' mode." },
+                            "by_layer": { "type": "BOOLEAN", "description": "Enable or disable AutoCAD ByLayer color mode in 'set_by_layer' mode." },
+                            "preset": { "type": "STRING", "description": "Layer standard bundle for 'apply_preset' mode: 'aia' or 'iso13567'." },
                             "color_hex": { "type": "STRING", "description": "Optional '#RRGGBB' stroke accent color when adding a custom layer." }
                         },
                         "required": ["mode"]
@@ -1547,10 +1562,79 @@ pub fn execute_headless_tool_with_city(
                     ToolCadLayerCommand::ExportDxf,
                     "Exported layer-aware AutoCAD AC1015 .dxf sheet".to_string(),
                 ),
+                "set_by_layer" | "bylayer" => {
+                    let Some(enabled) = call.args.get("by_layer").and_then(|v| v.as_bool()) else {
+                        return ToolExecutionOutcome::err(
+                            name,
+                            "set_by_layer mode requires boolean 'by_layer'.",
+                        );
+                    };
+                    (
+                        ToolCadLayerCommand::SetByLayer { enabled },
+                        format!("Set CAD ByLayer color override -> {enabled}"),
+                    )
+                }
+                "isolate" | "solo" => {
+                    let Some(lname) = layer_name else {
+                        return ToolExecutionOutcome::err(name, "isolate mode requires 'layer_name'.");
+                    };
+                    (
+                        ToolCadLayerCommand::IsolateLayer {
+                            name: lname.to_string(),
+                        },
+                        format!("Isolated CAD layer '{lname}'"),
+                    )
+                }
+                "show_all" => (
+                    ToolCadLayerCommand::ShowAllLayers,
+                    "Revealed all 2D CAD drafting layers".to_string(),
+                ),
+                "delete" | "remove" => {
+                    let Some(lname) = layer_name else {
+                        return ToolExecutionOutcome::err(name, "delete mode requires 'layer_name'.");
+                    };
+                    if lname.eq_ignore_ascii_case("0-sketch") {
+                        return ToolExecutionOutcome::err(
+                            name,
+                            "Base CAD layer '0-Sketch' cannot be deleted.",
+                        );
+                    }
+                    (
+                        ToolCadLayerCommand::DeleteLayer {
+                            name: lname.to_string(),
+                        },
+                        format!("Deleted custom CAD layer '{lname}' (entities migrate to 0-Sketch)"),
+                    )
+                }
+                "apply_preset" | "preset" => {
+                    let raw_preset = call
+                        .args
+                        .get("preset")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_ascii_lowercase();
+                    let norm = match raw_preset.as_str() {
+                        "aia" | "aia_structural" | "ncs" => "aia",
+                        "iso" | "iso13567" | "iso_13567" => "iso13567",
+                        _ => {
+                            return ToolExecutionOutcome::err(
+                                name,
+                                "apply_preset mode requires 'preset' as 'aia' or 'iso13567'.",
+                            );
+                        }
+                    };
+                    (
+                        ToolCadLayerCommand::ApplyPreset {
+                            preset: norm.to_string(),
+                        },
+                        format!("Applied CAD standard layer preset '{norm}'"),
+                    )
+                }
                 _ => {
                     return ToolExecutionOutcome::err(
                         name,
-                        "Unknown mode for manage_cad_layers. Use 'add', 'set_active', 'configure', or 'export_dxf'.",
+                        "Unknown mode for manage_cad_layers. Use 'add', 'set_active', 'configure', 'isolate', 'show_all', 'delete', 'set_by_layer', 'apply_preset', or 'export_dxf'.",
                     );
                 }
             };

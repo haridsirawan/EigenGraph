@@ -7,7 +7,17 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.9 (5/10)]
+## [Unreleased — Next: v0.8.9 (6/10)]
+
+### Update 6/10 (`v0.8.8.6` -> `v0.8.9`) — AIA/ISO 13567 CAD Layer Presets, SVG `ByLayer` Parity, Drafting Ribbon `ByLayer` Toggle & Extended Tool #17
+- **AIA & ISO 13567 Drafting Layer Standards (`src/views/universal_canvas/{types.rs, mod.rs}`)**:
+  - Added [`CadLayerStandardPreset`](src/views/universal_canvas/types.rs) (`AiaStructural`, `Iso13567`) and idempotent [`VisibilityGraphicsState::apply_standard_preset`](src/views/universal_canvas/types.rs) to populate standard BIM/CAD discipline layers non-destructively.
+  - Updated [`UniversalCanvasState::export_svg`](src/views/universal_canvas/mod.rs) to emit active `ByLayer` stroke colors when `visibility_graphics.color_by_layer` is enabled.
+- **Drafting Ribbon & `Layers / VG` Preset Controls (`src/views/spatial_workspace/{ribbon_ui.rs, drawers.rs}`)**:
+  - Added a `"ByLayer"` toggle tile inside the `Drafting -> Layers` ribbon group and `+ AIA` / `+ ISO 13567` quick-apply preset pills inside the `Layers / VG` drawer header.
+- **Extended Gemini Tool #17 & Copilot Telemetry (`src/core/agent_tools.rs`, `src/views/spatial_workspace/commands.rs`)**:
+  - Extended `"manage_cad_layers"` (`ToolCadLayerCommand`) with `SetByLayer`, `IsolateLayer`, `ShowAllLayers`, `DeleteLayer` (protecting `"0-Sketch"`), and `ApplyPreset`, wired through `handle_gemini_reply`, and surfaced `ByLayer=...` telemetry in `build_gemini_copilot_system_prompt`.
+- **Verification**: Added [`test_v0886_cad_presets_svg_bylayer_and_extended_tool17`](src/views/spatial_workspace/tests.rs) and verified `cargo check --lib` plus targeted unit tests.
 
 ### Update 5/10 (`v0.8.8.5` -> `v0.8.9`) — AutoCAD `"ByLayer"` Color Mode, Custom CAD Layer Lifecycle, Entity Layer Reassignment & Model Tree 3D Sync
 - **`ByLayer` Color Override & Full Custom CAD Layer Lifecycle (`src/views/universal_canvas/{types.rs, cad_ops.rs, render_layers.rs}`)**:

@@ -1888,6 +1888,20 @@ impl SpatialWorkspaceState {
                         ui,
                         theme,
                         AppIcon::SlidersPanel,
+                        "ByLayer",
+                        universal_canvas.visibility_graphics.color_by_layer,
+                        theme.accent_blue,
+                        "Toggle AutoCAD ByLayer color override for 2D CAD entities",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.visibility_graphics.color_by_layer =
+                            !universal_canvas.visibility_graphics.color_by_layer;
+                    }
+                    if Self::ribbon_tool_tile(
+                        ui,
+                        theme,
+                        AppIcon::SlidersPanel,
                         "VG / Layers",
                         self.project_browser_drawer_open && self.project_browser_tab == 1,
                         theme.accent_blue,

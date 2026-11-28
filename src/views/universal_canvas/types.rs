@@ -456,6 +456,13 @@ impl CadDraftingLayer {
     }
 }
 
+/// Engineering standard CAD drafting layer bundle presets (AIA CAD Layer Guidelines & ISO 13567).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CadLayerStandardPreset {
+    AiaStructural,
+    Iso13567,
+}
+
 /// Unified Visibility/Graphics (VG) + 2D CAD Drafting Layer manager persisted in `.eigen.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VisibilityGraphicsState {
@@ -660,6 +667,50 @@ impl VisibilityGraphicsState {
             self.active_cad_layer_id = "0-Sketch".to_string();
         }
         true
+    }
+
+    pub fn apply_standard_preset(&mut self, preset: CadLayerStandardPreset) -> usize {
+        let specs: &[(&str, [u8; 3])] = match preset {
+            CadLayerStandardPreset::AiaStructural => &[
+                ("S-COLS", [56, 189, 248]),
+                ("S-BEAM", [52, 211, 153]),
+                ("S-SLAB", [148, 163, 184]),
+                ("S-WALL", [251, 146, 60]),
+                ("S-FNDN", [168, 85, 247]),
+                ("S-REBR", [244, 63, 94]),
+                ("A-DIMS", [250, 204, 21]),
+                ("M-HVAC", [34, 211, 238]),
+                ("E-POWR", [248, 113, 113]),
+            ],
+            CadLayerStandardPreset::Iso13567 => &[
+                ("S-28-COLS", [56, 189, 248]),
+                ("S-28-BEAM", [52, 211, 153]),
+                ("S-23-SLAB", [148, 163, 184]),
+                ("A-21-WALL", [251, 146, 60]),
+                ("S-16-FNDN", [168, 85, 247]),
+                ("A-90-ANNO", [250, 204, 21]),
+                ("M-57-HVAC", [34, 211, 238]),
+                ("E-60-POWR", [248, 113, 113]),
+            ],
+        };
+        let mut added = 0usize;
+        for &(name, color_rgb) in specs {
+            let exists = self
+                .cad_layers
+                .iter()
+                .any(|l| l.id.eq_ignore_ascii_case(name) || l.name.eq_ignore_ascii_case(name));
+            if !exists {
+                self.cad_layers.push(CadDraftingLayer {
+                    id: name.to_string(),
+                    name: name.to_string(),
+                    visible: true,
+                    locked: false,
+                    color_rgb,
+                });
+                added += 1;
+            }
+        }
+        added
     }
 
     pub fn content_revision_hash(&self) -> u64 {

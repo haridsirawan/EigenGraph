@@ -1305,6 +1305,53 @@ impl SpatialWorkspaceState {
                         crate::core::agent_tools::ToolCadLayerCommand::ExportDxf => {
                             out.export_cad_dxf = true;
                         }
+                        crate::core::agent_tools::ToolCadLayerCommand::SetByLayer { enabled } => {
+                            universal_canvas.visibility_graphics.color_by_layer = enabled;
+                        }
+                        crate::core::agent_tools::ToolCadLayerCommand::IsolateLayer { name } => {
+                            if let Some(found) = universal_canvas
+                                .visibility_graphics
+                                .cad_layers
+                                .iter()
+                                .find(|l| {
+                                    l.id.eq_ignore_ascii_case(&name)
+                                        || l.name.eq_ignore_ascii_case(&name)
+                                })
+                                .map(|l| l.id.clone())
+                            {
+                                universal_canvas.visibility_graphics.isolate_cad_layer(&found);
+                            }
+                        }
+                        crate::core::agent_tools::ToolCadLayerCommand::ShowAllLayers => {
+                            universal_canvas
+                                .visibility_graphics
+                                .show_all_cad_layers();
+                        }
+                        crate::core::agent_tools::ToolCadLayerCommand::DeleteLayer { name } => {
+                            if let Some(found) = universal_canvas
+                                .visibility_graphics
+                                .cad_layers
+                                .iter()
+                                .find(|l| {
+                                    l.id.eq_ignore_ascii_case(&name)
+                                        || l.name.eq_ignore_ascii_case(&name)
+                                })
+                                .map(|l| l.id.clone())
+                            {
+                                let _ = universal_canvas
+                                    .delete_cad_layer_and_reassign_entities(&found);
+                            }
+                        }
+                        crate::core::agent_tools::ToolCadLayerCommand::ApplyPreset { preset } => {
+                            let std_preset = if preset == "iso13567" {
+                                crate::views::universal_canvas::CadLayerStandardPreset::Iso13567
+                            } else {
+                                crate::views::universal_canvas::CadLayerStandardPreset::AiaStructural
+                            };
+                            let _ = universal_canvas
+                                .visibility_graphics
+                                .apply_standard_preset(std_preset);
+                        }
                     }
                 }
                 self.push_trace(format!("Tool {} -> {}", call.name, outcome.summary), outcome.ok);
@@ -5464,9 +5511,10 @@ impl SpatialWorkspaceState {
             .map(|l| format!("{} (vis={}, locked={})", l.name, l.visible, l.locked))
             .unwrap_or_else(|| universal_canvas.visibility_graphics.active_cad_layer_id.clone());
         let cad_ctx = format!(
-            " | ActiveCADLayer={}, TotalCADLayers={}",
+            " | ActiveCADLayer={}, TotalCADLayers={}, ByLayer={}",
             active_cad_name,
-            universal_canvas.visibility_graphics.cad_layers.len()
+            universal_canvas.visibility_graphics.cad_layers.len(),
+            universal_canvas.visibility_graphics.color_by_layer,
         );
 
         format!(

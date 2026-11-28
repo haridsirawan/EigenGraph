@@ -9345,6 +9345,38 @@ impl SpatialWorkspaceState {
                     {
                         actions.export_cad_dxf = true;
                     }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Plus),
+                        "+ AIA",
+                        false,
+                        theme.accent_blue,
+                        "Add standard AIA CAD structural & MEP drafting layers (S-COLS, S-BEAM, S-SLAB, ...)",
+                    )
+                    .clicked()
+                    {
+                        let added = universal_canvas.visibility_graphics.apply_standard_preset(
+                            crate::views::universal_canvas::CadLayerStandardPreset::AiaStructural,
+                        );
+                        self.push_trace(format!("Applied AIA layer preset (+{added} layers)"), true);
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Plus),
+                        "+ ISO 13567",
+                        false,
+                        theme.accent_blue,
+                        "Add ISO 13567 CAD drafting layers (S-28-COLS, S-23-SLAB, ...)",
+                    )
+                    .clicked()
+                    {
+                        let added = universal_canvas.visibility_graphics.apply_standard_preset(
+                            crate::views::universal_canvas::CadLayerStandardPreset::Iso13567,
+                        );
+                        self.push_trace(format!("Applied ISO 13567 layer preset (+{added} layers)"), true);
+                    }
                 });
                 let active_id = universal_canvas.visibility_graphics.active_cad_layer_id.clone();
                 let mut set_active: Option<String> = None;

@@ -2982,7 +2982,13 @@ impl UniversalCanvasState {
                 .replace('&', "&amp;")
                 .replace('"', "&quot;")
                 .replace('<', "&lt;");
-            let [r, g, b] = ent.color_rgb;
+            let [r, g, b] = if self.visibility_graphics.color_by_layer {
+                self.visibility_graphics
+                    .layer_color_rgb(layer_tag)
+                    .unwrap_or(ent.color_rgb)
+            } else {
+                ent.color_rgb
+            };
             let col = format!("rgb({r},{g},{b})");
             let sw = ent.stroke_width * 24.0;
             match &ent.kind {

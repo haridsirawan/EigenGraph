@@ -7997,3 +7997,172 @@ use crate::theme::MacTheme;
     fn theme_helper_for_test() -> crate::theme::MacTheme {
         crate::theme::MacTheme::for_mode(crate::theme::ThemeMode::ProDark)
     }
+
+    #[test]
+    fn test_v0886_cad_presets_svg_bylayer_and_extended_tool17() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        // 1. AIA & ISO 13567 presets are non-destructive & idempotent.
+        let aia_added_1 = canvas.visibility_graphics.apply_standard_preset(
+            crate::views::universal_canvas::CadLayerStandardPreset::AiaStructural,
+        );
+        assert_eq!(aia_added_1, 9);
+        assert_eq!(
+            canvas.visibility_graphics.apply_standard_preset(
+                crate::views::universal_canvas::CadLayerStandardPreset::AiaStructural
+            ),
+            0
+        );
+        let iso_added_1 = canvas.visibility_graphics.apply_standard_preset(
+            crate::views::universal_canvas::CadLayerStandardPreset::Iso13567,
+        );
+        assert_eq!(iso_added_1, 8);
+        assert_eq!(
+            canvas.visibility_graphics.apply_standard_preset(
+                crate::views::universal_canvas::CadLayerStandardPreset::Iso13567
+            ),
+            0
+        );
+
+        // 2. SVG export color parity under ByLayer = false vs true.
+        let line_id = canvas.commit_parametric_2d_line(4.0, 0.0, "G", "Drafting");
+        let layer_before = canvas
+            .visibility_graphics
+            .layer_color_rgb("0-Sketch")
+            .expect("0-Sketch color");
+        let cycled = canvas
+            .visibility_graphics
+            .cycle_layer_color("0-Sketch")
+            .expect("cycle color");
+        assert_ne!(layer_before, cycled);
+        let ent_rgb = canvas
+            .entities
+            .iter()
+            .find(|e| e.id == line_id)
+            .expect("line entity")
+            .color_rgb;
+        assert_ne!(ent_rgb, cycled);
+
+        canvas.visibility_graphics.color_by_layer = false;
+        let svg_entity_col = canvas.export_svg(
+            &build.bim_bus.project,
+            crate::models::NavigationPillar::ParametricDED,
+        );
+        assert!(svg_entity_col.contains(&format!(
+            "rgb({},{},{})",
+            ent_rgb[0], ent_rgb[1], ent_rgb[2]
+        )));
+
+        canvas.visibility_graphics.color_by_layer = true;
+        let svg_bylayer_col = canvas.export_svg(
+            &build.bim_bus.project,
+            crate::models::NavigationPillar::ParametricDED,
+        );
+        assert!(svg_bylayer_col.contains(&format!(
+            "rgb({},{},{})",
+            cycled[0], cycled[1], cycled[2]
+        )));
+
+        // 3. Extended Tool #17 modes via Gemini Copilot dispatch & telemetry.
+        let mut tool_canvas = UniversalCanvasState::default();
+        spatial.gemini_api_key_draft.clear();
+        let reply = crate::core::web_bridge::GeminiApiReply {
+            request_id: 6,
+            model: "gemini-2.5-flash".to_string(),
+            ok: true,
+            text: String::new(),
+            function_calls: vec![
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "manage_cad_layers".to_string(),
+                    args: serde_json::json!({ "mode": "apply_preset", "preset": "aia" }),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "manage_cad_layers".to_string(),
+                    args: serde_json::json!({ "mode": "set_by_layer", "by_layer": true }),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "manage_cad_layers".to_string(),
+                    args: serde_json::json!({ "mode": "isolate", "layer_name": "S-COLS" }),
+                },
+            ],
+            raw_model_content: None,
+            error: None,
+        };
+        let _ = spatial.handle_gemini_reply(reply, &mut tool_canvas, &mut build, &mut ai);
+        assert!(tool_canvas.visibility_graphics.color_by_layer);
+        assert_eq!(tool_canvas.visibility_graphics.active_cad_layer_id, "S-COLS");
+        assert!(tool_canvas.visibility_graphics.is_cad_layer_visible("S-COLS"));
+        assert!(!tool_canvas.visibility_graphics.is_cad_layer_visible("0-Sketch"));
+
+        let prompt =
+            spatial.build_gemini_copilot_system_prompt(&tool_canvas, &build.bim_bus.project, &[]);
+        assert!(prompt.contains("ByLayer=true"));
+
+        let reply_cleanup = crate::core::web_bridge::GeminiApiReply {
+            request_id: 7,
+            model: "gemini-2.5-flash".to_string(),
+            ok: true,
+            text: String::new(),
+            function_calls: vec![
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "manage_cad_layers".to_string(),
+                    args: serde_json::json!({ "mode": "show_all" }),
+                },
+                crate::core::agent_tools::GeminiToolCall {
+                    name: "manage_cad_layers".to_string(),
+                    args: serde_json::json!({ "mode": "delete", "layer_name": "S-REBR" }),
+                },
+            ],
+            raw_model_content: None,
+            error: None,
+        };
+        let _ = spatial.handle_gemini_reply(reply_cleanup, &mut tool_canvas, &mut build, &mut ai);
+        assert!(tool_canvas.visibility_graphics.is_cad_layer_visible("0-Sketch"));
+        assert!(!tool_canvas
+            .visibility_graphics
+            .cad_layers
+            .iter()
+            .any(|l| l.id == "S-REBR"));
+
+        // 4. Responsive Drafting Ribbon + Layers/VG zero-overflow check.
+        spatial.mobile_deck_pinned = true;
+        spatial.close_focus_layer_return_to_ribbon();
+        spatial.active_ribbon_tab = RibbonCategoryTab::Drafting;
+        spatial.open_project_browser_drawer(1);
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            let ctx = egui::Context::default();
+            for _ in 0..2 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme_helper_for_test(),
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            assert!(
+                spatial.hud_rects[0].right() <= win_w + 1.0,
+                "Drafting + Layers/VG overflow @ {win_w}px: {:?}",
+                spatial.hud_rects[0]
+            );
+        }
+    }
