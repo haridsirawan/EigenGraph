@@ -465,6 +465,8 @@ pub struct VisibilityGraphicsState {
     pub cad_layers: Vec<CadDraftingLayer>,
     #[serde(default = "default_cad_layer_id")]
     pub active_cad_layer_id: String,
+    #[serde(default)]
+    pub color_by_layer: bool,
 }
 
 fn default_cad_layer_id() -> String {
@@ -477,6 +479,7 @@ impl Default for VisibilityGraphicsState {
             bim: BimCategoryVisibility::default(),
             cad_layers: CadDraftingLayer::default_layers(),
             active_cad_layer_id: default_cad_layer_id(),
+            color_by_layer: false,
         }
     }
 }
@@ -582,10 +585,93 @@ impl VisibilityGraphicsState {
         self.active_cad_layer_id = self.cad_layers[next].id.clone();
     }
 
+    pub fn layer_color_rgb(&self, layer_id: &str) -> Option<[u8; 3]> {
+        let key = if layer_id.trim().is_empty() {
+            "0-Sketch"
+        } else {
+            layer_id.trim()
+        };
+        self.cad_layers
+            .iter()
+            .find(|l| l.id == key)
+            .map(|l| l.color_rgb)
+    }
+
+    pub fn cycle_layer_color(&mut self, layer_id: &str) -> Option<[u8; 3]> {
+        const PALETTE: [[u8; 3]; 8] = [
+            [56, 189, 248],
+            [148, 163, 184],
+            [250, 204, 21],
+            [52, 211, 153],
+            [168, 85, 247],
+            [244, 63, 94],
+            [251, 146, 60],
+            [248, 250, 252],
+        ];
+        let key = if layer_id.trim().is_empty() {
+            "0-Sketch"
+        } else {
+            layer_id.trim()
+        };
+        let layer = self.cad_layers.iter_mut().find(|l| l.id == key)?;
+        let cur_idx = PALETTE.iter().position(|c| *c == layer.color_rgb);
+        let next = match cur_idx {
+            Some(i) => PALETTE[(i + 1) % PALETTE.len()],
+            None => PALETTE[0],
+        };
+        layer.color_rgb = next;
+        Some(next)
+    }
+
+    pub fn isolate_cad_layer(&mut self, layer_id: &str) {
+        let key = if layer_id.trim().is_empty() {
+            "0-Sketch"
+        } else {
+            layer_id.trim()
+        };
+        if !self.cad_layers.iter().any(|l| l.id == key) {
+            return;
+        }
+        for layer in &mut self.cad_layers {
+            layer.visible = layer.id == key;
+        }
+        self.active_cad_layer_id = key.to_string();
+    }
+
+    pub fn show_all_cad_layers(&mut self) {
+        for layer in &mut self.cad_layers {
+            layer.visible = true;
+        }
+    }
+
+    pub fn delete_custom_layer(&mut self, layer_id: &str) -> bool {
+        let key = layer_id.trim();
+        if key.is_empty() || key == "0-Sketch" {
+            return false;
+        }
+        let Some(pos) = self.cad_layers.iter().position(|l| l.id == key) else {
+            return false;
+        };
+        if self.cad_layers[pos].locked {
+            return false;
+        }
+        self.cad_layers.remove(pos);
+        if self.active_cad_layer_id == key {
+            self.active_cad_layer_id = "0-Sketch".to_string();
+        }
+        true
+    }
+
     pub fn content_revision_hash(&self) -> u64 {
-        let mut h = self.bim.bitmask() ^ (self.cad_layers.len() as u64).wrapping_mul(1_000_003);
+        let mut h = self.bim.bitmask()
+            ^ (self.cad_layers.len() as u64).wrapping_mul(1_000_003)
+            ^ (u64::from(self.color_by_layer) << 63);
         for (idx, l) in self.cad_layers.iter().enumerate() {
             h ^= (u64::from(l.visible) | (u64::from(l.locked) << 1)) << ((idx * 2) % 48);
+            let rgb_bits = u64::from(l.color_rgb[0])
+                | (u64::from(l.color_rgb[1]) << 8)
+                | (u64::from(l.color_rgb[2]) << 16);
+            h ^= rgb_bits.rotate_left(((idx * 7) % 40) as u32);
         }
         h
     }

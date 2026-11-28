@@ -154,7 +154,7 @@ impl UniversalCanvasState {
         self.selected_entity_id == Some(id) || self.selected_entity_ids.contains(&id)
     }
 
-    pub(super) fn set_single_selection(&mut self, id: Option<usize>) {
+    pub fn set_single_selection(&mut self, id: Option<usize>) {
         self.selected_entity_id = id;
         self.selected_entity_ids.clear();
         if let Some(eid) = id {
@@ -547,6 +547,81 @@ impl UniversalCanvasState {
             self.selected_entity_id = self.selected_entity_ids.first().copied();
         }
         true
+    }
+
+    /// Reassigns a CAD sketch entity to `target_layer_id`, enforcing both source and destination layer locks.
+    pub fn reassign_entity_layer(&mut self, entity_id: usize, target_layer_id: &str) -> bool {
+        let target_key = if target_layer_id.trim().is_empty() {
+            "0-Sketch"
+        } else {
+            target_layer_id.trim()
+        };
+        let Some(target_rgb) = self.visibility_graphics.layer_color_rgb(target_key) else {
+            return false;
+        };
+        if self.visibility_graphics.is_cad_layer_locked(target_key) {
+            return false;
+        }
+        let Some(cur_layer) = self
+            .entities
+            .iter()
+            .find(|e| e.id == entity_id)
+            .map(|e| {
+                if e.layer_id.trim().is_empty() {
+                    "0-Sketch".to_string()
+                } else {
+                    e.layer_id.trim().to_string()
+                }
+            })
+        else {
+            return false;
+        };
+        if cur_layer == target_key || self.visibility_graphics.is_cad_layer_locked(&cur_layer) {
+            return false;
+        }
+        self.push_undo();
+        let by_layer = self.visibility_graphics.color_by_layer;
+        if let Some(ent) = self.entities.iter_mut().find(|e| e.id == entity_id) {
+            ent.layer_id = target_key.to_string();
+            if by_layer {
+                ent.color_rgb = target_rgb;
+            }
+        }
+        true
+    }
+
+    /// Deletes a non-locked custom CAD layer and safely migrates any entities on it to `"0-Sketch"`.
+    pub fn delete_cad_layer_and_reassign_entities(&mut self, layer_id: &str) -> Option<usize> {
+        let key = layer_id.trim();
+        if key.is_empty() || key == "0-Sketch" {
+            return None;
+        }
+        let exists_unlocked = self
+            .visibility_graphics
+            .cad_layers
+            .iter()
+            .any(|l| l.id == key && !l.locked);
+        if !exists_unlocked {
+            return None;
+        }
+        let migrate_count = self
+            .entities
+            .iter()
+            .filter(|e| e.layer_id == key)
+            .count();
+        if migrate_count > 0 {
+            self.push_undo();
+            for ent in &mut self.entities {
+                if ent.layer_id == key {
+                    ent.layer_id = "0-Sketch".to_string();
+                }
+            }
+        }
+        if self.visibility_graphics.delete_custom_layer(key) {
+            Some(migrate_count)
+        } else {
+            None
+        }
     }
 
     /// Clears recorded geodesic measurement vertices.

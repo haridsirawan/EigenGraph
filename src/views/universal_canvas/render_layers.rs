@@ -3879,10 +3879,20 @@ impl UniversalCanvasState {
             if !self.sync_all_layers && ent.pillar_badge != active_badge {
                 continue;
             }
-            let base_col = Color32::from_rgb(ent.color_rgb[0], ent.color_rgb[1], ent.color_rgb[2]);
+            let raw_rgb = if self.visibility_graphics.color_by_layer {
+                self.visibility_graphics
+                    .layer_color_rgb(&ent.layer_id)
+                    .unwrap_or(ent.color_rgb)
+            } else {
+                ent.color_rgb
+            };
+            let base_col = Color32::from_rgb(raw_rgb[0], raw_rgb[1], raw_rgb[2]);
+            let layer_locked = self.visibility_graphics.is_cad_layer_locked(&ent.layer_id);
             let is_selected = self.is_entity_selected(ent.id);
             let col = if is_selected {
                 theme.accent_orange
+            } else if layer_locked {
+                base_col.gamma_multiply(0.68)
             } else if ent.pillar_badge == active_badge {
                 base_col
             } else {

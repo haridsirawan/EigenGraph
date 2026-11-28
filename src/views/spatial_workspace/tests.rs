@@ -7863,3 +7863,137 @@ use crate::theme::MacTheme;
             out.textures_delta.clear();
         }
     }
+
+    #[test]
+    fn test_v0885_cad_bylayer_reassignment_delete_migration_and_model_tree_sync() {
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        // 1. VisibilityGraphicsState ByLayer flag + JSON roundtrip + layer color cycle & isolate
+        canvas.visibility_graphics.color_by_layer = true;
+        let roundtrip_json = serde_json::to_string(&canvas.visibility_graphics).expect("serialize vg");
+        let parsed_vg: crate::views::universal_canvas::VisibilityGraphicsState =
+            serde_json::from_str(&roundtrip_json).expect("deserialize vg");
+        assert!(parsed_vg.color_by_layer);
+
+        let prev_col = canvas
+            .visibility_graphics
+            .layer_color_rgb("0-Sketch")
+            .expect("base layer color");
+        let next_col = canvas
+            .visibility_graphics
+            .cycle_layer_color("0-Sketch")
+            .expect("cycled color");
+        assert_ne!(prev_col, next_col);
+
+        assert!(canvas
+            .visibility_graphics
+            .add_custom_layer("S-SHEAR", [168, 85, 247]));
+        canvas.visibility_graphics.isolate_cad_layer("S-SHEAR");
+        assert_eq!(canvas.visibility_graphics.active_cad_layer_id, "S-SHEAR");
+        assert!(canvas.visibility_graphics.is_cad_layer_visible("S-SHEAR"));
+        assert!(!canvas.visibility_graphics.is_cad_layer_visible("0-Sketch"));
+        canvas.visibility_graphics.show_all_cad_layers();
+        assert!(canvas.visibility_graphics.is_cad_layer_visible("0-Sketch"));
+
+        // 2. Lock-guarded entity layer reassignment + ByLayer color sync
+        let line_id = canvas.commit_parametric_2d_line(5.0, 0.0, "G", "Drafting");
+        let rect_id = canvas.commit_parametric_2d_rect(4.0, 2.0, "G", "Drafting");
+        assert_eq!(canvas.entities.len(), 2);
+
+        canvas
+            .visibility_graphics
+            .set_cad_layer_locked("A-Anno", true);
+        assert!(!canvas.reassign_entity_layer(line_id, "A-Anno"));
+        canvas
+            .visibility_graphics
+            .set_cad_layer_locked("A-Anno", false);
+        canvas
+            .visibility_graphics
+            .set_cad_layer_locked("S-SHEAR", true);
+        assert!(!canvas.reassign_entity_layer(line_id, "S-SHEAR"));
+        canvas
+            .visibility_graphics
+            .set_cad_layer_locked("S-SHEAR", false);
+        assert!(canvas.reassign_entity_layer(line_id, "A-Anno"));
+        let moved_ent = canvas
+            .entities
+            .iter()
+            .find(|e| e.id == line_id)
+            .expect("line present");
+        assert_eq!(moved_ent.layer_id, "A-Anno");
+        assert_eq!(
+            Some(moved_ent.color_rgb),
+            canvas.visibility_graphics.layer_color_rgb("A-Anno")
+        );
+
+        // 3. Delete custom layer protection & automatic entity migration to "0-Sketch"
+        assert_eq!(canvas.delete_cad_layer_and_reassign_entities("0-Sketch"), None);
+        canvas
+            .visibility_graphics
+            .set_cad_layer_locked("S-SHEAR", true);
+        assert_eq!(canvas.delete_cad_layer_and_reassign_entities("S-SHEAR"), None);
+        canvas
+            .visibility_graphics
+            .set_cad_layer_locked("S-SHEAR", false);
+        let migrated = canvas
+            .delete_cad_layer_and_reassign_entities("S-SHEAR")
+            .expect("custom unlocked layer deletes cleanly");
+        assert_eq!(migrated, 1);
+        assert_eq!(
+            canvas
+                .entities
+                .iter()
+                .find(|e| e.id == rect_id)
+                .map(|e| e.layer_id.as_str()),
+            Some("0-Sketch")
+        );
+        assert_eq!(canvas.visibility_graphics.active_cad_layer_id, "0-Sketch");
+
+        // 4. Dynamic Island responsive zero-overflow check for Model Tree + Layers/VG tabs
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            for tab_idx in [0usize, 1usize] {
+                spatial.open_project_browser_drawer(tab_idx);
+                let ctx = egui::Context::default();
+                for _ in 0..2 {
+                    let raw = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(win_w, win_h),
+                        )),
+                        ..Default::default()
+                    };
+                    let mut out = ctx.run_ui(raw, |ui| {
+                        let _ = spatial.render_hud_overlays(
+                            ui.ctx(),
+                            &theme_helper_for_test(),
+                            &mut canvas,
+                            &mut build,
+                            &mut ai,
+                            &members,
+                            &projects,
+                            &mut db_components,
+                        );
+                    });
+                    out.textures_delta.clear();
+                }
+                assert_eq!(spatial.hud_rects.len(), 1);
+                assert!(
+                    spatial.hud_rects[0].right() <= win_w + 1.0,
+                    "Dynamic Island overflow on tab {tab_idx} @ {win_w}px: {:?}",
+                    spatial.hud_rects[0]
+                );
+            }
+        }
+    }
+
+    fn theme_helper_for_test() -> crate::theme::MacTheme {
+        crate::theme::MacTheme::for_mode(crate::theme::ThemeMode::ProDark)
+    }

@@ -807,6 +807,60 @@ impl SpatialWorkspaceState {
                 {
                     Self::render_kv_row(ui, theme, "Entity Type", kind_lbl, theme.accent_blue);
                     Self::render_kv_row(ui, theme, "Geometry", &detail, theme.text_primary);
+                    let cur_layer = universal_canvas
+                        .entities
+                        .iter()
+                        .find(|e| e.id == id)
+                        .map(|e| {
+                            if e.layer_id.trim().is_empty() {
+                                "0-Sketch".to_string()
+                            } else {
+                                e.layer_id.trim().to_string()
+                            }
+                        })
+                        .unwrap_or_else(|| "0-Sketch".to_string());
+                    Self::render_kv_row(ui, theme, "CAD Layer", &cur_layer, theme.accent_green);
+                    let layer_choices: Vec<(String, String, [u8; 3])> = universal_canvas
+                        .visibility_graphics
+                        .cad_layers
+                        .iter()
+                        .filter(|l| !l.locked || l.id == cur_layer)
+                        .map(|l| (l.id.clone(), l.name.clone(), l.color_rgb))
+                        .collect();
+                    let mut move_to_layer: Option<String> = None;
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new("Layer:").size(10.0).color(theme.text_secondary));
+                        for (lid, lname, rgb) in layer_choices {
+                            let is_cur = lid == cur_layer;
+                            let sw = Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+                            if ui
+                                .add(
+                                    egui::Button::new(RichText::new(&lname).size(9.5).color(if is_cur {
+                                        Color32::WHITE
+                                    } else {
+                                        theme.text_primary
+                                    }))
+                                    .min_size(Vec2::new(0.0, 20.0))
+                                    .fill(if is_cur {
+                                        theme.accent_green
+                                    } else {
+                                        theme.bg_card
+                                    })
+                                    .stroke(Stroke::new(1.0, sw.gamma_multiply(0.85)))
+                                    .corner_radius(CornerRadius::same(6)),
+                                )
+                                .clicked()
+                                && !is_cur
+                            {
+                                move_to_layer = Some(lid);
+                            }
+                        }
+                    });
+                    if let Some(target_lid) = move_to_layer {
+                        if universal_canvas.reassign_entity_layer(id, &target_lid) {
+                            self.push_trace(format!("Moved CAD #{id} -> {target_lid}"), true);
+                        }
+                    }
                     if len_m > 0.001 {
                         Self::render_kv_row(
                             ui,

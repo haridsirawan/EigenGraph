@@ -8980,6 +8980,22 @@ impl SpatialWorkspaceState {
                 if let Some(t) = picked {
                     self.selected_target = Some(t);
                     self.popup_tab = SmartPopupTab::Properties;
+                    universal_canvas.highlighted_bim_element = match t {
+                        SmartSelectionTarget::Column(id) => {
+                            Some((crate::core::BimElementKind::Column, id))
+                        }
+                        SmartSelectionTarget::Beam(id) => Some((crate::core::BimElementKind::Run, id)),
+                        SmartSelectionTarget::Wall(id) => {
+                            Some((crate::core::BimElementKind::Wall, id))
+                        }
+                        SmartSelectionTarget::Slab(id) => {
+                            Some((crate::core::BimElementKind::Slab, id))
+                        }
+                        SmartSelectionTarget::Footing(id) => {
+                            Some((crate::core::BimElementKind::Footing, id))
+                        }
+                        _ => universal_canvas.highlighted_bim_element,
+                    };
                 }
 
                 ui.add_space(3.0);
@@ -8994,6 +9010,45 @@ impl SpatialWorkspaceState {
                     .strong()
                     .color(theme.accent_orange),
                 );
+                if !universal_canvas.entities.is_empty() {
+                    let mut pick_cad_id: Option<usize> = None;
+                    ui.horizontal_wrapped(|ui| {
+                        for ent in universal_canvas.entities.iter().take(8) {
+                            let layer_lbl = if ent.layer_id.trim().is_empty() {
+                                "0-Sketch"
+                            } else {
+                                ent.layer_id.trim()
+                            };
+                            let lbl = format!("#{} [{}]", ent.id, layer_lbl);
+                            if !q.is_empty()
+                                && !lbl.to_ascii_lowercase().contains(&q)
+                                && !"cad".contains(&q)
+                            {
+                                continue;
+                            }
+                            let act = self.selected_target
+                                == Some(SmartSelectionTarget::SketchEntity(ent.id));
+                            if Self::glass_pill_button(
+                                ui,
+                                theme,
+                                Some(AppIcon::Pencil),
+                                lbl,
+                                act,
+                                theme.accent_blue,
+                                "Select 2D CAD shape & inspect in Live Properties",
+                            )
+                            .clicked()
+                            {
+                                pick_cad_id = Some(ent.id);
+                            }
+                        }
+                    });
+                    if let Some(eid) = pick_cad_id {
+                        universal_canvas.set_single_selection(Some(eid));
+                        self.selected_target = Some(SmartSelectionTarget::SketchEntity(eid));
+                        self.popup_tab = SmartPopupTab::Properties;
+                    }
+                }
                 ui.horizontal_wrapped(|ui| {
                     if Self::glass_pill_button(
                         ui,
@@ -9237,14 +9292,65 @@ impl SpatialWorkspaceState {
                 });
 
                 ui.add_space(4.0);
-                ui.label(
-                    RichText::new("2D CAD Drafting Layers (AutoCAD-Compatible DXF)")
-                        .size(9.4)
-                        .strong()
-                        .color(theme.accent_green),
-                );
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new("2D CAD Drafting Layers (AutoCAD-Compatible DXF)")
+                            .size(9.4)
+                            .strong()
+                            .color(theme.accent_green),
+                    );
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "ByLayer",
+                        universal_canvas.visibility_graphics.color_by_layer,
+                        theme.accent_blue,
+                        "Override CAD entity colors dynamically from their assigned CAD layer",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas.visibility_graphics.color_by_layer =
+                            !universal_canvas.visibility_graphics.color_by_layer;
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        None,
+                        "All On",
+                        universal_canvas
+                            .visibility_graphics
+                            .cad_layers
+                            .iter()
+                            .all(|l| l.visible),
+                        theme.accent_green,
+                        "Show all 2D CAD drafting layers",
+                    )
+                    .clicked()
+                    {
+                        universal_canvas
+                            .visibility_graphics
+                            .show_all_cad_layers();
+                    }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Document),
+                        "Export .dxf",
+                        false,
+                        theme.accent_orange,
+                        "Export layer-aware AutoCAD AC1015 .dxf drawing",
+                    )
+                    .clicked()
+                    {
+                        actions.export_cad_dxf = true;
+                    }
+                });
                 let active_id = universal_canvas.visibility_graphics.active_cad_layer_id.clone();
                 let mut set_active: Option<String> = None;
+                let mut cycle_color_id: Option<String> = None;
+                let mut solo_layer_id: Option<String> = None;
+                let mut delete_layer_id: Option<String> = None;
                 let entities = &universal_canvas.entities;
                 for layer in &mut universal_canvas.visibility_graphics.cad_layers {
                     let count = entities
@@ -9258,10 +9364,17 @@ impl SpatialWorkspaceState {
                         })
                         .count();
                     let is_act = layer.id == active_id;
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         let dot_col = Color32::from_rgb(layer.color_rgb[0], layer.color_rgb[1], layer.color_rgb[2]);
-                        let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
-                        ui.painter().circle_filled(dot_rect.center(), 4.5, dot_col);
+                        let (dot_rect, dot_resp) =
+                            ui.allocate_exact_size(Vec2::splat(12.0), egui::Sense::click());
+                        ui.painter().circle_filled(dot_rect.center(), 4.8, dot_col);
+                        if dot_resp
+                            .on_hover_text("Click to cycle CAD layer stroke color")
+                            .clicked()
+                        {
+                            cycle_color_id = Some(layer.id.clone());
+                        }
                         if Self::glass_pill_button(
                             ui,
                             theme,
@@ -9300,10 +9413,51 @@ impl SpatialWorkspaceState {
                         {
                             layer.locked = !layer.locked;
                         }
+                        if Self::glass_pill_button(
+                            ui,
+                            theme,
+                            None,
+                            "Solo",
+                            false,
+                            theme.accent_blue,
+                            "Isolate and activate this CAD drafting layer",
+                        )
+                        .clicked()
+                        {
+                            solo_layer_id = Some(layer.id.clone());
+                        }
+                        if layer.id != "0-Sketch" && !layer.locked {
+                            if Self::glass_icon_button(
+                                ui,
+                                theme,
+                                AppIcon::Close,
+                                false,
+                                theme.accent_red,
+                                "Delete custom layer (entities migrate to 0-Sketch)",
+                            )
+                            .clicked()
+                            {
+                                delete_layer_id = Some(layer.id.clone());
+                            }
+                        }
                     });
                 }
                 if let Some(nid) = set_active {
                     universal_canvas.visibility_graphics.active_cad_layer_id = nid;
+                }
+                if let Some(cid) = cycle_color_id {
+                    let _ = universal_canvas.visibility_graphics.cycle_layer_color(&cid);
+                }
+                if let Some(sid) = solo_layer_id {
+                    universal_canvas.visibility_graphics.isolate_cad_layer(&sid);
+                }
+                if let Some(did) = delete_layer_id {
+                    if let Some(migrated) = universal_canvas.delete_cad_layer_and_reassign_entities(&did) {
+                        self.push_trace(
+                            format!("Deleted layer {did} (migrated {migrated} shapes -> 0-Sketch)"),
+                            true,
+                        );
+                    }
                 }
                 ui.horizontal(|ui| {
                     ui.add(

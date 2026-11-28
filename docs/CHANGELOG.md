@@ -7,7 +7,18 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.9 (4/10)]
+## [Unreleased — Next: v0.8.9 (5/10)]
+
+### Update 5/10 (`v0.8.8.5` -> `v0.8.9`) — AutoCAD `"ByLayer"` Color Mode, Custom CAD Layer Lifecycle, Entity Layer Reassignment & Model Tree 3D Sync
+- **`ByLayer` Color Override & Full Custom CAD Layer Lifecycle (`src/views/universal_canvas/{types.rs, cad_ops.rs, render_layers.rs}`)**:
+  - Added `color_by_layer` plus [`layer_color_rgb`](src/views/universal_canvas/types.rs), [`cycle_layer_color`](src/views/universal_canvas/types.rs), [`isolate_cad_layer`](src/views/universal_canvas/types.rs), [`show_all_cad_layers`](src/views/universal_canvas/types.rs), and [`delete_custom_layer`](src/views/universal_canvas/types.rs) on `VisibilityGraphicsState` (with updated `content_revision_hash`).
+  - Added lock-guarded [`UniversalCanvasState::reassign_entity_layer`](src/views/universal_canvas/cad_ops.rs) and [`UniversalCanvasState::delete_cad_layer_and_reassign_entities`](src/views/universal_canvas/cad_ops.rs) with full Undo history support and automatic migration to `"0-Sketch"`.
+  - Updated [`UniversalCanvasState::paint_entities`](src/views/universal_canvas/render_layers.rs) to honor `ByLayer` stroke colors and dim locked CAD layer entities.
+- **`Layers / VG`, `Model Tree` & `Live Properties` UX Upgrades (`src/views/spatial_workspace/{drawers.rs, smart_popup.rs}`)**:
+  - Upgraded the `Layers / VG` CAD section with `ByLayer`, `All On`, `Export .dxf`, clickable color swatches to cycle layer stroke color, `Solo` isolation, and safe custom layer deletion.
+  - Synced `Model Tree` BIM element selection directly to `universal_canvas.highlighted_bim_element` for instant 3D viewport highlight + badge callout, and added searchable 2D CAD entity quick-pick pills.
+  - Added a `"Layer:"` reassignment pill bar inside `Live Properties` for selected 2D CAD shapes (`SmartSelectionTarget::SketchEntity`).
+- **Verification**: Added [`test_v0885_cad_bylayer_reassignment_delete_migration_and_model_tree_sync`](src/views/spatial_workspace/tests.rs) and verified `cargo check --lib` alongside CAD/VG/Dynamic Island regression suites.
 
 ### Update 4/10 (`v0.8.8.4` -> `v0.8.9`) — Gemini Copilot Native VG/CAD Tools #16–#17, Prompt Telemetry & 3D Selected Element Callout Badge
 - **Native Gemini Engineering Tools #16 & #17 (`src/core/{agent_tools.rs, mod.rs}`)**:
