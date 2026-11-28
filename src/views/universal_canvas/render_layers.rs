@@ -134,6 +134,9 @@ impl UniversalCanvasState {
         if !self.globe_mode {
             // 2B. Isolated Pad Footings (Flat 2D Projection)
             for ft in &bim_project.footings {
+                if !self.visibility_graphics.bim.show_footings {
+                    continue;
+                }
                 let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Footing, ft.id));
                 let ring: Vec<Pos2> = ft
                     .footprint_ring()
@@ -155,6 +158,9 @@ impl UniversalCanvasState {
 
             // 3. Structural Beams / Runs (Flat 2D Projection)
             for run in &bim_project.runs {
+                if !self.visibility_graphics.bim.show_beams {
+                    continue;
+                }
                 let s0 = to_screen([run.start.0, run.start.1]);
                 let s1 = to_screen([run.end.0, run.end.1]);
                 let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Run, run.id));
@@ -181,6 +187,9 @@ impl UniversalCanvasState {
 
             // 4. Compound Walls (Flat 2D Projection)
             for w in &bim_project.walls {
+                if !self.visibility_graphics.bim.show_walls {
+                    continue;
+                }
                 let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Wall, w.id));
                 let ring: Vec<Pos2> = w
                     .footprint_ring()
@@ -207,6 +216,9 @@ impl UniversalCanvasState {
 
             // 5. Structural Columns (Flat 2D Projection)
             for col in &bim_project.columns {
+                if !self.visibility_graphics.bim.show_columns {
+                    continue;
+                }
                 let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Column, col.id));
                 let ring: Vec<Pos2> = col
                     .footprint_ring()
@@ -547,6 +559,9 @@ impl UniversalCanvasState {
 
                 // 6A. Subsurface 3D Foundation Pads / Pile Caps & Deep Foundation Pile Shafts
                 for ft in &bim_project.footings {
+                    if !self.visibility_graphics.bim.show_footings {
+                        continue;
+                    }
                     if !show_on_story(ft.level_id) && !(isolate && active_lvl_id <= 1) {
                         continue;
                     }
@@ -630,7 +645,7 @@ impl UniversalCanvasState {
 
                 // 6B. Floor & Roof Slabs
                 for sl in &bim_project.slabs {
-                    if sl.boundary.len() < 3 {
+                    if !self.visibility_graphics.bim.show_slabs || sl.boundary.len() < 3 {
                         continue;
                     }
                     if isolate && sl.level_id != active_lvl_id && sl.level_id != active_top_id {
@@ -667,7 +682,7 @@ impl UniversalCanvasState {
 
                 // 6C. Extruded 3D Walls & Door/Window Openings (with Directional Sun Shading & Section Cut)
                 for w in &bim_project.walls {
-                    if !show_on_story(w.base_level_id) {
+                    if !self.visibility_graphics.bim.show_walls || !show_on_story(w.base_level_id) {
                         continue;
                     }
                     let is_sel = self.highlighted_bim_element == Some((crate::core::BimElementKind::Wall, w.id));
@@ -808,6 +823,9 @@ impl UniversalCanvasState {
                 // 6D. Structural Columns (Directional Sun-Shaded Prisms + Deformed/Modal + N-1 Ghost + Force Diagrams)
                 let mut apex_callout_pt: Option<(f64, Pos2)> = None;
                 for col in &bim_project.columns {
+                    if !self.visibility_graphics.bim.show_columns {
+                        continue;
+                    }
                     if isolate && col.base_level_id != active_lvl_id && col.top_level_id != active_lvl_id {
                         continue;
                     }
@@ -980,6 +998,9 @@ impl UniversalCanvasState {
 
                 // 6E. Structural Beams / Runs (Sun-Shaded 3D Extruded Prisms + Deformed/Modal + N-1 Ghost + 3D Moment Diagrams)
                 for (beam_idx, run) in bim_project.runs.iter().enumerate() {
+                    if !self.visibility_graphics.bim.show_beams {
+                        continue;
+                    }
                     if isolate && run.level_id != active_lvl_id && run.level_id != active_top_id {
                         continue;
                     }

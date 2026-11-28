@@ -9097,6 +9097,19 @@ impl SpatialWorkspaceState {
                     {
                         universal_canvas.visibility_graphics.bim.show_all();
                     }
+                    if Self::glass_pill_button(
+                        ui,
+                        theme,
+                        Some(AppIcon::Document),
+                        "Export VG .ifcx",
+                        false,
+                        theme.accent_blue,
+                        "Export IFCX (IFC 5) snapshot containing only visible BIM categories",
+                    )
+                    .clicked()
+                    {
+                        actions.export_vg_filtered_ifcx = true;
+                    }
                 });
 
                 let mut isolate_cat: Option<&'static str> = None;

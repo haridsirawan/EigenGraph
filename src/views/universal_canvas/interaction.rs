@@ -603,6 +603,36 @@ impl UniversalCanvasState {
                     let p2 = crate::core::P2(pt[0], pt[1]);
 
                     match self.earth_bim_author.active_tool {
+                        EarthBimTool::Column if self.visibility_graphics.bim.lock_columns => {
+                            self.status_message = Some(
+                                "Placement blocked: Columns category is locked (unlock in Layers / VG)."
+                                    .to_string(),
+                            );
+                        }
+                        EarthBimTool::Footing if self.visibility_graphics.bim.lock_footings => {
+                            self.status_message = Some(
+                                "Placement blocked: Footings category is locked (unlock in Layers / VG)."
+                                    .to_string(),
+                            );
+                        }
+                        EarthBimTool::Wall if self.visibility_graphics.bim.lock_walls => {
+                            self.status_message = Some(
+                                "Placement blocked: Walls category is locked (unlock in Layers / VG)."
+                                    .to_string(),
+                            );
+                        }
+                        EarthBimTool::Beam if self.visibility_graphics.bim.lock_beams => {
+                            self.status_message = Some(
+                                "Placement blocked: Beams category is locked (unlock in Layers / VG)."
+                                    .to_string(),
+                            );
+                        }
+                        EarthBimTool::Slab if self.visibility_graphics.bim.lock_slabs => {
+                            self.status_message = Some(
+                                "Placement blocked: Slabs category is locked (unlock in Layers / VG)."
+                                    .to_string(),
+                            );
+                        }
                         EarthBimTool::Column => {
                             let w = self.earth_bim_author.col_width_mm.clamp(150.0, 2000.0);
                             let d = self.earth_bim_author.col_depth_mm.clamp(150.0, 2000.0);
@@ -1454,6 +1484,9 @@ impl UniversalCanvasState {
                 // 1. Columns (3D vertical shaft)
                 let mut best_col: Option<(f32, usize)> = None;
                 for c in &bim_project.columns {
+                    if !self.visibility_graphics.bim.show_columns {
+                        continue;
+                    }
                     if isolate && c.base_level_id != active_lvl_id && c.top_level_id != active_lvl_id {
                         continue;
                     }
@@ -1473,6 +1506,9 @@ impl UniversalCanvasState {
                 // 2. Beams / Runs (at elevated storey height)
                 let mut best_run: Option<(f32, usize)> = None;
                 for r in &bim_project.runs {
+                    if !self.visibility_graphics.bim.show_beams {
+                        continue;
+                    }
                     if isolate && r.level_id != active_lvl_id && r.level_id != active_top_id {
                         continue;
                     }
@@ -1490,6 +1526,9 @@ impl UniversalCanvasState {
 
                 // 3. Walls (3D extruded face quad or chords)
                 for w in bim_project.walls.iter().rev() {
+                    if !self.visibility_graphics.bim.show_walls {
+                        continue;
+                    }
                     if isolate && w.base_level_id != active_lvl_id {
                         continue;
                     }
@@ -1517,6 +1556,9 @@ impl UniversalCanvasState {
 
                 // 4. Footings
                 for f in &bim_project.footings {
+                    if !self.visibility_graphics.bim.show_footings {
+                        continue;
+                    }
                     if isolate && active_lvl_id > 1 && f.level_id != active_lvl_id {
                         continue;
                     }
@@ -1530,6 +1572,9 @@ impl UniversalCanvasState {
 
                 // 5. Slabs / Roofs (elevated 3D polygon)
                 for sl in bim_project.slabs.iter().rev() {
+                    if !self.visibility_graphics.bim.show_slabs {
+                        continue;
+                    }
                     if isolate && sl.level_id != active_lvl_id && sl.level_id != active_top_id {
                         continue;
                     }
@@ -1550,6 +1595,9 @@ impl UniversalCanvasState {
         // 1. Columns (highest priority at grid intersections)
         let mut best_col: Option<(f32, usize)> = None;
         for c in &bim_project.columns {
+            if !self.visibility_graphics.bim.show_columns {
+                continue;
+            }
             let sp = self.world_to_screen(rect, [c.pos.0, c.pos.1]);
             if !rect.expand(24.0).contains(sp) {
                 continue;
@@ -1566,6 +1614,9 @@ impl UniversalCanvasState {
         // 2. Beams / Structural Runs
         let mut best_run: Option<(f32, usize)> = None;
         for r in &bim_project.runs {
+            if !self.visibility_graphics.bim.show_beams {
+                continue;
+            }
             let s0 = self.world_to_screen(rect, [r.start.0, r.start.1]);
             let s1 = self.world_to_screen(rect, [r.end.0, r.end.1]);
             if !rect.expand(30.0).contains(s0) && !rect.expand(30.0).contains(s1) {
@@ -1583,6 +1634,9 @@ impl UniversalCanvasState {
         // 3. Walls
         let mut best_wall: Option<(f32, usize)> = None;
         for w in &bim_project.walls {
+            if !self.visibility_graphics.bim.show_walls {
+                continue;
+            }
             let s0 = self.world_to_screen(rect, [w.start.0, w.start.1]);
             let s1 = self.world_to_screen(rect, [w.end.0, w.end.1]);
             if !rect.expand(30.0).contains(s0) && !rect.expand(30.0).contains(s1) {
@@ -1600,6 +1654,9 @@ impl UniversalCanvasState {
         // 4. Isolated Footings
         let mut best_ft: Option<(f32, usize)> = None;
         for f in &bim_project.footings {
+            if !self.visibility_graphics.bim.show_footings {
+                continue;
+            }
             let sp = self.world_to_screen(rect, [f.pos.0, f.pos.1]);
             if !rect.expand(24.0).contains(sp) {
                 continue;
@@ -1615,7 +1672,7 @@ impl UniversalCanvasState {
 
         // 5. Floor Slabs / Roofs (reverse order prefers top-most/latest slab)
         for sl in bim_project.slabs.iter().rev() {
-            if sl.boundary.len() < 3 {
+            if !self.visibility_graphics.bim.show_slabs || sl.boundary.len() < 3 {
                 continue;
             }
             let pts: Vec<Pos2> = sl

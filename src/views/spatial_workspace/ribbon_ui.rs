@@ -1053,6 +1053,73 @@ impl SpatialWorkspaceState {
             });
         }
 
+        if !universal_canvas.visibility_graphics.bim.is_all_visible()
+            || universal_canvas.visibility_graphics.bim.any_locked()
+        {
+            ui.add_space(3.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(deck_w);
+                ui.spacing_mut().item_spacing = Vec2::new(4.0, 2.0);
+                let hidden = universal_canvas.visibility_graphics.bim.hidden_labels();
+                let locked = universal_canvas.visibility_graphics.bim.locked_labels();
+                if !hidden.is_empty() {
+                    icons::pill_badge(
+                        ui,
+                        AppIcon::SectionCut,
+                        format!("Hidden: {}", hidden.join(", ")),
+                        theme.accent_blue,
+                    );
+                }
+                if !locked.is_empty() {
+                    icons::pill_badge(
+                        ui,
+                        AppIcon::Lock,
+                        format!("Locked: {}", locked.join(", ")),
+                        theme.accent_orange,
+                    );
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::CheckCircle),
+                    "Reset VG",
+                    false,
+                    theme.accent_green,
+                    "Show all BIM categories and unlock all locks",
+                )
+                .clicked()
+                {
+                    universal_canvas.visibility_graphics.bim.reset_all();
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Layers),
+                    "Layers / VG",
+                    false,
+                    theme.accent_blue,
+                    "Open Project Browser Layers / VG manager",
+                )
+                .clicked()
+                {
+                    self.open_project_browser_drawer(1);
+                }
+                if Self::glass_pill_button(
+                    ui,
+                    theme,
+                    Some(AppIcon::Document),
+                    "VG .ifcx",
+                    false,
+                    theme.accent_green,
+                    "Export Visibility/Graphics filtered IFCX view (.ifcx)",
+                )
+                .clicked()
+                {
+                    actions.export_vg_filtered_ifcx = true;
+                }
+            });
+        }
+
         if self.active_lens != SpatialLens::Clean {
             ui.add_space(3.0);
             self.render_active_lens_colorbar_strip(

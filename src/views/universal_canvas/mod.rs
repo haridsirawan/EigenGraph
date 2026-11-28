@@ -3076,6 +3076,49 @@ impl UniversalCanvasState {
         dxf
     }
 
+    /// Exports an IFCX (IFC 5) JSON document containing only visible BIM categories per `VisibilityGraphicsState`,
+    /// composed with a non-destructive `eigengraph::view::visibility_graphics` metadata overlay.
+    pub fn export_vg_filtered_ifcx(&self, bim_project: &BimProject) -> String {
+        let filtered = self.visibility_graphics.bim.filter_bim_project(bim_project);
+        let geo = (self.ground_origin_lat_lon.0, self.ground_origin_lat_lon.1, 0.0);
+        let base_doc = crate::core::ifcx::IfcxDocument::from_bim_project(
+            &filtered,
+            Some(geo),
+            0.0,
+            None,
+            None,
+            None,
+        );
+        let hidden: Vec<String> = self
+            .visibility_graphics
+            .bim
+            .hidden_labels()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let locked: Vec<String> = self
+            .visibility_graphics
+            .bim
+            .locked_labels()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let vis_layers: Vec<String> = self
+            .visibility_graphics
+            .cad_layers
+            .iter()
+            .filter(|l| l.visible)
+            .map(|l| l.id.clone())
+            .collect();
+        let composed = crate::core::ifcx::IfcxStage::compose_with_visibility_graphics_overlay(
+            &base_doc,
+            &hidden,
+            &locked,
+            &vis_layers,
+        );
+        serde_json::to_string_pretty(&composed).unwrap_or_else(|_| "{}".to_string())
+    }
+
     /// Renders the unified canvas-first drawing workspace for the active sidebar module.
     #[allow(clippy::too_many_arguments)]
     pub fn show(

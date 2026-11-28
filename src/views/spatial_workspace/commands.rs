@@ -4601,6 +4601,10 @@ impl SpatialWorkspaceState {
                     actions.export_cad_dxf = true;
                     self.push_trace("Exported layer-aware AutoCAD .dxf", true);
                 }
+                "/export-vg-ifcx" | "/vg-ifcx" => {
+                    actions.export_vg_filtered_ifcx = true;
+                    self.push_trace("Exported VG-filtered IFCX view (.ifcx)", true);
+                }
                 "/theme" => {
                     actions.toggle_theme = true;
                     self.push_trace("Toggled Pro Dark / Engineering Daylight", true);

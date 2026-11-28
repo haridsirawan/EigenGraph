@@ -88,6 +88,7 @@ pub mod ns {
     pub const EG_CITY_INTERSECTIONS: &str = "eigengraph::gis::city_intersections";
     pub const EG_SITE_TERRAFORM: &str = "eigengraph::gis::site_terraform";
     pub const EG_MASTER_DOSSIER_INDEX: &str = "eigengraph::governance::master_dossier_index";
+    pub const EG_VISIBILITY_GRAPHICS: &str = "eigengraph::view::visibility_graphics";
     pub const EG_RETROFIT: &str = "eigengraph::bim::retrofit_delta";
     pub const EG_CASCADE_CRC: &str = "eigengraph::analysis::crc_cascade";
     pub const EG_GEOTECH_STRATIGRAPHY: &str = "eigengraph::geotech::stratigraphy";
@@ -621,6 +622,10 @@ impl IfcxDocument {
         schemas.insert(
             ns::EG_MASTER_DOSSIER_INDEX.to_string(),
             json!({ "value": { "dataType": "Object", "spec": "EigenGraph v0.8.8 Master Engineering Dossier Drawing Index (S-000 / S-100..S-118)" } }),
+        );
+        schemas.insert(
+            ns::EG_VISIBILITY_GRAPHICS.to_string(),
+            json!({ "value": { "dataType": "Object", "spec": "EigenGraph v0.8.9 Visibility/Graphics (VG) & 2D CAD Layer Filter Snapshot" } }),
         );
         Self {
             header: IfcxHeader {
@@ -2374,10 +2379,52 @@ impl IfcxStage {
         let stage = Self::compose(&[base_doc.clone(), ov_doc]);
         stage.to_composed_document(&format!("{}_master_dossier_index", base_doc.header.id))
     }
+
+    /// Composes a base `.ifcx` document with the active Visibility/Graphics (VG) & CAD Layer view filter.
+    pub fn compose_with_visibility_graphics_overlay(
+        base_doc: &IfcxDocument,
+        hidden_categories: &[String],
+        locked_categories: &[String],
+        visible_cad_layers: &[String],
+    ) -> IfcxDocument {
+        let mut ov_doc = IfcxDocument::new(&format!("{}_vg_view", base_doc.header.id));
+        let mut attrs = BTreeMap::new();
+        attrs.insert(
+            ns::BSI_CLASS.to_string(),
+            json!({ "code": "IfcAnnotation", "version": "IFC5-IFCX" }),
+        );
+        attrs.insert(
+            ns::BSI_PROP.to_string(),
+            json!({
+                "name": "EigenGraph Visibility/Graphics & Layer Filter View",
+                "hiddenCategories": hidden_categories,
+                "lockedCategories": locked_categories,
+                "visibleCadLayers": visible_cad_layers,
+            }),
+        );
+        attrs.insert(
+            ns::EG_VISIBILITY_GRAPHICS.to_string(),
+            json!({
+                "hiddenCategories": hidden_categories,
+                "lockedCategories": locked_categories,
+                "visibleCadLayers": visible_cad_layers,
+            }),
+        );
+        ov_doc.data.push(IfcxNode {
+            path: "/earth/view/visibility_graphics".to_string(),
+            children: BTreeMap::new(),
+            inherits: BTreeMap::new(),
+            attributes: attrs,
+        });
+        let stage = Self::compose(&[base_doc.clone(), ov_doc]);
+        stage.to_composed_document(&format!("{}_vg_view", base_doc.header.id))
+    }
 }
 
 fn classify_ifcx_node_layer(node: &IfcxNode) -> String {
-    if node.attributes.contains_key(ns::EG_MASTER_DOSSIER_INDEX) {
+    if node.attributes.contains_key(ns::EG_VISIBILITY_GRAPHICS) {
+        "Visibility/Graphics View".to_string()
+    } else if node.attributes.contains_key(ns::EG_MASTER_DOSSIER_INDEX) {
         "Master Dossier Index".to_string()
     } else if node.attributes.contains_key(ns::EG_CONSTRUCTION_4D5D6D) {
         "4D/5D/6D Sequence & LCA".to_string()

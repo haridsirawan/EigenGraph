@@ -7,7 +7,17 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.8.9 (2/10)]
+## [Unreleased — Next: v0.8.9 (3/10)]
+
+### Update 3/10 (`v0.8.8.3` -> `v0.8.9`) — 3D BIM Picking/Authoring VG Guards, CPU Fallback Parity, Contextual `VG Filter:` Ribbon Strip & VG-Filtered IFCX Export
+- **3D Viewport BIM Picking, Authoring Lock Guards & CPU Fallback Parity (`src/views/universal_canvas/{interaction.rs, render_layers.rs, types.rs}`)**:
+  - Added [`BimCategoryVisibility::is_bim_kind_visible`](src/views/universal_canvas/types.rs), `any_locked`, `unlock_all`, `reset_all`, `hidden_labels`, `locked_labels`, and [`filter_bim_project`](src/views/universal_canvas/types.rs).
+  - Guarded [`UniversalCanvasState::pick_bim_element_at_screen`](src/views/universal_canvas/interaction.rs) (both 3D Globe & 2D fallback) and 2D/3D CPU vector fallback loops in [`render_layers.rs`](src/views/universal_canvas/render_layers.rs) so hidden BIM categories cannot be clicked or drawn, and blocked 3D `EarthBimTool` placement onto locked BIM categories.
+- **Contextual `VG Filter:` Ribbon Strip & VG-Filtered IFCX Export (`src/core/ifcx.rs`, `src/views/universal_canvas/mod.rs`, `src/views/spatial_workspace/{ribbon_ui.rs, drawers.rs, types.rs, commands.rs}`, `src/app.rs`)**:
+  - Registered `eigengraph::view::visibility_graphics` + [`IfcxStage::compose_with_visibility_graphics_overlay`](src/core/ifcx.rs) and added [`UniversalCanvasState::export_vg_filtered_ifcx`](src/views/universal_canvas/mod.rs), `/export-vg-ifcx`, and `Export VG .ifcx` pill in `Layers / VG`.
+  - Added conditional 1-row `VG Filter:` strip inside [`render_categorized_ribbon_deck`](src/views/spatial_workspace/ribbon_ui.rs) showing hidden/locked category badges alongside 1-click `Reset VG`, `Layers / VG`, and `VG .ifcx` when active.
+- **Verification (`src/views/spatial_workspace/tests.rs`)**:
+  - Added [`test_v0883_viewport_vg_picking_ifcx_filter_and_context_bar`](src/views/spatial_workspace/tests.rs).
 
 ### Update 2/10 (`v0.8.8.2` -> `v0.8.9`) — True BIM/CAD Layer Lock Enforcement, Layer-Aware AutoCAD DXF & SVG Export, and Drafting Layers Ribbon
 - **True BIM Category & 2D CAD Layer Lock Enforcement (`src/views/universal_canvas/{types.rs, cad_ops.rs, interaction.rs}`, `src/views/spatial_workspace/smart_popup.rs`)**:

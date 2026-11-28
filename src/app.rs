@@ -4277,6 +4277,25 @@ impl EigenGraphApp {
                 Err(err) => self.spatial_workspace.push_trace(err, false),
             }
         }
+        if hud_actions.export_vg_filtered_ifcx {
+            let ifcx_json = self
+                .universal_canvas
+                .export_vg_filtered_ifcx(&self.build_view.bim_bus.project);
+            let raw_name =
+                Self::safe_ifcx_project_stem(&self.build_view.bim_bus.project.project_name);
+            let fname = format!("{raw_name}_vg_view.ifcx");
+            match crate::core::web_bridge::save_text_file(
+                &fname,
+                &ifcx_json,
+                "application/json;charset=utf-8",
+            ) {
+                Ok(dest) => {
+                    self.spatial_workspace
+                        .push_trace(format!("Exported VG-filtered .ifcx -> {dest}"), true);
+                }
+                Err(err) => self.spatial_workspace.push_trace(err, false),
+            }
+        }
         if hud_actions.run_zoning_agent {
             let rep = self
                 .universal_canvas

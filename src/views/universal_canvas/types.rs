@@ -311,6 +311,104 @@ impl BimCategoryVisibility {
             crate::core::BimElementKind::Footing => self.lock_footings = locked,
         }
     }
+
+    pub fn is_bim_kind_visible(&self, kind: crate::core::BimElementKind) -> bool {
+        match kind {
+            crate::core::BimElementKind::Column => self.show_columns,
+            crate::core::BimElementKind::Run => self.show_beams,
+            crate::core::BimElementKind::Wall => self.show_walls,
+            crate::core::BimElementKind::Slab => self.show_slabs,
+            crate::core::BimElementKind::Footing => self.show_footings,
+        }
+    }
+
+    pub fn any_locked(&self) -> bool {
+        self.lock_columns
+            || self.lock_beams
+            || self.lock_walls
+            || self.lock_slabs
+            || self.lock_footings
+    }
+
+    pub fn unlock_all(&mut self) {
+        self.lock_columns = false;
+        self.lock_beams = false;
+        self.lock_walls = false;
+        self.lock_slabs = false;
+        self.lock_footings = false;
+    }
+
+    pub fn reset_all(&mut self) {
+        self.show_all();
+        self.unlock_all();
+    }
+
+    pub fn hidden_labels(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if !self.show_columns {
+            out.push("Columns");
+        }
+        if !self.show_beams {
+            out.push("Beams");
+        }
+        if !self.show_walls {
+            out.push("Walls");
+        }
+        if !self.show_slabs {
+            out.push("Slabs");
+        }
+        if !self.show_footings {
+            out.push("Footings");
+        }
+        if !self.show_grid_and_axes {
+            out.push("Grid");
+        }
+        out
+    }
+
+    pub fn locked_labels(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.lock_columns {
+            out.push("Columns");
+        }
+        if self.lock_beams {
+            out.push("Beams");
+        }
+        if self.lock_walls {
+            out.push("Walls");
+        }
+        if self.lock_slabs {
+            out.push("Slabs");
+        }
+        if self.lock_footings {
+            out.push("Footings");
+        }
+        out
+    }
+
+    /// Returns a filtered `BimProject` clone omitting hidden BIM categories for VG-aware IFCX export.
+    pub fn filter_bim_project(&self, project: &BimProject) -> BimProject {
+        let mut filtered = project.clone();
+        if !self.show_columns {
+            filtered.columns.clear();
+        }
+        if !self.show_beams {
+            filtered.runs.clear();
+        }
+        if !self.show_walls {
+            filtered.walls.clear();
+        }
+        if !self.show_slabs {
+            filtered.slabs.clear();
+        }
+        if !self.show_footings {
+            filtered.footings.clear();
+        }
+        if !self.show_grid_and_axes {
+            filtered.grids.clear();
+        }
+        filtered
+    }
 }
 
 /// AutoCAD-compatible 2D CAD drafting & annotation layer definition.

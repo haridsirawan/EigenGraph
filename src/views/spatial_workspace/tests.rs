@@ -7642,3 +7642,92 @@ use crate::theme::MacTheme;
             );
         }
     }
+
+    #[test]
+    fn test_v0883_viewport_vg_picking_ifcx_filter_and_context_bar() {
+        assert!(SLASH_COMMANDS.iter().any(|s| s.cmd == "/export-vg-ifcx"));
+
+        let mut spatial = SpatialWorkspaceState::default();
+        let mut canvas = UniversalCanvasState::default();
+        let mut build = BuildView::default();
+        build.bim_bus =
+            crate::core::BimCommandBus::from_project(BimProject::sample_bimcraft_building());
+        let mut ai = AiAssistantView::default();
+        let members = Vec::new();
+        let projects = Vec::new();
+        let mut db_components = Vec::new();
+
+        // 1. VG BIM project filtering & reset_all
+        let orig_cols = build.bim_bus.project.columns.len();
+        assert!(orig_cols > 0);
+        canvas.visibility_graphics.bim.show_columns = false;
+        canvas.visibility_graphics.bim.lock_walls = true;
+        let filtered = canvas
+            .visibility_graphics
+            .bim
+            .filter_bim_project(&build.bim_bus.project);
+        assert!(filtered.columns.is_empty());
+        assert_eq!(filtered.walls.len(), build.bim_bus.project.walls.len());
+
+        // 2. VG-filtered IFCX view export
+        let vg_ifcx = canvas.export_vg_filtered_ifcx(&build.bim_bus.project);
+        let parsed = crate::core::ifcx::IfcxDocument::parse(&vg_ifcx).expect("valid VG IFCX");
+        assert!(vg_ifcx.contains("eigengraph::view::visibility_graphics"));
+        assert!(
+            parsed
+                .data
+                .iter()
+                .all(|n| !n.path.contains("/columns/")),
+            "Hidden Columns category must be omitted from VG-filtered IFCX export"
+        );
+        assert!(parsed.data.iter().any(|n| n.path.contains("/walls/")));
+
+        let act = spatial.execute_spatial_input(
+            "/export-vg-ifcx",
+            &mut canvas,
+            &mut build,
+            &mut ai,
+            &members,
+            &projects,
+            &mut db_components,
+        );
+        assert!(act.export_vg_filtered_ifcx);
+
+        // 3. Contextual VG Filter strip renders responsively with zero overflow across Desktop, Tablet, Mobile
+        let theme = MacTheme::for_mode(crate::theme::ThemeMode::ProDark);
+        for (win_w, win_h) in [(1440.0_f32, 900.0_f32), (768.0, 900.0), (390.0, 844.0)] {
+            let ctx = egui::Context::default();
+            spatial.mobile_deck_pinned = true;
+            spatial.close_focus_layer_return_to_ribbon();
+            spatial.active_ribbon_tab = RibbonCategoryTab::Modeling;
+            for _ in 0..4 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(win_w, win_h))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    let _ = spatial.render_hud_overlays(
+                        ui.ctx(),
+                        &theme,
+                        &mut canvas,
+                        &mut build,
+                        &mut ai,
+                        &members,
+                        &projects,
+                        &mut db_components,
+                    );
+                });
+                out.textures_delta.clear();
+            }
+            assert_eq!(spatial.hud_rects.len(), 1);
+            assert!(
+                spatial.hud_rects[0].right() <= win_w + 1.0,
+                "VG Filter contextual strip overflowed {win_w}: {:?}",
+                spatial.hud_rects[0]
+            );
+        }
+
+        canvas.visibility_graphics.bim.reset_all();
+        assert!(canvas.visibility_graphics.bim.is_all_visible());
+        assert!(!canvas.visibility_graphics.bim.any_locked());
+    }
