@@ -1,9 +1,9 @@
-//! ribbon_ui.rs — Update `v0.8.6.2` (`2/10` -> `v0.8.7`):
+//! ribbon_ui.rs — Update `v0.8.9.2` (`2/10` -> `v0.9.0`):
 //! Smart Layered 10-Category AEC Engineering Lifecycle Ribbon & Layer-2 Focus Breadcrumb Header.
 //!
 //! Renders:
-//! - Layer 1: Quick-Access Bar (`Vault`, `Save`, `Undo`, `Redo`, `3D`, `Project · Level`, utilities) +
-//!   10 scrollable AEC category tabs (`Planning` .. `Industrialization`) +
+//! - Layer 1: Unified Row A (`Vault`, `Save`, `Undo`, `Redo`, `3D`, `Project Browser`, `Properties`,
+//!   10 icon-only AEC category tabs `Planning` .. `Industrialization`, and right utilities) +
 //!   horizontal grouped Icon-Above-Caption tool tiles with soft-pill bottom group footers.
 //! - Layer 2: Compact breadcrumb header (`<- Ribbon | Active Focus Layer | x`) when any overlay,
 //!   Project Browser, drawer, inspector, or chat is active so layers swap in-place cleanly.
@@ -11,7 +11,7 @@
 use super::*;
 use egui::{
     Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Frame, Layout, Margin, Pos2, Rect,
-    Response, RichText, ScrollArea, Sense, Stroke, Ui, Vec2,
+    Response, ScrollArea, Sense, Stroke, Ui, Vec2,
 };
 
 use crate::icons::{self, AppIcon};
@@ -206,8 +206,301 @@ impl SpatialWorkspaceState {
         returned_to_ribbon
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn render_ribbon_row_a_left_and_tabs(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        universal_canvas: &mut UniversalCanvasState,
+        build_view: &mut BuildView,
+        vault_connected: bool,
+        vault_name: &str,
+        proj_name: &str,
+        story_lbl: &str,
+        can_undo: bool,
+        can_redo: bool,
+        actions: &mut SpatialHudActions,
+    ) {
+        if vault_connected {
+            if Self::glass_icon_button(
+                ui,
+                theme,
+                AppIcon::Folder,
+                self.vault_drawer_open,
+                theme.accent_green,
+                &format!("Vault Project Browser: {vault_name}"),
+            )
+            .clicked()
+            {
+                self.toggle_exclusive_drawer("vault");
+            }
+        } else if Self::glass_icon_button(
+            ui,
+            theme,
+            AppIcon::Folder,
+            false,
+            theme.accent_blue,
+            "Open Project Browser / Mount Local Vault Folder",
+        )
+        .clicked()
+        {
+            self.toggle_exclusive_drawer("vault");
+        }
+        if Self::glass_icon_button(
+            ui,
+            theme,
+            AppIcon::SaveDisk,
+            false,
+            theme.accent_blue,
+            "Save / Export .eigen.json workspace",
+        )
+        .clicked()
+        {
+            actions.export_archive = true;
+        }
+        ui.separator();
+        if Self::glass_icon_button(
+            ui,
+            theme,
+            AppIcon::Undo,
+            false,
+            theme.accent_blue,
+            "Undo last BIM or 2D canvas action (Cmd/Ctrl+Z)",
+        )
+        .clicked()
+            && can_undo
+        {
+            actions.undo = true;
+        }
+        if Self::glass_icon_button(
+            ui,
+            theme,
+            AppIcon::Redo,
+            false,
+            theme.accent_blue,
+            "Redo undone BIM or 2D canvas action (Cmd/Ctrl+Y)",
+        )
+        .clicked()
+            && can_redo
+        {
+            actions.redo = true;
+        }
+        ui.separator();
+        if Self::glass_icon_button(
+            ui,
+            theme,
+            AppIcon::Cube3D,
+            self.active_canvas_mode == SpatialCanvasMode::EarthGlobe,
+            theme.accent_blue,
+            "Default 3D Isometric Earth / BIM View",
+        )
+        .clicked()
+        {
+            self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
+            universal_canvas.globe_mode = true;
+            self.apply_camera_preset(build_view, universal_canvas, "iso");
+            actions.fit_camera = true;
+        }
+
+        let vg_filtered = !universal_canvas.visibility_graphics.bim.is_all_visible()
+            || universal_canvas.visibility_graphics.bim.any_locked();
+        let browser_accent = if vg_filtered {
+            theme.accent_orange
+        } else {
+            theme.accent_blue
+        };
+        let prop_tip = match self.selected_target {
+            Some(SmartSelectionTarget::Column(id)) => {
+                format!("Properties · C{id} — Open Live Properties & Smart Element Inspector")
+            }
+            Some(SmartSelectionTarget::Beam(id)) => {
+                format!("Properties · B{id} — Open Live Properties & Smart Element Inspector")
+            }
+            Some(SmartSelectionTarget::Wall(id)) => {
+                format!("Properties · W{id} — Open Live Properties & Smart Element Inspector")
+            }
+            Some(SmartSelectionTarget::Footing(id)) => {
+                format!("Properties · F{id} — Open Live Properties & Smart Element Inspector")
+            }
+            Some(SmartSelectionTarget::Slab(id)) => {
+                format!("Properties · S{id} — Open Live Properties & Smart Element Inspector")
+            }
+            Some(SmartSelectionTarget::SketchEntity(id)) => {
+                format!("Properties · 2D#{id} — Open Live Properties & Smart Element Inspector")
+            }
+            Some(SmartSelectionTarget::EarthSite { .. }) => {
+                "Properties · Site — Open Live Properties & Smart Element Inspector".to_string()
+            }
+            None => "Properties — Open Live Properties & Smart Element Inspector".to_string(),
+        };
+        if Self::glass_icon_button(
+            ui,
+            theme,
+            AppIcon::Layers,
+            self.project_browser_drawer_open || vg_filtered,
+            browser_accent,
+            &format!(
+                "{proj_name} · {story_lbl} — Open Project Browser (Model Tree, Layers / VG & Vault)"
+            ),
+        )
+        .clicked()
+        {
+            self.toggle_exclusive_drawer("project_browser");
+        }
+        if Self::glass_icon_button(
+            ui,
+            theme,
+            AppIcon::SlidersPanel,
+            self.properties_drawer_open || self.selected_target.is_some(),
+            theme.accent_green,
+            &prop_tip,
+        )
+        .clicked()
+        {
+            if self.selected_target.is_some() && !self.properties_drawer_open {
+                self.selected_target = None;
+            } else {
+                self.toggle_exclusive_drawer("properties");
+            }
+        }
+
+        ui.separator();
+
+        // 10 AEC Engineering Lifecycle category tabs as compact icon-only triggers beside Properties
+        for tab in RibbonCategoryTab::ALL {
+            if Self::glass_icon_button(
+                ui,
+                theme,
+                tab.icon(),
+                self.active_ribbon_tab == tab,
+                theme.accent_blue,
+                tab.label(),
+            )
+            .clicked()
+            {
+                self.active_ribbon_tab = tab;
+            }
+        }
+    }
+
+    fn render_ribbon_row_a_utilities(
+        &mut self,
+        ui: &mut Ui,
+        theme: &MacTheme,
+        has_key: bool,
+        needs_key: bool,
+        actions: &mut SpatialHudActions,
+        reversed: bool,
+    ) {
+        let key_accent = if has_key {
+            theme.accent_green
+        } else if needs_key {
+            theme.accent_orange
+        } else {
+            theme.accent_blue
+        };
+        let order: [usize; 6] = if reversed {
+            [0, 1, 2, 3, 4, 5]
+        } else {
+            [5, 4, 3, 2, 1, 0]
+        };
+        for idx in order {
+            match idx {
+                0 => {
+                    if Self::glass_icon_button(
+                        ui,
+                        theme,
+                        AppIcon::ChevronDown,
+                        false,
+                        theme.text_secondary,
+                        "Minimize Dynamic Island",
+                    )
+                    .clicked()
+                    {
+                        self.collapse_dynamic_island();
+                    }
+                }
+                1 => {
+                    if Self::glass_icon_button(
+                        ui,
+                        theme,
+                        AppIcon::SettingsGear,
+                        false,
+                        theme.text_secondary,
+                        "Open Workspace Settings inside Dynamic Island",
+                    )
+                    .clicked()
+                    {
+                        actions.open_settings = true;
+                    }
+                }
+                2 => {
+                    if Self::glass_icon_button(
+                        ui,
+                        theme,
+                        AppIcon::Lock,
+                        self.api_key_popover_open || has_key || needs_key,
+                        key_accent,
+                        if has_key {
+                            "Gemini API Key configured"
+                        } else {
+                            "Configure Gemini API Key"
+                        },
+                    )
+                    .clicked()
+                    {
+                        self.toggle_exclusive_drawer("api_key");
+                    }
+                }
+                3 => {
+                    if Self::glass_icon_button(
+                        ui,
+                        theme,
+                        AppIcon::Clock,
+                        self.history_popover_open,
+                        theme.accent_blue,
+                        "Conversation History",
+                    )
+                    .clicked()
+                    {
+                        self.toggle_exclusive_drawer("history");
+                    }
+                }
+                4 => {
+                    if Self::glass_icon_button(
+                        ui,
+                        theme,
+                        AppIcon::SlidersPanel,
+                        true,
+                        theme.accent_blue,
+                        &format!("{}: {}", self.agent_mode.label(), self.agent_mode.description()),
+                    )
+                    .clicked()
+                    {
+                        self.agent_mode = self.agent_mode.next();
+                    }
+                }
+                _ => {
+                    let model_lbl = self.active_model_display_label();
+                    if Self::glass_icon_button(
+                        ui,
+                        theme,
+                        AppIcon::Bot,
+                        false,
+                        theme.accent_blue,
+                        &format!("AI Model: {model_lbl} (click to cycle preset)"),
+                    )
+                    .clicked()
+                    {
+                        self.agent_model = self.agent_model.next();
+                    }
+                }
+            }
+        }
+    }
+
     /// Renders Layer 1 of the Smart Dynamic Island:
-    /// Quick-Access Top Bar + 10 scrollable AEC Lifecycle Category Tabs +
+    /// Quick-Access Top Bar + 10 Icon-Only AEC Lifecycle Category Tabs beside Properties +
     /// Horizontal Grouped Icon-Above-Caption Ribbon Strip.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_categorized_ribbon_deck(
@@ -245,300 +538,76 @@ impl SpatialWorkspaceState {
             build_view.bim_bus.project.project_name.clone()
         };
 
-        // Row A: Quick-Access Top Bar (Vault / Save / Undo / Redo / 3D + Centered Model Title + Utilities)
-        ui.horizontal(|ui| {
-            ui.set_max_width(deck_w);
-            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-            ui.spacing_mut().item_spacing.x = 3.0;
-            if vault_connected {
-                if Self::glass_icon_button(
-                    ui,
-                    theme,
-                    AppIcon::Folder,
-                    self.vault_drawer_open,
-                    theme.accent_green,
-                    &format!("Vault Project Browser: {vault_name}"),
-                )
-                .clicked()
-                {
-                    self.toggle_exclusive_drawer("vault");
-                }
-            } else if Self::glass_icon_button(
-                ui,
-                theme,
-                AppIcon::Folder,
-                false,
-                theme.accent_blue,
-                "Open Project Browser / Mount Local Vault Folder",
-            )
-            .clicked()
-            {
-                self.toggle_exclusive_drawer("vault");
-            }
-            if Self::glass_icon_button(
-                ui,
-                theme,
-                AppIcon::SaveDisk,
-                false,
-                theme.accent_blue,
-                "Save / Export .eigen.json workspace",
-            )
-            .clicked()
-            {
-                actions.export_archive = true;
-            }
-            ui.separator();
-            if Self::glass_icon_button(
-                ui,
-                theme,
-                AppIcon::Undo,
-                false,
-                theme.accent_blue,
-                "Undo last BIM or 2D canvas action (Cmd/Ctrl+Z)",
-            )
-            .clicked()
-                && can_undo
-            {
-                actions.undo = true;
-            }
-            if Self::glass_icon_button(
-                ui,
-                theme,
-                AppIcon::Redo,
-                false,
-                theme.accent_blue,
-                "Redo undone BIM or 2D canvas action (Cmd/Ctrl+Y)",
-            )
-            .clicked()
-                && can_redo
-            {
-                actions.redo = true;
-            }
-            ui.separator();
-            if Self::glass_icon_button(
-                ui,
-                theme,
-                AppIcon::Cube3D,
-                self.active_canvas_mode == SpatialCanvasMode::EarthGlobe,
-                theme.accent_blue,
-                "Default 3D Isometric Earth / BIM View",
-            )
-            .clicked()
-            {
-                self.active_canvas_mode = SpatialCanvasMode::EarthGlobe;
-                universal_canvas.globe_mode = true;
-                self.apply_camera_preset(build_view, universal_canvas, "iso");
-                actions.fit_camera = true;
-            }
-
-            let vg_filtered = !universal_canvas.visibility_graphics.bim.is_all_visible()
-                || universal_canvas.visibility_graphics.bim.any_locked();
-            let browser_accent = if vg_filtered {
-                theme.accent_orange
-            } else {
-                theme.accent_blue
-            };
-            let prop_tip = match self.selected_target {
-                Some(SmartSelectionTarget::Column(id)) => {
-                    format!("Properties · C{id} — Open Live Properties & Smart Element Inspector")
-                }
-                Some(SmartSelectionTarget::Beam(id)) => {
-                    format!("Properties · B{id} — Open Live Properties & Smart Element Inspector")
-                }
-                Some(SmartSelectionTarget::Wall(id)) => {
-                    format!("Properties · W{id} — Open Live Properties & Smart Element Inspector")
-                }
-                Some(SmartSelectionTarget::Footing(id)) => {
-                    format!("Properties · F{id} — Open Live Properties & Smart Element Inspector")
-                }
-                Some(SmartSelectionTarget::Slab(id)) => {
-                    format!("Properties · S{id} — Open Live Properties & Smart Element Inspector")
-                }
-                Some(SmartSelectionTarget::SketchEntity(id)) => {
-                    format!("Properties · 2D#{id} — Open Live Properties & Smart Element Inspector")
-                }
-                Some(SmartSelectionTarget::EarthSite { .. }) => {
-                    "Properties · Site — Open Live Properties & Smart Element Inspector".to_string()
-                }
-                None => "Properties — Open Live Properties & Smart Element Inspector".to_string(),
-            };
-            if Self::glass_icon_button(
-                ui,
-                theme,
-                AppIcon::Layers,
-                self.project_browser_drawer_open || vg_filtered,
-                browser_accent,
-                &format!(
-                    "{proj_name} · {story_lbl} — Open Project Browser (Model Tree, Layers / VG & Vault)"
-                ),
-            )
-            .clicked()
-            {
-                self.toggle_exclusive_drawer("project_browser");
-            }
-            if Self::glass_icon_button(
-                ui,
-                theme,
-                AppIcon::SlidersPanel,
-                self.properties_drawer_open || self.selected_target.is_some(),
-                theme.accent_green,
-                &prop_tip,
-            )
-            .clicked()
-            {
-                if self.selected_target.is_some() && !self.properties_drawer_open {
-                    self.selected_target = None;
-                } else {
-                    self.toggle_exclusive_drawer("properties");
-                }
-            }
-
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        // Row A: Quick-Access Icons + 10 Icon-Only AEC Category Tabs beside Properties + Right Utilities
+        if deck_w >= 660.0 {
+            ui.horizontal(|ui| {
+                ui.set_max_width(deck_w);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 ui.spacing_mut().item_spacing.x = 3.0;
-                if Self::glass_icon_button(
+                self.render_ribbon_row_a_left_and_tabs(
                     ui,
                     theme,
-                    AppIcon::ChevronDown,
-                    false,
-                    theme.text_secondary,
-                    "Minimize Dynamic Island",
-                )
-                .clicked()
-                {
-                    self.collapse_dynamic_island();
-                }
-                if Self::glass_icon_button(
-                    ui,
-                    theme,
-                    AppIcon::SettingsGear,
-                    false,
-                    theme.text_secondary,
-                    "Open Workspace Settings inside Dynamic Island",
-                )
-                .clicked()
-                {
-                    actions.open_settings = true;
-                }
-                let key_accent = if has_key {
-                    theme.accent_green
-                } else if needs_key {
-                    theme.accent_orange
-                } else {
-                    theme.accent_blue
-                };
-                if Self::glass_icon_button(
-                    ui,
-                    theme,
-                    AppIcon::Lock,
-                    self.api_key_popover_open || has_key || needs_key,
-                    key_accent,
-                    if has_key {
-                        "Gemini API Key configured"
-                    } else {
-                        "Configure Gemini API Key"
-                    },
-                )
-                .clicked()
-                {
-                    self.toggle_exclusive_drawer("api_key");
-                }
-                if Self::glass_icon_button(
-                    ui,
-                    theme,
-                    AppIcon::Clock,
-                    self.history_popover_open,
-                    theme.accent_blue,
-                    "Conversation History",
-                )
-                .clicked()
-                {
-                    self.toggle_exclusive_drawer("history");
-                }
-                if Self::glass_icon_button(
-                    ui,
-                    theme,
-                    AppIcon::SlidersPanel,
-                    true,
-                    theme.accent_blue,
-                    &format!("{}: {}", self.agent_mode.label(), self.agent_mode.description()),
-                )
-                .clicked()
-                {
-                    self.agent_mode = self.agent_mode.next();
-                }
-                let model_lbl = self.active_model_display_label();
-                if Self::glass_icon_button(
-                    ui,
-                    theme,
-                    AppIcon::Bot,
-                    false,
-                    theme.accent_blue,
-                    &format!("AI Model: {model_lbl} (click to cycle preset)"),
-                )
-                .clicked()
-                {
-                    self.agent_model = self.agent_model.next();
-                }
-            });
-        });
-
-        ui.add_space(3.0);
-
-        // Row B: 10 Scrollable AEC Engineering Lifecycle Category Tabs
-        ScrollArea::horizontal()
-            .id_salt("smart_ribbon_category_tabs")
-            .max_width(deck_w)
-            .max_height(30.0)
-            .auto_shrink([false, true])
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .show(ui, |ui| {
-                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    for tab in RibbonCategoryTab::ALL {
-                        let active = self.active_ribbon_tab == tab;
-                        let fill = if active {
-                            if theme.is_dark() {
-                                Color32::from_rgba_unmultiplied(255, 255, 255, 22)
-                            } else {
-                                Color32::WHITE
-                            }
-                        } else {
-                            Color32::TRANSPARENT
-                        };
-                        let stroke = if active {
-                            Stroke::new(1.0, theme.border_subtle)
-                        } else {
-                            Stroke::NONE
-                        };
-                        let fg = if active {
-                            theme.text_primary
-                        } else {
-                            theme.text_muted
-                        };
-                        let mut rt = RichText::new(tab.label()).size(10.5).color(fg);
-                        if active {
-                            rt = rt.strong();
-                        }
-                        if ui
-                            .add(
-                                egui::Button::new(rt)
-                                    .min_size(Vec2::new(0.0, 24.0))
-                                    .fill(fill)
-                                    .stroke(stroke)
-                                    .corner_radius(CornerRadius::same(6)),
-                            )
-                            .clicked()
-                        {
-                            self.active_ribbon_tab = tab;
-                        }
-                    }
+                    universal_canvas,
+                    build_view,
+                    vault_connected,
+                    vault_name,
+                    &proj_name,
+                    &story_lbl,
+                    can_undo,
+                    can_redo,
+                    actions,
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    self.render_ribbon_row_a_utilities(
+                        ui,
+                        theme,
+                        has_key,
+                        needs_key,
+                        actions,
+                        true,
+                    );
                 });
             });
+        } else {
+            ScrollArea::horizontal()
+                .id_salt("smart_ribbon_row_a")
+                .max_width(deck_w)
+                .max_height(28.0)
+                .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 3.0;
+                        self.render_ribbon_row_a_left_and_tabs(
+                            ui,
+                            theme,
+                            universal_canvas,
+                            build_view,
+                            vault_connected,
+                            vault_name,
+                            &proj_name,
+                            &story_lbl,
+                            can_undo,
+                            can_redo,
+                            actions,
+                        );
+                        ui.separator();
+                        self.render_ribbon_row_a_utilities(
+                            ui,
+                            theme,
+                            has_key,
+                            needs_key,
+                            actions,
+                            false,
+                        );
+                    });
+                });
+        }
 
         ui.add_space(3.0);
 
-        // Row C: Frosted Ribbon Tray hosting Horizontal-Scrollable Grouped Icon-Above-Caption Tiles
+        // Row B: Frosted Ribbon Tray hosting Horizontal-Scrollable Grouped Icon-Above-Caption Tiles
         let (_, max_dcr, min_eigengate, _) = self.structural_health_summary_cached(
             &build_view.bim_bus.project,
             members,

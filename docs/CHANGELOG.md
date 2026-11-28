@@ -7,7 +7,12 @@ The project strictly adheres to sequential versioning and strict 1-to-1 phase ma
 
 ---
 
-## [Unreleased — Next: v0.9.0 (1/10)]
+## [Unreleased — Next: v0.9.0 (2/10)]
+
+### Update 2/10 (`v0.8.9.2` -> `v0.9.0`) — Icon-Only AEC Lifecycle Category Tabs Beside `Properties` on Row A
+- **Unified Row A Icon Strip (`src/views/spatial_workspace/ribbon_ui.rs`)**:
+  - Consolidated all 10 AEC Engineering Lifecycle category tabs (`Planning`, `Drafting`, `Modeling`, `Scheduling`, `Budgeting`, `Sustainability`, `Facility`, `Safety`, `Construction`, `Industrialization` via `RibbonCategoryTab::icon()`) into compact icon-only buttons immediately to the right of the `Properties` (`AppIcon::SlidersPanel`) icon on Row A, removing the separate Row B text-tab bar.
+  - Added a width-adaptive horizontal `ScrollArea` on narrow/mobile viewports (`deck_w < 660.0`) so Row A stays completely single-line with zero horizontal overflow across Desktop, Tablet, and Mobile while reducing expanded Dynamic Island height.
 
 ### Update 1/10 (`v0.8.9.1` -> `v0.9.0`) — Compact Icon-Only `Project Browser` & `Properties` Triggers Beside `3D Isometric Earth`
 - **Row A Compact Icon Cluster (`src/views/spatial_workspace/ribbon_ui.rs`)**:
